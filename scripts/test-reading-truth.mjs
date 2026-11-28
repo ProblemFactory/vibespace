@@ -1265,7 +1265,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
       ["windows: establishedWindowsOf(hk), groupOf: windowGroupOf", "windows: establishedWindows(), groupOf: windowGroupOf"],   // stale-pins: kept (the release's table put back in the red)
       ["  if (d.action === 'refile') d = { ...d, action: 'archive', reason: noRefile ?", "  if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: noRefile ?"],
       ["  const sid = session?._webuiId || session?.claudeSessionId || '-';\n", "  if (d.action === 'refile') return d.key;\n  const sid = session?._webuiId || session?.claudeSessionId || '-';\n"],
-      ["      // (B) r5534: the guard never answers another row — no re-file, so no re-pin of the turn onto another account\n", "      if (target !== key) { key = target; refiled = true; if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer(), names }); try { session._turnReadingSlot = { key, slotOk: !!validateBillingSlot(session?._accountId || null, key).ok, at: Date.now() }; } catch { } }\n"],
+      ["      // (B) r5534: the guard never answers another row — no re-file, so no re-pin of the turn onto another account\n", "      if (target !== key) { key = target; if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer(), names }); try { session._turnReadingSlot = { key, slotOk: !!validateBillingSlot(session?._accountId || null, key).ok, at: Date.now() }; } catch { } }\n"],
     ];
     const relSrc = RELB.every(([a]) => esrcB.split(a).length === 2) ? RELB.reduce((t, [a, b]) => t.split(a).join(b), esrcB) : null;
     const mRelB = relSrc ? require(MUT.write(ENG, relSrc, 'b423-release-refile')) : null;
@@ -1362,7 +1362,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
         fs.writeFileSync(path.join(cdir, readingLag.windowSidecarName(k)), J({ at: Date.now(), source: 'on-demand', sevenDay: r }));
       }
       const tp = path.join(dir, 'vibespace-usage'); fs.writeFileSync(tp, toolText);
-      try { execFileSync(process.execPath, [tp], { input: J({ model: { id: 'claude-opus-5' }, rate_limits: { five_hour: { used_percentage: 20, resets_at: Math.floor(Date.now() / 1000) + 3600 }, seven_day: { used_percentage: 47, resets_at: NB } } }), env: { ...process.env, VIBESPACE_USAGE_CACHE: cdir, VIBESPACE_ACCOUNT_KEY: 'sub-vela' }, stdio: ['pipe', 'ignore', 'ignore'] }); } catch { }
+      const shortEnv = {}; for (const k of ['PATH', 'HOME', 'TMPDIR', 'TZ', 'LANG']) if (process.env[k] != null) shortEnv[k] = process.env[k];   // r5575 (4): never the runner's link variable, never the person's own statusline command
+      try { execFileSync(process.execPath, [tp], { input: J({ model: { id: 'claude-opus-5' }, rate_limits: { five_hour: { used_percentage: 20, resets_at: Math.floor(Date.now() / 1000) + 3600 }, seven_day: { used_percentage: 47, resets_at: NB } } }), env: { ...shortEnv, VIBESPACE_USAGE_CACHE: cdir, VIBESPACE_ACCOUNT_KEY: 'sub-vela' }, stdio: ['pipe', 'ignore', 'ignore'] }); } catch { }
       const u = (k) => ((JSON.parse(fs.readFileSync(path.join(cdir, k + '.json'), 'utf8')).sevenDay || {}).utilization);
       return { vela: u('sub-vela'), orin: u('sub-orin'), refused: fs.existsSync(path.join(cdir, '.window-refused.ndjson')) };
     };
@@ -1372,6 +1373,60 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     console.log(`    the statusline: ${J(sl)}; the release's: ${J(slr)}`);
     ok('2.369.423 (B) THE STATUSLINE MIRROR: a render of Vela\'s carrying Orin\'s hour is REFUSED (written down), Orin\'s file untouched and Vela\'s too', sl.orin === 0.2 && sl.vela === 0.2 && sl.refused, sl);
     ok('2.369.423 (B) RED CONTROL (the release\'s statusline rule, in a copy): the render lands on Orin\'s file', !!slr && slr.orin === 0.47, slr);
+    // r5575 (5) — A CODEX ACCOUNT ROW (the harness reader's second branch: a row by its record), its leftover stamp on the hour Vela
+    // left, its readings on Orin's hour: all its own, none under Orin, none archived; red: the release's guard over every harness
+    const roadCA = async (engMod) => {
+      const W = mkB(engMod);
+      const cxId = W.am.createCodexSubscription({ name: 'Cora' }).id;
+      const cx = { backend: 'codex', mode: 'chat', host: null, _webuiId: 'b-cxa', claudeSessionId: null, _accountId: cxId, pty: { write() { } }, name: 'cxa' };
+      W.sessions.set('b-cxa', cx);
+      fs.writeFileSync(path.join(W.cacheDir, cxId + '.json'), J({ fetchedAt: Date.now() - 3600e3, source: 'codex', sevenDay: { utilization: 0.1, resetsAt: HB } }));
+      fs.writeFileSync(path.join(W.cacheDir, readingLag.windowSidecarName(cxId)), J({ at: Date.now(), source: 'on-demand', sevenDay: HB }));
+      quiet(() => W.eng.repairIdentityAnchors('hourly'));
+      const arch = path.join(W.root, 'data', 'archive', 'readings-window-mismatch.ndjson');
+      const rows = [];
+      for (let i = 1; i <= 8; i++) {
+        const pct = 50 + i;
+        quiet(() => W.eng.recordCodexQuotaSignal(cx, { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 5, window_minutes: 300, resets_at: Math.floor(Date.now() / 1000) + 3600 }, secondary: { used_percent: pct, window_minutes: 10080, resets_at: NB } } }));
+        await sleep(3);
+        const c7 = (W.readJ(cxId + '.json') || {}).sevenDay || {}, o7 = (W.ownO() || {}).sevenDay || {};
+        const near = (x) => x != null && (Math.abs(Number(x) - pct / 100) < 1e-9 || Number(x) === pct);
+        rows.push(near(c7.utilization) ? 'C' : near(o7.utilization) ? 'O' : 'a');
+      }
+      let archived = 0; try { archived = fs.readFileSync(arch, 'utf8').split('\n').filter((l) => /codex:/.test(l)).length; } catch { archived = 0; }
+      return { rows: rows.join(''), underOrin: rows.filter((x) => x === 'O').length, archived };
+    };
+    const ca1 = await roadCA(realEng), ca1r = mRelB ? await roadCA(mRelB) : null;
+    console.log(`    a codex ACCOUNT row with a leftover stamp: ${J(ca1)}; the release: ${J(ca1r)}`);
+    ok('2.369.423 (B) r5575 (5) A CODEX ACCOUNT ROW (its record names its harness) with a leftover stamp: all eight readings its own, none under the claude row, none archived', ca1.rows === 'CCCCCCCC' && ca1.underOrin === 0 && ca1.archived === 0, ca1);
+    ok('2.369.423 (B) r5575 (5) RED CONTROL (the release\'s guard over every harness, in a copy): the codex account row\'s readings are filed under the claude row', !!ca1r && ca1r.underOrin >= 1, ca1r);
+    // r5575 (5) — THE RE-PIN's OWN LEG: after an ARCHIVED reading the turn's pin is still the row's own; the release re-pins it onto
+    // Orin, and the re-pin alone is what moves it (the release without its re-pin line keeps it)
+    const RELB_NOPIN = RELB.slice(0, 4), relNoPin = RELB_NOPIN.every(([a]) => esrcB.split(a).length === 2) ? RELB_NOPIN.reduce((t, [a, b]) => t.split(a).join(b), esrcB) : null;
+    const mRelNoPin = relNoPin ? require(MUT.write(ENG, relNoPin, 'b423-release-no-repin')) : null;
+    const pinAfter = async (engMod) => { const W = mkB(engMod), c = convB(W, 'b-pin'); evB(W, c)(0.33); await sleep(3); let k = null; try { k = W.eng.readingSlotFor(c).key; } catch { k = null; } return { pin: k === W.V ? 'Vela' : k === W.O ? 'Orin' : String(k) }; };
+    const pn = await pinAfter(realEng), pnr = mRelB ? await pinAfter(mRelB) : null, pnc = mRelNoPin ? await pinAfter(mRelNoPin) : null;
+    console.log(`    the turn's pin after a reading of Orin's hour: ${J(pn)}; the release: ${J(pnr)}; the release without its re-pin line: ${J(pnc)}`);
+    ok('2.369.423 (B) r5575 (5) THE RE-PIN: after an archived reading the turn\'s pin is still the row\'s own (no window re-pins the turn)', pn.pin === 'Vela', pn);
+    ok('2.369.423 (B) r5575 (5) RED CONTROL (the release, in a copy): the turn is re-pinned onto Orin — and without its re-pin line alone it is not (the re-pin is what moves it)', !!pnr && pnr.pin === 'Orin' && !!pnc && pnc.pin === 'Vela', { pnr, pnc });
+    // r5575 (5) — THE WINDOWS OF ONE HARNESS: a claude reading whose window matches ONLY a codex leftover stamp names nobody (the
+    // guard's table holds claude rows alone); red: that one call put back to every harness's windows
+    const ONE_H = "windows: establishedWindowsOf(hk), groupOf: windowGroupOf", mAllH = esrcB.split(ONE_H).length === 2 ? require(MUT.write(ENG, esrcB.split(ONE_H).join("windows: establishedWindows(), groupOf: windowGroupOf"), 'b423-all-harness-table')) : null;   // stale-pins: kept (the red puts the release table back)
+    const oneH = async (engMod) => {
+      const W = mkB(engMod), XB = NB + 5 * 3600;
+      fs.writeFileSync(path.join(W.cacheDir, '__global_codex__.json'), J({ fetchedAt: Date.now() - 3600e3, source: 'codex', sevenDay: { utilization: 0.1, resetsAt: XB } }));
+      fs.writeFileSync(path.join(W.cacheDir, readingLag.windowSidecarName('__global_codex__')), J({ at: Date.now(), source: 'on-demand', sevenDay: XB }));
+      quiet(() => W.eng.repairIdentityAnchors('hourly'));
+      quiet(() => W.eng.recordRateLimitEvent(convB(W, 'b-oneh'), { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.37, resetsAt: XB } }));
+      await sleep(3);
+      let last = null; try { const ls = fs.readFileSync(path.join(W.root, 'data', 'archive', 'readings-window-mismatch.ndjson'), 'utf8').split('\n').filter(Boolean); last = JSON.parse(ls[ls.length - 1]); } catch { last = null; }
+      const names = (last && last.entry && last.entry.verdict && last.entry.verdict.names) || null;
+      return { archived: !!last, names };
+    };
+    const oh = await oneH(realEng), ohr = mAllH ? await oneH(mAllH) : null;
+    console.log(`    a claude reading on a codex leftover's hour: ${J(oh)}; every harness's table (red): ${J(ohr)}`);
+    ok('2.369.423 (B) r5575 (5) THE WINDOWS OF ONE HARNESS: a claude reading whose window matches only a codex leftover stamp is archived naming NOBODY', oh.archived && Array.isArray(oh.names) && oh.names.length === 0, oh);
+    ok('2.369.423 (B) r5575 (5) RED CONTROL (that one call put back to every harness\'s windows, in a copy): the codex leftover is named', !!ohr && Array.isArray(ohr.names) && ohr.names.includes('__global_codex__'), ohr);
   }
   }}
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass}${typeof globalThis.__rtSkipped === 'number' && globalThis.__rtSkipped ? `, ${globalThis.__rtSkipped} skipped — the release's history is not in this clone` : ''})`);

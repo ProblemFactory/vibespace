@@ -55,6 +55,9 @@ import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// r5575 (4): the shipped statusline tool runs on a SHORT environment — never the runner's link variable (it would point the key at a
+// real member) nor the person's own statusline command
+const TOOL_ENV = {}; for (const k of ['PATH', 'HOME', 'TMPDIR', 'TZ', 'LANG']) if (process.env[k] != null) TOOL_ENV[k] = process.env[k];
 // THE DECISION ROAD a stand-in accounts store owes the usage routes (B-360d, line 228: the accounts list reads no file on the
 // loop; 主开发 r2020 — the suite crashed at «accounts.decisionList is not a function»). The REAL store's shapes
 // (src/accounts.js): a row of the decision road carries `facts: { state: 'read', at }`; signinFactsSettled / signinFactsNow
@@ -1090,7 +1093,7 @@ if (!probe) {
     return { d, link, point: (to) => { fs.unlinkSync(link); fs.symlinkSync(path.join(d, 'subs', to), link); } };
   };
   const P = (p5, p7) => JSON.stringify({ session_id: 'conv-sline', rate_limits: { five_hour: { used_percentage: p5, resets_at: 1788800000 }, seven_day: { used_percentage: p7, resets_at: 1789000000 } } });
-  const render = (w, payload) => execFileSync(process.execPath, [SCRIPT], { input: payload, encoding: 'utf8', env: { ...process.env, VIBESPACE_USAGE_CACHE: path.join(w.d, 'usage-cache'), VIBESPACE_ACCOUNT_KEY: 'pool-1', VIBESPACE_ACCOUNT_LINK: w.link } });
+  const render = (w, payload) => execFileSync(process.execPath, [SCRIPT], { input: payload, encoding: 'utf8', env: { ...TOOL_ENV, VIBESPACE_USAGE_CACHE: path.join(w.d, 'usage-cache'), VIBESPACE_ACCOUNT_KEY: 'pool-1', VIBESPACE_ACCOUNT_LINK: w.link } });
   const cacheOf = (w, id) => { try { return JSON.parse(fs.readFileSync(path.join(w.d, 'usage-cache', id + '.json'), 'utf8')); } catch { return null; } };
 
   {
@@ -1128,7 +1131,7 @@ if (!probe) {
     // it costs an UNPOOLED session nothing, and the state file is invisible to
     // every usage-cache scanner (they all filter on `.json`)
     const w = mk();
-    execFileSync(process.execPath, [SCRIPT], { input: P(11, 22), encoding: 'utf8', env: { ...process.env, VIBESPACE_USAGE_CACHE: path.join(w.d, 'usage-cache'), VIBESPACE_ACCOUNT_KEY: 'sub-plain00' } });
+    execFileSync(process.execPath, [SCRIPT], { input: P(11, 22), encoding: 'utf8', env: { ...TOOL_ENV, VIBESPACE_USAGE_CACHE: path.join(w.d, 'usage-cache'), VIBESPACE_ACCOUNT_KEY: 'sub-plain00' } });
     const names = fs.readdirSync(path.join(w.d, 'usage-cache'));
     ok('§12d a session with NO credential link writes no slot state at all (it cannot switch under itself)', !names.some((n) => n.startsWith('.slot-')) && names.includes('sub-plain00.json'), JSON.stringify(names));
     const w2 = mk();
@@ -1609,8 +1612,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const lines = cap.done();
     // 2.369.423 (B) (主开发 r5471 / r5534): A RE-FILE IS AN ARCHIVE, NEVER ANOTHER ROW — the reading whose window is not the pin's is
     // archived by name, filed under neither member; nothing re-pins the turn by a window (a request known decides, else the pin dies with the turn)
-    ok('§14 STALE TURN PIN ((B): ARCHIVED): a reading whose window is the NEW member\'s is never filed under the pinned member, nor re-filed onto the new one',
-      Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.44) > 1e-9, JSON.stringify(w.readCache(w.SPARE).sevenDay));
+    ok('§14 STALE TURN PIN ((B): ARCHIVED): a reading whose window is the NEW member\'s is never filed under the pinned member, nor re-filed onto the new one (the new member keeps its own 11 %; the red lives in test-reading-truth)',
+      Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9, JSON.stringify(w.readCache(w.SPARE).sevenDay));
     ok('§14 …and the pinned member does not receive it', Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.20) < 1e-9, JSON.stringify(w.readCache(w.LINK).sevenDay));
     ok('§14 …the archive is SPOKEN, naming the account the window names', lines.some((l) => /refusing to write/.test(l) && /never filed under another row/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
     ok('§14 …and no window re-pins the turn ((B)): the pin stays the turn\'s own',
@@ -1748,7 +1751,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         input: JSON.stringify({ model: { id: 'claude-fable-5' }, rate_limits: {
           five_hour: { used_percentage: 20, resets_at: cur.fiveHour.resetsAt },
           seven_day: { used_percentage: pct, resets_at: sevenDayReset } } }),
-        env: { ...process.env, VIBESPACE_USAGE_CACHE: w.cacheDir, VIBESPACE_ACCOUNT_KEY: id }, encoding: 'utf8',
+        env: { ...TOOL_ENV, VIBESPACE_USAGE_CACHE: w.cacheDir, VIBESPACE_ACCOUNT_KEY: id }, encoding: 'utf8',
       });
     };
     const TOOL_PATH = path.join(REPO, 'data/bin/vibespace-usage');
@@ -1872,7 +1875,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       }
       cp.execFileSync(process.execPath, [toolPath], {
         input: JSON.stringify({ session_id: w.CID, model: { id: 'claude-fable-5' }, rate_limits: rl }),
-        env: { ...process.env, VIBESPACE_USAGE_CACHE: w.cacheDir, VIBESPACE_ACCOUNT_KEY: w.LINK,
+        env: { ...TOOL_ENV, VIBESPACE_USAGE_CACHE: w.cacheDir, VIBESPACE_ACCOUNT_KEY: w.LINK,
           VIBESPACE_ACCOUNT_LINK: w.am.sessionPoolLinkPath(w.P, w.SID) },
         encoding: 'utf8',
       });
@@ -1985,7 +1988,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         input: JSON.stringify({ model: { id: 'claude-fable-5' }, rate_limits: {
           five_hour: { used_percentage: 20, resets_at: w.nowSec + 2 * 3600 },
           seven_day: { used_percentage: pct, resets_at: sevenDayReset } } }),
-        env: { ...process.env, VIBESPACE_USAGE_CACHE: w.cacheDir, VIBESPACE_ACCOUNT_KEY: key },
+        env: { ...TOOL_ENV, VIBESPACE_USAGE_CACHE: w.cacheDir, VIBESPACE_ACCOUNT_KEY: key },
         encoding: 'utf8',
       });
     };
@@ -1993,7 +1996,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const w = mkIncidentWorld();
       renderKeyed(TOOL_PATH, w, w.SPARE, { pct: 96, sevenDayReset: w.WIN[w.LINK] });   // SPARE's key, LINK's WEEK
       ok('§15 STATUSLINE GUARD ((B): ARCHIVED): a reading whose weekly window is another member\'s is refused — not written to the key the spawn handed us, nor re-filed onto that member',
-        Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9 && Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.96) > 1e-9,
+        Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9 && Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.98) < 1e-9,   // both untouched (the red lives in test-reading-truth)
         JSON.stringify([w.readCache(w.SPARE).sevenDay, w.readCache(w.LINK).sevenDay]));
       const readRefused = () => { try { return fs.readFileSync(path.join(w.cacheDir, '.window-refused.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } };
       const refused = readRefused();

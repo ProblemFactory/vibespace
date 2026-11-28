@@ -1723,6 +1723,8 @@ const HELD_MAX = 4096;   // r6: far past any roster; the oldest key is dropped b
 const labelOf = (id) => { const n = nameOf(id); return typeof n === 'string' && n && !n.includes('@') ? n : String(id || '?'); };
 // B-6a92 (r2688, a should): the same-instant hold's words name a row only by the name a person gave it — «another account» else
 const personNameOf = (id) => { const n = nameOf(id); return typeof n === 'string' && n && !n.includes('@') && n !== id ? n : 'another account'; };
+// (B) follow (主开发 r5575 (2)): the guard's archive words name the ROW only by the name a person gave it — «this account» else
+const rowWordOf = (id) => { const n = nameOf(id); return typeof n === 'string' && n && !n.includes('@') && n !== id ? n : 'this account'; };
 const ownGroupOf = (key) => { try { return new Set(rowOwnAccountIds(key)); } catch { return new Set([key]); } };   // r5264: the ONE notion (the hold's and its door's)
 const othersOf = (key, names) => { const own = ownGroupOf(key); return (Array.isArray(names) ? names : []).filter((k) => typeof k === 'string' && k && !own.has(k)); };
 const heldFactOf = (key, f) => { if (!(f && Array.isArray(f.names) && Number(f.phase) > 0)) return null; const names = othersOf(key, f.names).slice(0, 4); return names.length ? { names, phase: Number(f.phase), at: Number(f.at) || null, ...(f.by === 'same-instant' ? { by: 'same-instant' } : {}) } : null; };
@@ -1779,8 +1781,8 @@ function apiDerivedWindow(key, { witness = false, held = false } = {}) {
   return { window: out, ring, k: API_WITNESS_K, foreign: heldWindowOf(key, w) };
 }
 /** Feed ONE eligible weekly candidate into the account's witness ring.
- *  `outcome` = what the guard did with the reading (write / archived /
- *  refiled). Returns `{run, k, established, moved}`, or null when the reading
+ *  `outcome` = what the guard did with the reading (write / archived;
+ *  2.369.423 (B): no re-file any more). Returns `{run, k, established, moved}`, or null when the reading
  *  is not weekly or the sidecar could not be written. */
 function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = null, names = [] } = {}) {
   try {
@@ -1992,14 +1994,14 @@ function guardReadingTarget(key, readingWindow, { session = null, what = 'readin
   // fact against it, and neither is guessed away — the reading is archived, named, and nothing is written
   // (B) r5471 / r5534 — A RE-FILE IS AN ARCHIVE, NEVER ANOTHER ROW: a reading is filed under the row whose sign-in produced it, or
   // under none. Its row re-anchors by its own K readings (a validated slot feeds its ring: the archive below carries the verdict there)
-  if (d.action === 'refile') d = { ...d, action: 'archive', reason: noRefile ? `the reading and its request disagree — its window names ${nameOf(d.key)}, its request went out on ${nameOf(key)} (${d.reason})` : `its window names ${nameOf(d.key)}'s account, not ${nameOf(key)}'s — never filed under another row (${d.reason})` };
+  if (d.action === 'refile') d = { ...d, action: 'archive', reason: noRefile ? `the reading and its request disagree — its window names ${personNameOf(d.key)}, its request went out on ${rowWordOf(key)} (${d.reason})` : `its window names ${personNameOf(d.key)}'s account, not ${rowWordOf(key)}'s — never filed under another row (${d.reason})` };
   const sid = session?._webuiId || session?.claudeSessionId || '-';
   // B-6a92: the verdict handed BACK to the caller that asks for it (`verdictTo`) — the account(s) whose window this reading names
   // travel with it to the slot's ring — and written on the guard's OWN copy of the entry in the archive (the standing repair
   // reads it there). The caller's entry is never touched: two producers hand the very object they then file (r5, a small)
   const verdict = { action: d.action, names: othersOf(key, Array.isArray(d.matched) && d.matched.length ? d.matched : (d.key ? [d.key] : [])).slice(0, 4) };   // r8 rule 1
   if (verdictTo && typeof verdictTo === 'object') { try { verdictTo.verdict = verdict; } catch { } }
-  noteWindowVerdict(sid, key, 'archive', () => console.log(`[usage] ${what}: refusing to write ${nameOf(key)} a reading from another window — archived (${d.reason})`));
+  noteWindowVerdict(sid, key, 'archive', () => console.log(`[usage] ${what}: refusing to write ${rowWordOf(key)} a reading from another window — archived (${d.reason})`));
   global.__vsEvent?.('usage-reading-window-archived', `${key}:${what}`);
   appendReadingArchive({ key, sid, what, reason: d.reason, matched: d.matched, ownWindow: establishedWindows()[key] || null, entry: entry && typeof entry === 'object' && !Array.isArray(entry) ? { ...entry, verdict } : entry });
   return null;
@@ -4354,7 +4356,6 @@ function recordRateLimitEventNow(session, msg) {
     const slot = ev.status === 'rejected' ? rejectionSlotFor(session) : readingSlotFor(session, Date.now(), { window: win, fingerprint: fp });
     if (slot && slot.held) return;   // B-f276: the slot ledger held — this reading is filed nowhere (said by ledgerHeldSlot)
     let key = (slot && slot.key) || usageCacheKeyFor(session);
-    let refiled = false; // the guard moved this reading off the slot's key — then the slot is not the witness for it
     // THE WITNESS ELIGIBILITY of this reading is judged BEFORE the guard, on
     // the slot it arrived on, with the corroboration the write below reuses:
     // a reading the guard archives or re-files still feeds the SLOT's ring
@@ -4465,7 +4466,7 @@ function recordRateLimitEventNow(session, msg) {
     // filed on a slot-VALIDATED link, not re-filed by the guard and eligible
     // as a witness, is ONE candidate for the ring the panel probe is checked
     // against — K agreeing candidates make it the witness.
-    if (r.wroteReading && ev.status !== 'rejected' && win && !refiled && witness && witness.ok) noteApiDerivedWindow(writeKey, witnessEv, session, { outcome: 'write', producer: producer() });
+    if (r.wroteReading && ev.status !== 'rejected' && win && witness && witness.ok) noteApiDerivedWindow(writeKey, witnessEv, session, { outcome: 'write', producer: producer() });
     postCheck();
     // a reading busts the estimator memo via fetchedAt and becomes an anchor
     // at the next sweep; exhaustion acts NOW (banner parity)
@@ -6988,14 +6989,18 @@ function memberPoolsOf(memberId) {
  *  to contradict. */
 function readingForeignForWake(memberId, snap) {
   try {
+    // (B) follow (主开发 r5575 (1)): THE ONE PREDICATE with the guard — one harness's windows, and no judgement for a harness whose
+    // stamps nothing writes (codex: a leftover stamp is not evidence, its readings are its own)
+    const hk = windowHarnessOf(memberId);
+    if (!windowStampsWritten(hk)) return null;
     const d = readingLag.decideReadingTarget({
       key: memberId,
       readingWindow: readingLag.windowOf(snap),
-      windows: establishedWindows(),
+      windows: establishedWindowsOf(hk),
       groupOf: windowGroupOf,
     });
     if (!d || d.action === 'write') return null;
-    return d.action === 'refile' ? `these numbers are ${nameOf(d.key)}'s — ${d.reason}` : d.reason;
+    return d.action === 'refile' ? `these numbers are ${personNameOf(d.key)}'s — ${d.reason}` : d.reason;
   } catch (e) {
     // A guard that cannot decide must not block — the same rule
     // guardReadingTarget states at its own catch ("writing as asked").

@@ -63,7 +63,7 @@ const RELEASE_REFILE = [
     ["windows: establishedWindowsOf(hk), groupOf: windowGroupOf", "windows: establishedWindows(), groupOf: windowGroupOf"],   // stale-pins: kept (the release table put back in the control)
     ["  if (d.action === 'refile') d = { ...d, action: 'archive', reason: noRefile ?", "  if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: noRefile ?"],
     ["  const sid = session?._webuiId || session?.claudeSessionId || '-';\n", "  if (d.action === 'refile') return d.key;\n  const sid = session?._webuiId || session?.claudeSessionId || '-';\n"],
-    ["      // (B) r5534: the guard never answers another row — no re-file, so no re-pin of the turn onto another account\n", "      if (target !== key) { key = target; refiled = true; if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer(), names }); try { session._turnReadingSlot = { key, slotOk: !!validateBillingSlot(session?._accountId || null, key).ok, at: Date.now() }; } catch { } }\n"],
+    ["      // (B) r5534: the guard never answers another row — no re-file, so no re-pin of the turn onto another account\n", "      if (target !== key) { key = target; if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer(), names }); try { session._turnReadingSlot = { key, slotOk: !!validateBillingSlot(session?._accountId || null, key).ok, at: Date.now() }; } catch { } }\n"],
 ];
 const REL_REFILE_ENG = (() => { const m = mutate('src/server/usage-pool-engine.js', 'release-refile', RELEASE_REFILE); return m.hit ? m.mod : null; })();
 const quiet = () => {
