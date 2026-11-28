@@ -48,6 +48,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a restart, a duplicate terminal, OpenCode, Antigravity or Codex window started after this update is closed at once if its program ended, kept if it runs.
 - Stop in an Antigravity chat reaches Antigravity at once, even while this machine's disk is slow to write.
 - After a restart, closing a duplicate window ends only programs VibeSpace started for it; another VibeSpace on the same data folder keeps running.
+- A refresh that reads an account by itself no longer saves another account's usage as its own when its folder holds that login; it says why and how to fix it.
+- After 2.369.419–2.369.422, an account whose folder held another's sign-in may show that account's usage (one quota); sign it in again with its own account.
 
 ## 2.369.422 — 2026-11-27
 
