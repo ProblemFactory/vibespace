@@ -60,7 +60,7 @@
   "scripts/test-channel-attach-send.mjs": 1,
   "scripts/test-channel-caps.mjs": 1,
   "scripts/test-channel-edit-autosize.mjs": 1,
-  "scripts/test-channel-outbox.mjs": 2,
+  "scripts/test-channel-outbox-card.mjs": 2,
   "scripts/test-channel-reauth-line.mjs": 1,
   "scripts/test-channel-row-notices.mjs": 1,
   "scripts/test-channels-accounts.mjs": 1,

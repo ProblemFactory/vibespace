@@ -1,6 +1,7 @@
 {
  "//": "B-1747 (lane bl-tests-e): the scripts whose OWN assertion helper (every name in scripts/lib/check.mjs HELPER_NAMES: ok, check, ck, leg, assert, and the pin / failPass families judged by a verdict in the body) does not refuse a swap, with how many — the list only FALLS. A new suite imports { checker } from scripts/lib/check.mjs; test-ci-gate-tiers §7b reds a file that ADDS one, by name, and prints the row that would admit it.",
  "files": {
+  "channel-outbox-world.mjs": 1,
   "ci-gate-kit.mjs": 1,
   "dbg-billing-menu-shot.mjs": 1,
   "dbg-close-smoke.mjs": 1,
@@ -257,7 +258,6 @@
   "test-channel-names-ui.mjs": 1,
   "test-channel-names.mjs": 1,
   "test-channel-outbox-window.mjs": 1,
-  "test-channel-outbox.mjs": 1,
   "test-channel-placement.mjs": 1,
   "test-channel-quote-topic.mjs": 1,
   "test-channel-reactions.mjs": 1,
