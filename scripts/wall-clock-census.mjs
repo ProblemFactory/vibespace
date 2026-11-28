@@ -606,7 +606,8 @@ export function censusOver(rows, readSource = (name) => fs.readFileSync(path.joi
 }
 
 /** ONE fast suite's row of the census (censusOver's body for one row). `parseSuite` parses the suite's text as this module's
- *  own parse does (test-ci-gate hands the tree of its ONE PASS, 主开发 r2572 (5)); it throws as acorn throws. */
+ *  own parse does (test-ci-gate's ONE PASS handed its tree here, 主开发 r2572 (5), until B-54a9's ninth part: test-ci-gate-scripts §2e
+ *  now asks this module's own parse); it throws as acorn throws. */
 export function censusRow(r, src, parseSuite = parse, readFile = undefined) {
   // one parse per suite, shared by the product read and the flow (a suite with no clock and no duration name skips both)
   let ast = null;
