@@ -401,8 +401,19 @@ console.log('②f B-ab6c (主开发 r5287 / r5317, must 1): EVERY door of EVERY 
   // the suite's own state again: English, its own size, the window; the rows this leg added leave
   await cdp('Emulation.clearDeviceMetricsOverride');
   await closeVaultWindow(); await evalJs(`localStorage.removeItem('vibespace.lang')`); await cdp('Page.navigate', { url: URL }); await until(`!!(window.app && app.wm)`, { timeout: 30000 }); await splashGone();
-  await evalJs(`fetch('/api/vault/web-logins/' + encodeURIComponent('web-login:https://fit.example.test#fit-user'), { method: 'DELETE' }).then((r) => r.status)`);
-  if (FILE_ROWS && f1 && (f1.entry || f1.id)) await evalJs(`fetch('/api/vault/files/' + encodeURIComponent(${JSON.stringify(String((f1 && (f1.id || f1.entry)) || ''))}), { method: 'DELETE' }).then((r) => r.status)`);
+  // THE LEG REMOVES WHAT IT PLANTED AND PROVES IT GONE BEFORE IT ENDS (主开发 r5543 — the second candidate's hosted heavy red: this
+  // cleanup deleted the file by its whole entry «keyfile:<hex>», the files door takes the hex alone (src/server/vault-paste-door.js
+  // dropFile adds the prefix), it answered entry_unknown_id, the file row stayed and section ⑥'s phone list counted one row more).
+  // Each by its own door, each answer read, then the vault's own list asked: neither the login nor the file is in it
+  const FIT_LOGIN = 'web-login:https://fit.example.test#fit-user';
+  const dropAnswer = (u) => evalJs(`fetch(${JSON.stringify(u)}, { method: 'DELETE' }).then(async (r) => JSON.stringify({ status: r.status, ok: ((await r.json().catch(() => null)) || {}).ok === true }))`).then((x) => { try { return JSON.parse(x); } catch { return { status: null, ok: false }; } });
+  const dropLogin = await dropAnswer('/api/vault/web-logins/' + encodeURIComponent(FIT_LOGIN));
+  const fileEntry = FILE_ROWS && f1 && typeof f1.entry === 'string' ? f1.entry : null;
+  const dropFile = fileEntry ? await dropAnswer('/api/vault/files/' + encodeURIComponent(fileEntry.replace(/^keyfile:/, ''))) : null;
+  const leftText = String(await evalJs(`fetch('/api/vault/contents').then((r) => r.text())`) || '');
+  check(`②f's cleanup: the login${FILE_ROWS ? ' and the file' : ''} this leg planted are removed by their own doors and are GONE from the vault's own list before the leg ends`,
+    dropLogin.ok && (!FILE_ROWS || (!!fileEntry && !!dropFile && dropFile.ok)) && leftText.length > 0 && !leftText.includes('fit.example.test') && !(fileEntry && leftText.includes(fileEntry)),
+    { dropLogin, dropFile, fileEntry: !!fileEntry, loginLeft: leftText.includes('fit.example.test'), fileLeft: !!(fileEntry && leftText.includes(fileEntry)) });
   await openWindow();
 }
 
@@ -575,7 +586,8 @@ await click('#vault-filter-dialog .vw-fchip[data-prov="system"]');
 check('… a press applies at once: the list behind it follows (the hub\'s own row only)', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 1 && rows[0].dataset.store === 'automation'; })()`, { timeout: 5000 })));
 await click('#vault-filter-dialog .vw-fchip[data-prov="system"]');
 await click('#vault-filter-dialog .vw-filter-done');
-check('… and back: every row, the modal closed', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4 + 2 && !document.getElementById('vault-filter-dialog')`, { timeout: 5000 })));   // + ⑥c's two agent rows (lane vault-agent-own)
+check('… and back: every row, the modal closed', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4 + 2 && !document.getElementById('vault-filter-dialog')`, { timeout: 5000 })),   // + ⑥c's two agent rows (lane vault-agent-own)
+  await evalJs(`JSON.stringify({ rows: document.querySelectorAll('.vw-list .vw-row').length, modal: !!document.getElementById('vault-filter-dialog'), kinds: [...document.querySelectorAll('.vw-list .vw-row')].map((r) => r.dataset.purpose || r.dataset.store || '?') })`));   // a red says what the list holds (主开发 r5543)
 await shot('vw-6-phone.png');
 await cdp('Emulation.clearDeviceMetricsOverride');
 
