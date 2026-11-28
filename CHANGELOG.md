@@ -13,6 +13,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A message the agent never received now offers «Send again» and «Dismiss» right where it stands in the conversation.
 - A website login's row in the Vault has «Change password…», and «Use the previous password» when one is kept; Add says first when it would change a saved login.
 - An agent whose stored website login stopped working can ask you for the new one; the card says it is the agent's claim, and you may answer «It still works».
+- A file in the vault can be replaced on its own row (Replace file…): it keeps its name, its description and who may use it, and the next run gets the new file.
 
 ### Changed
 - If a pool can't be moved off an account you remove, its sign-in folder is kept and the notice says so.
