@@ -43,6 +43,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In the Vault window every button of a row stays inside the window at any width; a website login showing all its buttons no longer runs off its side.
 - An agent's ask whose words hold a password is refused before any card is made, and the agent is told how to say it instead.
 - An agent's ask for a login's new password shows «Change password» and «It still works» in the Vault's «Needs you» strip too; the card says what you pressed.
+- After a restart, a duplicate terminal, OpenCode, Antigravity or Codex window started after this update is closed at once if its program ended, kept if it runs.
 
 ## 2.369.422 — 2026-11-27
 
