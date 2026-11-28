@@ -827,6 +827,52 @@ else {
 // ⑦'s mutants START here and run beside ⑧–⑩ (disjoint scratch state); their rows print after ⑩
 let sleepyChain = Promise.resolve();
 const sleepyTurn = (f) => (sleepyChain = sleepyChain.then(f, f));   // the sleepy rc writes ONE pair of pid files: its mutants take turns
+// ⑬ AN RC's PLAIN BACKGROUND PROGRAM UNDER THE PERSON's REAL SHELLS (主开发 r5617): a person's rc that starts ONE program with an
+// ampersand and nothing more (`prog &`), asked by the product's OWN askShell (`-l -i -c`, its session, its bound) in REAL zsh and
+// REAL bash under stand-in homes. MEASURED FIRST (the never-lined probe da70add3b, machine 1, the box zone, 2026-11-28): asked that
+// way — no terminal behind it — both shells run WITHOUT job control (`$-` holds no m), so the program stays in the shell's process
+// group, and the product's group kill ends it, at the shell's exit (the answer) and at the bound's kill. THE LAW, PINNED: an rc's
+// plain background program does not outlive the look — its group is the shell's, and it is dead (gone, or its SIGKILL pending)
+// after the ask's answer AND after the bound's kill; each line prints the facts (job control, the shell, the program, its group,
+// its looks). A program that makes a session of its own (a daemon) is NOT this measure (the person's, left alone). Its red: ⑦'s
+// «session not signalled» mutant, run on these legs too.
+async function bgLegs(mod, { deathMs = DEATH_MS } = {}) {
+  const out = [], leg = (name, pass, detail) => out.push({ name, pass: !!pass, detail });
+  const num = (f) => { try { return Number(fs.readFileSync(f, 'utf8').trim()) || 0; } catch { return 0; } };
+  const txt = (f) => { try { return fs.readFileSync(f, 'utf8').trim(); } catch { return '(none written)'; } };
+  const reap = (pid, n) => { if (!(pid > 1)) return; try { const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8'); if (cmd.includes('sleep\u0000' + n)) process.kill(pid, 'SIGKILL'); } catch { } };   // by the pid its own rc wrote, /proc confirming the command line
+  let k = 0;
+  for (const [sn, sp] of REAL8.SHELLS) {
+    const F2 = {};
+    for (const road of ['answer', 'bound']) {
+      const n = 7000 + (process.pid % 997) * 4 + (++k);   // the program's own sleep length names it in /proc (never another's)
+      const h = path.join(DIR, 'homes', `bg-${sn}-${road}-${deathMs}`); fs.rmSync(h, { recursive: true, force: true }); fs.mkdirSync(h, { recursive: true });
+      // the rc: its shell's pid, its job-control flag, ONE plain background program (its pid, its group read at once); the bound's
+      // rc then never returns (it waits on a second program, killed with the group)
+      const rc = `echo $$ > "$HOME/sh.pid"; case $- in *m*) echo on;; *) echo off;; esac > "$HOME/jc"; sleep ${n} & echo $! > "$HOME/bg.pid"; cut -d' ' -f5 /proc/$!/stat > "$HOME/bg.pgrp"`
+        + (road === 'bound' ? `; sleep ${n + 50} & echo $! > "$HOME/fg.pid"; wait` : '');
+      fs.writeFileSync(path.join(h, '.zshenv'), 'skip_global_compinit=1\n');
+      for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), rc + '\n');
+      const env = { HOME: h, PATH: '/usr/bin:/bin', USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' };
+      let a = null, at = 0;
+      for (const bound of road === 'bound' ? [1500, 6000] : [8000]) {   // a slow start that wrote no program pid inside the first bound is asked again
+        for (const f of ['sh.pid', 'bg.pid', 'bg.pgrp', 'fg.pid', 'jc']) fs.rmSync(path.join(h, f), { force: true });
+        a = await mod.askShell('vs-bg-none', { shell: sp, env, timeoutMs: bound }); at = Date.now();
+        if (num(path.join(h, 'bg.pid')) > 1) break;
+      }
+      const shp = num(path.join(h, 'sh.pid')), bgp = num(path.join(h, 'bg.pid')), pg = num(path.join(h, 'bg.pgrp')), jc = txt(path.join(h, 'jc'));
+      const d = bgp > 1 ? await diedWithin(bgp, at, deathMs) : null;
+      F2[road] = { a: `${a.kind}${a.why ? ':' + a.why : ''}`, jc, shp, bgp, pg, d, looks: bgp > 1 ? looksOf(bgp) : 'no program pid written' };
+      reap(bgp, n); reap(num(path.join(h, 'fg.pid')), n + 50);
+    }
+    const A = F2.answer, B = F2.bound;
+    const said = (x) => `answer ${x.a} · job control ${x.jc} · shell ${x.shp} · program ${x.bgp} in group ${x.pg} (${x.pg === x.shp ? "the shell's" : 'NOT the shell\'s'}) · ${x.d === null ? `ALIVE ${deathMs} ms after the answer` : `dead ${x.d} ms after the answer${KILLED_NOT_RUN.has(x.bgp) ? ' (its SIGKILL pending)' : ''}`} · looks ${x.looks}`;
+    leg(`⑬ ${sn}: an rc's PLAIN background program does not outlive the look — in the shell's process group (job control ${A.jc} / ${B.jc}), dead after the ask's ANSWER (${A.d === null ? 'ALIVE' : A.d + ' ms'}) and after the BOUND's kill (${B.d === null ? 'ALIVE' : B.d + ' ms'})`,
+      A.bgp > 1 && B.bgp > 1 && A.pg === A.shp && B.pg === B.shp && A.d !== null && B.d !== null && B.a === 'unanswered:timeout', `ANSWER: ${said(A)} — BOUND: ${said(B)}`);
+  }
+  return out;
+}
+
 const SEVEN = (() => {
   const cc = read('src/server/cli-cmd.js');
   const MUT = [
@@ -836,7 +882,8 @@ const SEVEN = (() => {
     ['filter boot-only (B-544d: the shell\'s verdict ignored — the pre-fix /api/home)', '      if (missingOf(e)) return false;\n      // asked and NOT answered (the shell failed to start, timed out) is unknown, like not asked — only a real «none» says absent\n      return isAbs(e.current) || ((!e.answer || e.answer.kind === \'unanswered\') && !!unaskedBare);', '      return isAbs(e.current) || !!unaskedBare;', (m) => filterLegs(m), /^THE FILTER after the login shell found NO program/],
     ['the bound removed (the starter\'s run asked with no bound)', '  const req = { timeoutMs, capture: true, maxBuffer: 4 * 1024 * 1024, wholeEnv: true,', '  const req = { timeoutMs: 0, capture: true, maxBuffer: 4 * 1024 * 1024, wholeEnv: true,', (m) => sleepyTurn(() => rungLegs(m, { groups: ['sleepy'], boundGuardMs: 40 })), /unanswered:timeout/],
     // 主开发 08:58Z: the death leg keeps its meaning — a leftover child the product did NOT signal (its session never killed) stays alive: red
-    ['session not signalled (the starter\'s session option dropped: only the shell is killed at the bound — the probe\'s own group never)', " session: { cwd: home } };\n", ' };\n', (m) => sleepyTurn(() => rungLegs(m, { groups: ['sleepy'], deathMs: 1500 })), /leftover child/],   // 1.5 s: the shell is gone at once, a child nobody signalled lives on (sleep 60) — the real leg keeps DEATH_MS
+    ['session not signalled (the starter\'s session option dropped: only the shell is killed at the bound — the probe\'s own group never)', " session: { cwd: home } };\n", ' };\n', (m) => sleepyTurn(() => rungLegs(m, { groups: ['sleepy'], deathMs: 1500 })), /leftover child/],
+    ['session not signalled, on ⑬ (r5617: the rc\'s plain background program under real zsh / bash outlives the look)', " session: { cwd: home } };\n", ' };\n', (m) => sleepyTurn(() => bgLegs(m, { deathMs: 1500 })), /PLAIN background program/],   // 1.5 s: the shell is gone at once, a child nobody signalled lives on (sleep 60) — the real leg keeps DEATH_MS
   ];
   const runs = MUT.map(([label, from, to, legs]) => cc.includes(from)
     ? legs(M.load('src/server/cli-cmd.js', editAnchor(cc, from, to, "src/server/cli-cmd.js"), label.split(' ')[0].replace(/[^a-z]/g, ''))).then((rs) => rs.filter((r) => !r.pass).map((r) => r.name))
@@ -1146,6 +1193,9 @@ console.log('⑫ B-ec25: the boot probes start no agent CLI the hub found by its
   const B = boot({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: path.join(BIN, 'claude'), CODEX_CMD: path.join(BIN, 'codex') });
   ok(`the stand-ins the env NAMES still run under the flag, each once (${B.runs.join(' · ') || 'none'}), and their answers are read (--name support; the failed sandbox)`, !!B.out && same(B.runs, BOTH) && B.out.supportsName === true && B.out.sandbox === !LINUX, B.err || JSON.stringify(B.out));
 }
+
+console.log('⑬ an rc\'s PLAIN background program under the person\'s REAL zsh / bash (主开发 r5617) — the product\'s own ask, stand-in homes');
+for (const r of await sleepyTurn(() => bgLegs(CLI))) ok(r.name, r.pass, r.detail);
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
 process.exit(fail ? 1 : 0);
