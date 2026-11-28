@@ -669,7 +669,38 @@ const relogin9 = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 
 // lane vault-locked-loud: 立即锁定 is a LOCK ACT — the hub filed THE urgent For-you item at that moment (nobody refused yet),
 // and the load behind the new sign-in asks at once (a NEW lock: an earlier 「稍后」 set aside another one), the ⚙ red
 const items9 = ((((await api('GET', '/api/user-todos')).json || {}).todos || {}).open || []).filter((i) => i.sessionKey === 'vault' && i.action && i.action.type === 'vault-unlock');
-check('⑨L lane vault-locked-loud: the lock act filed THE urgent For-you item at once — an action row, urgent, the lock\u2019s own words (no refusal yet)', relogin9 === 200 && items9.length === 1 && items9[0].kind === 'action' && items9[0].urgency === 'urgent' && items9[0].i18n?.text?.key === 'The vault is locked \u2014 agents that need a credential will be refused until you unlock it. Enter the second password to unlock.', items9.map((i) => ({ kind: i.kind, urgency: i.urgency, i18n: i.i18n })));
+// r5589 (主开发): THE ORDER IS NOT THE LEG'S. The lock act files THE row in the lock's own words; a refusal AFTER it re-files the SAME
+// row in that refusal's words (vault-hooks onBlocked: by design). The lock act's own refusals (the integrations store, read inside the
+// act, before its words: placed by a probe of the hub's refusals at a952ac17a and at f0bfe2822) never change them. A later reader can
+// come first on a slow box: the hub's token sync (the accounts store, accounts.js _syncOatFileNow, once, 2 to 3 s after the lock).
+// So the judge takes the lock's own words, or (only when a refusal beyond the lock act's own came before the read) that refusal's
+// words naming it. A lock act that filed nothing leaves at once the row of its own refusal alone: red (the control below).
+const LOCK_WORDS9 = 'The vault is locked — agents that need a credential will be refused until you unlock it. Enter the second password to unlock.';
+const WAIT_WORDS9 = 'The vault is locked — waiting on it: {who}. Enter the second password to unlock.';
+const LOCK_ACT_OWN9 = { actor: 'VibeSpace', verbs: ['the integrations store'] };   // what the lock act itself reads (the probe's placing)
+/** → { ok, read } over the vault's open rows of one read: ONE row, an action, urgent, in the lock's words or in a later refusal's */
+const judge9L = (rows) => {
+  if (rows.length !== 1) return { ok: false, read: `${rows.length} rows` };
+  const r = rows[0];
+  if (r.kind !== 'action' || r.urgency !== 'urgent') return { ok: false, read: `a ${r.kind} row, ${r.urgency}` };
+  const key = r.i18n && r.i18n.text && r.i18n.text.key;
+  if (key === LOCK_WORDS9) return { ok: true, read: 'the lock’s own words' };
+  if (key !== WAIT_WORDS9) return { ok: false, read: `other words: ${String(key).slice(0, 90)}` };
+  const who = String((r.i18n.text.params && r.i18n.text.params.who) || '');
+  // the words' callers, each «actor (verb, verb)» (src/vault-blocked.js itemWords); «…» = more callers, never the lock act's own
+  const later = who.split(' · ').filter((part) => { const m = /^(.*) \((.*)\)$/.exec(part); return !(m && m[1] === LOCK_ACT_OWN9.actor && m[2].split(', ').every((v) => LOCK_ACT_OWN9.verbs.includes(v))); });
+  return later.length ? { ok: true, read: `a later refusal’s words: ${who}` } : { ok: false, read: `the lock act’s own refusal alone: ${who || '(no one named)'}` };
+};
+const j9 = judge9L(items9);
+console.log(`  ⑨L the read: ${j9.read}`);
+check('⑨L lane vault-locked-loud: the lock act filed THE urgent For-you item at once — an action row, urgent, the lock’s own words (or a later refusal’s, when one came before the read: r5589)', relogin9 === 200 && j9.ok === true, { relogin9, read: j9.read, rows: items9.map((i) => ({ kind: i.kind, urgency: i.urgency, i18n: i.i18n })) });
+// the judge's two roads, each fed the row it names: the slow box's reading takes the later-refusal road (the probe's words, 20 s
+// after the sign-in); the row a lock act that filed nothing leaves at once is refused
+const row9 = (who) => [{ kind: 'action', urgency: 'urgent', i18n: { text: { key: WAIT_WORDS9, params: { who } } } }];
+const late9 = judge9L(row9('VibeSpace (the integrations store, the accounts store)'));
+check('⑨L … the judge takes the slow box’s reading: the accounts store refused after the lock act, its words naming it', late9.ok === true && late9.read.startsWith('a later refusal'), late9);
+const ctl9 = judge9L(row9('VibeSpace (the integrations store)'));
+check('red control: «a lock act that filed nothing» — the row of the lock act’s own refusal alone (the integrations store) — is refused by the same judge', ctl9.ok === false && ctl9.read.startsWith('the lock act'), ctl9);
 await cdp('Page.navigate', { url: URL });
 // wait-for-effect, staged (lane vault-unlock-modal-race): the same shape as ⑥a — the on-load unlock modal is gated behind
 // the serial /api/home → /api/vault/state boot, so wait for the /api/home pass (app._localHome), then the modal's OWN 10 s.
