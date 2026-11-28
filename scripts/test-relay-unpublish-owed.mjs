@@ -24,6 +24,9 @@
 //      P9b / P10b (r5421): a refused retry (the pass, «Try again») keeps whose old address it is; a service over a person's row is
 //         never told that person's address is its own; P9c (r5486) a second change of owner never moves the mark; P15 (r5486, S6) a
 //         confirmed removal on a job's live row asks the jobs engine ONCE — the waiting service published with no restart
+//   U  (r5561) THE OWED ROW, as a person reads it: its name (the machine and port, its service) and THE ADDRESS still up in its text
+//      (U1, red: the base's list hides the address); a row that wraps so the name is never squeezed to nothing (U2, a CSS law; red:
+//      the base's rules); the unmarked file's words wrap — the panel never scrolls sideways (U3); the press carries its words (U4)
 //   I  the instance address (src/server/instance-url.js): a refused removal is OWED and retried at a start (I1), on the pace (I2),
 //      a Publish waits for a retry out (I3), a retry refused the same way writes nothing (I4), and a press waits for a retry out
 //      only as long as its bound (I5, r5486)
@@ -44,6 +47,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scratchDir, anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
+import { cssRules } from './lib/css-rules.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -417,6 +421,41 @@ const PFrevive = copyOf(PF_REL, [["    const gone = rec && rec.forwardGone ? rec
   judged(t.removed === 1, t.asks === 1 && t.busyAtAsk === false, 'P15b one confirm settled twice (its late answer, then the pass): the jobs engine asked ONCE, after the pass — never in its middle', t);
   const red = await scene(copyOf(PF_REL, [["    if (rec.ownerJob) this._reconcileOwed = true;\n", "    if (rec.ownerJob) { const jm = this.getJobs && this.getJobs(); if (jm) jm.forwardsReconcile('red'); }   /* RED: an ask at every settle */\n"]], 'p-two-asks').PortForwardManager);
   judged(red.removed === 1, red.asks === 2, 'P15b RED CONTROL (an ask at every settle, in a copy): two asks for one confirm, in the middle of the pass', red);
+}
+
+console.log('U the owed row, as a person reads it (r5561)');
+{
+  const PO = await import(pathToFileURL(path.join(REPO, 'src/lib/ports-owed.js')).href);
+  const nameOf = (h) => (h === '__local__' ? 'This machine' : h);
+  const scene = async (PFM) => {
+    const rl = relay(), w = worldOf(PFM, [pub(40, { label: 'service: web', forwardGone: true, unpublishOwed: { code: 'relay_unpublish_unreloaded', reason: 'r', since: 1 } })], rl);
+    const row = w.pf.list().find((x) => x.id === pub(40).id);
+    return { row: !!row, words: row ? PO.owedRowText(row, { nameOf, service: 'web', why: 'why' }) : null };
+  };
+  const t = await scene(PFm);
+  ok(!!(t.words && t.words.name === 'This machine:7140 — web' && t.words.url === pub(40).publicUrl && t.words.addressLead === 'Its address:' && t.words.press === 'Try again'),
+    'U1 an owed row says WHAT it was (the machine and port, its service) and THE ADDRESS still up — in its text, beside why and the press with its words', t);
+  const red = await scene(copyOf(PF_REL, [["      stillUpUrl: (r.forwardGone || r.orphan) && r.unpublishOwed ? r.publicUrl || null : null,", "      /* RED: the base's list — the address hidden */"]], 'p-no-address').PortForwardManager);
+  judged(red.row, !!(red.words && !red.words.url), 'U1 RED CONTROL (the base\'s list, in a copy): the row has no address to say', red);
+  const orphanW = PO.owedRowText({ orphan: true, label: 'pf-made-up', unpublishOwed: { code: 'relay_orphan' } }, { nameOf });
+  ok(orphanW.name === 'A relay file of this hub: pf-made-up' && !orphanW.url && orphanW.addressLead === 'Its address is written in that relay file.', 'U1 an orphan row names its relay file, and says its address is written in that file (this hub never recorded it)', orphanW);
+  // U2 / U3: THE LAWS OF THE STYLESHEET (the drawn half is the walk's pictures): read the rules as the browser would apply them
+  const CSSTEXT = srcOf('public/style.css');
+  const bodyOf = (text, sel) => { const r = cssRules(text).filter((x) => x.sel === sel); return r.length ? r[r.length - 1].body : ''; };
+  const boxNeverEmpty = (text) => /flex-wrap:\s*wrap/.test(bodyOf(text, '.ports-row-owed')) && /min-width:\s*[1-9][\d.]*(em|px|rem)/.test(bodyOf(text, '.ports-row-owed > .ports-row-label')) && /flex:\s*1 0 100%/.test(bodyOf(text, '.ports-owed-detail'));
+  const BLOCK0 = CSSTEXT.indexOf('/* B-73c4 (主开发 r5561)'), BLOCK1 = CSSTEXT.indexOf('.ports-words-wrap {');
+  const base = BLOCK0 > 0 && BLOCK1 > BLOCK0 ? CSSTEXT.slice(0, BLOCK0) + CSSTEXT.slice(CSSTEXT.indexOf('}', BLOCK1) + 1) : null;
+  ok(boxNeverEmpty(CSSTEXT), 'U2 an owed row WRAPS: its words take their own line and its name keeps a width — never squeezed to nothing beside them');
+  ok(!!base && !boxNeverEmpty(base), 'U2 RED CONTROL (the base\'s rules): the row does not wrap and its name may shrink to nothing');
+  const wraps = (text) => /overflow-wrap:\s*anywhere/.test(bodyOf(text, '.ports-words-wrap'));
+  const SR = srcOf('src/lib/sidebar-rail.js');
+  ok(wraps(CSSTEXT) && SR.includes('<div class="empty-hint ports-words-wrap">${escHtml(tr(\'A relay file in this home has no owner mark'), 'U3 the unmarked file\'s words WRAP (a folder path with no space breaks anywhere): the panel never scrolls sideways');
+  ok(!!base && !wraps(base), 'U3 RED CONTROL (the base\'s rules): a long path cannot break — the panel scrolls sideways');
+  // U4: the press carries its words (a phone has no hover)
+  const pressHasWords = (src) => /_owedRetryBtn\(f, api, render\) \{[^]*?b\.innerHTML = `\$\{PORT_ICONS\.globeOff\}<span>\$\{escHtml\(tr\('Try again'\)\)\}<\/span>`;/.test(src);
+  const BASE_PRESS = "    _owedRetryBtn(f, api, render, btn) {\n      return btn(PORT_ICONS.globeOff, tr('Try again'), async () => {";
+  ok(pressHasWords(SR), 'U4 «Try again» carries its WORDS on the button (not only a tooltip) at every width');
+  ok(!pressHasWords(BASE_PRESS), 'U4 RED CONTROL (the base\'s press: an icon whose only words are its tooltip): no words on the button');
 }
 
 console.log('I the instance address: a refused removal is owed and retried at a start (r5334)');

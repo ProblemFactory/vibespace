@@ -21,6 +21,7 @@ import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDi
 import { registerMenuItem } from './contributions.js';
 import { pluginProvides, pluginState, relayRefusalWords } from './plugins-ui.js';
 import { registerWindowType } from './window-types.js';
+import { owedRowText } from './ports-owed.js';   // B-73c4 (r5561): an owed row's words, PURE
 import { track } from './telemetry-client.js';
 import { censusRows, WORDS as MEMORY_WORDS } from '../memory-census.js'; // PURE: the server memory census's rows (lane server-memory-census)
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a cleared service's label / scan tag holds the stored key — worded here
@@ -1104,7 +1105,7 @@ export function installSidebarRail(Sidebar) {
           const svcWords = svcM ? (svcM[1] === CLEARED_TEXT ? clearedText() : svcM[1]) : null;   // a cleared job's service in THIS device's words (verify r8)
           row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${svcM ? ` <span class="ports-svc">${escHtml(svcWords)}</span>` : ''} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
           if (f.ownerGone) row.insertAdjacentHTML('beforeend', `<div class="empty-hint empty-hint-inline">${escHtml(tr('Its background job is gone: this forward and its public address stay until you remove it here.'))}</div>`);   // r3327: a job row whose job is gone, said on it
-          if (f.unpublishOwed) row.insertAdjacentHTML('beforeend', `<div class="empty-hint empty-hint-inline">${escHtml(this._owedPortWords(f))}</div>`);   // B-73c4: its unpublish not confirmed — the address is still up
+          if (f.unpublishOwed) { row.classList.add('ports-row-owed'); row.insertAdjacentHTML('beforeend', this._owedDetailHtml(f, nameOf)); }   // B-73c4 (r5561): its unpublish not confirmed — why and THE ADDRESS, on their own line
           // the proto chip is the override handle
           const chip = row.querySelector('.ports-proto');
           if (chip) chip.onclick = (ev) => this._portProtoMenu(ev, f, render);
@@ -1216,7 +1217,7 @@ export function installSidebarRail(Sidebar) {
         }
         // B-73c4 (r5162): relay files of this home with NO owner mark and no row — shown ONCE as words, never touched, no press (a person
         // removes such a file by hand); the folder rides as a value, never inside the words
-        if (relayFiles && Array.isArray(relayFiles.names) && relayFiles.names.length) sec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(tr('A relay file in this home has no owner mark and serves a public address: {names} — in {folder}. Remove it by hand if it is not wanted.', { names: relayFiles.names.join(', '), folder: relayFiles.folder || '' }))}</div>`);
+        if (relayFiles && Array.isArray(relayFiles.names) && relayFiles.names.length) sec.insertAdjacentHTML('beforeend', `<div class="empty-hint ports-words-wrap">${escHtml(tr('A relay file in this home has no owner mark and serves a public address: {names} — in {folder}. Remove it by hand if it is not wanted.', { names: relayFiles.names.join(', '), folder: relayFiles.folder || '' }))}</div>`);
         out.appendChild(sec);
         // per-machine scan sections
         for (const m of machines) {
@@ -1351,26 +1352,38 @@ export function installSidebarRail(Sidebar) {
       return tr('Its public address is still up: {reason}', { reason: why }) + (earlier ? ' ' + tr('That address is its earlier owner\'s and is still being taken down.') : '');
     },
     /** B-73c4: «Try again» on a row whose public address is still up — a person's press (the route refuses an agent's) */
-    _owedRetryBtn(f, api, render, btn) {
-      return btn(PORT_ICONS.globeOff, tr('Try again'), async () => {
+    _owedRetryBtn(f, api, render) {   // r5561: the press carries its WORDS at every width (an icon's tooltip says nothing on a phone)
+      const b = document.createElement('button');
+      b.className = 'mounts-btn ports-owed-press';
+      b.innerHTML = `${PORT_ICONS.globeOff}<span>${escHtml(tr('Try again'))}</span>`;
+      b.onclick = async () => {
         const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/unpublish-again`, { method: 'POST' });
         if (r?.error) { const why = relayRefusalWords(r); showToast(why || r.error, { type: 'error' }); }
         else if (r?.confirmed) showToast(tr('Its public address is down now.'));
         render();
-      });
+      };
+      return b;
+    },
+    /** r5561: the service a row is for, in THIS device's words (a cleared job's: clearedText) — as the live rows say it */
+    _owedSvc(f) { const m = /^service:\s*(.+)$/.exec(f.label || ''); return m ? (m[1] === CLEARED_TEXT ? clearedText() : m[1]) : null; },
+    /** r5561: why its address is still up, then THE ADDRESS (to open) — its own line of the row, never a dim centred hint */
+    _owedDetailHtml(f, nameOf) {
+      const w = owedRowText(f, { nameOf, tr, why: this._owedPortWords(f), service: this._owedSvc(f) });
+      const addr = w.url ? `${escHtml(w.addressLead)} <a class="ports-owed-url" href="${escHtml(w.url)}" target="_blank" rel="noopener noreferrer">${escHtml(w.url)}</a>` : escHtml(w.addressLead);
+      return `<div class="ports-owed-detail"><div class="ports-owed-why">${escHtml(w.why)}</div><div class="ports-owed-addr">${addr}</div></div>`;
     },
     /** B-73c4: a row that is nothing but an owed removal: its name, why its address is still up, «Try again» */
-    _owedPortRow(f, api, render, nameOf) {
+    _owedPortRow(f, api, render, nameOf) {   // r5561: its NAME (the machine and port, its service), why, THE ADDRESS, the press with its words
+      const w = owedRowText(f, { nameOf, tr, service: this._owedSvc(f) });
       const row = document.createElement('div');
-      row.className = 'ports-row';
+      row.className = 'ports-row ports-row-owed';
       row.dataset.forwardId = f.id;
-      const label = f.orphan ? escHtml(f.label || '') : `${escHtml(nameOf(f.hostId))}:${f.remotePort}`;
-      row.innerHTML = `<span class="ports-row-label" title="${label}">${label}</span><div class="empty-hint empty-hint-inline">${escHtml(this._owedPortWords(f))}</div>`;
+      row.innerHTML = `<span class="ports-row-label" title="${escHtml(w.name)}">${escHtml(w.name)}</span>`;
       const acts = document.createElement('span');
       acts.className = 'ports-row-actions';
-      const btn = (icon, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.innerHTML = icon; b.dataset.tip = tip; b.onclick = fn; return b; };
-      acts.append(this._owedRetryBtn(f, api, render, btn));
+      acts.append(this._owedRetryBtn(f, api, render));
       row.appendChild(acts);
+      row.insertAdjacentHTML('beforeend', this._owedDetailHtml(f, nameOf));
       return row;
     },
     // Override the detected protocol of a forward. Auto = clear the override

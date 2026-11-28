@@ -339,6 +339,7 @@ class PortForwardManager {
       proto: r.protoOverride || r.proto || null,
       protoDetected: r.proto || null, protoOverride: r.protoOverride || null,
       // public (frp relay) exposure, if published
+      stillUpUrl: (r.forwardGone || r.orphan) && r.unpublishOwed ? r.publicUrl || null : null,   // B-73c4 (r5561): the address still up, said on its row
       publicUrl: r.forwardGone || r.orphan ? null : r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl && !r.forwardGone && !r.orphan,   // B-73c4: an owed removal is no published forward
       publicSub: r.publicSub || null, pathMount: r.pathMount || null, pathPublic: !!r.pathPublic,
       ownerJob: r.ownerJob || null,   // r3228: the job whose service this row is (written by the jobs engine only); a person's row has none
