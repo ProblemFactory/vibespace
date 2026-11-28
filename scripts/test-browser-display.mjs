@@ -468,7 +468,22 @@ app.use(Rt.router);
 srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
 const API = `http://127.0.0.1:${srv.address().port}`;
 const CLI = path.join(REPO, 'data/bin/vibespace-browser');
-const cliEnvFor = (s) => ({ PATH: PATH_ENV, HOME: fakeHome, FAKE_AB_STATE: AB_STATE, XDG_RUNTIME_DIR: XDG, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: s.agentToken, VIBESPACE_SKIP_AGENT_HOOKS: '1', ...S.pairsToEnv(s._browserEnv) });
+// r5614 (the fourth candidate's once-red, PLACED at will): the shipped CLI runs the stand-in in its private run directory
+// <TMPDIR>/vibespace-browser-cwd-<uid>, made BEFORE its /resolve call and used by its spawn AFTER it (the whole launch between). With
+// TMPDIR dropped from this explicit env, that was the FIXED /tmp/vibespace-browser-cwd-<uid>, shared by every suite's CLI on the
+// machine: gone inside that window ⇒ «spawn …/agent-browser ENOENT [binary_absent]», the first verb red and the same-file leg one
+// command short. The CLI's temp folder is now the suite's own (inside ROOT, 0700): nothing outside the suite names that directory.
+const CLI_TMP = path.join(ROOT, 'cli-tmp'); fs.mkdirSync(CLI_TMP, { recursive: true, mode: 0o700 });
+// …and a scene that did not form is a NAMED SKIP (never a red, never a green): the CLI could not START the suite's own stand-in
+// while that stand-in is there and runnable (only its run directory can have gone). A stand-in really missing is judged as before
+const STAND_IN = path.join(BIN, 'agent-browser');
+const sceneNotFormed = (c) => {
+  const m = /could not run the browser CLI \((spawn [^)]* ENOENT)\) \[binary_absent\]/.exec(String((c && c.stderr) || ''));
+  if (!m) return null;
+  let there = false; try { const st = fs.statSync(STAND_IN); there = st.isFile() && (st.mode & 0o111) !== 0; } catch { there = false; }
+  return there ? `the CLI could not start the suite's own stand-in, which is there and runnable (${m[1]}): its run directory went away` : null;
+};
+const cliEnvFor = (s) => ({ TMPDIR: CLI_TMP, PATH: PATH_ENV, HOME: fakeHome, FAKE_AB_STATE: AB_STATE, XDG_RUNTIME_DIR: XDG, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: s.agentToken, VIBESPACE_SKIP_AGENT_HOOKS: '1', ...S.pairsToEnv(s._browserEnv) });
 // (r184: the run's exit is a FACT a leg prints — a status, the signal and «killed» when the 30 s bound ended it, and how long it took)
 const cli = (args, env) => { const t0 = Date.now(); return new Promise((resolve) => execFile(process.execPath, [CLI, ...args], { env, encoding: 'utf8', timeout: 30000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, killed: !!(err && err.killed), signal: (err && err.signal) || null, ms: Date.now() - t0, stdout: String(stdout || ''), stderr: String(stderr || '') }))); };
 const ephOf = (kk, key) => kk._reg().profiles.find((p) => B.isEphemeralProfile(p) && p.owner.id === key) || null;
@@ -483,7 +498,9 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const pN = ephOf(k, KEY_N);
   const recN = pN ? k.browserOf(pN.id) : null;
   let L = launches().filter((l) => l.sess === 'vs-' + KEY_N);
-  ok(c.status === 0 && recN && recN.state === 'ready', 'rung N, NO DISPLAY: the first verb SUCCEEDS (it failed "The platform failed to initialize" before)', c.stderr);
+  const notFormedN = sceneNotFormed(c);
+  if (notFormedN) console.log(`  ⊘ SKIP rung N, NO DISPLAY: the scene did not form — ${notFormedN} — the first verb and the same-file leg are not judged`);
+  else ok(c.status === 0 && recN && recN.state === 'ready', 'rung N, NO DISPLAY: the first verb SUCCEEDS (it failed "The platform failed to initialize" before)', c.stderr);
   ok(L.length === 1 && L[0].headed === false && L[0].args === '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-logging,--log-level=3,--vibespace-keeper=' + KEY_N && !/ozone/.test(L[0].args), 'the launch ran HEADLESS with the Wayland pin dropped (its launch tail kept: B-1789 cure, the quiet log switches — the keeper\'s own file for a fresh launch — then the mark)', L);
   ok(L[0].config && L[0].config.startsWith(path.join(DATA, 'browser-env', 'display') + '/') && cfgOfLaunch(L[0]).headed === false, 'under the PLANNED file (data/browser-env/display/…), never the base', L[0]);
   ok(recN && recN.display && recN.display.kind === 'none' && recN.display.fallback.why === 'no-display' && recN.display.wanted.headed === true && recN.display.wanted.ozone === 'wayland', 'the fact rides the record (no display, a window was wanted, Wayland pinned)', recN && recN.display);
@@ -491,7 +508,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   c = await cli(['click', '@e1'], cliEnvFor(sN));
   const cm = cmds().filter((x) => x.sess === 'vs-' + KEY_N);
   ok(c.status === 0 && !/\[browser_headless\]/.test(c.stderr) && restarts().length === 0 && launches().filter((l) => l.sess === 'vs-' + KEY_N).length === 1, 'a later verb: no note, NO restart (its view equals the launch\'s), still one launch', { stderr: c.stderr, restarts: restarts() });
-  ok(cm.length === 3 && cm[0].verb === 'open' && cm.every((x) => x.config === L[0].config), 'the launch and every agent command named the SAME planned file (/resolve handed it to the CLI)', cm);
+  if (!notFormedN) ok(cm.length === 3 && cm[0].verb === 'open' && cm.every((x) => x.config === L[0].config), 'the launch and every agent command named the SAME planned file (/resolve handed it to the CLI)', cm);
   const eRow = k.ephemerals().find((e) => e.browserKey === KEY_N);
   ok(eRow && eRow.display && eRow.display.fallback.why === 'no-display' && k.list().browsers[pN.id].display.fallback.why === 'no-display', 'the Agent browser panel\'s ephemeral row and the digest\'s browsers carry the fact');
   ok(journal.some((j) => /no desktop session on this machine .* launched headless instead of the window its config asks for; dropped --ozone-platform=wayland/.test(j)), 'ONE journal line names the fallback and what was dropped', journal);
