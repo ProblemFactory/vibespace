@@ -51,7 +51,7 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LAW_MS = 250, SESSIONS = Number(process.env.BOOT_SESSIONS) || 13, SCALE = Number(process.env.BOOT_SHAPE_SCALE) || 1;
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** The control's stall over [at, at + ms] (absolute ms): the longest overlap of one of its own gaps with that span. */
@@ -73,11 +73,11 @@ const holdWords = (h) => holdName(h) || (h && h.faint && h.faint.length ? `unnam
 const gapWords = (g, names = []) => g ? `${holdWords(names.find((h) => Math.abs(h.at - g.at) <= 50)) || '—'} ${g.ms} ms (cpu ${g.cpu ?? '?'} · run-queue wait ${g.wait ?? '?'} · control ${g.ctl} ⇒ held ${g.held})` : 'none';
 console.log('① the judge');
 check('a 300 ms gap past the first turn is red', !judge({ first: 900, gaps: [{ at: 2000, ms: 300 }] }).ok);
-check('a 249 ms gap is green; the first turn (the code loading) is never judged', judge({ first: 5000, gaps: [{ at: 2000, ms: 249 }] }).ok);
+check('a 249 ms gap is green; the first turn (the code loading) is never judged', verdictOf(judge({ first: 5000, gaps: [{ at: 2000, ms: 249 }] }).ok));
 check('no clock answer is red (an unread clock proves nothing)', !judge(null).ok && !judge({ first: null, gaps: [] }).ok);
 check('a 300 ms gap that was 300 ms of main-thread CPU is red — with or without a control beside it', !judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 300, wait: 0 }] }).ok && !judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 300, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 2100, ms: 30 }] }).ok);
-check('a 300 ms gap the box made wait 120 ms for a CPU holds 180 ms: green, and said', judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 175, wait: 120 }] }).ok && judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 175, wait: 120 }] }).maxHeld === 180);
-check('a 300 ms gap the same-box control stalled 200 ms over is green (the whole box was held); a stall elsewhere excuses nothing', judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 90, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 2050, ms: 200 }] }).ok && !judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 90, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 5000, ms: 200 }] }).ok);
+check('a 300 ms gap the box made wait 120 ms for a CPU holds 180 ms: green, and said', gateOf(judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 175, wait: 120 }] }).ok) && judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 175, wait: 120 }] }).maxHeld === 180);
+check('a 300 ms gap the same-box control stalled 200 ms over is green (the whole box was held); a stall elsewhere excuses nothing', gateOf(judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 90, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 2050, ms: 200 }] }).ok) && !judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 90, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 5000, ms: 200 }] }).ok);
 check('no run-queue reading and no control ⇒ the whole gap is the hold (strict)', !judge({ first: 900, gaps: [{ at: 2000, ms: 260, cpu: 100, wait: null }] }).ok);
 
 // ── the scratch server: this tree's code in a worktree, the shape in its data/, HOME a scratch home ──
@@ -182,8 +182,8 @@ check(`the ${SESSIONS} sessions were restored (the restore really ran)`, !!b1 &&
 const span = (r, n) => ((r && r.spans) || []).find((s) => s.name === n) || null;
 const warm1 = span(rep1, 'usage-ledger-warm');
 check('the ledger warm joined the first load in the fold worker (lane ledger-boot-load: no slice parsed on the loop) and loaded the shape\'s ledger', !!warm1 && warm1.worker === true && warm1.slices === 0 && warm1.rows > shape.rows.ledger * 0.5, warm1);
-check('the OTel stash replay, the identity repair and the restore probes ran off the loop (each a span that ended)', ['otel-replay', 'identity-repair', 'restore-probes'].every((n) => span(rep1, n) && span(rep1, n).ms != null), rep1 && rep1.spans);
-check(`THE LAW: no hold ≥ ${LAW_MS} ms from the first loop turn to the warm's end — the longest gap ${gapWords(j1.top, names1)}; the longest hold ${j1.maxHeld} ms; code loading ${j1.firstMs} ms, not judged; monitorEventLoopDelay max ${c1 && c1.eldMax} ms`, j1.ok, { over: j1.over.map((g) => gapWords(g, names1)), named: names1 });
+check('the OTel stash replay, the identity repair and the restore probes ran off the loop (each a span that ended)', verdictOf(['otel-replay', 'identity-repair', 'restore-probes'].every((n) => span(rep1, n) && span(rep1, n).ms != null)), rep1 && rep1.spans);
+check(`THE LAW: no hold ≥ ${LAW_MS} ms from the first loop turn to the warm's end — the longest gap ${gapWords(j1.top, names1)}; the longest hold ${j1.maxHeld} ms; code loading ${j1.firstMs} ms, not judged; monitorEventLoopDelay max ${c1 && c1.eldMax} ms`, verdictOf(j1.ok), { over: j1.over.map((g) => gapWords(g, names1)), named: names1 });
 // r12: the server names EVERY hold it recorded (≥ 100 ms) — its step / span, or the frames its CPU stood in (the sampler ran).
 // r14: named only by what FILLS it (the tracer's rule) — a hold this suite's own clock saw the BOX take most of (held, its
 // ms − max(run-queue wait, the control's stall), under half the gap) may go unnamed, and is said as the box's
@@ -220,7 +220,7 @@ check(`…the server names the hold: the step usage-ledger-warm, and the tracer 
   const undo = BT.wrapSync({ ops, now: () => clock, turn: () => turnNo });
   try { for (let k = 0; k < 600; k++) { clock += 0.3; if (k === 300) turnNo++; fs.existsSync(f); } } finally { undo(); fs.existsSync = orig; }
   const two = [{ at: 0, ms: 240 }, { at: 240, ms: 240 }].map((g) => { const sites = typeof BT.sitesOf === 'function' ? BT.sitesOf(ops, g) : []; return { ...g, credited: sites.reduce((n, x) => n + x.ms, 0), named: sites.some((x) => /test-boot-loop-hold\.mjs/.test(x.what)) }; });
-  check(`…the two-hold control: 600 short calls across two 240 ms holds — hold 1 credited ${two[0].credited} ms, hold 2 ${two[1].credited} ms, each naming its site (a fold never crosses a hold)`, two.every((g) => g.named && g.credited > 0 && g.credited <= g.ms), { two, ops: ops.length });
+  check(`…the two-hold control: 600 short calls across two 240 ms holds — hold 1 credited ${two[0].credited} ms, hold 2 ${two[1].credited} ms, each naming its site (a fold never crosses a hold)`, verdictOf(two.every((g) => g.named && g.credited > 0 && g.credited <= g.ms)), { two, ops: ops.length });
 }
 
 // lane ledger-dedup-law r12: THE SAMPLER'S CONTROL — 300 ms of pure CPU in a function of this file (no sync call: the call
@@ -261,7 +261,7 @@ process.stdout.write('ready\\n');`;
   } catch { } finally { end(); }
   const big = ((rep && rep.holds) || []).filter((h) => h.ms >= 200).sort((a, b) => a.at - b.at), stopped = big[0] || null, spun = big[1] || null;
   check(`…the STOPPED control: a child stopped 300 ms (SIGSTOP — the box) holds ${stopped ? stopped.ms : '?'} ms, ${stopped ? holdWords(stopped) || 'unnamed, nothing seen in it' : 'NO HOLD'}${stopped && holdName(stopped) ? ' — NAMED' : ''}; its 300 ms spin holds ${spun ? spun.ms : '?'} ms, named ${spun ? holdName(spun) || 'NOTHING' : '—'} (a1d92418: the stopped hold named «cpu (program)» by one sample)`,
-    !!stopped && !holdName(stopped) && !!spun && !!holdName(spun) && (spun.sites || []).some((x) => /^cpu /.test(x.what)), rep && rep.holds);
+    !!stopped && !holdName(stopped) && !!spun && !!holdName(spun) && verdictOf((spun.sites || []).some((x) => /^cpu /.test(x.what))), rep && rep.holds);
 }
 
 // lane ledger-dedup-law r15: THE FILL IS THE RAW TIME — 600 calls of 0.4 ms, each at its own site, in a 300 ms hold (a burst of
@@ -272,7 +272,7 @@ process.stdout.write('ready\\n');`;
   const at = (k) => Array.from({ length: 600 }, (_, i) => ({ op: 'readFileSync', site: `src/x${i % k}.js:1`, at: 1000 + i * 0.45, span: 0.4, ms: 0.4 }));
   const fill = (k) => { const all = BT.sitesOf(at(k), w, Infinity); return { fills: BT.fills(all, w), shown: all.slice(0, 3).reduce((n, x) => n + x.ms, 0) }; };
   const many = fill(600), few = fill(3);
-  check(`…the fill is the raw time: 600 calls of 0.4 ms in a 300 ms hold — at 600 sites ${many.fills ? 'NAME it' : 'do NOT name it (faint)'}, at 3 sites ${few.fills ? 'name it' : 'do NOT name it'} (the top three shown ${many.shown} / ${few.shown} ms)`, many.fills && few.fills, { many, few });
+  check(`…the fill is the raw time: 600 calls of 0.4 ms in a 300 ms hold — at 600 sites ${many.fills ? 'NAME it' : 'do NOT name it (faint)'}, at 3 sites ${few.fills ? 'name it' : 'do NOT name it'} (the top three shown ${many.shown} / ${few.shown} ms)`, gateOf(many.fills) && verdictOf(few.fills), { many, few });
 }
 
 // lane ledger-dedup-law r15: THE DIAGNOSTICS ROW — ⚙ Diagnostics' own row expression (src/lib/setup-flows.js) over a hold with a
@@ -284,7 +284,7 @@ process.stdout.write('ready\\n');`;
   let row = '';
   try { row = new Function('bt', 'esc', expr)({ holds: [{ at: 215, ms: 309, name: 'listen', sites: [{ ms: 160, what: 'cpu named-site (src/x.js:1)' }], faint: [{ ms: 43, what: 'fs.readFileSync faint-site src/y.js:2' }] }] }, esc); } catch (e) { row = `THREW ${e.message}`; }
   const faint = /<div class="dim faint">43 ms · fs\.readFileSync faint-site/.test(row), named = /<div class="dim">160 ms · cpu named-site/.test(row);
-  check(`…the Diagnostics row: a hold's named site ${named ? 'listed' : 'MISSING'}, its faint one ${faint ? 'listed, greyed' : 'MISSING'} — ${row.replace(/<[^>]+>/g, ' | ').replace(/( \| )+/g, ' | ').slice(0, 200)}`, named && faint, row);
+  check(`…the Diagnostics row: a hold's named site ${named ? 'listed' : 'MISSING'}, its faint one ${faint ? 'listed, greyed' : 'MISSING'} — ${row.replace(/<[^>]+>/g, ' | ').replace(/( \| )+/g, ' | ').slice(0, 200)}`, gateOf(named) && verdictOf(faint), row);
 }
 
 // ── boots 3 + 4: THE RESTORE'S PROBES CANNOT BE REAPED (B-92a4) ──
@@ -311,9 +311,9 @@ await stop();
 const sockets3 = fs.readdirSync(path.join(wt, 'data', 'sockets')).filter((f) => f.startsWith('cw-')).length;
 const reconnected3 = (log3.match(/✓ Reconnected:/g) || []).length;
 check(`the listener opened at the cap: ${rep3 && probes3 ? rep3.listenAt - probes3.at : '?'} ms after the probes began (cap ${CAP} ms + 5 s; ${rep3 && rep3.listenAt} ms after the process started)`, !!b3 && !!probes3 && rep3.listenAt - probes3.at <= CAP + 5000, { listenAt: rep3 && rep3.listenAt, probes3 });
-check(`the boot trace names what did not answer — restore-probes: ${probes3 && probes3.note}`, !!probes3 && probes3.unanswered === SESSIONS && new RegExp(`^${SESSIONS} unanswered \\((fuser|pgrep|not asked) cw-`).test(probes3.note || ''), probes3);
-check(`every session restored (${reconnected3}/${SESSIONS} reconnected, probe-pending), none retired, every socket in place (${sockets3})`, reconnected3 === SESSIONS && !/Dead socket|Duplicate of/.test(log3) && sockets3 === SESSIONS && new RegExp(`${SESSIONS} session\\(s\\) adopted probe-pending`).test(log3), log3.split('\n').filter((l) => /Dead socket|Duplicate|probe-pending|\[child\]/.test(l)).slice(0, 8));
-check(`the re-probe after listen settles all ${SESSIONS} alive once they answer: ${reprobes(rep3b).map((n) => n.text).join(' | ')}`, !!rep3b && reprobes(rep3b).every((n) => /0 dead \(retired\), 0 duplicate/.test(n.text)), rep3b && rep3b.notes);
+check(`the boot trace names what did not answer — restore-probes: ${probes3 && probes3.note}`, !!probes3 && probes3.unanswered === SESSIONS && verdictOf(new RegExp(`^${SESSIONS} unanswered \\((fuser|pgrep|not asked) cw-`).test(probes3.note || '')), probes3);
+check(`every session restored (${reconnected3}/${SESSIONS} reconnected, probe-pending), none retired, every socket in place (${sockets3})`, reconnected3 === SESSIONS && !/Dead socket|Duplicate of/.test(log3) && sockets3 === SESSIONS && verdictOf(new RegExp(`${SESSIONS} session\\(s\\) adopted probe-pending`).test(log3)), log3.split('\n').filter((l) => /Dead socket|Duplicate|probe-pending|\[child\]/.test(l)).slice(0, 8));
+check(`the re-probe after listen settles all ${SESSIONS} alive once they answer: ${reprobes(rep3b).map((n) => n.text).join(' | ')}`, !!rep3b && verdictOf(reprobes(rep3b).every((n) => /0 dead \(retired\), 0 duplicate/.test(n.text))), rep3b && rep3b.notes);
 endHeld();
 
 console.log('⑥ RED control: the pre-fix pair (runChild settles only in its callback; no cap) over the same fakes');
@@ -335,7 +335,7 @@ console.log('⑥ RED control: the pre-fix pair (runChild settles only in its cal
   const tlsReal = fs.readFileSync(tlsF, 'utf8'), brReal = fs.readFileSync(brF, 'utf8');
   const rcA = tlsReal.indexOf('function runChild('), rcB = tlsReal.indexOf('\n}\n', rcA) + 3;
   const RACE = 'await Promise.race([Promise.all([drain(), drain(), drain(), drain()]), new Promise((r) => { cap = setTimeout(() => { out.capped = true; r(); }, capMs); })]);';
-  check('control setup: the copy cuts runChild\'s answering timer and the cap\'s race', rcA > 0 && brReal.includes(RACE));
+  check('control setup: the copy cuts runChild\'s answering timer and the cap\'s race', rcA > 0 && verdictOf(brReal.includes(RACE)));
   fs.writeFileSync(tlsF, tlsReal.slice(0, rcA) + OLD_RUN_CHILD + tlsReal.slice(rcB));
   fs.writeFileSync(brF, brReal.replace(RACE, 'await Promise.all([drain(), drain(), drain(), drain()]);'));
   fs.writeFileSync(HELD, 'hang');
@@ -350,4 +350,4 @@ console.log('⑥ RED control: the pre-fix pair (runChild settles only in its cal
 }
 
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

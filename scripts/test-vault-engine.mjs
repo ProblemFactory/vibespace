@@ -47,7 +47,7 @@ const V = require(path.join(REPO, 'src/vault.js'));
 const SB = require(path.join(REPO, 'src/secret-box.js'));
 const KF = require(path.join(REPO, 'src/key-file.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -90,7 +90,7 @@ console.log('A  not set up = the key-file law over the files');
   ok(e.state() === 'not_set_up' && e.facts().state === 'not_set_up', 'no vault.json ⇒ not_set_up');
   ok(boxOf(dir, '.channels-key').dec(files['.channels-key'].ct) === 'secret under .channels-key', 'a key file is read as before (the migration window)');
   const nb = boxOf(dir, '.integrations-key', false);
-  ok(nb.dec(nb.enc('x')) === 'x' && /^[0-9a-f]{64}$/.test(fs.readFileSync(path.join(dir, '.integrations-key'), 'utf8')), 'a store\'s FIRST key is minted as a file, as before (sealed in at setup)');
+  ok(nb.dec(nb.enc('x')) === 'x' && verdictOf(/^[0-9a-f]{64}$/.test(fs.readFileSync(path.join(dir, '.integrations-key'), 'utf8'))), 'a store\'s FIRST key is minted as a file, as before (sealed in at setup)');
   ok(e.lock().code === 'vault_not_set_up' && e.facts().keys === 0, 'lock before setup ⇒ vault_not_set_up');
   e.close();
 }
@@ -104,21 +104,21 @@ let B = null;
   const seen = [];
   const e = mk(dir, { bcast: (m) => seen.push(m) });
   const r = await e.setup(PW, { ip: '10.0.0.7' });
-  ok(r.ok && r.sealed.length === 5 && e.state() === 'unlocked', 'setup seals the five key files and leaves the vault unlocked', JSON.stringify(r));
+  ok(gateOf(r.ok) && r.sealed.length === 5 && e.state() === 'unlocked', 'setup seals the five key files and leaves the vault unlocked', JSON.stringify(r));
   const names = Object.keys(files);
-  ok(names.every((k) => !fs.existsSync(path.join(dir, k))), 'every key file is gone');
+  ok(verdictOf(names.every((k) => !fs.existsSync(path.join(dir, k)))), 'every key file is gone');
   const markers = names.map((k) => { try { return JSON.parse(fs.readFileSync(path.join(dir, k + '.sealed'), 'utf8')); } catch { return null; } });
-  ok(markers.every((m, i) => m && m.sealed === true && m.entry === names[i] && m.vault === 'vault.json'), 'a .sealed marker names each file\'s entry');
+  ok(verdictOf(markers.every((m, i) => m && m.sealed === true && m.entry === names[i] && m.vault === 'vault.json')), 'a .sealed marker names each file\'s entry');
   const vt = fs.readFileSync(path.join(dir, 'vault.json'), 'utf8'), rec = JSON.parse(vt);
-  ok(V.recordShapeOk(rec) && names.every((k) => rec.entries[k]) && !rec.sealing, 'vault.json holds an entry per key, no pending seal');
-  ok(names.every((k) => !vt.includes(files[k].key.toString('hex')) && !vt.includes(files[k].key.toString('base64'))) && !vt.includes(PW), 'no key byte and no password in vault.json');
+  ok(gateOf(V.recordShapeOk(rec)) && gateOf(names.every((k) => rec.entries[k])) && !rec.sealing, 'vault.json holds an entry per key, no pending seal');
+  ok(gateOf(names.every((k) => !vt.includes(files[k].key.toString('hex')) && !vt.includes(files[k].key.toString('base64')))) && !vt.includes(PW), 'no key byte and no password in vault.json');
   ok((fs.statSync(path.join(dir, 'vault.json')).mode & 0o777) === 0o600, 'vault.json is 0600');
   const lk = fs.readFileSync(link);
   ok(lk.length === files['.accounts-key'].bytes.length && !lk.equals(files['.accounts-key'].bytes), 'the key file was OVERWRITTEN before the unlink (a hard link to it now holds other bytes)');
   const led = JSON.parse(fs.readFileSync(path.join(dir, 'migrations.json'), 'utf8'));
-  ok(led.applied[`vault-seal-${rec.createdAt}`] && led.reports[`vault-seal-${rec.createdAt}`].keys === 5, 'the seal is a ledger-keyed one-shot (src/migration-runner.js)');
-  ok(names.every((k) => boxOf(dir, k).dec(files[k].ct) === 'secret under ' + k), 'every ciphertext sealed BEFORE the setup still opens');
-  ok(seen.some((m) => m.type === 'vault-state' && m.state === 'unlocked'), 'the setup is broadcast (vault-state)');
+  ok(gateOf(led.applied[`vault-seal-${rec.createdAt}`]) && led.reports[`vault-seal-${rec.createdAt}`].keys === 5, 'the seal is a ledger-keyed one-shot (src/migration-runner.js)');
+  ok(verdictOf(names.every((k) => boxOf(dir, k).dec(files[k].ct) === 'secret under ' + k)), 'every ciphertext sealed BEFORE the setup still opens');
+  ok(verdictOf(seen.some((m) => m.type === 'vault-state' && m.state === 'unlocked')), 'the setup is broadcast (vault-state)');
   ok((await e.setup('another password here')).code === 'already_set_up', 'a second setup ⇒ already_set_up');
   B = { dir, files, e };
 }
@@ -126,13 +126,13 @@ let B = null;
 console.log('C  LOCKED');
 {
   const { dir, files, e } = B;
-  ok(e.lock('test').ok && e.state() === 'locked', 'lock() ⇒ locked');
+  ok(gateOf(e.lock('test').ok) && e.state() === 'locked', 'lock() ⇒ locked');
   const reads = { n: 0 };
   const real = { r: fs.readFileSync, x: fs.existsSync, s: fs.statSync };
   fs.readFileSync = (...a) => { reads.n++; return real.r(...a); }; fs.existsSync = (...a) => { reads.n++; return real.x(...a); }; fs.statSync = (...a) => { reads.n++; return real.s(...a); };
   let r;
   try { r = e.keyFor('.accounts-key', { keyFile: path.join(dir, '.accounts-key'), hasCiphertext: () => true, legacy: () => ({ ok: true, key: Buffer.alloc(32) }) }); } finally { Object.assign(fs, { readFileSync: real.r, existsSync: real.x, statSync: real.s }); }
-  ok(r && !r.ok && r.code === KF.VAULT_LOCKED && reads.n === 0, `a locked keyFor answers ${KF.VAULT_LOCKED} and touches no file (${reads.n} fs calls)`);
+  ok(gateOf(r) && !r.ok && r.code === KF.VAULT_LOCKED && reads.n === 0, `a locked keyFor answers ${KF.VAULT_LOCKED} and touches no file (${reads.n} fs calls)`);
   for (const k of Object.keys(files)) {
     const err = refusalOf(() => boxOf(dir, k).dec(files[k].ct));
     if (!(err && err.reason === KF.VAULT_LOCKED && err.code === 'key-unreadable')) { ok(false, `locked: ${k}`, String(err && err.message)); }
@@ -141,7 +141,7 @@ console.log('C  LOCKED');
   ok(JSON.stringify(boxOf(dir, '.mounts-key').refusal()) === JSON.stringify({ code: KF.VAULT_LOCKED, file: '.mounts-key' }), 'the row fact says vault_locked');
   ok(boxOf(dir, '.mounts-key').hasKey() === true, 'hasKey: the vault holds it (no integration-key-missing while locked)');
   ok(SB.lawfulKey(path.join(dir, '.channels-key'), { hasCiphertext: () => true }).code === KF.VAULT_LOCKED, 'lawfulKey (the shim every store calls) ⇒ vault_locked');
-  ok(/vault is locked/.test(KF.refusalWords(KF.VAULT_LOCKED, '.mounts-key')), 'the refusal in words says the vault is locked');
+  ok(verdictOf(/vault is locked/.test(KF.refusalWords(KF.VAULT_LOCKED, '.mounts-key'))), 'the refusal in words says the vault is locked');
   // a process with NO engine over this dir (another process, a suite): locked, never the legacy branch
   const unreg = SB.registerVault(path.join(ROOT, 'elsewhere'), { keyFor: () => ({ ok: false, code: 'x' }), peek: () => null, hasEntry: () => false, state: () => 'locked', epoch: () => 0 });
   e.close(); unreg();
@@ -156,13 +156,13 @@ console.log('D  unlock ⇒ reads; minted INTO the vault; key-missing kept');
   const e = mk(dir);
   ok(e.state() === 'locked', 'a new engine over a set-up dir starts LOCKED (default after every start)');
   ok((await e.unlock('wrong password!!')).code === 'wrong_password' && e.state() === 'locked', 'a wrong password leaves it locked');
-  ok((await e.unlock(PW)).ok && e.state() === 'unlocked', 'the right password unlocks');
-  ok(Object.keys(files).every((k) => boxOf(dir, k).dec(files[k].ct) === 'secret under ' + k), 'every store reads again');
+  ok(gateOf((await e.unlock(PW)).ok) && e.state() === 'unlocked', 'the right password unlocks');
+  ok(verdictOf(Object.keys(files).every((k) => boxOf(dir, k).dec(files[k].ct) === 'secret under ' + k)), 'every store reads again');
   const nb = boxOf(dir, '.integrations-key', false);
-  ok(nb.dec(nb.enc('fresh')) === 'fresh' && !fs.existsSync(path.join(dir, '.integrations-key')) && JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['.integrations-key'], 'a store\'s first key is minted INTO the vault — no file');
+  ok(nb.dec(nb.enc('fresh')) === 'fresh' && !fs.existsSync(path.join(dir, '.integrations-key')) && verdictOf(JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['.integrations-key']), 'a store\'s first key is minted INTO the vault — no file');
   const mb = SB.secretBox(path.join(dir, 'other-store.key'), { hasCiphertext: () => true });
   const err = refusalOf(() => mb.enc('x'));
-  ok(err && err.code === 'key-missing' && !JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['other-store.key'], 'no entry + ciphertext ⇒ key-missing (never a new key over what is stored)');
+  ok(gateOf(err) && err.code === 'key-missing' && !JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['other-store.key'], 'no entry + ciphertext ⇒ key-missing (never a new key over what is stored)');
   B.e = e;
 }
 
@@ -191,16 +191,16 @@ console.log('E  zeroing');
   const realZero = V.zero;
   V.zero = (...bufs) => { for (const b of bufs) if (Buffer.isBuffer(b)) zeroed.push(b); return realZero(...bufs); };
   try { boxOf(dir, '.accounts-key').dec(files['.accounts-key'].ct); e.lock('zero-test'); } finally { V.zero = realZero; }
-  ok(zeroed.length >= 2 && zeroed.every((b) => b.length === 32 && isZero(b)), `lock zeroes the DEK and every unwrapped key (${zeroed.length} buffers, all zeros)`);
+  ok(zeroed.length >= 2 && verdictOf(zeroed.every((b) => b.length === 32 && isZero(b))), `lock zeroes the DEK and every unwrapped key (${zeroed.length} buffers, all zeros)`);
   const seen = [];
   const real = crypto.scrypt;
   crypto.scrypt = (p, s, l, o, cb) => { seen.push(p); return real(p, s, l, o, cb); };
   try { await e.unlock('not it at all'); await e.unlock(PW); } finally { crypto.scrypt = real; }
-  ok(seen.length === 2 && seen.every(isZero), 'the password Buffer of every unlock is zeros once the door returns');
+  ok(seen.length === 2 && verdictOf(seen.every(isZero)), 'the password Buffer of every unlock is zeros once the door returns');
   const copies = [];
   const k1 = e.keyFor('.mounts-key', { keyFile: path.join(dir, '.mounts-key') });
   copies.push(k1.key);
-  ok(k1.ok && !isZero(k1.key), 'a reader gets a COPY of the key');
+  ok(gateOf(k1.ok) && !isZero(k1.key), 'a reader gets a COPY of the key');
   const box = boxOf(dir, '.mounts-key');
   const realEnc = SB.encWith; let handed = null;
   ok(box.dec(box.enc('copy')) === 'copy', 'secretBox under a vault: the copy is used for one call');
@@ -219,7 +219,7 @@ for (const [step, at] of [['write-record', ''], ['read-back', ''], ['marker', '.
   const r = await e.setup(PW);
   const back = Object.keys(files).every((k) => { try { return fs.readFileSync(path.join(dir, k)).equals(before[k]); } catch { return false; } });
   const markers = Object.keys(files).filter((k) => fs.existsSync(path.join(dir, k + '.sealed')));
-  ok(!r.ok && r.code === 'migration_failed' && back && !markers.length && !fs.existsSync(path.join(dir, 'vault.json')) && e.state() === 'not_set_up',
+  ok(!r.ok && r.code === 'migration_failed' && gateOf(back) && !markers.length && !fs.existsSync(path.join(dir, 'vault.json')) && e.state() === 'not_set_up',
     `a fault at ${step}${at ? ' (' + at + ')' : ''} ⇒ migration_failed, every file back byte for byte, no marker, no vault.json, not_set_up`, JSON.stringify({ r, back, markers }));
   ok(boxOf(dir, '.channels-key').dec(files['.channels-key'].ct) === 'secret under .channels-key', `  … and the stores read their files as before (${step})`);
   e.close();
@@ -229,7 +229,7 @@ for (const [step, at] of [['write-record', ''], ['read-back', ''], ['marker', '.
   fs.writeFileSync(path.join(dir, '.mounts-key'), 'not a key', { mode: 0o600 });
   const e = mk(dir);
   const r = await e.setup(PW);
-  ok(!r.ok && r.code === 'migration_failed' && r.file === '.mounts-key' && r.why === 'key-malformed' && fs.existsSync(path.join(dir, '.accounts-key')) && !fs.existsSync(path.join(dir, 'vault.json')),
+  ok(!r.ok && r.code === 'migration_failed' && r.file === '.mounts-key' && r.why === 'key-malformed' && gateOf(fs.existsSync(path.join(dir, '.accounts-key'))) && !fs.existsSync(path.join(dir, 'vault.json')),
     'a damaged key file stops the setup BEFORE anything moves (it could never be shredded safely)', JSON.stringify(r));
   e.close();
 }
@@ -241,8 +241,8 @@ for (const [step, at] of [['write-record', ''], ['read-back', ''], ['marker', '.
   const e = mk(dir, { faultAt: (s, nm) => { if (armed && s === 'shred' && nm === '.mounts-key') { armed = false; fs.writeFileSync = (f, ...a) => { if (path.basename(String(f)) === '.accounts-key') throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); return realWrite(f, ...a); }; throw Object.assign(new Error('injected shred'), { code: 'EIO' }); } } });
   const r = await e.setup(PW);
   fs.writeFileSync = realWrite;
-  ok(!r.ok && r.code === 'migration_failed' && /\.accounts-key/.test(r.why) && fs.existsSync(path.join(dir, 'vault.json')) && e.state() === 'locked', 'a shred fault + a restore fault ⇒ migration_failed naming the file not put back, the record KEPT, the vault locked', JSON.stringify(r));
-  ok((await e.unlock(PW)).ok && boxOf(dir, '.accounts-key').dec(files['.accounts-key'].ct) === 'secret under .accounts-key' && boxOf(dir, '.mounts-key').dec(files['.mounts-key'].ct) === 'secret under .mounts-key' && !fs.existsSync(path.join(dir, '.mounts-key')), '… and the unlock opens both keys and finishes the seal (nothing lost)');
+  ok(!r.ok && r.code === 'migration_failed' && gateOf(/\.accounts-key/.test(r.why)) && gateOf(fs.existsSync(path.join(dir, 'vault.json'))) && e.state() === 'locked', 'a shred fault + a restore fault ⇒ migration_failed naming the file not put back, the record KEPT, the vault locked', JSON.stringify(r));
+  ok(gateOf((await e.unlock(PW)).ok) && boxOf(dir, '.accounts-key').dec(files['.accounts-key'].ct) === 'secret under .accounts-key' && boxOf(dir, '.mounts-key').dec(files['.mounts-key'].ct) === 'secret under .mounts-key' && !fs.existsSync(path.join(dir, '.mounts-key')), '… and the unlock opens both keys and finishes the seal (nothing lost)');
   e.close();
 }
 
@@ -259,7 +259,7 @@ console.log('G  RESUME an interrupted seal');
   const e2 = mk(dir);
   await e2.unlock(PW);
   const audit = fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8');
-  ok(!fs.existsSync(path.join(dir, '.accounts-key')) && fs.existsSync(path.join(dir, '.mounts-key')) && /vault-seal-conflict/.test(audit) && !JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).sealing,
+  ok(!fs.existsSync(path.join(dir, '.accounts-key')) && gateOf(fs.existsSync(path.join(dir, '.mounts-key'))) && gateOf(/vault-seal-conflict/.test(audit)) && !JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).sealing,
     'the next unlock seals the file that matches its entry, KEEPS the one that differs (audited vault-seal-conflict), and clears the pending list');
   ok(boxOf(dir, '.mounts-key').dec(files['.mounts-key'].ct) === 'secret under .mounts-key', 'the vault entry wins over a stray file for the store\'s reads');
   e2.close();
@@ -272,8 +272,8 @@ console.log('H  ADOPT a restored key file');
   await e.setup(PW);
   const k = crypto.randomBytes(32), ct = SB.encWith(k, 'restored');
   fs.writeFileSync(path.join(dir, '.channels-key'), k.toString('hex'), { mode: 0o600 });
-  ok(boxOf(dir, '.channels-key').dec(ct) === 'restored' && !fs.existsSync(path.join(dir, '.channels-key')) && fs.existsSync(path.join(dir, '.channels-key.sealed'))
-    && JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['.channels-key'], 'a key file restored after the setup is sealed in at its first read (entry + marker, file shredded)');
+  ok(boxOf(dir, '.channels-key').dec(ct) === 'restored' && !fs.existsSync(path.join(dir, '.channels-key')) && gateOf(fs.existsSync(path.join(dir, '.channels-key.sealed')))
+    && verdictOf(JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['.channels-key']), 'a key file restored after the setup is sealed in at its first read (entry + marker, file shredded)');
   e.lock();
   ok(SB.lawfulKey(path.join(dir, '.channels-key'), { hasCiphertext: () => true }).code === KF.VAULT_LOCKED, '… and is locked with the rest');
   void files; e.close();
@@ -302,10 +302,10 @@ console.log('J  pacing, change, idle lock');
   const p = await e.unlock(PW);
   ok(!p.ok && p.code === 'paced' && p.retryInMs > 0 && p.retryInMs <= 60e3 && e.facts().failedTries === 5, '5 wrong ⇒ the next try is refused paced — the RIGHT password too', JSON.stringify(p));
   clock += 60e3 + 1;
-  ok((await e.unlock(PW)).ok && e.facts().failedTries === 0, 'after the minute the right password unlocks and the count resets');
+  ok(gateOf((await e.unlock(PW)).ok) && e.facts().failedTries === 0, 'after the minute the right password unlocks and the count resets');
   ok((await e.change('wrong old one', 'brand new password')).code === 'wrong_password', 'change with a wrong old password ⇒ wrong_password');
   ok((await e.change(PW, PW)).code === 'same_password' && (await e.change(PW, 'the sign-in pw!')).code === 'same_as_sign_in', 'change refuses the same / the sign-in password');
-  ok((await e.change(PW, 'brand new password')).ok, 'change ok');
+  ok(verdictOf((await e.change(PW, 'brand new password')).ok), 'change ok');
   {
     // verify r1 B4: a change writes onto the record as it is NOW — a key minted and an idle lock set WHILE its derives ran survive
     const real = crypto.scrypt; crypto.scrypt = (p, s, l, o, cb) => setTimeout(() => real(p, s, l, o, cb), 30);
@@ -314,8 +314,8 @@ console.log('J  pacing, change, idle lock');
     const nb = boxOf(dir, '.race-key', false); const ct = nb.enc('during the change'); e.setIdleLock(3);
     let ch; try { ch = await pending; } finally { crypto.scrypt = real; }
     const rec = JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8'));
-    ok(ch.ok && !!rec.entries['.race-key'] && rec.idleLockHours === 3 && nb.dec(ct) === 'during the change', 'a key minted and an idle lock set WHILE the password changed are kept (the lost-update race)', JSON.stringify({ ch, entry: !!rec.entries['.race-key'], idle: rec.idleLockHours }));
-    e.setIdleLock(0); ok((await e.change('brand new password 2', 'brand new password')).ok, 'changed back');
+    ok(gateOf(ch.ok) && !!rec.entries['.race-key'] && rec.idleLockHours === 3 && nb.dec(ct) === 'during the change', 'a key minted and an idle lock set WHILE the password changed are kept (the lost-update race)', JSON.stringify({ ch, entry: !!rec.entries['.race-key'], idle: rec.idleLockHours }));
+    e.setIdleLock(0); ok(verdictOf((await e.change('brand new password 2', 'brand new password')).ok), 'changed back');
   }
   {
     // verify r1 A1: a PARALLEL burst — the derives in flight count toward the pace (40 concurrent wrong passwords landed 40 derives)
@@ -323,14 +323,14 @@ console.log('J  pacing, change, idle lock');
     const real = crypto.scrypt; let derives = 0; crypto.scrypt = (...a) => { derives++; return real(...a); };
     let rs; try { rs = await Promise.all(Array.from({ length: 12 }, (_, i) => e.unlock('burst wrong ' + i))); } finally { crypto.scrypt = real; }
     ok(derives === 5 && rs.filter((r) => r.code === 'paced').length === 7 && rs.filter((r) => r.code === 'wrong_password').length === 5, `12 concurrent wrong passwords ⇒ 5 derives, 7 refused paced before any landed (${derives} derives)`);
-    clock += 60e3 + 1; ok((await e.unlock('brand new password')).ok && e.facts().failedTries === 0, 'after the minute the right password unlocks');
+    clock += 60e3 + 1; ok(gateOf((await e.unlock('brand new password')).ok) && e.facts().failedTries === 0, 'after the minute the right password unlocks');
   }
   e.lock();
-  ok((await e.unlock(PW)).code === 'wrong_password' && (await e.unlock('brand new password')).ok, 'the old password stops, the new one opens');
+  ok((await e.unlock(PW)).code === 'wrong_password' && verdictOf((await e.unlock('brand new password')).ok), 'the old password stops, the new one opens');
   ok(boxOf(dir, '.accounts-key').dec(files['.accounts-key'].ct) === 'secret under .accounts-key', 'the keys are unchanged by a password change');
   clock += 1000 * 3600e3; e.idleTick();
   ok(e.state() === 'unlocked' && e.facts().idleLockHours === 0, 'the idle lock is OFF by default (1000 h later, still unlocked)');
-  ok(e.setIdleLock(2).ok && e.setIdleLock(1.5).code === 'bad_hours' && e.setIdleLock(721).code === 'bad_hours', 'the idle lock is whole hours 0..720');
+  ok(gateOf(e.setIdleLock(2).ok) && e.setIdleLock(1.5).code === 'bad_hours' && e.setIdleLock(721).code === 'bad_hours', 'the idle lock is whole hours 0..720');
   e.touch(); clock += 2 * 3600e3 - 1; e.idleTick();
   ok(e.state() === 'unlocked', 'just under 2 h idle ⇒ still unlocked');
   clock += 2; e.idleTick();
@@ -349,9 +349,9 @@ console.log('K  signals, broadcast, audit');
   first();
   ok(e.state() === 'locked', 'the FIRST SIGTERM listener (prepended) locks the vault before the hub\'s own shutdown');
   await e.unlock(PW); process.listeners('SIGINT')[0](); ok(e.state() === 'locked', 'SIGINT locks it too');
-  ok(['unlocked', 'locked'].every((s) => seen.some((m) => m.type === 'vault-state' && m.state === s)) && seen.every((m) => !JSON.stringify(m).includes(PW)), 'every change is broadcast as vault-state (no secret in it)');
+  ok(gateOf(['unlocked', 'locked'].every((s) => seen.some((m) => m.type === 'vault-state' && m.state === s))) && verdictOf(seen.every((m) => !JSON.stringify(m).includes(PW))), 'every change is broadcast as vault-state (no secret in it)');
   const audit = fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8');
-  ok(/"event":"vault-unlock-failed"[^\n]*"ip":"192\.0\.2\.10"/.test(audit) && /"event":"vault-set-up"/.test(audit) && /"event":"vault-unlocked"/.test(audit), 'the audit has the failure with its address, the setup and the unlock');
+  ok(gateOf(/"event":"vault-unlock-failed"[^\n]*"ip":"192\.0\.2\.10"/.test(audit)) && gateOf(/"event":"vault-set-up"/.test(audit)) && verdictOf(/"event":"vault-unlocked"/.test(audit)), 'the audit has the failure with its address, the setup and the unlock');
   ok(!audit.includes(PW) && !audit.includes('a wrong password') && !logs.join('\n').includes(PW) && !logs.join('\n').includes('a wrong password'), 'no password — right or wrong — in the audit or the log');
   ok((fs.statSync(path.join(dir, VE.AUDIT_FILE)).mode & 0o777) === 0o600, 'the audit file is 0600');
   e.close();
@@ -401,9 +401,9 @@ console.log('M  A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) — w
   W.note({ actor: VB.HUB, verb: 'the accounts store', epoch: 1 });
   for (const a of ['Lane A', 'Lane B', 'mac-mini', 'Lark — Inbox', 'Lane E']) W.note({ actor: a, verb: 'v', epoch: 1 });
   const iw = VB.itemWords(W.summary());
-  ok(iw.who.startsWith('Lane A (v) · Lane B (v) · mac-mini (v) · Lark — Inbox (v)') && iw.who.endsWith(' · …') && iw.lines.length === 6 && iw.lines[5].who === VB.HUB, 'the item’s words: the named callers first (≤ 4 on its line, then …), VibeSpace’s own reads last; one detail line each', JSON.stringify(iw));
+  ok(gateOf(iw.who.startsWith('Lane A (v) · Lane B (v) · mac-mini (v) · Lark — Inbox (v)')) && gateOf(iw.who.endsWith(' · …')) && iw.lines.length === 6 && iw.lines[5].who === VB.HUB, 'the item’s words: the named callers first (≤ 4 on its line, then …), VibeSpace’s own reads last; one detail line each', JSON.stringify(iw));
   ok(VB.itemWords(bs).lines.length === VB.DETAIL_ROWS && VB.itemWords(bs).moreActors === VB.MAX_ACTORS - VB.DETAIL_ROWS && VB.itemWords(bs).moreRefusals === 10, '… bounded too: ≤ 11 detail lines, the rest counted (the store keeps ≤ 12 i18n lines)');
-  ok(/the user has already been told/.test(VB.AGENT_WORDS) && /do not ask them to unlock it or for its password/.test(VB.AGENT_WORDS) && VB.agentWords('x waits').startsWith('the vault is locked — x waits; the user has already been told'), 'THE words toward an agent: the user was already told — never ask them to unlock');
+  ok(gateOf(/the user has already been told/.test(VB.AGENT_WORDS)) && gateOf(/do not ask them to unlock it or for its password/.test(VB.AGENT_WORDS)) && verdictOf(VB.agentWords('x waits').startsWith('the vault is locked — x waits; the user has already been told')), 'THE words toward an agent: the user was already told — never ask them to unlock');
 
   // the engine
   const { dir } = world();
@@ -419,11 +419,11 @@ console.log('M  A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) — w
   const box = boxOf(dir, '.accounts-key');
   const err = refusalOf(() => box.dec(SB.encWith(crypto.randomBytes(32), 'x')));
   const s1 = e.blockedSummary();
-  ok(err && err.reason === KF.VAULT_LOCKED && s1.count === 1 && s1.actors[0].actor === VB.HUB && s1.actors[0].verbs.join() === 'the accounts store', 'THE STORE-KEY ROAD notes itself: a store’s key read refused while locked ⇒ actor «VibeSpace», the store as the verb (nothing read — the lock law unchanged)', JSON.stringify(s1));
-  ok(e.facts().blocked === 1 && sent.some((m) => m.type === 'vault-state' && m.blocked === 1) && runs.length === 1 && runs[0].count === 1, 'a fresh note re-announces the facts (blocked = 1, the strip’s count) and runs onBlocked ONCE with the summary');
+  ok(gateOf(err) && err.reason === KF.VAULT_LOCKED && s1.count === 1 && s1.actors[0].actor === VB.HUB && s1.actors[0].verbs.join() === 'the accounts store', 'THE STORE-KEY ROAD notes itself: a store’s key read refused while locked ⇒ actor «VibeSpace», the store as the verb (nothing read — the lock law unchanged)', JSON.stringify(s1));
+  ok(e.facts().blocked === 1 && gateOf(sent.some((m) => m.type === 'vault-state' && m.blocked === 1)) && runs.length === 1 && runs[0].count === 1, 'a fresh note re-announces the facts (blocked = 1, the strip’s count) and runs onBlocked ONCE with the summary');
   refusalOf(() => box.dec('x')); refusalOf(() => box.enc('y'));
   ok(runs.length === 1 && e.blockedSummary().actors[0].n === 3, 'the same store refused again ⇒ counted, no hook, no broadcast storm');
-  ok(e.secretGet('host:host-0123456789abcdef').code === KF.VAULT_LOCKED && e.blockedSummary().actors[0].verbs.includes('a device link token') && !JSON.stringify(e.blockedSummary()).includes('0123456789abcdef'), 'a secret refused while locked ⇒ noted by its kind («a device link token») — never the machine’s id');
+  ok(e.secretGet('host:host-0123456789abcdef').code === KF.VAULT_LOCKED && gateOf(e.blockedSummary().actors[0].verbs.includes('a device link token')) && !JSON.stringify(e.blockedSummary()).includes('0123456789abcdef'), 'a secret refused while locked ⇒ noted by its kind («a device link token») — never the machine’s id');
   ok(e.blocked('Worker one', 'vibespace-api conversations.rename') === true && runs.length === 3 && e.facts().blocked === 2, 'a door’s own note (the ONE helper) ⇒ a second actor, the hook runs');
   ok(e.state() === 'locked' && !fs.existsSync(path.join(dir, '.accounts-key')), 'the lock law is unchanged: still locked, no key file written by any note');
   await e.unlock(PW);
@@ -440,15 +440,15 @@ console.log('N  the two-step entry totp:<name> (design q-047 L1, lane vault-totp
   await e.setup(PW, {});
   const SEED = ['JBSWY3DP', 'EHPK3PXP'].join('');   // a secret-shaped fixture is built at runtime, never a literal
   const rec = JSON.stringify({ v: 1, seed: SEED, digits: 6, period: 30, algorithm: 'SHA1', issuer: 'GitHub', account: 'o', addedAt: 1, source: 'manual' });
-  ok(VE.isSecretName('totp:github-owner') && VE.isSecretName('totp:a.b_c-1') && !VE.isSecretName('totp:') && !VE.isSecretName('totp:a b') && !VE.isSecretName('totp:a/b'), 'totp:<[\\w.-]> is a secret name; an empty / spaced / slashed one is not');
+  ok(gateOf(VE.isSecretName('totp:github-owner')) && gateOf(VE.isSecretName('totp:a.b_c-1')) && !VE.isSecretName('totp:') && !VE.isSecretName('totp:a b') && !VE.isSecretName('totp:a/b'), 'totp:<[\\w.-]> is a secret name; an empty / spaced / slashed one is not');
   const put = e.secretPut('totp:github-owner', rec), got = e.secretGet('totp:github-owner');
-  ok(put.ok && got.ok && got.value.toString('utf8') === rec && e.secretNames().some((x) => x.name === 'totp:github-owner') && e.facts().secrets === 1, 'unlocked: sealed, read back to the very text, listed by NAME (a secret, not a store key)');
+  ok(gateOf(put.ok) && gateOf(got.ok) && got.value.toString('utf8') === rec && gateOf(e.secretNames().some((x) => x.name === 'totp:github-owner')) && e.facts().secrets === 1, 'unlocked: sealed, read back to the very text, listed by NAME (a secret, not a store key)');
   got.value.fill(0);
   ok(!fs.readFileSync(path.join(dir, 'vault.json'), 'utf8').includes(SEED), 'vault.json holds no seed in the clear');
   e.lock('test');
   const lp = e.secretPut('totp:other', rec), lg = e.secretGet('totp:github-owner');
-  ok(!lp.ok && /vault_locked/.test(lp.code) && !lg.ok && /vault_locked/.test(lg.code), 'LOCKED: a put and a get refused by name (vault_locked) — nothing written', { lp, lg });
-  ok(e.secretDrop('totp:github-owner').ok && !e.secretNames().some((x) => x.name === 'totp:github-owner'), 'a locked vault still FORGETS one (a delete needs no key)');
+  ok(!lp.ok && gateOf(/vault_locked/.test(lp.code)) && !lg.ok && verdictOf(/vault_locked/.test(lg.code)), 'LOCKED: a put and a get refused by name (vault_locked) — nothing written', { lp, lg });
+  ok(gateOf(e.secretDrop('totp:github-owner').ok) && !e.secretNames().some((x) => x.name === 'totp:github-owner'), 'a locked vault still FORGETS one (a delete needs no key)');
   e.close();
 }
 
@@ -463,7 +463,7 @@ console.log('O  agent mint / put (q-043 §9)');
     'a name with / or : is refused (no namespace escape); a bad scope is refused');
   ok(V.mintVerdict({}).length === 24 && V.mintVerdict({}).charset === 'ascii-printable' && V.mintVerdict({ length: 4 }).code === 'bad_length' && V.mintVerdict({ charset: 'hex' }).code === 'bad_charset',
     'mintVerdict: defaults 24 / ascii-printable; a short length or an unknown charset refused');
-  for (const cs of ['ascii-printable', 'alnum', 'digits']) { const str = V.randomSecret(64, cs).toString('utf8'); ok(str.length === 64 && [...str].every((c) => V.MINT_CHARSETS[cs].includes(c)), `randomSecret(${cs}) is 64 chars, every one in the alphabet`); }
+  for (const cs of ['ascii-printable', 'alnum', 'digits']) { const str = V.randomSecret(64, cs).toString('utf8'); ok(str.length === 64 && verdictOf([...str].every((c) => V.MINT_CHARSETS[cs].includes(c))), `randomSecret(${cs}) is 64 chars, every one in the alphabet`); }
   ok(new Set([...V.randomSecret(300, 'digits').toString('utf8')]).size === 10, 'randomSecret(digits, 300) draws all ten digits (uniform — no symbol starved by a modulo bias)');
 
   const { dir } = world();
@@ -471,21 +471,21 @@ console.log('O  agent mint / put (q-043 §9)');
   await e.setup(PW, {});
   // MINT: the hub makes it, seals it, returns name + ref — NEVER the value
   const m = e.agentMint('agent:conv-7/signup-pw', { length: 20, charset: 'alnum', actor: 'My Chat' });
-  ok(m.ok && m.name === 'agent:conv-7/signup-pw' && m.ref === 'vault://agent:conv-7/signup-pw' && !('value' in m), 'agentMint ⇒ { ok, name, ref } with NO value field (the agent never sees it)');
+  ok(gateOf(m.ok) && m.name === 'agent:conv-7/signup-pw' && m.ref === 'vault://agent:conv-7/signup-pw' && !('value' in m), 'agentMint ⇒ { ok, name, ref } with NO value field (the agent never sees it)');
   const g = e.secretGet('agent:conv-7/signup-pw');
   const minted = g.ok && g.value ? g.value.toString('utf8') : null;
-  ok(minted && minted.length === 20 && [...minted].every((c) => V.MINT_CHARSETS.alnum.includes(c)), 'the owner CAN reveal the minted value (20 alnum chars) — it is sealed, not lost');
+  ok(gateOf(minted) && minted.length === 20 && verdictOf([...minted].every((c) => V.MINT_CHARSETS.alnum.includes(c))), 'the owner CAN reveal the minted value (20 alnum chars) — it is sealed, not lost');
   if (g.value) g.value.fill(0);
   const audit = fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8');
   ok(!audit.includes(minted) && !fs.readFileSync(path.join(dir, 'vault.json'), 'utf8').includes(minted) && !JSON.stringify(m).includes(minted), 'the minted value is in NO return, audit line or record byte (only the entry name + who)');
-  ok(/"event":"vault-agent-mint"/.test(audit) && /"by":"agent"/.test(audit) && /"actor":"My Chat"/.test(audit), 'the mint is audited by name + actor (never the value)');
+  ok(gateOf(/"event":"vault-agent-mint"/.test(audit)) && gateOf(/"by":"agent"/.test(audit)) && verdictOf(/"actor":"My Chat"/.test(audit)), 'the mint is audited by name + actor (never the value)');
   // PUT
   const p = e.agentPut('agent:conv-7/vendor-key', 'sk-PLANTED-UNIQUE-55', { actor: 'My Chat' });
-  ok(p.ok && p.name === 'agent:conv-7/vendor-key' && !('value' in p), 'agentPut ⇒ { ok, name, ref }, no value echoed back');
+  ok(gateOf(p.ok) && p.name === 'agent:conv-7/vendor-key' && !('value' in p), 'agentPut ⇒ { ok, name, ref }, no value echoed back');
   const g2 = e.secretGet('agent:conv-7/vendor-key');
-  ok(g2.ok && g2.value.toString('utf8') === 'sk-PLANTED-UNIQUE-55', 'the put value is sealed and reveals back to the very bytes'); if (g2.value) g2.value.fill(0);
+  ok(gateOf(g2.ok) && g2.value.toString('utf8') === 'sk-PLANTED-UNIQUE-55', 'the put value is sealed and reveals back to the very bytes'); if (g2.value) g2.value.fill(0);
   const sn = e.secretNames().filter((x) => x.name.startsWith('agent:'));
-  ok(sn.length === 2 && sn.find((x) => x.name.endsWith('/signup-pw')).prov === 'minted' && sn.find((x) => x.name.endsWith('/vendor-key')).prov === 'stored' && sn.every((x) => x.actor === 'My Chat'),
+  ok(sn.length === 2 && sn.find((x) => x.name.endsWith('/signup-pw')).prov === 'minted' && sn.find((x) => x.name.endsWith('/vendor-key')).prov === 'stored' && verdictOf(sn.every((x) => x.actor === 'My Chat')),
     'secretNames() carries prov (minted / stored) + actor for agent entries');
   ok(VE.isSecretName('agent:conv-7/x') === true && VE.isSecretName('agent:conv-7/a/b') === false && VE.isSecretName('host:dev9') === true, 'isSecretName: an agent entry with ONE slash is a secret; a second slash is not; host still is');
   ok(e.agentMint('host:dev9', {}).code === 'bad-name' && e.agentMint('agent:conv-7/x', { length: 4 }).code === 'bad_length' && e.agentMint('agent:conv-7/x', { charset: 'hex' }).code === 'bad_charset', 'agentMint refuses a non-agent name, a short length, an unknown charset');
@@ -527,7 +527,7 @@ console.log('P  THE USE LAW (lane vault-use-law — design q-043 D1 / D2 / D7): 
   const l0 = belt(VU);
   ok(Object.keys(l0).join() === VU.LINE_KEYS.join() && l0.event === 'vault-use' && !JSON.stringify(l0).includes('SENTINEL'), `THE LINE: a CLOSED key set (${VU.LINE_KEYS.join(', ')}) — a value a door hands it never reaches the file`, JSON.stringify(l0));
   ok(VU.outcomeOf(undefined) === 'ok' && VU.outcomeOf('human_only') === 'human_only' && VU.outcomeOf('the value is hunter2') === 'error', 'an outcome is ok or a code — a sentence is `error`, never itself');
-  ok(VU.counts('human_only') && VU.counts('no_link') && VU.counts('wrong_password') && !VU.counts('ok') && !VU.counts('vault_locked') && !VU.counts('key-unreadable:vault_locked') && !VU.counts('paced') && !VU.counts('vault_not_set_up'), 'COUNTED: the actor\'s own refusals — never the lock\'s, the pace\'s or a vault not set up');
+  ok(gateOf(VU.counts('human_only')) && gateOf(VU.counts('no_link')) && gateOf(VU.counts('wrong_password')) && !VU.counts('ok') && !VU.counts('vault_locked') && !VU.counts('key-unreadable:vault_locked') && !VU.counts('paced') && !VU.counts('vault_not_set_up'), 'COUNTED: the actor\'s own refusals — never the lock\'s, the pace\'s or a vault not set up');
   const F = VU.createFailures();
   const fires = []; let t = 1e12;
   for (let i = 1; i <= 45; i++) { t += 60e3; const r = F.note({ key: 'agent:c-1', actor: 'Lane', by: 'agent', entry: 'vault', door: 'unlock', outcome: 'human_only', at: t }); if (r.fire) fires.push([i, r.card.n]); }
@@ -550,7 +550,7 @@ console.log('P  THE USE LAW (lane vault-use-law — design q-043 D1 / D2 / D7): 
   const box = boxOf(dir, '.accounts-key');
   box.dec(box.enc('a store\'s own read'));
   const lu = e.lastUse('accounts');
-  ok(lu && lu.by === 'system' && lu.door === 'store' && lu.conv === null && lu.at === clock, 'keyFor: a store\'s own read is a use in THE shape — by system, door store (the window\'s «last used»)', JSON.stringify(lu));
+  ok(gateOf(lu) && lu.by === 'system' && lu.door === 'store' && lu.conv === null && lu.at === clock, 'keyFor: a store\'s own read is a use in THE shape — by system, door store (the window\'s «last used»)', JSON.stringify(lu));
   e.noteUse('accounts', { by: 'human', door: 'vault-window' });
   ok(e.lastUse('accounts').by === 'human' && e.lastUse('accounts').door === 'vault-window', 'the Vault window\'s reveal goes through the SAME writer (by human, door vault-window)');
   const SENT = 'sentinel-' + crypto.randomBytes(16).toString('hex');
@@ -565,7 +565,7 @@ console.log('P  THE USE LAW (lane vault-use-law — design q-043 D1 / D2 / D7): 
     return { lines, extra: lines.filter((l) => Object.keys(l).join() !== VU.LINE_KEYS.join()).length, hits: forms.filter((f) => text.includes(f)).length };
   };
   const a1 = auditLeg(dir);
-  ok(/^vr-[0-9a-f]{12}$/.test(rc.receipt) && a1.lines.length === 2 && a1.extra === 0 && a1.hits === 0, `THE AUDIT LEG: a bearer's use is ONE vault-use line each (2: an agent's ok, a job's no_link), the closed key set, a receipt — and the value a door handed the writer is in NO form in the file`, JSON.stringify(a1));
+  ok(gateOf(/^vr-[0-9a-f]{12}$/.test(rc.receipt)) && a1.lines.length === 2 && a1.extra === 0 && a1.hits === 0, `THE AUDIT LEG: a bearer's use is ONE vault-use line each (2: an agent's ok, a job's no_link), the closed key set, a receipt — and the value a door handed the writer is in NO form in the file`, JSON.stringify(a1));
   const [ok1, no1] = a1.lines;
   ok(ok1.entry === 'frp:token' && ok1.purpose === 'publish the relay' && ok1.by === 'agent' && ok1.door === 'run' && ok1.conv === 'c-law' && ok1.actor === 'Law lane' && ok1.outcome === 'ok' && ok1.receipt === rc.receipt && ok1.ip === '10.0.0.9' && no1.outcome === 'no_link' && no1.by === 'job', 'the line: entry, purpose, actor, door, conversation, outcome, receipt (design q-043 D2) — names and codes only');
   ok(!a1.lines.some((l) => l.by === 'system' || l.by === 'human'), 'no line for the hub\'s own reads (a flood) or a person\'s (their doors keep their own lines)');
@@ -576,7 +576,7 @@ console.log('P  THE USE LAW (lane vault-use-law — design q-043 D1 / D2 / D7): 
   e.lock('door');
   for (let i = 0; i < 20; i++) { clock += i % 5 === 0 ? 61e3 : 1e3; await e.unlock('not the password', { ip: '198.51.100.7' }); }
   ok(cards.length === 2 && cards[1].by === 'human' && cards[1].actor === 'someone at 198.51.100.7' && cards[1].entry === VU.VAULT_ENTRY && cards[1].outcome === 'wrong_password', 'design §2 T7: 20 wrong SECOND PASSWORDS in a day from one address ⇒ its card (someone at <address>, the second password)', JSON.stringify(cards[1] || null));
-  ok(auditLeg(dir).lines.every((l) => l.by !== 'human') && !fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8').includes('not the password'), 'the wrong passwords keep their own lines (vault-unlock-failed) — never the password, never a second line');
+  ok(gateOf(auditLeg(dir).lines.every((l) => l.by !== 'human')) && !fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8').includes('not the password'), 'the wrong passwords keep their own lines (vault-unlock-failed) — never the password, never a second line');
   e.close();
 
   // THE MUTANTS — each judged by the SAME leg ⇒ RED
@@ -598,7 +598,7 @@ console.log('P  THE USE LAW (lane vault-use-law — design q-043 D1 / D2 / D7): 
   ok(VS.split(fromV).length === 2, 'the PURE mutant\'s anchor is the line\'s closed key set');
   const VUm = loadAs('src/vault-use.js', VS.replace(fromV, '  return { ...arguments[0], ...line };'));
   const lm = belt(VUm);
-  ok(JSON.stringify(lm).includes('SENTINEL') && Object.keys(lm).join() !== VU.LINE_KEYS.join(), 'MUTANT RED: a line that keeps what a door hands it carries the value (the belt above is the judge)');
+  ok(gateOf(JSON.stringify(lm).includes('SENTINEL')) && Object.keys(lm).join() !== VU.LINE_KEYS.join(), 'MUTANT RED: a line that keeps what a door hands it carries the value (the belt above is the judge)');
 }
 
 console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — decision ③): one census over the engine\'s onLock subscribers, one live world, a mutant per consequence');
@@ -630,12 +630,12 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
   const unknown = [...sites].filter(([f, k]) => !SUBSCRIBERS[f] || SUBSCRIBERS[f].n !== k).map(([f, k]) => `${f}: ${k}`);
   const dead = Object.keys(SUBSCRIBERS).filter((f) => !sites.has(f));
   ok(sites.size >= 4 && !unknown.length && !dead.length, `the census: every onLock subscriber of the tree (${[...sites].map(([f, k]) => `${path.basename(f)}×${k}`).join(', ')}) is a row with what it ends — none unclassified, none dead`, JSON.stringify({ unknown, dead }));
-  ok(CONSEQUENCES.every((c) => Object.values(SUBSCRIBERS).some((s) => s.ends.includes(c))), 'each of the four consequences (view · asks · grants · runs) is carried by a subscriber');
+  ok(verdictOf(CONSEQUENCES.every((c) => Object.values(SUBSCRIBERS).some((s) => s.ends.includes(c)))), 'each of the four consequences (view · asks · grants · runs) is carried by a subscriber');
   const askFiles = files.filter((f) => /origin: 'vault',[^}]{0,240}?kind: 'action'/.test(code(f)));
   // int332: a file whose action row is the LOCK'S OWN prompt (vault-hooks.js, lane vault-locked-loud) declares it as `item` — filed by the lock, resolved by the unlock
-  ok(askFiles.length >= 2 && askFiles.every((f) => SUBSCRIBERS[f] && (SUBSCRIBERS[f].ends.includes('asks') || SUBSCRIBERS[f].item)), `every file that files a vault ASK (origin vault, kind action: ${askFiles.map((f) => path.basename(f)).join(', ')}) subscribes and withdraws it on a lock — or declares its action row as the lock's own prompt`, askFiles.join(', '));
+  ok(askFiles.length >= 2 && verdictOf(askFiles.every((f) => SUBSCRIBERS[f] && (SUBSCRIBERS[f].ends.includes('asks') || SUBSCRIBERS[f].item))), `every file that files a vault ASK (origin vault, kind action: ${askFiles.map((f) => path.basename(f)).join(', ')}) subscribes and withdraws it on a lock — or declares its action row as the lock's own prompt`, askFiles.join(', '));
   const eng = code('src/server/vault-engine.js');
-  ok(/if \(!quiet\) \{ audit\('vault-locked', \{ ip, why \}\); announce\(\); runHooks\(lockHooks, 'a lock', why\); \}/.test(eng) && /close\(\) \{[^}]*lock\('close', \{ quiet: true \}\)/.test(eng), 'the engine runs them on a lock ACT only (door / agent / idle) — the shutdown\'s quiet lock runs none');
+  ok(gateOf(/if \(!quiet\) \{ audit\('vault-locked', \{ ip, why \}\); announce\(\); runHooks\(lockHooks, 'a lock', why\); \}/.test(eng)) && verdictOf(/close\(\) \{[^}]*lock\('close', \{ quiet: true \}\)/.test(eng)), 'the engine runs them on a lock ACT only (door / agent / idle) — the shutdown\'s quiet lock runs none');
   // (2) THE LIVE WORLD — the four at once
   const ROWS = [{ entry: 'm1', field: 'secretKey', label: 'bucket', cipher: 'x'.repeat(60) }, { entry: 'm2', field: 'secretKey', label: 'second', cipher: 'x'.repeat(60) }, { entry: 'm3', field: 'secretKey', label: 'third', cipher: 'x'.repeat(60) }];
   const VAL = { m1: 'lock-census-value-one-0123', m2: 'lock-census-value-two-4567', m3: 'lock-census-value-three-89' };
@@ -711,10 +711,10 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
   const four = (e) => CONSEQUENCES.every((c) => e[c] === true);
   for (const why of ['door', 'agent', 'idle']) {
     const w = await lockWorld();
-    ok(Object.values(w.live).every(Boolean), `(${why}) the world holds all four before the lock: a reveal window, a running child, three waiting asks, two one-time grants`, JSON.stringify(w.live));
+    ok(verdictOf(Object.values(w.live).every(Boolean)), `(${why}) the world holds all four before the lock: a reveal window, a running child, three waiting asks, two one-time grants`, JSON.stringify(w.live));
     if (why === 'idle') { w.v.setIdleLock(1); w.tick(2 * 3600e3); w.v.idleTick(); } else w.v.lock(why);
     const e = await ended(w);
-    ok(w.v.state() === 'locked' && four(e), `a lock by ${why === 'door' ? 'the DOOR (a person)' : why === 'agent' ? 'an AGENT' : 'the IDLE timer'} ENDS all four: the view closed · every ask withdrawn vault_locked (the run card, the request, the automation call) · every one-time grant ended · the running child gone (vault_locked, killed)`, JSON.stringify(e));
+    ok(w.v.state() === 'locked' && verdictOf(four(e)), `a lock by ${why === 'door' ? 'the DOOR (a person)' : why === 'agent' ? 'an AGENT' : 'the IDLE timer'} ENDS all four: the view closed · every ask withdrawn vault_locked (the run card, the request, the automation call) · every one-time grant ended · the running child gone (vault_locked, killed)`, JSON.stringify(e));
     w.door.closeAll(); w.v.close();
   }
   {
@@ -756,7 +756,7 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     let card = null; await until(() => (card = (userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'automation-ask')) != null, FACT_MS, 'the automation card after the unlock');
     if (card) auto.answer(card.action.askId, { answer: 'deny', answeredBy: 'user' });
     const r = await call;
-    ok(still && card && !ran.length && r.ok === false, 'a lock whose store write FAILED still ends the automation once-grant: the next use asks again (the engine remembers the lock), nothing ran', JSON.stringify({ still, card: !!card, ran: ran.length, code: r.code }));
+    ok(gateOf(still) && gateOf(card) && !ran.length && r.ok === false, 'a lock whose store write FAILED still ends the automation once-grant: the next use asks again (the engine remembers the lock), nothing ran', JSON.stringify({ still, card: !!card, ran: ran.length, code: r.code }));
     v.close();
   }
   // (3) MUTANTS — a copy dropping ONE consequence ⇒ RED, on that one
@@ -773,7 +773,7 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     const loaded = Object.values(mods).every(Boolean);
     let e = null;
     if (loaded) { const w = await lockWorld(mods); w.v.lock('agent'); e = await ended(w); w.door.closeAll(); w.v.close(); }
-    ok(loaded && e && e[c] === false && CONSEQUENCES.filter((x) => x !== c).every((x) => e[x] === true), `MUTANT «${name}»: the patch hits once and the census goes RED on ${c} alone — the shipped tree ends it`, JSON.stringify(e));
+    ok(gateOf(loaded) && gateOf(e) && e[c] === false && verdictOf(CONSEQUENCES.filter((x) => x !== c).every((x) => e[x] === true)), `MUTANT «${name}»: the patch hits once and the census goes RED on ${c} alone — the shipped tree ends it`, JSON.stringify(e));
   }
 }
 
@@ -784,22 +784,22 @@ console.log('Q  A FREE ENTRY (lane vault-paste-request — the owner: 「我压�
   const v = VE.create({ dataDir: d, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {} }, idleTimer: false, register: false, bcast: (m) => frames.push(JSON.stringify(m)) });
   const PW = 'free entry second password';
   const VAL = ['free', 'entry', 'value', crypto.randomBytes(6).toString('hex')].join('-');
-  ok(VE.isSecretName('secret:0a1b2c3d4e') && !VE.isSecretName('secret:') && !VE.isSecretName('secret:../x') && !VE.isSecretName('secrets:x'), 'the kind: `secret:<id>` is a secret name (the id one segment of [\\w.-], never a path, never another prefix)');
+  ok(gateOf(VE.isSecretName('secret:0a1b2c3d4e')) && !VE.isSecretName('secret:') && !VE.isSecretName('secret:../x') && !VE.isSecretName('secrets:x'), 'the kind: `secret:<id>` is a secret name (the id one segment of [\\w.-], never a path, never another prefix)');
   const nsu = v.secretPut('secret:0a1b2c3d4e', VAL, { prov: 'owner', label: 'Router admin', kind: 'password', note: 'x' });
   ok(!nsu.ok && nsu.code === 'vault_not_set_up', 'NOT SET UP ⇒ refused by name (vault_not_set_up), nothing written', nsu);
   await v.setup(PW);
   const put = v.secretPut('secret:0a1b2c3d4e', VAL, { prov: 'owner', actor: 'Lane asker', label: 'Router admin', kind: 'password', note: 'Asked for by Lane asker: change the DNS' });
-  ok(put.ok, 'unlocked ⇒ sealed under its own entry');
+  ok(verdictOf(put.ok), 'unlocked ⇒ sealed under its own entry');
   const n = v.secretNames().find((x) => x.name === 'secret:0a1b2c3d4e');
-  ok(n && n.label === 'Router admin' && n.kind === 'password' && /change the DNS/.test(n.note) && n.prov === 'owner' && n.actor === 'Lane asker' && !Object.values(n).some((x) => String(x).includes(VAL)), 'its NAMES ride beside the box — label, kind, note, provenance, who asked — never the value', n);
+  ok(gateOf(n) && n.label === 'Router admin' && n.kind === 'password' && gateOf(/change the DNS/.test(n.note)) && n.prov === 'owner' && n.actor === 'Lane asker' && !Object.values(n).some((x) => String(x).includes(VAL)), 'its NAMES ride beside the box — label, kind, note, provenance, who asked — never the value', n);
   const g = v.secretGet('secret:0a1b2c3d4e');
-  ok(g.ok && g.value.toString('utf8') === VAL && v.facts().secrets === 1, 'the hub\'s own read opens exactly it; facts count it among the secrets');
+  ok(gateOf(g.ok) && g.value.toString('utf8') === VAL && v.facts().secrets === 1, 'the hub\'s own read opens exactly it; facts count it among the secrets');
   const rec = fs.readFileSync(path.join(d, 'vault.json'), 'utf8');
-  ok(!rec.includes(VAL) && /"label": "Router admin"/.test(rec), 'the record holds the label in the clear and the value only wrapped');
+  ok(!rec.includes(VAL) && verdictOf(/"label": "Router admin"/.test(rec)), 'the record holds the label in the clear and the value only wrapped');
   v.lock('door');
   const lk = v.secretPut('secret:0b1b2c3d4e', VAL, { label: 'x' });
-  ok(!lk.ok && lk.code === 'key-unreadable:vault_locked' && v.blockedSummary().count >= 1 && /a stored password or key/.test(JSON.stringify(v.blockedSummary())), 'LOCKED ⇒ refused by name, and the refusal names what it stopped in words («a stored password or key» — never the id)', { lk, b: v.blockedSummary() });
-  ok(v.secretDrop('secret:0a1b2c3d4e').ok && !v.secretNames().some((x) => x.name === 'secret:0a1b2c3d4e'), 'its delete door forgets it — a locked vault forgets too (no key needed)');
+  ok(!lk.ok && lk.code === 'key-unreadable:vault_locked' && v.blockedSummary().count >= 1 && verdictOf(/a stored password or key/.test(JSON.stringify(v.blockedSummary()))), 'LOCKED ⇒ refused by name, and the refusal names what it stopped in words («a stored password or key» — never the id)', { lk, b: v.blockedSummary() });
+  ok(gateOf(v.secretDrop('secret:0a1b2c3d4e').ok) && !v.secretNames().some((x) => x.name === 'secret:0a1b2c3d4e'), 'its delete door forgets it — a locked vault forgets too (no key needed)');
   ok(!frames.some((f) => f.includes(VAL)), 'no broadcast frame holds the value');
   v.close();
 }
@@ -832,7 +832,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     'cleanName keeps the base name only — no folder (either slash), no control or direction character');
   ok(VF.cleanName('..') === null && VF.cleanName('') === null && VF.cleanName('   ') === null && VF.cleanName(7) === null && [...VF.cleanName('k'.repeat(300))].length === VF.NAME_MAX, 'a name that cleans to nothing is refused; a long one is cut to 120');
   const v0 = VF.fileVerdict(Buffer.alloc(0), 'a'), v7 = VF.fileVerdict(Buffer.alloc(7, 1), 'a'), vMax = VF.fileVerdict(Buffer.alloc(VF.FILE_MAX, 1), 'big.bin'), vOver = VF.fileVerdict(Buffer.alloc(VF.FILE_MAX + 1, 1), 'big.bin'), vNo = VF.fileVerdict(Buffer.alloc(9, 1), '../');
-  ok(v0.code === 'file_empty' && v7.code === 'file_too_small' && vMax.ok && vMax.size === VF.FILE_MAX && vOver.code === 'file_too_large' && vNo.code === 'file_name_bad' && [v0, v7, vOver, vNo].every((x) => x.words && x.words.length > 20),
+  ok(v0.code === 'file_empty' && v7.code === 'file_too_small' && gateOf(vMax.ok) && vMax.size === VF.FILE_MAX && vOver.code === 'file_too_large' && vNo.code === 'file_name_bad' && verdictOf([v0, v7, vOver, vNo].every((x) => x.words && x.words.length > 20)),
     'fileVerdict: empty / under 8 bytes / over 1 MB / no name ⇒ refused BY NAME with words; exactly 1 MB ⇒ kept (the owner\'s D1)', [v0.code, v7.code, vMax.ok, vOver.code, vNo.code]);
   const kPlain = opensshKey(), kEnc = opensshKey({ encrypted: true });
   ok(VF.kindOf(kPlain) === 'ssh-key' && VF.encryptedOf(kPlain) === false && VF.kindOf(kEnc) === 'ssh-key' && VF.encryptedOf(kEnc) === true,
@@ -842,31 +842,31 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     'a certificate / a PKCS#8 key is pem (the encrypted PKCS#8 says so), a classic RSA key is ssh-key, a kubeconfig or random bytes generic — the HEADER only, never the name');
   const text = Buffer.from(['apiVersion: v1', 'kind: Config', 'client-key-data: ' + crypto.randomBytes(40).toString('base64'), '  token: ' + crypto.randomBytes(20).toString('hex'), 'client-key-data: ' + 'x'.repeat(3), ''].join('\n'));
   const ms = VF.maskSetOf(text);
-  ok(ms.whole.some(([f, t]) => f === 'raw' && t === text.toString()) && ms.whole.some(([f, t]) => f === 'base64' && t === text.toString('base64')) && ms.whole.some(([f, t]) => f === 'hex' && t === text.toString('hex').toUpperCase())
-    && ms.lines.length === 3 && ms.lines.every((l) => Buffer.byteLength(l) >= 16) && !ms.lines.includes('kind: Config') && !ms.lines.includes('apiVersion: v1') && ms.lines.some((l) => l.startsWith('token: ')) && ms.pieces.length > 0,
+  ok(gateOf(ms.whole.some(([f, t]) => f === 'raw' && t === text.toString())) && gateOf(ms.whole.some(([f, t]) => f === 'base64' && t === text.toString('base64'))) && gateOf(ms.whole.some(([f, t]) => f === 'hex' && t === text.toString('hex').toUpperCase()))
+    && ms.lines.length === 3 && gateOf(ms.lines.every((l) => Buffer.byteLength(l) >= 16)) && !ms.lines.includes('kind: Config') && !ms.lines.includes('apiVersion: v1') && gateOf(ms.lines.some((l) => l.startsWith('token: '))) && ms.pieces.length > 0,
     'maskSetOf: a small file whole (raw / base64 / hex, both cases) + its 64-character pieces + every DISTINCT line of 16 bytes or more, trimmed (the short ones are ordinary text)', ms.lines);
   const bin = Buffer.concat([Buffer.from([0, 255, 0, 1, 2, 3]), crypto.randomBytes(300)]);
   const mb = VF.maskSetOf(bin);
-  ok(mb.whole.some(([, t]) => t === bin.toString('base64')) && mb.whole.some(([, t]) => t === bin.toString('hex')) && mb.pieces.some(([f, t]) => f === 'base64' && t === bin.toString('base64').slice(0, 64)), 'a binary file: its base64 and hex whole and in pieces (its raw text is what the output decoder makes of it)');
+  ok(gateOf(mb.whole.some(([, t]) => t === bin.toString('base64'))) && gateOf(mb.whole.some(([, t]) => t === bin.toString('hex'))) && verdictOf(mb.pieces.some(([f, t]) => f === 'base64' && t === bin.toString('base64').slice(0, 64))), 'a binary file: its base64 and hex whole and in pieces (its raw text is what the output decoder makes of it)');
   // adversarial read r1: a Latin-1 licence file is NOT strict UTF-8 — its lines are read as the run's output decoder reads them
   const lat = Buffer.concat([Buffer.from('Licensee: Soci'), Buffer.from([0xe9]), Buffer.from('t'), Buffer.from([0xe9]), Buffer.from(' Example\nLicense-Key: 3F9A-77B2-C0DE-9911-ABCD\n')]);
   const ml = VF.maskSetOf(lat);
-  ok(ml.lines.includes('License-Key: 3F9A-77B2-C0DE-9911-ABCD') && ml.lines.some((l) => l.startsWith('Licensee: Soci')), 'a Latin-1 file: its lines as the output decoder reads them (lenient UTF-8) — never «no text, no lines»', ml.lines);
+  ok(gateOf(ml.lines.includes('License-Key: 3F9A-77B2-C0DE-9911-ABCD')) && verdictOf(ml.lines.some((l) => l.startsWith('Licensee: Soci'))), 'a Latin-1 file: its lines as the output decoder reads them (lenient UTF-8) — never «no text, no lines»', ml.lines);
   // r1: a short token file — `$(cat "$VAULT_FILE{K}")` drops its newline, and its one line is under 16 bytes
   const tok = VF.maskSetOf(Buffer.from('XXXX-1234-YYYY\n'));
   ok(tok.trimmed === 'XXXX-1234-YYYY' && tok.lines.length === 0, 'a short token file: its TRIMMED whole is masked in every spelling (14 bytes, its newline dropped)', tok);
   // r1: a big file is masked by PIECES — no whole form, so the masker's window does not grow with the file
   const big = Buffer.from(Array.from({ length: 5000 }, (_, i) => `${i} ` + crypto.randomBytes(45).toString('base64')).join('\n'));
   const mbig = VF.maskSetOf(big);
-  ok(mbig.whole.length === 0 && mbig.pieces.every(([, t]) => t.length <= 64) && mbig.pieces.length > 5000 && mbig.lines.every((l) => Buffer.byteLength(l) <= 1024), `a ${big.length}-byte file: no whole form, ${mbig.pieces.length} pieces of ≤ 64 characters, every line ≤ 1024 bytes`);
-  ok(VF.maskSetOf(Buffer.from(['-----BEGIN', 'CERTIFICATE-----'].join(' ') + '\n' + crypto.randomBytes(48).toString('base64') + '\n')).lines.every((l) => !/BEGIN/.test(l)), 'a PEM armor line is the format\'s — never masked as the file\'s (it is in every certificate a run prints)');
-  ok(VF.diskNameOf('id_rsa (1)') === 'id_rsa_1' && VF.diskNameOf('my key.pem') === 'my_key.pem' && VF.diskNameOf('a$b;c`d.key') === 'a_b_c_d.key' && VF.diskNameOf('鍵ファイル.pem') === 'file.pem' && VF.diskNameOf('') === 'file' && Buffer.byteLength(VF.diskNameOf('k'.repeat(300) + '.yaml')) <= 80 && VF.diskNameOf('k'.repeat(300) + '.yaml').endsWith('.yaml'),
+  ok(mbig.whole.length === 0 && gateOf(mbig.pieces.every(([, t]) => t.length <= 64)) && mbig.pieces.length > 5000 && verdictOf(mbig.lines.every((l) => Buffer.byteLength(l) <= 1024)), `a ${big.length}-byte file: no whole form, ${mbig.pieces.length} pieces of ≤ 64 characters, every line ≤ 1024 bytes`);
+  ok(verdictOf(VF.maskSetOf(Buffer.from(['-----BEGIN', 'CERTIFICATE-----'].join(' ') + '\n' + crypto.randomBytes(48).toString('base64') + '\n')).lines.every((l) => !/BEGIN/.test(l))), 'a PEM armor line is the format\'s — never masked as the file\'s (it is in every certificate a run prints)');
+  ok(VF.diskNameOf('id_rsa (1)') === 'id_rsa_1' && VF.diskNameOf('my key.pem') === 'my_key.pem' && VF.diskNameOf('a$b;c`d.key') === 'a_b_c_d.key' && VF.diskNameOf('鍵ファイル.pem') === 'file.pem' && VF.diskNameOf('') === 'file' && Buffer.byteLength(VF.diskNameOf('k'.repeat(300) + '.yaml')) <= 80 && verdictOf(VF.diskNameOf('k'.repeat(300) + '.yaml').endsWith('.yaml')),
     'diskNameOf: the run writes a shell-safe name (no space, no $ ; `), at most 80 bytes, its extension kept');
   const many = Buffer.from(Array.from({ length: 6000 }, (_, i) => `line ${String(i).padStart(5, '0')} ${'z'.repeat(50)}`).join('\n'));
   const mm = VF.maskSetOf(many);
   ok(mm.lines.length > 1000 && mm.lines.length <= VF.LINES_MAX && mm.lines.reduce((s, l) => s + Buffer.byteLength(l), 0) <= VF.LINE_BYTES_MAX, `the lines stop at the measured bound (${mm.lines.length} lines, ≤ ${VF.LINE_BYTES_MAX} bytes) — the whole-file forms still hold past it`);
   const wb = VF.wireBytesOf(bin.toString('base64'), { size: bin.length });
-  ok(wb.ok && wb.bytes.equals(bin) && VF.wireBytesOf('a b=', {}).code === 'bytes_bad' && VF.wireBytesOf('QUJD', { size: 4 }).code === 'bytes_bad' && VF.wireBytesOf('QUJD').ok && VF.wireBytesOf('').code === 'file_empty' && VF.wireBytesOf('QUJ').code === 'bytes_bad',
+  ok(gateOf(wb.ok) && gateOf(wb.bytes.equals(bin)) && VF.wireBytesOf('a b=', {}).code === 'bytes_bad' && VF.wireBytesOf('QUJD', { size: 4 }).code === 'bytes_bad' && gateOf(VF.wireBytesOf('QUJD').ok) && VF.wireBytesOf('').code === 'file_empty' && VF.wireBytesOf('QUJ').code === 'bytes_bad',
     'wireBytesOf: strict base64 only (a space, a cut quantum ⇒ bytes_bad), the size the sender said must be the size that arrived');
 
   // the engine
@@ -875,13 +875,13 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
   const v = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false, bcast: (m) => frames.push(JSON.stringify(m)) });
   ok((await v.filePut('keyfile:0123456789', bin, { filename: 'blob.bin' })).code === 'vault_not_set_up', 'NOT SET UP ⇒ a file is refused by name (vault_not_set_up), nothing written');
   await v.setup(PW);
-  ok(VE.isSecretName('keyfile:0123456789') && !VE.isSecretName('keyfile:') && !VE.isSecretName('keyfile:../x'), 'the kind: `keyfile:<id>` is a secret name (the owner\'s files — decision D4)');
+  ok(gateOf(VE.isSecretName('keyfile:0123456789')) && !VE.isSecretName('keyfile:') && !VE.isSecretName('keyfile:../x'), 'the kind: `keyfile:<id>` is a secret name (the owner\'s files — decision D4)');
   const put = (await v.filePut('keyfile:0123456789', bin, { filename: '../tmp/blob.bin', prov: 'uploaded', label: 'Blob', note: 'the licence file' }));
-  ok(put.ok && put.file && put.file.name === 'blob.bin' && put.file.size === bin.length && put.file.kind === 'generic' && put.file.encrypted === false && !('id' in put.file) && !('sha256' in put.file),
+  ok(gateOf(put.ok) && gateOf(put.file) && put.file.name === 'blob.bin' && put.file.size === bin.length && put.file.kind === 'generic' && put.file.encrypted === false && !('id' in put.file) && !('sha256' in put.file),
     'filePut ⇒ { ok, file: { name, size, kind, encrypted } } — its id (a path piece) and digest stay in the vault', put);
   const rec = fs.readFileSync(path.join(d, 'vault.json'), 'utf8');
   const box = JSON.parse(rec).entries['keyfile:0123456789'];
-  ok(box && box.file && /^[0-9a-f]{10}$/.test(box.file.id) && box.file.size === bin.length && !('sha256' in box.file) && !rec.includes(crypto.createHash('sha256').update(bin).digest('hex')) && box.prov === 'uploaded' && box.label === 'Blob',
+  ok(gateOf(box) && gateOf(box.file) && gateOf(/^[0-9a-f]{10}$/.test(box.file.id)) && box.file.size === bin.length && !('sha256' in box.file) && !rec.includes(crypto.createHash('sha256').update(bin).digest('hex')) && box.prov === 'uploaded' && box.label === 'Blob',
     'the box carries the file\'s FACTS (id, name, size, kind) beside its words — and NO digest of its bytes anywhere in vault.json (the cure: RULE 5′ — a short token file\'s sha256 is a guess away)');
   ok(!rec.includes(bin.toString('base64').slice(0, 40)) && !rec.includes(bin.toString('hex').slice(0, 40)) && rec.length < 4000, 'vault.json holds NONE of the bytes (no base64, no hex) — only the wrapped 32-byte file key');
   const vfile = path.join(d, 'vault-files', `${box.file.id}.vfile`);
@@ -890,14 +890,14 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
   ok((vst.mode & 0o777) === 0o600 && (dst.mode & 0o777) === 0o700 && sealed.subarray(0, 6).toString('latin1') === 'VSVF1\n' && sealed.indexOf(bin.subarray(6, 40)) < 0 && sealed.length === bin.length + 34,
     'the bytes are SEALED in data/vault-files/<id>.vfile (0600 in a 0700 folder): magic · iv · tag · ciphertext — no plaintext run in it');
   const op = (await v.fileOpen('keyfile:0123456789'));
-  ok(op.ok && Buffer.isBuffer(op.bytes) && op.bytes.equals(bin) && op.file.name === 'blob.bin', 'fileOpen (the ONE road) opens it to the very bytes'); if (op.bytes) op.bytes.fill(0);
+  ok(gateOf(op.ok) && gateOf(Buffer.isBuffer(op.bytes)) && gateOf(op.bytes.equals(bin)) && op.file.name === 'blob.bin', 'fileOpen (the ONE road) opens it to the very bytes'); if (op.bytes) op.bytes.fill(0);
   const sg = v.secretGet('keyfile:0123456789');
   ok(!sg.ok && sg.code === 'is_a_file' && !('value' in sg), 'secretGet REFUSES a file entry by name (is_a_file) — no door gets its box value (the file key)');
   let revealed = null, revealCode = null;
   try { revealed = VC.secretSource({ vault: v }).vaultReveal('keyfile:0123456789'); } catch (e) { revealCode = e && e.code; }
   ok(revealed === null && revealCode === 'is_a_file', 'the Vault window\'s reveal source meets the same refusal (a file is never SHOWN — its download is its own door)', { revealCode });
   const sn = v.secretNames().find((x) => x.name === 'keyfile:0123456789');
-  ok(sn && sn.file && sn.file.name === 'blob.bin' && sn.file.size === bin.length && !('id' in sn.file) && !('sha256' in sn.file) && sn.label === 'Blob', 'secretNames carries the file\'s public facts (name, size, kind) — no id, no digest');
+  ok(gateOf(sn) && gateOf(sn.file) && sn.file.name === 'blob.bin' && sn.file.size === bin.length && !('id' in sn.file) && !('sha256' in sn.file) && sn.label === 'Blob', 'secretNames carries the file\'s public facts (name, size, kind) — no id, no digest');
   ok(v.fileOf('keyfile:0123456789').id === box.file.id && v.fileOf('secret:nope') === null, 'fileOf = the box\'s facts (the doors ask it before opening anything)');
   // a re-put: a NEW sealed file, the old one SHREDDED once the record names the new one
   const link = path.join(ROOT, 'file-entry-old-link'); fs.linkSync(vfile, link);
@@ -905,17 +905,17 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
   const re = (await v.filePut('keyfile:0123456789', bin2, { filename: 'blob.bin', prov: 'uploaded' }));
   await v.filesSettled();   // the cure: the old file is shredded off the main loop, after the record names the new one
   const box2 = JSON.parse(fs.readFileSync(path.join(d, 'vault.json'), 'utf8')).entries['keyfile:0123456789'];
-  ok(re.ok && box2.file.id !== box.file.id && !fs.existsSync(vfile) && fs.existsSync(path.join(d, 'vault-files', `${box2.file.id}.vfile`)) && !fs.readFileSync(link).equals(sealed),
+  ok(gateOf(re.ok) && box2.file.id !== box.file.id && !fs.existsSync(vfile) && gateOf(fs.existsSync(path.join(d, 'vault-files', `${box2.file.id}.vfile`))) && !fs.readFileSync(link).equals(sealed),
     'a re-put seals a NEW file and SHREDS the old one (a hard link to it reads the overwrite, not the old ciphertext)');
   fs.unlinkSync(link);
   // a text value is never turned into a file — and a file never into a text value (the owner's D5)
-  ok(v.secretPut('secret:0a1b2c3d4e', 'a text value of the owner', { prov: 'owner', label: 'x' }).ok && (await v.filePut('secret:0a1b2c3d4e', bin, { filename: 'b.bin' })).code === 'not_a_file', 'a TEXT entry ⇒ filePut refused not_a_file (never upgraded)');
+  ok(gateOf(v.secretPut('secret:0a1b2c3d4e', 'a text value of the owner', { prov: 'owner', label: 'x' }).ok) && (await v.filePut('secret:0a1b2c3d4e', bin, { filename: 'b.bin' })).code === 'not_a_file', 'a TEXT entry ⇒ filePut refused not_a_file (never upgraded)');
   const af = (await v.agentFilePut('agent:conv-9/deploy-key', kEnc, { filename: 'id_ed25519', actor: 'Deploy chat', note: 'the deploy key' }));
-  ok(af.ok && af.ref === 'vault://agent:conv-9/deploy-key' && af.file.kind === 'ssh-key' && af.file.encrypted === true, 'agentFilePut (put --file) ⇒ its ref + the file\'s facts; a key with its passphrase is stored AS IS and SAID (encrypted — the owner\'s change, round 3)', af);
-  ok(v.agentPut('agent:conv-9/deploy-key', 'now a text value').code === 'is_a_file' && v.agentPut('agent:conv-9/t', 'a text value here').ok && (await v.agentFilePut('agent:conv-9/t', bin, { filename: 'b.bin' })).code === 'not_a_file',
+  ok(gateOf(af.ok) && af.ref === 'vault://agent:conv-9/deploy-key' && af.file.kind === 'ssh-key' && af.file.encrypted === true, 'agentFilePut (put --file) ⇒ its ref + the file\'s facts; a key with its passphrase is stored AS IS and SAID (encrypted — the owner\'s change, round 3)', af);
+  ok(v.agentPut('agent:conv-9/deploy-key', 'now a text value').code === 'is_a_file' && gateOf(v.agentPut('agent:conv-9/t', 'a text value here').ok) && (await v.agentFilePut('agent:conv-9/t', bin, { filename: 'b.bin' })).code === 'not_a_file',
     'a text put over a FILE entry ⇒ is_a_file; a file put over a TEXT entry ⇒ not_a_file');
   const idBefore = v.fileOf('agent:conv-9/deploy-key').id;
-  ok(v.agentMint('agent:conv-9/deploy-key', {}).code === 'is_a_file' && v.secretPut('agent:conv-9/deploy-key', 'x'.repeat(20)).code === 'is_a_file' && v.fileOf('agent:conv-9/deploy-key').id === idBefore && fs.existsSync(path.join(d, 'vault-files', `${idBefore}.vfile`)),
+  ok(v.agentMint('agent:conv-9/deploy-key', {}).code === 'is_a_file' && v.secretPut('agent:conv-9/deploy-key', 'x'.repeat(20)).code === 'is_a_file' && v.fileOf('agent:conv-9/deploy-key').id === idBefore && verdictOf(fs.existsSync(path.join(d, 'vault-files', `${idBefore}.vfile`))),
     'adversarial read r1: a MINT (or any text write) over a file entry ⇒ is_a_file — the file and its sealed bytes stay (it once became a random text value later runs wrote out as the key)');
   const before = fs.readdirSync(path.join(d, 'vault-files')).length;
   const bb = await v.agentFilePut('agent:conv-9/x', bin, { filename: 'b.bin', expect: { sha256: 'f'.repeat(64) } });
@@ -924,7 +924,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     'the sender\'s digest differs ⇒ bytes_bad, its sealed file shredded, no entry');
   ok((await v.filePut('keyfile:0b1b2c3d4e', Buffer.alloc(VF.FILE_MAX + 1, 7), { filename: 'big.bin' })).code === 'file_too_large' && !v.fileOf('keyfile:0b1b2c3d4e'), 'over 1 MB ⇒ file_too_large (by name), nothing kept');
   const audit = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8');
-  ok(/"event":"vault-agent-put"/.test(audit) && /"file":\{"size":/.test(audit) && !audit.includes(kEnc.toString('latin1').split('\n')[1].slice(0, 30)) && !frames.some((f) => f.includes(bin.toString('base64').slice(0, 30))),
+  ok(gateOf(/"event":"vault-agent-put"/.test(audit)) && gateOf(/"file":\{"size":/.test(audit)) && !audit.includes(kEnc.toString('latin1').split('\n')[1].slice(0, 30)) && !frames.some((f) => f.includes(bin.toString('base64').slice(0, 30))),
     'the put is audited by name, size and kind — no byte in any audit line or broadcast frame');
   // damaged: a file moved onto another id does not open (the id is its additional data), a flipped byte does not open
   const idA = JSON.parse(fs.readFileSync(path.join(d, 'vault.json'), 'utf8')).entries['agent:conv-9/deploy-key'].file.id;
@@ -935,7 +935,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
   ok((await v.fileOpen('agent:conv-9/deploy-key')).code === 'file_damaged', 'one flipped byte ⇒ file_damaged');
   fs.writeFileSync(fA, keepA);
   const back = (await v.fileOpen('agent:conv-9/deploy-key'));
-  ok(back.ok && back.bytes.equals(kEnc), 'the file put back ⇒ it opens again'); if (back.bytes) back.bytes.fill(0);
+  ok(gateOf(back.ok) && verdictOf(back.bytes.equals(kEnc)), 'the file put back ⇒ it opens again'); if (back.bytes) back.bytes.fill(0);
   // LOCKED: refused by name, nothing read, nothing written — its facts still readable (no DEK)
   v.lock('door');
   const nFiles = fs.readdirSync(path.join(d, 'vault-files')).length;
@@ -945,7 +945,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
   const fK = path.join(d, 'vault-files', `${box2.file.id}.vfile`), lk2 = path.join(ROOT, 'file-entry-del-link'); fs.linkSync(fK, lk2); const sealedK = fs.readFileSync(fK);
   const dropped = v.secretDrop('keyfile:0123456789');
   await v.filesSettled();
-  ok(dropped.ok && !fs.existsSync(fK) && !fs.readFileSync(lk2).equals(sealedK) && !v.fileOf('keyfile:0123456789'), 'secretDrop SHREDS the sealed file with the entry (a hard link reads the overwrite) — locked too');
+  ok(gateOf(dropped.ok) && !fs.existsSync(fK) && !fs.readFileSync(lk2).equals(sealedK) && !v.fileOf('keyfile:0123456789'), 'secretDrop SHREDS the sealed file with the entry (a hard link reads the overwrite) — locked too');
   fs.unlinkSync(lk2);
   v.close();
   // THE START's SWEEP (主开发 r4625, the MUST): a stale temp file goes; a sealed file no entry names (a put that died between its file
@@ -963,9 +963,9 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
   const v2 = VE.create({ dataDir: d, kdf: CHEAP, log: cap2, idleTimer: false, register: false });
   await v2.filesSettled();
   const unnamed2 = said2.filter((s) => /files_unnamed/.test(s));
-  ok(fs.existsSync(orphan) && fs.existsSync(fresh) && !fs.existsSync(tmp) && fs.existsSync(fA), 'the start\'s sweep shreds a stale temp file — a sealed file NO ENTRY NAMES is KEPT (an old one and a fresh one), the live one stays');
-  ok(unnamed2.length === 1 && /\b2 sealed file\(s\)/.test(unnamed2[0]) && /KEPT \(files_unnamed\)/.test(unnamed2[0]) && !said2.join(' ').includes('abcdefabcd'), '…and SAID: ONE journal line with their count and the code files_unnamed (no id, no name)', said2);
-  ok(fs.existsSync(young), 'a fresh temp file of a writer that is alive stays (another process\'s put in flight)');
+  ok(gateOf(fs.existsSync(orphan)) && gateOf(fs.existsSync(fresh)) && !fs.existsSync(tmp) && verdictOf(fs.existsSync(fA)), 'the start\'s sweep shreds a stale temp file — a sealed file NO ENTRY NAMES is KEPT (an old one and a fresh one), the live one stays');
+  ok(unnamed2.length === 1 && gateOf(/\b2 sealed file\(s\)/.test(unnamed2[0])) && gateOf(/KEPT \(files_unnamed\)/.test(unnamed2[0])) && !said2.join(' ').includes('abcdefabcd'), '…and SAID: ONE journal line with their count and the code files_unnamed (no id, no name)', said2);
+  ok(verdictOf(fs.existsSync(young)), 'a fresh temp file of a writer that is alive stays (another process\'s put in flight)');
   fs.rmSync(young, { force: true }); fs.rmSync(orphan, { force: true }); fs.rmSync(fresh, { force: true });
   v2.close();
   // …the store's own rule, the engine's predicate: a sealed file and a temp of a put IN FLIGHT stay (this process's own temp too);
@@ -980,12 +980,12 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     const n1 = await st.sweep((id) => inFlight.has(id), { dropped: () => true });
     const kept = fs.existsSync(path.join(st.dir, '0f0f0f0f0f.vfile')) && fs.existsSync(ownTmp);
     const n2 = await st.sweep(() => false, { dropped: () => true });
-    ok(n1.shredded === 0 && kept && n2.shredded === 2 && !fs.existsSync(ownTmp) && !fs.existsSync(path.join(st.dir, '0f0f0f0f0f.vfile')),
+    ok(n1.shredded === 0 && gateOf(kept) && n2.shredded === 2 && !fs.existsSync(ownTmp) && !fs.existsSync(path.join(st.dir, '0f0f0f0f0f.vfile')),
       'round 2: the sweep spares a put IN FLIGHT by its id (its sealed file — even one named dropped — and this process\'s own temp) and takes them once out of flight', { n1, kept, n2 });
     // 主开发 r4625: THE STORE's LAW — a sealed file goes ONLY when the record names it dropped; one no list drops is kept and counted
     await st.write('0a0a0a0a0a', key, Buffer.from('a sealed file the record says nothing of'));
     const n3 = await st.sweep(() => false);
-    ok(n3.shredded === 0 && n3.kept === 1 && fs.existsSync(path.join(st.dir, '0a0a0a0a0a.vfile')), 'a sealed file NO list drops is KEPT and counted (the store never guesses from a silence)', n3);
+    ok(n3.shredded === 0 && n3.kept === 1 && verdictOf(fs.existsSync(path.join(st.dir, '0a0a0a0a0a.vfile'))), 'a sealed file NO list drops is KEPT and counted (the store never guesses from a silence)', n3);
     // the record GONE MID-WALK (behaviour): the dropped answer is asked at EACH file's own turn — once it says «no record» the rest stay
     await st.write('0b0b0b0b0b', key, Buffer.from('a dropped file the walk reaches first'));
     await st.write('0c0c0c0c0c', key, Buffer.from('a dropped file the walk reaches after the record went away'));
@@ -996,7 +996,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     // r4628: THE ID — 10 hex from 5 random bytes, drawn again while it is taken; an id it may not use is never answered
     const seq = ['0b0b0b0b0b', 'not hex', '0d0d0d0d0d'];
     const st2 = VFS.create({ dataDir: fd, randomId: () => seq.shift() });
-    ok(st2.mintId((id) => id === '0b0b0b0b0b') === '0d0d0d0d0d' && /^[0-9a-f]{10}$/.test(VFS.create({ dataDir: fd }).mintId()), 'mintId draws again while the id is taken (or not 10 hex) — the store\'s own default is 5 random bytes', seq);
+    ok(st2.mintId((id) => id === '0b0b0b0b0b') === '0d0d0d0d0d' && verdictOf(/^[0-9a-f]{10}$/.test(VFS.create({ dataDir: fd }).mintId())), 'mintId draws again while the id is taken (or not 10 hex) — the store\'s own default is 5 random bytes', seq);
     let threw = null; try { await st.write('0a0a0a0a0a', key, Buffer.from('over a kept file')); } catch (e) { threw = e.code; }
     ok(threw === 'file_id_taken' && fs.readFileSync(path.join(st.dir, '0a0a0a0a0a.vfile')).length > 40, 'a write NEVER goes over a sealed file already on disk (file_id_taken) — a kept file is never overwritten by a new put', threw);
     // 主开发 r4625 (2): the opened bytes are ONE buffer of their own (never a slice of the shared pool, whose whole slab a message to the
@@ -1011,12 +1011,12 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
   {
     const v5 = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
     await v5.unlock(PW);
-    ok((await v5.filePut('keyfile:0d0e0f0a0b', bin, { filename: 'race.bin', prov: 'uploaded' })).ok, 'a file to race');
+    ok(verdictOf((await v5.filePut('keyfile:0d0e0f0a0b', bin, { filename: 'race.bin', prov: 'uploaded' })).ok), 'a file to race');
     const pending = v5.fileOpen('keyfile:0d0e0f0a0b');
     v5.secretDrop('keyfile:0d0e0f0a0b');   // synchronous: the record no longer names it before the read resumes
     const lost = await pending;
     await v5.filesSettled();
-    ok(!lost.ok && ['file_moved', 'entry_unknown'].includes(lost.code) && !('bytes' in lost), 'a read that loses to a drop ⇒ file_moved / entry_unknown, no byte — never file_damaged / file_missing', lost.code);
+    ok(!lost.ok && gateOf(['file_moved', 'entry_unknown'].includes(lost.code)) && !('bytes' in lost), 'a read that loses to a drop ⇒ file_moved / entry_unknown, no byte — never file_damaged / file_missing', lost.code);
     v5.close();
   }
   // the round's should (r4676 page): the read REFUSED at its call (a placed EIO — the store-read family's rule), with a file ON the
@@ -1031,7 +1031,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     let v3 = null, st3 = null;
     try { v3 = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false }); } finally { cfs.readFileSync = keepRead; }
     await v3.filesSettled(); st3 = v3.state();
-    ok(placed === 1 && fs.existsSync(orphan) && fs.existsSync(fA), 'vault.json\'s read REFUSED at its call (a placed EIO) ⇒ the record is held, NOTHING is swept — a file the record lists as dropped stays (nothing at a start removes a file because a record is unread)', { placed, state: st3 });
+    ok(placed === 1 && gateOf(fs.existsSync(orphan)) && verdictOf(fs.existsSync(fA)), 'vault.json\'s read REFUSED at its call (a placed EIO) ⇒ the record is held, NOTHING is swept — a file the record lists as dropped stays (nothing at a start removes a file because a record is unread)', { placed, state: st3 });
     v3.close();
     fs.writeFileSync(path.join(d, 'vault.json'), recText);
     fs.rmSync(orphan, { force: true });
@@ -1066,7 +1066,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       return { put: ok0 && pb.ok, keptB, said: said.filter((s) => /files_unnamed/.test(s)).length, opens };
     };
     const ol = await olderLeg(VE);
-    ok(ol.put && ol.keptB && ol.said === 1 && ol.opens, 'THE MUST (r4625): a record OLDER than the folder names no file put after it — the next start KEEPS that file and SAYS it (files_unnamed); the right record put back, it opens again', ol);
+    ok(gateOf(ol.put) && gateOf(ol.keptB) && ol.said === 1 && verdictOf(ol.opens), 'THE MUST (r4625): a record OLDER than the folder names no file put after it — the next start KEEPS that file and SAYS it (files_unnamed); the right record put back, it opens again', ol);
     const releaseForm = MO.load('src/server/vault-engine.js', anchored(ESo, '    const r = await files.sweep(fileLive, { dropped: fileDropped });', '    const r = await files.sweep(fileLive, { dropped: (id) => !fileLive(id) });', 'test-vault-engine the release-form sweep'), 'releaseform');
     const olr = await olderLeg(releaseForm);
     ok(!olr.keptB && !olr.opens, 'red control: «the release-form sweep» (what the record does not name goes) SHREDS it — the right record put back, the file is gone for good', olr);
@@ -1116,7 +1116,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     ok(cl.idA === '0000000000' && cl.idC === '0000000002' && !cl.again, 'r4628 by construction: a restart, the list pruned — the next file takes the COUNTER\'s id, never a dropped file\'s', cl);
     const noSeq = MO.load('src/server/vault-engine.js', anchored(ESo, "  const withSeq = (rec, id) => ({ ...rec, fileSeq: Math.max(Number.isInteger(rec.fileSeq) && rec.fileSeq >= 0 ? rec.fileSeq : 0, idNum(id) + 1) });", '  const withSeq = (rec) => rec;', 'test-vault-engine the counter not raised'), 'noseq');
     const clr = await counterLeg(noSeq);
-    ok(clr.again, 'red control: «the counter not raised» mints a dropped file\'s id again after a restart', clr);
+    ok(verdictOf(clr.again), 'red control: «the counter not raised» mints a dropped file\'s id again after a restart', clr);
     // A KEPT FILE ON DISK AT THE COUNTER: the write refuses it (file_id_taken), the mint steps past, the kept file untouched
     {
       const dk = path.join(ROOT, 'file-counter-kept'); fs.mkdirSync(dk, { recursive: true });
@@ -1124,7 +1124,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       await k.filePut('keyfile:0d4d5d6d7d', bin, { filename: 'd.bin', prov: 'uploaded' });   // id 0000000000, fileSeq 1
       const planted = path.join(dk, 'vault-files', '0000000001.vfile'); fs.writeFileSync(planted, 'a kept file at the counter');
       const r = await k.filePut('keyfile:0e4e5e6e7e', bin, { filename: 'e.bin', prov: 'uploaded' });
-      ok(r.ok && k.fileOf('keyfile:0e4e5e6e7e').id === '0000000002' && fs.readFileSync(planted, 'utf8') === 'a kept file at the counter' && recOf(dk).fileSeq === 3,
+      ok(gateOf(r.ok) && k.fileOf('keyfile:0e4e5e6e7e').id === '0000000002' && fs.readFileSync(planted, 'utf8') === 'a kept file at the counter' && recOf(dk).fileSeq === 3,
         'a kept file AT the counter: the write refuses its id (file_id_taken), the mint STEPS PAST it — the kept file untouched, fileSeq past both', { ok: r.ok, id: r.ok && k.fileOf('keyfile:0e4e5e6e7e').id, fileSeq: recOf(dk).fileSeq });
       k.close();
     }
@@ -1148,7 +1148,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       const rv = recOf(dv); rv.filesDropped = [idH]; fs.writeFileSync(path.join(dv, 'vault.json'), JSON.stringify(rv));
       const k2 = mkE(VE, dv); await k2.unlock(PW); await k2.filesSettled();
       const o = await k2.fileOpen('keyfile:0b5b6b7b8b'); const opens = !!(o.ok && o.bytes.equals(bin)); if (o.bytes) o.bytes.fill(0); k2.close();
-      ok(opens, 'a file the record NAMES is never shredded at a start, even when its list names it too — a stale list can never take a file live under it', idH);
+      ok(verdictOf(opens), 'a file the record NAMES is never shredded at a start, even when its list names it too — a stale list can never take a file live under it', idH);
     }
     // A DROPPED FILE WHOSE SHRED FAILED is counted apart (files_drop_owed), never as unnamed (the round's should)
     {
@@ -1158,7 +1158,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       fs.mkdirSync(path.join(dw, 'vault-files', '0000000009.vfile'), { recursive: true });   // a «file» that cannot be unlinked (a folder)
       const said = [], cap = { log() {}, warn: (s) => said.push(String(s)) };
       const k2 = mkE(VE, dw, { log: cap }); await k2.filesSettled(); k2.close();
-      ok(said.some((s) => /\b1 sealed file\(s\)/.test(s) && /files_drop_owed/.test(s)) && !said.some((s) => /files_unnamed/.test(s)), 'a dropped file whose shred failed at a start is SAID apart (files_drop_owed — the next start takes it), never as a file the record does not name', said);
+      ok(gateOf(said.some((s) => /\b1 sealed file\(s\)/.test(s) && /files_drop_owed/.test(s))) && !said.some((s) => /files_unnamed/.test(s)), 'a dropped file whose shred failed at a start is SAID apart (files_drop_owed — the next start takes it), never as a file the record does not name', said);
     }
     // A FAILED LOOK PRUNES NOTHING (r4774 A 1): a shred that fails otherwise, a start whose look fails otherwise — the id stays listed;
     // its red: a prune on any shred's answer
@@ -1180,10 +1180,10 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       };
       try {
         const fl = await failLeg(VE);
-        ok(fl.listed && fl.onDisk && fl.goneAfterStart, 'a shred that FAILS keeps the id on the list (a look that failed otherwise prunes nothing) — the next start shreds it', fl);
+        ok(gateOf(fl.listed) && gateOf(fl.onDisk) && verdictOf(fl.goneAfterStart), 'a shred that FAILS keeps the id on the list (a look that failed otherwise prunes nothing) — the next start shreds it', fl);
         const pruneAny = MO.load('src/server/vault-engine.js', anchored(ESo, "if ((g === true || g === 'absent') && droppedOf(record).includes(String(id))) confirmedGone.add(String(id));", 'if (droppedOf(record).includes(String(id))) confirmedGone.add(String(id));', 'test-vault-engine a prune on any shred answer'), 'pruneany');
         const flr = await failLeg(pruneAny);
-        ok(!flr.listed && flr.onDisk && !flr.goneAfterStart, 'red control: «a prune on any shred answer» drops the instruction — the file is left on disk, no start ever takes it', flr);
+        ok(!flr.listed && gateOf(flr.onDisk) && !flr.goneAfterStart, 'red control: «a prune on any shred answer» drops the instruction — the file is left on disk, no start ever takes it', flr);
       } finally { VFSm.create = realC; }
     }
     // the suites' id seam (fileIds) asks the same taken check: a listed id offered first is passed over (its red: a mint that never asks)
@@ -1230,12 +1230,12 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         return { listing, look, code: r && r.code, untouched: fs.existsSync(planted) && fs.readFileSync(planted).equals(keep) };
       };
       const ml = await mustLeg(VE, 'look'), mf = await mustLeg(VE, 'folder');
-      ok(ml.listing === 1 && ml.look === 1 && ml.code === 'file_not_stored' && ml.untouched && mf.listing === 1 && mf.look === 1 && mf.code === 'file_not_stored' && mf.untouched,
+      ok(ml.listing === 1 && ml.look === 1 && ml.code === 'file_not_stored' && gateOf(ml.untouched) && mf.listing === 1 && mf.look === 1 && mf.code === 'file_not_stored' && verdictOf(mf.untouched),
         'THE MUST (r5114): a file AT the counter, the start\'s listing failed — the write\'s look failing once REFUSES (file_not_stored) and the folder\'s check failing once refuses too, said in the same family (file_not_stored, r5308): the planted file\'s bytes untouched after the put and after the queue drained', { ml, mf });
       const oldDir = MO.load('src/server/vault-files.js', anchored(SFo, "    try { await ensureDir(); } catch (e) { if (e && e.code === 'file_store_unsafe') throw e; throw err('file_look_failed', `the folder of the sealed files could not be looked at (${(e && e.code) || 'error'}) — nothing was written`); }",
         '    await ensureDir();', 'test-vault-engine the folder check said by its errno'), 'olddir');
       const mdr = await mustLeg(VE, 'folder', oldDir.create);
-      ok(mdr.look === 1 && mdr.code !== 'file_not_stored' && mdr.untouched, `red control: «the folder's check said by its errno» tells the person ${mdr.code}, a code of another family (r5308)`, mdr);
+      ok(mdr.look === 1 && mdr.code !== 'file_not_stored' && verdictOf(mdr.untouched), `red control: «the folder's check said by its errno» tells the person ${mdr.code}, a code of another family (r5308)`, mdr);
       const oldLook = MO.load('src/server/vault-files.js', anchored(SFo, "    let there = true;\n    try { await fsp.lstat(file); } catch (e) { if (!(e && e.code === 'ENOENT')) throw err('file_look_failed', `the place of a sealed file could not be looked at (${(e && e.code) || 'error'}) — nothing was written`); there = false; }\n    if (there) throw err('file_id_taken', 'a sealed file of that id is already kept');",
         "    if (await fsp.lstat(file).then(() => true, () => false)) throw err('file_id_taken', 'a sealed file of that id is already kept');", 'test-vault-engine the look reading any failure as absent'), 'oldlook');
       const mlr = await mustLeg(VE, 'look', oldLook.create);
@@ -1260,7 +1260,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       };
       const noTaken = MO.load('src/server/vault-files.js', anchored(SFo, "    if (there) throw err('file_id_taken', 'a sealed file of that id is already kept');", "    if (false) throw err('file_id_taken', 'a sealed file of that id is already kept');", 'test-vault-engine the taken check cut'), 'notaken');
       const st0 = await stepLeg(null), str = await stepLeg(noTaken.create);
-      ok(st0.kept && !str.kept, 'the step past a kept file holds it, and its red control «the taken check cut» writes over it', { st0, str });
+      ok(gateOf(st0.kept) && !str.kept, 'the step past a kept file holds it, and its red control «the taken check cut» writes over it', { st0, str });
       const liveLeg = async (E) => {
         const dv = path.join(ROOT, `file-live-${Math.random().toString(16).slice(2, 8)}`); fs.mkdirSync(dv, { recursive: true });
         const k = mkE(E, dv); await k.setup(PW, {});
@@ -1274,7 +1274,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         '    if (m && (isLive(m[1]) || !isDropped(m[1]))) return false;', '    if (m && !isDropped(m[1])) return false;', 'test-vault-engine the walk\'s own live re-ask cut'), 'nolivesweep');
       const lv0 = await liveLeg(VE);
       VFSm.create = noLiveSweep.create; let lvr; try { lvr = await liveLeg(noLive); } finally { VFSm.create = realC; }
-      ok(lv0.kept && !lvr.kept, 'live wins over listed, and its red control «fileDropped without !fileLive» (the sweep\'s own live skip cut with it) shreds the file the record names', { lv0, lvr });
+      ok(gateOf(lv0.kept) && !lvr.kept, 'live wins over listed, and its red control «fileDropped without !fileLive» (the sweep\'s own live skip cut with it) shreds the file the record names', { lv0, lvr });
       const noTop = MO.load('src/server/vault-engine.js', anchored(ESo, '    let n = Math.max(counter, diskTop + 1, seqMinted + 1);', '    let n = Math.max(counter, seqMinted + 1);', 'test-vault-engine the disk\'s top cut'), 'notop');
       const brokenLeg = async (E) => {
         const db = path.join(ROOT, `file-broken-${Math.random().toString(16).slice(2, 8)}`); fs.mkdirSync(db, { recursive: true });
@@ -1296,7 +1296,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         const k2 = mkE(VE, dp); await k2.unlock(PW); await k2.filesSettled();
         const before = (recOf(dp).filesDropped || []).includes('0000000005');
         await k2.filePut('keyfile:0b7b8b9b0b', bin, { filename: 'h.bin', prov: 'uploaded' }); await k2.filesSettled(); k2.close();   // the next record write
-        ok(before && !(recOf(dp).filesDropped || []).includes('0000000005'), 'a listed id whose file a start finds NOT THERE by its name leaves the list at the next record write', recOf(dp).filesDropped);
+        ok(gateOf(before) && !(recOf(dp).filesDropped || []).includes('0000000005'), 'a listed id whose file a start finds NOT THERE by its name leaves the list at the next record write', recOf(dp).filesDropped);
       }
       // U1c (主开发 r4774 B): THE KEPT FILES' DOOR — what a start keeps (r4625) is said as a count, sizes and dates (never an id);
       // the owner's removal shreds exactly those, each asked again at its own turn; a locked vault refuses by name; a lock in the
@@ -1315,14 +1315,14 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         const d1 = await keptScene('list', ['00000000a1', '00000000a2'], [30, 50]);
         const k1 = mkE(VE, d1); await k1.filesSettled();   // LOCKED: the start's sweep keeps and lists them all the same
         const f1 = k1.keptFacts();
-        ok(f1.count === 2 && f1.files.map((f) => f.size).sort((a, b) => a - b).join() === '30,50' && f1.files.every((f) => Object.keys(f).sort().join() === 'at,size' && f.at > 0),
+        ok(f1.count === 2 && f1.files.map((f) => f.size).sort((a, b) => a - b).join() === '30,50' && verdictOf(f1.files.every((f) => Object.keys(f).sort().join() === 'at,size' && f.at > 0)),
           'U1c: a start KEEPS the two sealed files the record does not name and says them as a count, each a size and a date — never an id; the named file is not among them', JSON.stringify(f1));
         const r1 = await k1.keptRemove({ who: 'test' });
-        ok(r1.ok === false && /vault_locked$/.test(String(r1.code)) && vfile(d1, '00000000a1') && vfile(d1, '00000000a2'), 'U1c: a LOCKED vault refuses the removal by name (the engine\'s own locked code, key-unreadable:vault_locked) — both files stay', JSON.stringify(r1));
+        ok(r1.ok === false && gateOf(/vault_locked$/.test(String(r1.code))) && gateOf(vfile(d1, '00000000a1')) && verdictOf(vfile(d1, '00000000a2')), 'U1c: a LOCKED vault refuses the removal by name (the engine\'s own locked code, key-unreadable:vault_locked) — both files stay', JSON.stringify(r1));
         await k1.unlock(PW);
         const r2 = await k1.keptRemove({ who: 'test', ip: '127.0.0.1' });
         const au = auditOf(d1).filter((l) => l.event === 'vault-files-kept-removed');
-        ok(r2.ok && r2.removed === 2 && r2.left === 0 && !vfile(d1, '00000000a1') && !vfile(d1, '00000000a2') && vfile(d1, '0000000000') && k1.keptFacts().count === 0 && au.length === 1 && au[0].removed === 2,
+        ok(gateOf(r2.ok) && r2.removed === 2 && r2.left === 0 && !vfile(d1, '00000000a1') && !vfile(d1, '00000000a2') && gateOf(vfile(d1, '0000000000')) && k1.keptFacts().count === 0 && au.length === 1 && au[0].removed === 2,
           'U1c: unlocked, the owner\'s removal shreds EXACTLY the two kept files — the named file stays, the line\'s count is 0, ONE audit line with the count', JSON.stringify({ r2, au, facts: k1.keptFacts() }));
         k1.close();
         const lockLeg = async (E) => {
@@ -1335,7 +1335,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
           return { r, seen, left: ['00000000b1', '00000000b2', '00000000b3'].filter((id) => vfile(d, id)).length };
         };
         const lk = await lockLeg(VE);
-        ok(lk.r && lk.r.ok && lk.r.removed === 1 && lk.left === 2, 'U1c: a LOCK in the middle of the removal stops the walk — the first file shredded, the two after it stay (each asked again at its own turn)', JSON.stringify(lk));
+        ok(gateOf(lk.r) && gateOf(lk.r.ok) && lk.r.removed === 1 && lk.left === 2, 'U1c: a LOCK in the middle of the removal stops the walk — the first file shredded, the two after it stay (each asked again at its own turn)', JSON.stringify(lk));
         const noReask = MO.load('src/server/vault-engine.js', anchored(ESo, "    const keep = (id) => state() !== 'unlocked' || !record || !!recordBad || fileLive(id);", '    const keep = (id) => fileLive(id);', 'test-vault-engine the removal that does not ask again'), 'noreask');
         const lkr = await lockLeg(noReask);
         ok(lkr.left === 0, 'red control: «a removal that does not ask again» goes on past the lock and shreds all three', JSON.stringify(lkr));
@@ -1356,10 +1356,10 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
           return { r, r2, lines: auditOf(d).filter((l) => l.event === 'vault-files-kept-removed').length, onDisk: ['00000000d1', '00000000d2', '00000000d3'].filter((id) => vfile(d, id)).length };
         };
         const rl = await relistLeg(VE);
-        ok(rl.r && rl.r.ok && rl.r.removed === 3 && rl.r.left === 0 && rl.r2 && rl.r2.removed === 0 && rl.r2.left === 0 && rl.lines === 1 && rl.onDisk === 0,
+        ok(gateOf(rl.r) && gateOf(rl.r.ok) && rl.r.removed === 3 && rl.r.left === 0 && gateOf(rl.r2) && rl.r2.removed === 0 && rl.r2.left === 0 && rl.lines === 1 && rl.onDisk === 0,
           'U1c follow (r5497 (1)): the listing after the removal FAILS — the answer says the files that stayed (left 0, never the list from before); a second press removes nothing and writes no audit line', JSON.stringify(rl));
         const rlr = await relistLeg(engMut(STAYED, '', 'nostayed', 'the list from before kept'));
-        ok(rlr.r && rlr.r.left === 3, `red control: «the list from before kept» answers left ${rlr.r && rlr.r.left} for files that are gone`, JSON.stringify(rlr));
+        ok(gateOf(rlr.r) && rlr.r.left === 3, `red control: «the list from before kept» answers left ${rlr.r && rlr.r.left} for files that are gone`, JSON.stringify(rlr));
         // (2) ONE removal at a time: two presses together remove the files once and write ONE audit line
         const twoLeg = async (E) => {
           const d = await keptScene('two', ['00000000e1', '00000000e2', '00000000e3'], [20, 20, 20]);
@@ -1368,10 +1368,10 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
           return { a, b, lines: auditOf(d).filter((l) => l.event === 'vault-files-kept-removed').map((l) => l.removed) };
         };
         const tw = await twoLeg(VE);
-        ok(tw.a.ok && tw.a.removed === 3 && tw.b.ok && tw.b.removed === 0 && tw.lines.length === 1 && tw.lines[0] === 3,
+        ok(gateOf(tw.a.ok) && tw.a.removed === 3 && gateOf(tw.b.ok) && tw.b.removed === 0 && tw.lines.length === 1 && tw.lines[0] === 3,
           'U1c follow (r5497 (2)): two presses at once — the files are removed ONCE (3, then 0) and ONE audit line says 3', JSON.stringify(tw));
         const twr = await twoLeg(engMut(QUEUE, '    const run = keptRemoveOnce(o);', 'noqueue2', 'two removals at once'));
-        ok(twr.b && twr.b.removed === 3 && twr.lines.length === 2, `red control: «two removals at once» counts the same files twice (${JSON.stringify(twr.lines)})`, JSON.stringify(twr));
+        ok(gateOf(twr.b) && twr.b.removed === 3 && twr.lines.length === 2, `red control: «two removals at once» counts the same files twice (${JSON.stringify(twr.lines)})`, JSON.stringify(twr));
         // (3) a record HELD at the start and lifted later: the kept files' line is said at the lift, not at the next start
         const liftLeg = async (E) => {
           const d = await keptScene('lift', ['00000000a7', '00000000a8'], [20, 30]);
@@ -1383,9 +1383,9 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
           return { placed, held, unlocked: !!(u && u.ok), after };
         };
         const lf = await liftLeg(VE);
-        ok(lf.placed === 1 && lf.held === 0 && lf.unlocked && lf.after === 2, 'U1c follow (r5497 (3)): vault.json HELD at the start (a placed EIO) lists nothing; the unlock\'s read lifts it and the kept files\' line says the two at once', JSON.stringify(lf));
+        ok(lf.placed === 1 && lf.held === 0 && gateOf(lf.unlocked) && lf.after === 2, 'U1c follow (r5497 (3)): vault.json HELD at the start (a placed EIO) lists nothing; the unlock\'s read lifts it and the kept files\' line says the two at once', JSON.stringify(lf));
         const lfr = await liftLeg(engMut(LIFT, '', 'nolift', 'the lift says nothing'));
-        ok(lfr.unlocked && lfr.after === 0, 'red control: «the lift says nothing» keeps the line silent until the next start', JSON.stringify(lfr));
+        ok(gateOf(lfr.unlocked) && lfr.after === 0, 'red control: «the lift says nothing» keeps the line silent until the next start', JSON.stringify(lfr));
         // (4) a record that NAMES a kept file AT THE PRESS (written between the count shown and the press): that file stays, the others go
         const namedLeg = async (E) => {
           const d = await keptScene('named', ['00000000b5', '00000000b6', '00000000b7'], [20, 20, 20]);
@@ -1396,10 +1396,10 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
           return { shown, named: !!(w && w.ok), r, b6: vfile(d, '00000000b6'), others: ['00000000b5', '00000000b7'].filter((id) => vfile(d, id)).length };
         };
         const nm = await namedLeg(VE);
-        ok(nm.shown === 3 && nm.named && nm.r.ok && nm.r.removed === 2 && nm.b6 && nm.others === 0,
+        ok(nm.shown === 3 && gateOf(nm.named) && gateOf(nm.r.ok) && nm.r.removed === 2 && gateOf(nm.b6) && nm.others === 0,
           'U1c follow (r5497 (4)): a record that names a kept file AT THE PRESS (named after the count was shown) — that file stays, the other two go', JSON.stringify(nm));
         const nmr = await namedLeg(engMut(KEEP, "    const keep = (id) => state() !== 'unlocked' || !record || !!recordBad;", 'nolive', 'the keep check without the live read'));
-        ok(nmr.named && !nmr.b6, 'red control: «the keep check without the live read» shreds the file the record names at the press', JSON.stringify(nmr));
+        ok(gateOf(nmr.named) && !nmr.b6, 'red control: «the keep check without the live read» shreds the file the record names at the press', JSON.stringify(nmr));
       }
     }
   }
@@ -1429,8 +1429,8 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       v4.close();
       const n0 = hits.length; cfs.readFileSync(fA); controlSeen = hits.length > n0; hits.length = n0;   // the probe's control (Node's readFileSync makes more than one synchronous call itself)
     } finally { for (const k of SYNC) cfs[k] = keep[k]; }
-    ok(controlSeen, 'the probe\'s control: a synchronous read of a sealed file IS counted (the probe is not blind)');
-    ok(flow && flow.put && flow.open && flow.drop && flow.gone && hits.length === 0,
+    ok(verdictOf(controlSeen), 'the probe\'s control: a synchronous read of a sealed file IS counted (the probe is not blind)');
+    ok(gateOf(flow) && gateOf(flow.put) && gateOf(flow.open) && gateOf(flow.drop) && gateOf(flow.gone) && hits.length === 0,
       'the cure: a boot sweep, a put, an open and a drop of a file make NO synchronous fs call on data/vault-files (fs.promises, awaited)', { flow, hits: hits.slice(0, 12) });
   }
   // r4625 (the round's should on MUST 2): THE PROBE COUNTS A DESTRUCTURED SYNC CALL — a copy of vault-files that takes readdirSync off
@@ -1541,22 +1541,22 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     };
     try {
       const fl = await flightLeg(VE);
-      ok(fl.onDisk && fl.kept && fl.put && fl.same, 'round 3: the boot sweep that runs WHILE a put is in flight spares its sealed file BY ITS ID (filesInFlight, added before the write) — the put lands, the file opens', fl);
+      ok(gateOf(fl.onDisk) && gateOf(fl.kept) && gateOf(fl.put) && verdictOf(fl.same), 'round 3: the boot sweep that runs WHILE a put is in flight spares its sealed file BY ITS ID (filesInFlight, added before the write) — the put lands, the file opens', fl);
       // r4625: a sealed file the record says nothing of is KEPT at a start whatever its flight; the in-flight mark is what spares a put
       // under a sweep that WOULD take it — so its red is the release-form sweep (what no entry names goes) with the mark gone
       const mF = MR.load('src/server/vault-engine.js', anchored(anchored(ES3, '    filesInFlight.add(id);\n', '\n', 'noflight'), '    const r = await files.sweep(fileLive, { dropped: fileDropped });', '    const r = await files.sweep(fileLive, { dropped: (id) => !fileLive(id) });', 'noflight-releaseform'), 'noflight');
       const fm = mF ? await flightLeg(mF) : null;
-      ok(fm && fm.onDisk && !fm.kept && !fm.same, 'MUTANT «a put never marked in flight, under the release-form sweep»: the leg goes RED — the sweep shredded the put\'s sealed file under it', fm);
+      ok(gateOf(fm) && gateOf(fm.onDisk) && !fm.kept && !fm.same, 'MUTANT «a put never marked in flight, under the release-form sweep»: the leg goes RED — the sweep shredded the put\'s sealed file under it', fm);
       const lo = await lostLeg(VE);
       ok(lo.dropped === 'entry_unknown' && lo.moved === 'file_moved' && !lo.bytes, 'round 3 (deterministic): a read that reaches the disk AFTER a drop\'s shred ⇒ entry_unknown, after a re-put ⇒ file_moved — the catch\'s own road, no byte', lo);
       const mL = patch('src/server/vault-engine.js', ES3, "      if (!now) return { ok: false, code: 'entry_unknown' };\n      if (!now.file || now.file.id !== f.id) return { ok: false, code: 'file_moved', words: VF.WORDS.file_moved };\n", '', 'nolost');
       const lm = mL ? await lostLeg(mL) : null;
-      ok(lm && lm.dropped === 'file_missing' && lm.moved === 'file_missing', 'MUTANT «the catch says what the disk said»: the patch hits once and the leg goes RED — «file_missing» (restore from a backup) about a healthy vault', lm);
+      ok(gateOf(lm) && lm.dropped === 'file_missing' && lm.moved === 'file_missing', 'MUTANT «the catch says what the disk said»: the patch hits once and the leg goes RED — «file_missing» (restore from a backup) about a healthy vault', lm);
       const ep = await epochLeg(VE);
-      ok(/vault_locked/.test(String(ep.code)) && !ep.stored && ep.shredded, 'round 3: a put whose write was held across a lock AND an unlock ⇒ vault_locked (the lock EPOCH moved), nothing stored, its sealed file shredded', ep);
+      ok(gateOf(/vault_locked/.test(String(ep.code))) && !ep.stored && verdictOf(ep.shredded), 'round 3: a put whose write was held across a lock AND an unlock ⇒ vault_locked (the lock EPOCH moved), nothing stored, its sealed file shredded', ep);
       const mE = patch('src/server/vault-engine.js', ES3, "state() !== 'unlocked' || epoch !== ep0) { key.fill(0); shredLater(id);", "state() !== 'unlocked') { key.fill(0); shredLater(id);", 'noepoch');
       const em = mE ? await epochLeg(mE) : null;
-      ok(em && em.stored, 'MUTANT «the state asked, not the epoch»: the patch hits once and the leg goes RED — the put that was in flight across the lock landed', em);
+      ok(gateOf(em) && verdictOf(em.stored), 'MUTANT «the state asked, not the epoch»: the patch hits once and the leg goes RED — the put that was in flight across the lock landed', em);
       const one = await oneLeg(realCreate);
       ok(one === 1, `round 3: ONE sealed-file operation at a time — 8 writes and 8 reads at once never open two files of data/vault-files together (most ${one})`, one);
       const mQ = patch('src/server/vault-files.js', SF3, 'write: one(write), read: one(read), shred: one(shred), has: one(has), sweep, keptList, shredKept: one(shredKept) };', 'write, read, shred, has, sweep, keptList, shredKept };', 'noqueue');   // stale-pins: kept (the replacement IS the round-2 store, unqueued)
@@ -1592,7 +1592,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         'round 4: a sealed-file operation past its bound ⇒ files_stuck; one queued behind it before the bound and one called after are refused (the fs never asked); once the hung one settles the store works again', sk);
       const mS2 = patch('src/server/vault-files.js', SF3, '      if (stuck) throw stuckErr();\n', '', 'nostuck2');   // round 5 (the fourth read): the IN-QUEUE refusal alone — an operation queued before the bound fired
       const skm = mS2 ? await stuckLeg(mS2.create) : null;
-      ok(skm && skm.whileStuck.fsAsked > 0, 'MUTANT «an operation queued behind a stuck one still asks the fs»: the patch hits once and the leg goes RED — the queued read went to the mount', skm);
+      ok(gateOf(skm) && skm.whileStuck.fsAsked > 0, 'MUTANT «an operation queued behind a stuck one still asks the fs»: the patch hits once and the leg goes RED — the queued read went to the mount', skm);
     } finally { VFS.create = realCreate; hold = {}; }
   }
 }
@@ -1621,7 +1621,7 @@ console.log('⑳ ROUND 7 OF THE U1a CURE (its sixth read, MINOR): a sealed file\
   const VFS7 = require(path.join(REPO, 'src/server/vault-files.js'));
   const r7 = await leg7(VFS7);
   console.log(`    judged: read ${r7.code} with ${r7.deciphers} decrypts · the shred's largest random buffer ${r7.most} B · gone ${r7.gone}`);
-  ok(r7.code === 'file_damaged' && r7.deciphers === 0 && r7.most > 0 && r7.most <= 64 * 1024 && r7.gone, 'a sealed file grown 4 MB past its 1 KB box ⇒ file_damaged with NO decrypt; its shred fills ONE buffer of at most 64 KiB at a time, and the file is gone', r7);
+  ok(r7.code === 'file_damaged' && r7.deciphers === 0 && r7.most > 0 && r7.most <= 64 * 1024 && verdictOf(r7.gone), 'a sealed file grown 4 MB past its 1 KB box ⇒ file_damaged with NO decrypt; its shred fills ONE buffer of at most 64 KiB at a time, and the file is gone', r7);
   const M7 = mutantCopies('vault-files-r7', REPO), SF7 = fs.readFileSync(path.join(REPO, 'src/server/vault-files.js'), 'utf8');
   const mSz = M7.load('src/server/vault-files.js', anchored(SF7, '        if (facts.size != null) sized = (await fh.stat()).size === MAGIC.length + 28 + Number(facts.size);\n', '', 'the size checked after the decrypt'), 'nosize');
   const rSz = await leg7(mSz);
@@ -1633,4 +1633,4 @@ console.log('⑳ ROUND 7 OF THE U1a CURE (its sixth read, MINOR): a sealed file\
 
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

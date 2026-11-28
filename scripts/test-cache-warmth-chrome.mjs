@@ -69,7 +69,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
 
@@ -131,7 +131,7 @@ srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: 'ignore',
 const origin = `http://127.0.0.1:${PORT}`;
 let up = false;
 for (let i = 0; i < 200 && !up; i++) { try { await fetch(`${origin}/api/home`); up = true; } catch { await sleep(250); } }
-check('the tree\'s hub answers', up);
+check('the tree\'s hub answers', verdictOf(up));
 if (!up) process.exit(1);
 
 // ── THE CONVERSATIONS: created over the hub's own ws, each one stub turn (the stamp) ──
@@ -243,7 +243,7 @@ const load = async (w, h, phone = false) => {
   await sleep(900);
 };
 await load(1280, 800);
-check('the page booted (desktop class, 1280 × 800)', await evalJs('!!window.app && !app.isMobile'));
+check('the page booted (desktop class, 1280 × 800)', verdictOf(await evalJs('!!window.app && !app.isMobile')));
 
 // ── the windows: one per conversation, found by its webui id ──
 const winOf = (k) => `[...app.wm.windows.values()].find((w) => app.sessions.get(w.id)?.sessionId === ${J(SIDS[k])})`;
@@ -282,11 +282,11 @@ await step('① the real road (no rewrite): a stub turn stamps the conversation;
   const raw = RW.lastRaw;
   check('the UNREWRITTEN answer carries `warmth[<the conversation>]` and `serverNow` (TTL 3600: a scratch hub, no account ⇒ the subscription TTL)',
     !!raw && raw.serverNow > 0 && !!raw.warmth[SIDS[0]] && raw.warmth[SIDS[0]].cacheTtlSec === 3600 && raw.warmth[SIDS[0]].lastRequestAt > 0, raw && { serverNow: raw.serverNow, entry: raw.warmth[SIDS[0]], n: Object.keys(raw.warmth).length });
-  check('…every one of the 14 stamped conversations is in it (each ran one stub turn)', !!raw && SIDS.every((s) => !!raw.warmth[s]), raw && SIDS.filter((s) => !raw.warmth[s]));
+  check('…every one of the 14 stamped conversations is in it (each ran one stub turn)', !!raw && verdictOf(SIDS.every((s) => !!raw.warmth[s])), raw && SIDS.filter((s) => !raw.warmth[s]));
   const b = await evalJs(BAR(0));
-  check('its title bar is FRESH and the band ≈ the bar\'s width × frac (±2 px)', b && b.tier === 'fresh' && b.band && near(b.width, b.barW * b.frac) && b.frac > 0.9, b);
-  check('…the bar\'s hover words are warmthTitle\'s («Cache: about N min left · last request HH:MM»)', b && /^Cache: about \d+ min left · last request \d\d:\d\d$/.test(b.title || '') && b.tip, b && b.title);
-  check('the summary chip beside For-you is up', await evalJs(`!!document.getElementById('taskbar-warmth')`));
+  check('its title bar is FRESH and the band ≈ the bar\'s width × frac (±2 px)', gateOf(b) && b.tier === 'fresh' && gateOf(b.band) && gateOf(near(b.width, b.barW * b.frac)) && b.frac > 0.9, b);
+  check('…the bar\'s hover words are warmthTitle\'s («Cache: about N min left · last request HH:MM»)', gateOf(b) && gateOf(/^Cache: about \d+ min left · last request \d\d:\d\d$/.test(b.title || '')) && verdictOf(b.tip), b && b.title);
+  check('the summary chip beside For-you is up', verdictOf(await evalJs(`!!document.getElementById('taskbar-warmth')`)));
 });
 
 await step('② the tier matrix (the CDP rewrite of EXISTING entries)', async () => {
@@ -299,32 +299,32 @@ await step('② the tier matrix (the CDP rewrite of EXISTING entries)', async ()
   for (const [k, want] of Object.entries(WANT)) {
     const b = bars[k], live = ['fresh', 'mid', 'late', 'critical'].includes(want), pl = MATRIX[k];
     if (live) check(`${nameOf(+k)} (${pl.ttl === 300 ? '5-min credits, 3 min left' : `${pl.agoMs / 60e3} min ago`}): tier ${want}; the band ≈ bar × frac (±2 px), frac ≈ the plan's`,
-      b && b.tier === want && b.band && near(b.width, b.barW * b.frac) && b.frac <= fracOf(pl) + 0.01 && b.frac >= fracOf(pl) - (pl.ttl === 300 ? 0.08 : 0.01), { b, planFrac: fracOf(pl) });
-    else check(`${nameOf(+k)} (${want === 'unknown' ? 'entry deleted ⇒ unknown' : pl.lost ? 'an account move after the last request' : '65 min ago'}): NO band, no tier attribute`, b && !b.band && !b.tier, b);
+      gateOf(b) && b.tier === want && gateOf(b.band) && gateOf(near(b.width, b.barW * b.frac)) && b.frac <= fracOf(pl) + 0.01 && b.frac >= fracOf(pl) - (pl.ttl === 300 ? 0.08 : 0.01), { b, planFrac: fracOf(pl) });
+    else check(`${nameOf(+k)} (${want === 'unknown' ? 'entry deleted ⇒ unknown' : pl.lost ? 'an account move after the last request' : '65 min ago'}): NO band, no tier attribute`, gateOf(b) && !b.band && !b.tier, b);
   }
   check('hover words (en): live «Cache: about N min left · last request HH:MM» (critical 55 min ago ⇒ «about 5 min»), expired «Cache expired · last request HH:MM», the move its own sentence, unknown none',
-    /^Cache: about 5 min left · last request \d\d:\d\d$/.test(bars[3].title || '') && /^Cache: about 35 min left/.test(bars[1].title || '') && /^Cache expired · last request \d\d:\d\d$/.test(bars[4].title || '') && bars[4].tip
-    && /^Cache expired — the conversation moved to another account · last request \d\d:\d\d$/.test(bars[6].title || '') && !bars[7].title && !bars[7].tip, [3, 1, 4, 6, 7].map((k) => bars[k].title));
+    gateOf(/^Cache: about 5 min left · last request \d\d:\d\d$/.test(bars[3].title || '')) && gateOf(/^Cache: about 35 min left/.test(bars[1].title || '')) && gateOf(/^Cache expired · last request \d\d:\d\d$/.test(bars[4].title || '')) && gateOf(bars[4].tip)
+    && gateOf(/^Cache expired — the conversation moved to another account · last request \d\d:\d\d$/.test(bars[6].title || '')) && !bars[7].title && !bars[7].tip, [3, 1, 4, 6, 7].map((k) => bars[k].title));
   // the taskbar ring's arc: stroke-dasharray: calc(var(--warmth-frac) * 100) 100 over pathLength 100 (UNVERIFIED in the brief — measured here)
   const rings = await evalJs(`[1, 2, 4].map((k) => { const w = [...app.wm.windows.values()].find((x) => app.sessions.get(x.id)?.sessionId === ${J(SIDS)}[k]); const r = document.querySelector('#taskbar-items .taskbar-item[data-win-id="' + w.id + '"] > .taskbar-icon > .warmth-ring'); const c = r && r.querySelector('circle');
     return r ? { tier: r.getAttribute('data-warmth-tier'), frac: parseFloat(r.style.getPropertyValue('--warmth-frac')), dash: getComputedStyle(c).strokeDasharray, stroke: getComputedStyle(c).stroke } : null; })`);
   const dash0 = (x) => parseFloat((String(x && x.dash).match(/-?\d+(?:\.\d+)?/) || [NaN])[0]); // Chrome serialises it «calc(58.2px), 100px»
   check('the tile rings: Chrome honours calc() in stroke-dasharray — the arc = frac × 100 of the circle (mid / late partial), the expired tile a FULL ring in --warmth-expired',
-    rings[0]?.tier === 'mid' && near(dash0(rings[0]), rings[0].frac * 100, 1) && rings[1]?.tier === 'late' && near(dash0(rings[1]), rings[1].frac * 100, 1) && rings[1].frac < 0.3 && rings[2]?.tier === 'expired' && near(dash0(rings[2]), 100, 1), rings);
+    rings[0]?.tier === 'mid' && gateOf(near(dash0(rings[0]), rings[0].frac * 100, 1)) && rings[1]?.tier === 'late' && gateOf(near(dash0(rings[1]), rings[1].frac * 100, 1)) && rings[1].frac < 0.3 && rings[2]?.tier === 'expired' && verdictOf(near(dash0(rings[2]), 100, 1)), rings);
   const ink2 = await evalJs(EXP_INK);
   check('r5: the expired tile\'s full ring IS the one quiet value — --warmth-expired (the dim text\'s hue at 45 %), a hairline, never the invisible border',
-    rings[2]?.tier === 'expired' && sameInk(rings[2].stroke, ink2.exp) && inkOf(ink2.exp)[3] < 0.6 && sameInk(inkOf(ink2.exp).slice(0, 3).concat(1).join(' '), inkOf(ink2.dim).join(' ')), { ring: rings[2], ink2 });
+    rings[2]?.tier === 'expired' && gateOf(sameInk(rings[2].stroke, ink2.exp)) && inkOf(ink2.exp)[3] < 0.6 && verdictOf(sameInk(inkOf(ink2.exp).slice(0, 3).concat(1).join(' '), inkOf(ink2.dim).join(' '))), { ring: rings[2], ink2 });
   await bothThemes('A-desktop-10-matrix');
   // zh: the dictionary is chosen once at module load ⇒ the language set before a reload
   const { identifier } = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}" });
   await load(1280, 800); await attach([0, 1, 2, 3, 4, 5, 6, 7]); await evalJs(`app.wm.applyLayout('grid-2-4')`); await nextTick(1);
   const z = {}; for (const k of [3, 4, 6, 7]) z[k] = await evalJs(BAR(k));
   check('hover words (zh, after a reload in zh): «缓存还剩约 5 分钟 · 上次请求 HH:MM», «缓存已过期 · 上次请求 HH:MM», «缓存已过期 — 对话已换到另一个账号 · 上次请求 HH:MM», unknown none',
-    /^缓存还剩约 [45] 分钟 · 上次请求 \d\d:\d\d$/.test(z[3].title || '') && /^缓存已过期 · 上次请求 \d\d:\d\d$/.test(z[4].title || '') && /^缓存已过期 — 对话已换到另一个账号 · 上次请求 \d\d:\d\d$/.test(z[6].title || '') && !z[7].title, [3, 4, 6, 7].map((k) => z[k].title));
+    gateOf(/^缓存还剩约 [45] 分钟 · 上次请求 \d\d:\d\d$/.test(z[3].title || '')) && gateOf(/^缓存已过期 · 上次请求 \d\d:\d\d$/.test(z[4].title || '')) && gateOf(/^缓存已过期 — 对话已换到另一个账号 · 上次请求 \d\d:\d\d$/.test(z[6].title || '')) && !z[7].title, [3, 4, 6, 7].map((k) => z[k].title));
   await shot('A-desktop-10-matrix-zh-dark');
   await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier });
   await load(1280, 800); await attach([0, 1, 2, 3, 4, 5, 6, 7]); await evalJs(`app.wm.applyLayout('grid-2-4')`); await nextTick(1);
-  check('…back in en after the next reload', /^Cache: about/.test((await evalJs(BAR(3)))?.title || ''));
+  check('…back in en after the next reload', verdictOf(/^Cache: about/.test((await evalJs(BAR(3)))?.title || '')));
 });
 
 await step('③ the blink over a critical band (the blink is untouched)', async () => {
@@ -332,7 +332,7 @@ await step('③ the blink over a critical band (the blink is untouched)', async 
   await evalJs(`${winOf(3)}.element.classList.add('window-waiting'), 1`); await sleep(300);
   const b = await evalJs(BAR(3));
   check('a critical window that also waits: ::after still runs the blink (blink-fade) AND ::before keeps its width and colour',
-    b && b.blink === 'blink-fade' && b.band && near(b.width, before.width, 1) && b.bg === before.bg && b.tier === 'critical', { before: before && [before.width, before.bg], after: b && [b.width, b.bg, b.blink] });
+    gateOf(b) && b.blink === 'blink-fade' && gateOf(b.band) && gateOf(near(b.width, before.width, 1)) && b.bg === before.bg && b.tier === 'critical', { before: before && [before.width, before.bg], after: b && [b.width, b.bg, b.blink] });
   const r = await evalJs(`(() => { const r = ${winOf(3)}.titleBar.getBoundingClientRect(); return { x: Math.max(0, r.left - 8), y: Math.max(0, r.top - 8), width: r.width + 16, height: r.height + 16 }; })()`);
   await bothThemes('A-desktop-10-blink-critical-closeup', r);
   await evalJs(`${winOf(3)}.element.classList.remove('window-waiting'), 1`);
@@ -407,19 +407,19 @@ await step('⑤b the strip\'s waiting blink in the window\'s OWN colour — red 
     const { px, hues } = at[th];
     console.log(`    after (${th}): ` + J({ px, hues }));
     check(`THE LAW (${th}): the waiting RED square's blink, read at mid-animation from the shot, is red (hue within 20° of --warmth-critical's) — not yellow`,
-      px.red.waiting && px.red.tier === 'critical' && hueGap(px.red.hue, hues.red) <= 20 && hueGap(px.red.hue, hues.yellow) > 20, { red: px.red, hues });
-    check(`…the waiting GREEN square blinks green (${th})`, px.green.waiting && px.green.tier === 'fresh' && hueGap(px.green.hue, hues.green) <= 20, { green: px.green, hues });
-    check(`…a waiting square with NO state colour (an unknown) still blinks yellow (${th})`, px.none.waiting && !px.none.tier && hueGap(px.none.hue, hues.yellow) <= 20, { none: px.none, hues });
+      gateOf(px.red.waiting) && px.red.tier === 'critical' && hueGap(px.red.hue, hues.red) <= 20 && hueGap(px.red.hue, hues.yellow) > 20, { red: px.red, hues });
+    check(`…the waiting GREEN square blinks green (${th})`, gateOf(px.green.waiting) && px.green.tier === 'fresh' && hueGap(px.green.hue, hues.green) <= 20, { green: px.green, hues });
+    check(`…a waiting square with NO state colour (an unknown) still blinks yellow (${th})`, gateOf(px.none.waiting) && !px.none.tier && hueGap(px.none.hue, hues.yellow) <= 20, { none: px.none, hues });
   }
   await theme('dark'); await sleep(150);
   const A = at.dark.b;
   const CAD = 'blink-fade 0.7s ease-in-out infinite reverse', TIM = '700 Infinity reverse'; // (a CSS animation's ease lives on its keyframes — the computed timing function is in CAD)
   check(`THE BLINK UNCHANGED: all three squares compute «${CAD}», their effect «${TIM}», and the SAME opacity at ${TIMES.length} instants (keyframe 50 % = 1 at 350 ms)`,
-    all.every((id) => A[id] && A[id].anim === CAD && A[id].timing === TIM && J(A[id].op) === J(A[ids.none].op)) && A[ids.none].op[4] === 1 && A[ids.none].op[0] === 0,
+    gateOf(all.every((id) => A[id] && A[id].anim === CAD && A[id].timing === TIM && J(A[id].op) === J(A[ids.none].op))) && A[ids.none].op[4] === 1 && A[ids.none].op[0] === 0,
     all.map((id) => A[id] && [A[id].tier, A[id].anim, A[id].timing, A[id].op]));
   const live = await evalJs(TRACE(all, 2300));
   console.log('    live trace (rAF, 2.3 s): ' + J(live.map((x) => ({ frames: x.frames, lows: x.lows, gaps: x.gaps }))));
-  check('…and live: each square\'s opacity bottoms out every ~700 ms (rAF trace over 2.3 s, every gap 700 ± 60 ms)', live.every((x) => x.gaps.length >= 1 && x.gaps.every((g) => Math.abs(g - 700) <= 60)), live);
+  check('…and live: each square\'s opacity bottoms out every ~700 ms (rAF trace over 2.3 s, every gap 700 ± 60 ms)', verdictOf(live.every((x) => x.gaps.length >= 1 && x.gaps.every((g) => Math.abs(g - 700) <= 60))), live);
   // BEFORE: the base's rule planted back — the shot pair and the RED control
   const swapped = await swapRule(FIX_SEL, BASE_SEL);
   await sleep(150);
@@ -429,10 +429,10 @@ await step('⑤b the strip\'s waiting blink in the window\'s OWN colour — red 
     swapped >= 1 && hueGap(before.px.red.hue, before.hues.red) > 20 && hueGap(before.px.red.hue, before.hues.yellow) <= 20 && hueGap(before.px.green.hue, before.hues.green) > 20 && hueGap(before.px.green.hue, before.hues.yellow) <= 20, { swapped, px: before.px, hues: before.hues });
   const B = before.b;
   check('…the cadence is the SAME before and after (the computed animation, the effect, the opacity at every instant): only the colour moved',
-    all.every((id) => B[id] && A[id] && B[id].anim === A[id].anim && B[id].timing === A[id].timing && J(B[id].op) === J(A[id].op)), all.map((id) => B[id] && [B[id].anim, B[id].op]));
+    verdictOf(all.every((id) => B[id] && A[id] && B[id].anim === A[id].anim && B[id].timing === A[id].timing && J(B[id].op) === J(A[id].op))), all.map((id) => B[id] && [B[id].anim, B[id].op]));
   const back = await swapRule(BASE_SEL, FIX_SEL); await sleep(150);
   const again = await evalJs(BLINKS([ids.red]));
-  check('…the rule restored: the red square computes its tier colour again', back === swapped && sameInk(again[ids.red]?.bg, at.dark.inks.red), { back, bg: again[ids.red]?.bg, red: at.dark.inks.red });
+  check('…the rule restored: the red square computes its tier colour again', back === swapped && verdictOf(sameInk(again[ids.red]?.bg, at.dark.inks.red)), { back, bg: again[ids.red]?.bg, red: at.dark.inks.red });
   await evalJs(`(() => { for (const w of [${winOf(3)}, ${winOf(0)}, ${winOf(7)}]) w.element.classList.remove('window-waiting'); app.desktopManager._renderSwitcher(); return 1; })()`);
   await sleep(300);
 });
@@ -454,14 +454,14 @@ await step('⑥ the «+N» chip: the worst tier it hides, in words, stable acros
       if (at) { for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 }); }
       await sleep(400); await nextTick(1); c = await evalJs(CHIP);
       check(`1100 px, 10 conversations: «+N · k critical» with the critical dot (k = the hidden critical tiles) — «${a && a.text}»`,
-        a && a.shown && a.dot === 'critical' && a.text === `+${a.n} · ${a.crit} critical` && a.crit >= 1, a);
-      check('…the same words across two ticks and a focus click on a visible tile between them (the refit settles)', a && b && c && a.text === b.text && b.text === c.text && !!at, { a: a && a.text, b: b && b.text, c: c && c.text, clicked: !!at });
+        gateOf(a) && gateOf(a.shown) && a.dot === 'critical' && a.text === `+${a.n} · ${a.crit} critical` && a.crit >= 1, a);
+      check('…the same words across two ticks and a focus click on a visible tile between them (the refit settles)', gateOf(a) && gateOf(b) && gateOf(c) && a.text === b.text && b.text === c.text && !!at, { a: a && a.text, b: b && b.text, c: c && c.text, clicked: !!at });
       await shot('A-desktop-12-plusN-1100-dark', { x: 0, y: h - 60, width: w, height: 60 });
     }
     per.push({ vp: `${w}x${h}`, shown: a && a.shown, a: a && a.text, b: b && b.text, c: c && c.text });
   }
   console.log('    «+N» per viewport: ' + J(per));
-  check('…at desktop-small\'s four viewports (951 / 1024 / 1100 / 1280) the chip\'s words hold across ticks (a shown chip names the dot\'s tier)', per.every((p) => p.a === p.b && p.b === p.c && (!p.shown || /^\+\d+( · \d+ (critical|expired))?$/.test(p.a))), per);
+  check('…at desktop-small\'s four viewports (951 / 1024 / 1100 / 1280) the chip\'s words hold across ticks (a shown chip names the dot\'s tier)', verdictOf(per.every((p) => p.a === p.b && p.b === p.c && (!p.shown || /^\+\d+( · \d+ (critical|expired))?$/.test(p.a)))), per);
   // r2 (H3): the floor exists so a tile keeps «an icon and a readable word» (taskbar-fit.js) — the title characters a 90-px
   // tile shows, warmth on vs off (the same window): the probe counts the characters left of the ellipsis
   const FLOOR = `(() => { const out = {}, s = document.getElementById('taskbar-items').getBoundingClientRect(), cv = document.createElement('canvas').getContext('2d');
@@ -481,7 +481,7 @@ await step('⑥ the «+N» chip: the worst tier it hides, in words, stable acros
     return { w, tiles: ids.length, rings: ids.filter((id) => floor.on[w][id].ring).length, titleW: ids.map((id) => [floor.on[w][id].titleW, floor.off[w][id].titleW]), on: ids.map((id) => floor.on[w][id].shown), off: ids.map((id) => floor.off[w][id].shown), same: ids.every((id) => floor.on[w][id].n === floor.off[w][id].n) }; });
   console.log('    the 90-px floor — title characters shown per tile, warmth ON vs OFF (the same windows): ' + J(cmp));
   check(`H3: at the 90-px floor (951 / 1024 / 1100, 10 windows) every tile shows the SAME title characters with warmth on and off — the ring rides the icon's corner (${cmp.map((c) => c.rings).join(' / ')} ringed floor tiles)`,
-    cmp.every((c) => c.tiles > 0 && c.rings > 0 && c.same), cmp);
+    verdictOf(cmp.every((c) => c.tiles > 0 && c.rings > 0 && c.same)), cmp);
   await device(951, 640); await sleep(700); await nextTick(1);
   await bothThemes('A-desktop-12-floor-951', { x: 0, y: 640 - 60, width: 951, height: 60 });
   // RED: the r1 DOM re-planted — each ring moved back to its tile's first flex child (12 px + the 6-px gap) ⇒ fewer characters
@@ -489,7 +489,7 @@ await step('⑥ the «+N» chip: the worst tier it hides, in words, stable acros
   await evalJs(`(() => { for (const r of document.querySelectorAll('#taskbar-items > .taskbar-item > .warmth-ring')) r.parentElement.querySelector(':scope > .taskbar-icon, :scope > .taskbar-icon-stack')?.prepend(r); return 1; })()`);
   const rid = Object.keys(red).filter((id) => red[id].ring && floor.off[951][id]);
   console.log('    RED (the r1 ring in the flow) at 951 — shown OFF vs r1-ON: ' + J(rid.map((id) => [floor.off[951][id].shown, red[id].shown])));
-  check('RED: the r1 DOM re-planted (the ring a flex child before the icon) ⇒ the probe counts FEWER characters on a ringed floor tile', rid.length > 0 && rid.some((id) => red[id].n < floor.off[951][id].n), rid.map((id) => [floor.off[951][id].n, red[id].n]));
+  check('RED: the r1 DOM re-planted (the ring a flex child before the icon) ⇒ the probe counts FEWER characters on a ringed floor tile', rid.length > 0 && verdictOf(rid.some((id) => red[id].n < floor.off[951][id].n)), rid.map((id) => [floor.off[951][id].n, red[id].n]));
   await device(1280, 800); await sleep(600);
   await evalJs(`app.wm.applyLayout('grid-2-4')`);
 });
@@ -506,7 +506,7 @@ await step('⑥b the warm «+N» chip and the strip never refit each other (r3 J
   // the 12 tiles in the strip's order: tile 11 EXPIRED, tile 10 LATE, the rest FRESH (the acceptance's set)
   const order = await evalJs(`[...document.querySelectorAll('#taskbar-items > .taskbar-item[data-win-id]')].map((e) => app.sessions.get(e.dataset.winId)?.sessionId || null)`);
   const ks = order.map((s) => SIDS.indexOf(s));
-  check(`the strip holds twelve tiles, one per conversation (${ks.join(' ')})`, ks.length === 12 && ks.every((k) => k >= 0), order);
+  check(`the strip holds twelve tiles, one per conversation (${ks.join(' ')})`, ks.length === 12 && verdictOf(ks.every((k) => k >= 0)), order);
   const tail = (t10, t11) => Object.fromEntries(ks.map((k, i) => [k, { agoMs: i === 11 ? t11 : i === 10 ? t10 : M(5) }]));
   const TIER = (ms) => (ms >= M(60) ? 'expired' : ms >= M(50) ? 'critical' : ms >= M(40) ? 'late' : ms >= M(20) ? 'mid' : 'fresh');
   const RANK = { critical: 4, late: 3, mid: 2, fresh: 1 };
@@ -535,11 +535,11 @@ await step('⑥b the warm «+N» chip and the strip never refit each other (r3 J
   console.log(`    ON — the strip's room swept (the bar's rest ${Math.round(rest)} px), per width «room:hidden«words»/chip px»: ${brief(on)}`);
   console.log(`    ON — MutationObserver calls per second at each width: ${on.map((x) => x.calls).join(' ')} (a refit by the page's own poll writes the same words and box)`);
   check(`J1: warmth ON, ${on.length} widths of the strip's room (${on[0]?.room} → ${on[on.length - 1]?.room} px): after a 500-ms settle the chip's words and its box change ZERO times in 1 s at EVERY width (≤ 4 observer calls — the loop's own threshold; most 0)`,
-    on.length >= 20 && on[0].room <= 1046 && on[on.length - 1].room >= 1214 && on.every((x) => !x.mobile && x.flips === 0 && x.boxes === 0 && x.calls <= 4), on.filter((x) => x.flips || x.boxes || x.calls > 4 || x.mobile).slice(0, 4));
+    on.length >= 20 && on[0].room <= 1046 && on[on.length - 1].room >= 1214 && verdictOf(on.every((x) => !x.mobile && x.flips === 0 && x.boxes === 0 && x.calls <= 4)), on.filter((x) => x.flips || x.boxes || x.calls > 4 || x.mobile).slice(0, 4));
   const alone = on.filter((x) => x.hidden.length === 1 && x.hidden[0] === sidAt(11)).length, both = on.filter((x) => x.hidden.includes(sidAt(10)) && x.hidden.includes(sidAt(11))).length;
   check(`…the loop's two hidden sets are both in the sweep: the expired tile alone (${alone} widths, «+1 · 1 expired») and the late one with it (${both} widths, «+N»)`, alone > 0 && both > 0, brief(on));
-  check(`…the shown chip's box is the CONSTANT box (OVERFLOW_CHIP_WARM_BOX_PX ${BOX} px) at every width, whatever it says`, on.filter((x) => x.text).length > 0 && on.every((x) => !x.text || (x.box && Math.abs(x.chipW - BOX) <= 0.5)), on.filter((x) => x.text).map((x) => [x.room, x.chipW, x.box]).slice(0, 6));
-  check('…and its words still name the hidden set at every width (the tail expired + late ⇒ «+N», the late dot)', on.every((x) => x.text === wordsOf(x.hidden) && (!x.text || x.hidden.length < 2 || x.dot === 'late')), on.filter((x) => x.text !== wordsOf(x.hidden)).map((x) => [x.room, x.text, wordsOf(x.hidden)]));
+  check(`…the shown chip's box is the CONSTANT box (OVERFLOW_CHIP_WARM_BOX_PX ${BOX} px) at every width, whatever it says`, on.filter((x) => x.text).length > 0 && verdictOf(on.every((x) => !x.text || (x.box && Math.abs(x.chipW - BOX) <= 0.5))), on.filter((x) => x.text).map((x) => [x.room, x.chipW, x.box]).slice(0, 6));
+  check('…and its words still name the hidden set at every width (the tail expired + late ⇒ «+N», the late dot)', verdictOf(on.every((x) => x.text === wordsOf(x.hidden) && (!x.text || x.hidden.length < 2 || x.dot === 'late'))), on.filter((x) => x.text !== wordsOf(x.hidden)).map((x) => [x.room, x.text, wordsOf(x.hidden)]));
   for (const room of [1072, 1100, 1132]) { await device(Math.round(room + rest), 700); await sleep(600); const fb = await evalJs(`(() => { const r = document.getElementById('taskbar').getBoundingClientRect(); return { x: 0, y: r.top - 4, width: innerWidth, height: r.height + 4 }; })()`); await shot(`A-desktop-12-plusN-room-${room}-dark`, fb); }
   // RED: the constant box taken away (the chip's box follows its words again, as on 6550a3a51) ⇒ the flip returns
   await evalJs(`(() => { const s = document.createElement('style'); s.id = '__j1'; s.textContent = '#taskbar-overflow.warmth-box { width: auto !important; }'; document.head.appendChild(s); return 1; })()`);
@@ -557,7 +557,7 @@ await step('⑥b the warm «+N» chip and the strip never refit each other (r3 J
   }
   console.log(`    the tail EXPIRED + EXPIRED, then CRITICAL + EXPIRED: ${other.map((x) => `${x.name} ${x.room}:«${x.text}»/${x.chipW}px ${x.flips}f${x.boxes}b`).join(' · ')}`);
   check(`…an expired-only tail says «+N · k expired», a critical one «+N · k critical» — in the same box, no change in 1 s (${[...new Set(other.map((x) => x.text))].join(' / ')})`,
-    other.every((x) => x.text === x.says && x.flips === 0 && x.boxes === 0 && Math.abs(x.chipW - BOX) <= 0.5) && other.some((x) => / expired$/.test(x.text)) && other.some((x) => / critical$/.test(x.text)), other.map((x) => [x.name, x.room, x.text, x.says, x.chipW, x.flips]));
+    gateOf(other.every((x) => x.text === x.says && x.flips === 0 && x.boxes === 0 && Math.abs(x.chipW - BOX) <= 0.5)) && gateOf(other.some((x) => / expired$/.test(x.text))) && verdictOf(other.some((x) => / critical$/.test(x.text))), other.map((x) => [x.name, x.room, x.text, x.says, x.chipW, x.flips]));
   // OFF: the plain chip (its box its words' again), the same sweep
   plan(tail(M(45), M(65)));
   await evalJs(`app.settings.set('desktop.cacheWarmth', false), 1`); await sleep(1300); await nextTick(1);
@@ -566,7 +566,7 @@ await step('⑥b the warm «+N» chip and the strip never refit each other (r3 J
   const off = await sweep(restOff);
   console.log(`    OFF — the same rooms (the bar's rest ${Math.round(restOff)} px): ${brief(off)}; observer calls per second: ${off.map((x) => x.calls).join(' ')}`);
   check(`J1: warmth OFF, the same ${off.length} widths (${off[0]?.room} → ${off[off.length - 1]?.room} px): ZERO changes of the words or the box in 1 s at every width; the plain «+N», no constant box`,
-    off[0].room <= 1046 && off[off.length - 1].room >= 1214 && off.some((x) => x.text) && off.every((x) => !x.mobile && x.flips === 0 && x.boxes === 0 && x.calls <= 4 && !x.box && (!x.text || x.text === '+' + x.hidden.length)), off.filter((x) => x.flips || x.boxes || x.calls > 4 || x.box).slice(0, 4));
+    off[0].room <= 1046 && off[off.length - 1].room >= 1214 && gateOf(off.some((x) => x.text)) && verdictOf(off.every((x) => !x.mobile && x.flips === 0 && x.boxes === 0 && x.calls <= 4 && !x.box && (!x.text || x.text === '+' + x.hidden.length))), off.filter((x) => x.flips || x.boxes || x.calls > 4 || x.box).slice(0, 4));
   await evalJs(`app.settings.set('desktop.cacheWarmth', true), 1`); await sleep(1300); await nextTick(1);
   await waitFor(`!!app._warmth?.drawn && !!document.getElementById('taskbar-warmth')`, 12000);
   await device(1280, 800); await sleep(600);
@@ -590,20 +590,20 @@ await step('④ a tab group: each tab its own band, no frame band', async () => 
   await nextTick(1);
   const g = await evalJs(TABS);
   const by = Object.fromEntries((g?.tabs || []).map((x) => [kOfSid(x.sid), x]));
-  check('four tabs: active fresh (研究 1), hidden critical, hidden expired, hidden late + waiting', g && g.tabs.length === 4 && by[0]?.active && by[2]?.waiting, g);
+  check('four tabs: active fresh (研究 1), hidden critical, hidden expired, hidden late + waiting', gateOf(g) && g.tabs.length === 4 && gateOf(by[0]?.active) && verdictOf(by[2]?.waiting), g);
   check('each live tab carries ITS OWN band, the tab\'s first child, its length ∝ the TAB\'s width × its frac (±2 px), in its own tier',
-    [0, 3, 2].every((k) => by[k] && by[k].band && by[k].first && by[k].tier === WANT[k] && near(by[k].width, by[k].tabW * by[k].frac)), [0, 3, 2].map((k) => by[k]));
-  check('…the expired tab has NO band node', by[4] && by[4].tier === null && !by[4].band, by[4]);
-  check('…and the frame draws none: the host bar\'s ::before computes content none (the :has guard), it carries no tier and no words', g && g.hostBefore === 'none' && !g.hostTier && !g.hostTitle, g && [g.hostBefore, g.hostTier, g.hostTitle]);
-  check('each tab\'s LABEL carries the hover words (the expired one «Cache expired · …»)', [0, 3, 2].every((k) => /^Cache: about \d+ min left/.test(by[k]?.label || '')) && /^Cache expired · last request/.test(by[4]?.label || ''), [0, 3, 2, 4].map((k) => by[k]?.label));
+    verdictOf([0, 3, 2].every((k) => by[k] && by[k].band && by[k].first && by[k].tier === WANT[k] && near(by[k].width, by[k].tabW * by[k].frac))), [0, 3, 2].map((k) => by[k]));
+  check('…the expired tab has NO band node', gateOf(by[4]) && by[4].tier === null && !by[4].band, by[4]);
+  check('…and the frame draws none: the host bar\'s ::before computes content none (the :has guard), it carries no tier and no words', gateOf(g) && g.hostBefore === 'none' && !g.hostTier && !g.hostTitle, g && [g.hostBefore, g.hostTier, g.hostTitle]);
+  check('each tab\'s LABEL carries the hover words (the expired one «Cache expired · …»)', gateOf([0, 3, 2].every((k) => /^Cache: about \d+ min left/.test(by[k]?.label || ''))) && verdictOf(/^Cache expired · last request/.test(by[4]?.label || '')), [0, 3, 2, 4].map((k) => by[k]?.label));
   await evalJs(`(() => { const ch = ${winOf(0)}._tabChain; app.wm.switchTab(ch, 1); return 1; })()`); await sleep(200);
   const g2 = await evalJs(TABS);
-  check('…after a switch (_markStrip owns tab.title) the label words stand', g2 && g2.tabs.every((x) => !!x.label), g2 && g2.tabs.map((x) => x.label));
+  check('…after a switch (_markStrip owns tab.title) the label words stand', gateOf(g2) && verdictOf(g2.tabs.every((x) => !!x.label)), g2 && g2.tabs.map((x) => x.label));
   const polls = RW.polls, wrap0 = await evalJs(`!!app.settings.get('window.tabWrap')`);
   await evalJs(`app.settings.set('window.tabWrap', ${!wrap0}), 1`); await sleep(400);
   const g3 = await evalJs(TABS);
   check('a strip REBUILD (window.tabWrap toggled) brings every band back with NO tick (makeTab re-applies from the map)',
-    RW.polls === polls && g3 && [0, 3, 2].every((k) => g3.tabs.find((x) => kOfSid(x.sid) === k)?.band), { pollsBetween: RW.polls - polls, tabs: g3 && g3.tabs.map((x) => [kOfSid(x.sid), x.band]) });
+    RW.polls === polls && gateOf(g3) && verdictOf([0, 3, 2].every((k) => g3.tabs.find((x) => kOfSid(x.sid) === k)?.band)), { pollsBetween: RW.polls - polls, tabs: g3 && g3.tabs.map((x) => [kOfSid(x.sid), x.band]) });
   await evalJs(`app.settings.set('window.tabWrap', ${wrap0}), 1`); await sleep(300);
   const RING = `(document.querySelector('#taskbar-items .taskbar-group .warmth-ring')?.getAttribute('data-warmth-tier') || null)`;
   check('the group tile\'s ring = the worst LIVE tier over its tabs: critical (the expired tab never outranks it)', (await evalJs(RING)) === 'critical', await evalJs(RING));
@@ -615,7 +615,7 @@ await step('④ a tab group: each tab its own band, no frame band', async () => 
   for (let i = 0; i < 2 && !(await evalJs(`!!document.querySelector('.taskbar-group-chooser')`)); i++) { await click('#taskbar-items .taskbar-group'); await sleep(400); }
   await waitFor(`document.querySelectorAll('.taskbar-group-chooser .overlap-switcher-item').length === 4`, 4000);
   const rows = await evalJs(`[...document.querySelectorAll('.taskbar-group-chooser .overlap-switcher-item')].map((r) => ({ sid: app.sessions.get(r.dataset.winId)?.sessionId, ring: r.firstElementChild?.matches('.warmth-ring') ? r.firstElementChild.getAttribute('data-warmth-tier') : null }))`);
-  check('the hover chooser: each row carries its own tab\'s ring (fresh / critical / expired / late)', rows.length === 4 && rows.every((r) => r.ring === WANT[kOfSid(r.sid)]), rows);
+  check('the hover chooser: each row carries its own tab\'s ring (fresh / critical / expired / late)', rows.length === 4 && verdictOf(rows.every((r) => r.ring === WANT[kOfSid(r.sid)])), rows);
   await evalJs(`(app.wm.revealWindow(${winOf(0)}.id), app.wm.applyLayout('maximize'), 1)`); await sleep(500); // the group's frame at full size for the shots
   if (!(await evalJs(`!!document.querySelector('.taskbar-group-chooser')`))) { for (let i = 0; i < 2 && !(await evalJs(`!!document.querySelector('.taskbar-group-chooser')`)); i++) { await click('#taskbar-items .taskbar-group'); await sleep(400); } }
   await bothThemes('A-desktop-14-tabs-chooser');
@@ -626,7 +626,7 @@ await step('④ a tab group: each tab its own band, no frame band', async () => 
   await evalJs(`(app.wm.bindSplit(${winOf(0)}, ${winOf(3)}), 1)`); await sleep(500);
   const sp = await evalJs(`[...document.querySelectorAll('.tab-item.tab-pane')].map((t) => ({ pane: getComputedStyle(t, '::before').backgroundColor, paneH: getComputedStyle(t, '::before').height, band: !!t.querySelector(':scope > .tab-warmth'), bandW: t.querySelector(':scope > .tab-warmth') ? parseFloat(getComputedStyle(t.querySelector(':scope > .tab-warmth')).width) : 0, tabW: t.clientWidth }))`);
   console.log('    split panes (the 2 px pane underline vs the band over it): ' + J(sp));
-  check('a split: both panes still carry their own band over the pane underline', sp.length === 2 && sp.every((p) => p.band), sp);
+  check('a split: both panes still carry their own band over the pane underline', sp.length === 2 && verdictOf(sp.every((p) => p.band)), sp);
   await bothThemes('A-desktop-14-tabs-split');
   await evalJs(`app.wm.applyLayout('grid-2-4')`); await sleep(400);
 });
@@ -635,13 +635,13 @@ await step('RED controls — the probes can see ABSENCE', async () => {
   const b0 = await evalJs(BAR(1)), t0 = await evalJs(TABS);
   await evalJs(`(() => { const s = document.createElement('style'); s.id = '__red'; s.textContent = '.window-titlebar::before{display:none!important}.tab-warmth{display:none!important}'; document.head.appendChild(s); return 1; })()`);
   const b1 = await evalJs(BAR(1)), t1 = await evalJs(TABS);
-  check('RED: with the band hidden by a planted style the ① frame probe reports it ABSENT (it reported it present a moment before)', b0?.band && b1 && !b1.band, [b0?.band, b1?.band]);
-  check('RED: …and the ④ tab probes report every tab band ABSENT', t0 && t0.tabs.some((x) => x.band) && t1 && t1.tabs.every((x) => !x.band), t1 && t1.tabs.map((x) => x.band));
+  check('RED: with the band hidden by a planted style the ① frame probe reports it ABSENT (it reported it present a moment before)', gateOf(b0?.band) && gateOf(b1) && !b1.band, [b0?.band, b1?.band]);
+  check('RED: …and the ④ tab probes report every tab band ABSENT', gateOf(t0) && gateOf(t0.tabs.some((x) => x.band)) && gateOf(t1) && verdictOf(t1.tabs.every((x) => !x.band)), t1 && t1.tabs.map((x) => x.band));
   await evalJs(`document.getElementById('__red').remove(), 1`);
   check('…the style removed: present again', (await evalJs(BAR(1)))?.band === true);
   plan({ ...MATRIX, 1: { agoMs: M(65) } }); await nextTick(2);
   const b2 = await evalJs(BAR(1));
-  check('RED: one window rewritten to expired ⇒ its probe reports NO band where it reported one a tick before', b0?.band && b2 && !b2.band && !b2.tier, [b0?.tier, b2?.tier, b2?.band]);
+  check('RED: one window rewritten to expired ⇒ its probe reports NO band where it reported one a tick before', gateOf(b0?.band) && gateOf(b2) && !b2.band && !b2.tier, [b0?.tier, b2?.tier, b2?.band]);
   plan(MATRIX); await nextTick(2);
 });
 
@@ -673,15 +673,15 @@ await step('⑤ desktops: the squares, three adjacent preview rings, the folded 
   check('the squares carry their tier (another desktop\'s too: late / fresh / mid)', sq(8)?.tier === 'late' && sq(9)?.tier === 'fresh' && sq(10)?.tier === 'mid' && sq(1)?.tier === 'mid', [8, 9, 10, 1].map((k) => sq(k)?.tier));
   const ink5 = await evalJs(EXP_INK);
   check('r5: an EXPIRED square computes the ONE quiet --warmth-expired (the dim text at 45 %) — no longer --text-dim itself, never the faint border',
-    sq(6)?.tier === 'expired' && sameInk(sq(6)?.bg, ink5.exp) && !sameInk(sq(6)?.bg, p.dim) && inkOf(ink5.exp)[3] < 0.6, { sq: sq(6), ink5, dim: p.dim });
+    sq(6)?.tier === 'expired' && gateOf(sameInk(sq(6)?.bg, ink5.exp)) && !sameInk(sq(6)?.bg, p.dim) && inkOf(ink5.exp)[3] < 0.6, { sq: sq(6), ink5, dim: p.dim });
   const one = await evalJs(`(() => ({ rings: [...document.querySelectorAll('.warmth-ring[data-warmth-tier="expired"] circle')].map((c) => getComputedStyle(c).stroke),
     dots: [...document.querySelectorAll('.wsum-dot[data-warmth-tier="expired"]')].map((d) => getComputedStyle(d).backgroundColor),
     squares: [...document.querySelectorAll('.desktop-preview-win[data-warmth-tier="expired"]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash)')].map((q) => getComputedStyle(q).backgroundColor) }))()`);
   check(`r5: ONE expired value — every expired ring (${one.rings.length}), summary / «+N» dot (${one.dots.length}) and square (${one.squares.length}) on the page computes it (the special cases are gone)`,
-    one.dots.length >= 1 && one.squares.length >= 1 && [...one.rings, ...one.dots, ...one.squares].every((c) => sameInk(c, ink5.exp)), { one, exp: ink5.exp });
+    one.dots.length >= 1 && one.squares.length >= 1 && verdictOf([...one.rings, ...one.dots, ...one.squares].every((c) => sameInk(c, ink5.exp))), { one, exp: ink5.exp });
   const twin = sq(2) && (p.previews || []).flatMap((x) => x.squares).find((s) => s.tier === sq(2).tier && !s.waiting);
   check('a WAITING square computes its OWN tier colour — a group member waits in the group\'s worst, the same fill as its group\'s resting squares (lane desktop-blink-colour; never the yellow)',
-    sq(2)?.waiting && ['critical', 'fresh', 'mid', 'expired'].includes(sq(2)?.tier) && !!twin && sameInk(sq(2)?.bg, twin.bg) && !sameInk(sq(2)?.bg, p.yellow), { sq: sq(2), twin, yellow: p.yellow });
+    gateOf(sq(2)?.waiting) && gateOf(['critical', 'fresh', 'mid', 'expired'].includes(sq(2)?.tier)) && !!twin && gateOf(sameInk(sq(2)?.bg, twin.bg)) && !sameInk(sq(2)?.bg, p.yellow), { sq: sq(2), twin, yellow: p.yellow });
   for (const [w, h] of [[1280, 800], [1100, 700]]) { await device(w, h); await sleep(700); await nextTick(1); const q = await evalJs(PREVIEWS); FORMS[`on-${w}`] = { form: q.form, chip: q.chip, summary: q.summary }; }
   // the same state with warmth OFF (the live flip): does the summary chip fold the previews / cut a tile?
   await evalJs(`app.settings.set('desktop.cacheWarmth', false), 1`); await sleep(1300); await nextTick(1);
@@ -690,7 +690,7 @@ await step('⑤ desktops: the squares, three adjacent preview rings, the folded 
   console.log('    the switcher form and «+N», 4 desktops, 10 windows on this one — warmth ON vs OFF: ' + J(FORMS));
   // r2 (H4): while warmth is drawn the verdict budgets the warm «+N» chip's longest form (OVERFLOW_CHIP_WARM_PX) — at 1100 px
   // with 4 desktops that folds the previews (r1's 48-px budget kept them full and left the strip 3 whole tiles: ⑧b)
-  check(`the previews: full at 1280 on and off and at 1100 off; at 1100 on the warm chip's budget decides — ${FORMS['on-1100']?.form}`, ['on-1280', 'off-1280', 'off-1100'].every((k) => FORMS[k]?.form === 'full') && ['full', 'compact'].includes(FORMS['on-1100']?.form), FORMS);
+  check(`the previews: full at 1280 on and off and at 1100 off; at 1100 on the warm chip's budget decides — ${FORMS['on-1100']?.form}`, gateOf(['on-1280', 'off-1280', 'off-1100'].every((k) => FORMS[k]?.form === 'full')) && verdictOf(['full', 'compact'].includes(FORMS['on-1100']?.form)), FORMS);
   await device(1280, 800); await sleep(600); await nextTick(1);
   const r = await evalJs(`(() => { const r = document.getElementById('desktop-previews').getBoundingClientRect(); return { x: Math.max(0, r.left - 6), y: Math.max(0, r.top - 6), width: r.width + 12, height: r.height + 12 }; })()`);
   await bothThemes('A-desktop-11-previews-rings', r);
@@ -713,7 +713,7 @@ await step('⑤ desktops: the squares, three adjacent preview rings, the folded 
   const after = q.summary;
   const pv2 = Object.fromEntries((q.previews || []).map((x) => [x.desk, x]));
   check(`after a reload the other desktops' conversations still resolve (${held.length} held, rung ${[...new Set(held.map((h) => h.rung))].join('/') || '—'}; ${built.filter(Boolean).length} built): rings late / mid, every square there carries a tier, the summary's counts unchanged`,
-    pv2[DESKS.d2]?.tier === 'late' && pv2[DESKS.d3]?.tier === 'mid' && [DESKS.d2, DESKS.d3, DESKS.d4].every((d) => (pv2[d]?.squares || []).length > 0 && pv2[d].squares.every((s) => !!s.tier)) && held.every((h) => h.rung !== 'none') && after === before,
+    pv2[DESKS.d2]?.tier === 'late' && pv2[DESKS.d3]?.tier === 'mid' && gateOf([DESKS.d2, DESKS.d3, DESKS.d4].every((d) => (pv2[d]?.squares || []).length > 0 && pv2[d].squares.every((s) => !!s.tier))) && gateOf(held.every((h) => h.rung !== 'none')) && after === before,
     { before, after, rings: q.previews?.map((x) => [x.desk, x.tier, x.squares.map((s) => s.tier)]) });
   await attach([0, 1, 2, 3, 4, 5, 6, 7]);
 });
@@ -729,8 +729,8 @@ await step('⑦ the summary chip and its list (every desktop, by time left)', as
   const truth = { critical: tiers.filter((x) => x === 'critical').length, late: tiers.filter((x) => x === 'late').length, expired: tiers.filter((x) => x === 'expired').length, known: tiers.filter((x) => x !== 'unknown').length };
   const chip = await evalJs(`(() => { const c = document.getElementById('taskbar-warmth'); if (!c) return null; const r = c.getBoundingClientRect(); return { text: c.textContent, h: r.height, segs: [...c.querySelectorAll('.wsum-seg')].map((s) => s.textContent), dots: [...c.querySelectorAll('.wsum-dot')].map((d) => d.getAttribute('data-warmth-tier')), nextIsForYou: c.nextElementSibling?.id === 'taskbar-user-todos', title: c.title }; })()`);
   check(`the chip's counts = the rewrite's ground truth (critical ${truth.critical} · late ${truth.late} · expired ${truth.expired} / ${truth.known}; the unknown one is not counted) — «${chip && chip.text}»`,
-    chip && chip.segs.join('|') === `Going cold ${truth.critical}|Late ${truth.late}|Expired ${truth.expired}` && chip.text.endsWith(`/ ${truth.known}`) && chip.dots.join(',') === 'critical,late,expired', { chip, truth });
-  check('…it sits beside For-you, ≥ 24 px tall, with its words in the title', chip && chip.nextIsForYou && chip.h >= 24 && /^Prompt-cache warmth on every desktop/.test(chip.title), chip);
+    gateOf(chip) && chip.segs.join('|') === `Going cold ${truth.critical}|Late ${truth.late}|Expired ${truth.expired}` && gateOf(chip.text.endsWith(`/ ${truth.known}`)) && chip.dots.join(',') === 'critical,late,expired', { chip, truth });
+  check('…it sits beside For-you, ≥ 24 px tall, with its words in the title', gateOf(chip) && gateOf(chip.nextIsForYou) && chip.h >= 24 && verdictOf(/^Prompt-cache warmth on every desktop/.test(chip.title)), chip);
   await click('#taskbar-warmth');
   await waitFor(`!!document.querySelector('.warmth-list .overlap-switcher-item')`, 3000);
   const L = '.warmth-list .overlap-switcher-item';
@@ -738,8 +738,8 @@ await step('⑦ the summary chip and its list (every desktop, by time left)', as
   const ks = rows.map((r) => kOfSid(r.sid));
   const lefts = ks.map(leftOfK);
   check(`the list: one row per known conversation (${rows.length}), «By time left» pressed, ascending, expired last, the unknown one absent`,
-    rows.length === truth.known && (await evalJs(`document.querySelector('.warmth-list .wl-sort')?.getAttribute('aria-pressed')`)) === 'true' && !ks.includes(7) && lefts.every((x, i) => i === 0 || x >= lefts[i - 1]) && rows.every((r) => r.band), { ks, lefts: lefts.map((x) => (x > 1e11 ? 'expired' : Math.round(x / 1000))) });
-  check('…each row says its time («N min left» / «Expired»)', rows.every((r) => /^\d+ min left$|^Expired$/.test(r.left)), rows.map((r) => r.left));
+    rows.length === truth.known && (await evalJs(`document.querySelector('.warmth-list .wl-sort')?.getAttribute('aria-pressed')`)) === 'true' && !ks.includes(7) && gateOf(lefts.every((x, i) => i === 0 || x >= lefts[i - 1])) && verdictOf(rows.every((r) => r.band)), { ks, lefts: lefts.map((x) => (x > 1e11 ? 'expired' : Math.round(x / 1000))) });
+  check('…each row says its time («N min left» / «Expired»)', verdictOf(rows.every((r) => /^\d+ min left$|^Expired$/.test(r.left))), rows.map((r) => r.left));
   // r5: the hue on the marks, legibility on the words — a live row's words = its tier's 50 % mix toward --text, its band the raw hue
   const INK = `(() => { const pr = document.createElement('span'); document.body.appendChild(pr); const at = (v) => { pr.style.color = v; return getComputedStyle(pr).color; };
     const out = [...document.querySelectorAll('.warmth-list .overlap-switcher-item')].map((it) => { const l = it.querySelector(':scope > .wl-left'), b = it.querySelector(':scope > .wl-band'); const t = l && l.getAttribute('data-warmth-tier');
@@ -750,7 +750,7 @@ await step('⑦ the summary chip and its list (every desktop, by time left)', as
     await theme(th); await sleep(120);
     const ink = await evalJs(INK), live = ink.filter((r) => r.tier), dead = ink.filter((r) => !r.tier);
     check(`r5 (${th}): a live row's words compute its tier's 50 % mix toward --text — never the raw hue its band wears; an «Expired» row's words stay --text-dim`,
-      live.length >= 3 && new Set(live.map((r) => r.tier)).size >= 2 && live.every((r) => sameInk(r.words, r.want) && !sameInk(r.words, r.raw) && sameInk(r.band, r.raw)) && dead.length >= 1 && dead.every((r) => sameInk(r.words, r.want)), ink);
+      live.length >= 3 && new Set(live.map((r) => r.tier)).size >= 2 && gateOf(live.every((r) => sameInk(r.words, r.want) && !sameInk(r.words, r.raw) && sameInk(r.band, r.raw))) && dead.length >= 1 && verdictOf(dead.every((r) => sameInk(r.words, r.want))), ink);
   }
   await theme('dark');
   await bothThemes('A-desktop-12-summary-list');
@@ -758,17 +758,17 @@ await step('⑦ the summary chip and its list (every desktop, by time left)', as
   const g = await evalJs(ROWS(L));
   const order = await evalJs(`app.desktopManager.desktops.map((d) => d.id)`);
   const di = g.map((r) => order.indexOf(r.desk));
-  check('one press groups the rows by desktop, in the desktops\' order', (await evalJs(`document.querySelector('.warmth-list .wl-sort')?.getAttribute('aria-pressed')`)) === 'false' && di.every((x, i) => x >= 0 && (i === 0 || x >= di[i - 1])), di);
+  check('one press groups the rows by desktop, in the desktops\' order', (await evalJs(`document.querySelector('.warmth-list .wl-sort')?.getAttribute('aria-pressed')`)) === 'false' && verdictOf(di.every((x, i) => x >= 0 && (i === 0 || x >= di[i - 1]))), di);
   await click('.warmth-list .wl-sort');
   const other = (await evalJs(ROWS(L))).find((r) => kOfSid(r.sid) === 8);
   const ok8 = await click(`.warmth-list .overlap-switcher-item[data-win-id="${other?.id}"]`);
   await waitFor(`app.desktopManager.activeDesktopId === ${J(DESKS.d2)} && app.sessions.get(app.wm.activeWindowId)?.sessionId === ${J(SIDS[8])}`, 8000);
   const went = await evalJs(`({ desk: app.desktopManager.activeDesktopId, active: app.sessions.get(app.wm.activeWindowId)?.sessionId || null })`);
-  check('a row of a conversation on ANOTHER desktop switches there and raises it (the window list\'s own jump)', ok8 && went.desk === DESKS.d2 && went.active === SIDS[8], { went, want: [DESKS.d2, SIDS[8]] });
+  check('a row of a conversation on ANOTHER desktop switches there and raises it (the window list\'s own jump)', gateOf(ok8) && went.desk === DESKS.d2 && went.active === SIDS[8], { went, want: [DESKS.d2, SIDS[8]] });
   await evalJs(`app.desktopManager.switchTo(${J(DESKS.d1)})`); await sleep(600);
   await click('#taskbar-warmth'); await waitFor(`!!document.querySelector('.warmth-list .overlap-switcher-item')`, 3000);
   const a = await evalJs(ROWS(L)); await nextTick(1); const b = await evalJs(ROWS(L));
-  check('reopened, one tick later: the band lengths moved, the row ORDER did not', a.length && a.map((r) => r.id).join() === b.map((r) => r.id).join() && a.some((r, i) => r.frac !== b[i].frac), { a: a.map((r) => r.frac), b: b.map((r) => r.frac) });
+  check('reopened, one tick later: the band lengths moved, the row ORDER did not', gateOf(a.length) && a.map((r) => r.id).join() === b.map((r) => r.id).join() && verdictOf(a.some((r, i) => r.frac !== b[i].frac)), { a: a.map((r) => r.frac), b: b.map((r) => r.frac) });
   await evalJs(`document.querySelectorAll('[data-popover]').forEach((p) => p.remove()), 1`);
 });
 
@@ -781,7 +781,7 @@ await step('⑧ the window list: a band per row, «By time left»', async () => 
   const keyOf = (r) => { const ks = (r.tabs && r.tabs.length > 1 ? r.tabs : [r.sid]).map(kOfSid).filter((k) => k >= 0); if (!ks.length) return Infinity; const l = ks.map(leftOfK).filter((x) => x < 1e11); return l.length ? Math.min(...l) : Math.min(...ks.map(leftOfK)); };
   const lefts = rows.map(keyOf);
   check(`every active-desktop row carries a band and its id; «By time left» pressed; ascending (expired, then unknown last) — ${rows.length} rows`,
-    rows.length > 0 && rows.every((r) => r.band && r.id) && (await evalJs(`document.querySelector('.overlap-switcher .wl-sort')?.getAttribute('aria-pressed')`)) === 'true' && lefts.every((x, i) => i === 0 || x >= lefts[i - 1]), { lefts: lefts.map((x) => (x === Infinity ? 'unknown' : x > 1e11 ? 'expired' : Math.round(x / 1000))) });
+    rows.length > 0 && gateOf(rows.every((r) => r.band && r.id)) && (await evalJs(`document.querySelector('.overlap-switcher .wl-sort')?.getAttribute('aria-pressed')`)) === 'true' && verdictOf(lefts.every((x, i) => i === 0 || x >= lefts[i - 1])), { lefts: lefts.map((x) => (x === Infinity ? 'unknown' : x > 1e11 ? 'expired' : Math.round(x / 1000))) });
   await bothThemes('A-desktop-10-window-list');
   await click('.overlap-switcher .wl-sort');
   const plain = await evalJs(ROWS(S));
@@ -796,23 +796,23 @@ await step('⑧ the window list: a band per row, «By time left»', async () => 
   const long = (rows) => rows.filter((r) => r.title && r.title.length >= 40 && r.title.includes('/') && kOfSid(r.sid) >= 0 && WANT[kOfSid(r.sid)] !== 'unknown');
   const e1 = long(await evalJs(EDGE));
   check(`H1: every row whose title is a «name — /path» (≥ 40 characters; ${e1.length} rows, ${e1.filter((r) => r.other).length} under «Other desktops») keeps its words whole inside the row — the label ends in an ellipsis`,
-    e1.length >= 6 && e1.some((r) => r.other) && e1.every((r) => r.words && r.wordsW > 0 && r.past <= 0.5 && r.cut), e1.map((r) => [r.title.length, r.words, r.past, r.cut]));
+    e1.length >= 6 && gateOf(e1.some((r) => r.other)) && verdictOf(e1.every((r) => r.words && r.wordsW > 0 && r.past <= 0.5 && r.cut)), e1.map((r) => [r.title.length, r.words, r.past, r.cut]));
   await bothThemes('A-desktop-10-window-list-others');
   await evalJs(`(() => { const s = document.createElement('style'); s.id = '__red'; s.textContent = '.overlap-switcher-item > .wl-name { flex: 0 0 auto !important; min-width: auto !important; }'; document.head.appendChild(s); return 1; })()`);
   const e2 = long(await evalJs(EDGE));
   await evalJs(`document.getElementById('__red').remove(), 1`);
-  check('RED: the shrink rule undone by a planted style ⇒ the probe sees the words pushed past the row\'s edge', e2.length > 0 && e2.some((r) => r.past > 0.5), e2.map((r) => r.past));
+  check('RED: the shrink rule undone by a planted style ⇒ the probe sees the words pushed past the row\'s edge', e2.length > 0 && verdictOf(e2.some((r) => r.past > 0.5)), e2.map((r) => r.past));
   // r2 (H2): an «Other desktops» row of a tab GROUP = the group's worst, never its host's alone (r1 painted the host)
   const grp = await evalJs(`[${J(SIDS[9])}, ${J(SIDS[11])}].map((sid) => { const r = [...document.querySelectorAll('.overlap-switcher-other')].find((x) => (app.sessions.get(x.dataset.winId)?.sessionId || app._warmth?.held.get(x.dataset.winId)?.id) === sid); if (!r) return { sid, row: false };
     const id = r.dataset.winId, built = app.wm.windows.has(id), tabs = built ? (app.wm.windows.get(id)._tabChain?.tabs || []) : (app._warmth.heldChains.get(id) || []);
     return { row: true, built, tabs: tabs.length, tier: r.querySelector(':scope > .wl-band')?.getAttribute('data-warmth-tier') || null, words: r.querySelector(':scope > .wl-left')?.textContent || '', own: app._warmth.byId.get(sid)?.tier || null }; })`);
   check('H2: an «Other desktops» row of a tab GROUP = its group\'s worst — d2\'s group BUILT: late, d3\'s HELD: mid (each host alone is fresh: what r1 painted)',
-    grp[0]?.row && grp[0].built && grp[0].tabs === 2 && grp[0].tier === 'late' && grp[0].own === 'fresh' && grp[1]?.row && !grp[1].built && grp[1].tabs === 2 && grp[1].tier === 'mid' && grp[1].own === 'fresh', grp);
+    gateOf(grp[0]?.row) && gateOf(grp[0].built) && grp[0].tabs === 2 && grp[0].tier === 'late' && grp[0].own === 'fresh' && gateOf(grp[1]?.row) && !grp[1].built && grp[1].tabs === 2 && grp[1].tier === 'mid' && grp[1].own === 'fresh', grp);
   const pq = await evalJs(PREVIEWS);
   const sqOf = (k) => (pq.previews || []).flatMap((x) => x.squares).find((q) => q.sid === SIDS[k]);
   const drawn = (ks) => ks.map(sqOf).filter(Boolean);
   check('…and the groups\' squares take the group\'s worst: d2 (built) late, d3 (held) mid — the host\'s square too (its own tier fresh)',
-    !!sqOf(9) && !!sqOf(11) && drawn([8, 9]).every((q) => q.tier === 'late') && drawn([10, 11]).every((q) => q.tier === 'mid'), [8, 9, 10, 11].map((k) => sqOf(k)?.tier || 'no square'));
+    !!sqOf(9) && !!sqOf(11) && gateOf(drawn([8, 9]).every((q) => q.tier === 'late')) && verdictOf(drawn([10, 11]).every((q) => q.tier === 'mid')), [8, 9, 10, 11].map((k) => sqOf(k)?.tier || 'no square'));
   await click('.overlap-switcher-group'); // folded again, as the list opens by default
   await evalJs(`document.querySelectorAll('[data-popover]').forEach((p) => p.remove()), 1`);
 });
@@ -847,14 +847,14 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
   console.log(`    the switcher's boundary (the narrowest viewport judged 'full', 4 desktops): ON ${J(on)} · OFF ${J(off)}`);
   console.log(`    the «+N» chip's forms (px, the natural box): plain «+88» ${forms.plain88}; ${forms.forms.map((f) => `${f.lang} «${f.s}» ${f.w}`).join('; ')} — the longest ${longest}; the constant box OVERFLOW_CHIP_WARM_BOX_PX = ${TF.OVERFLOW_CHIP_WARM_BOX_PX}; its room OVERFLOW_CHIP_WARM_PX = ${TF.OVERFLOW_CHIP_WARM_PX}`);
   check(`H4: at the switcher's boundary the strip keeps ≥ STRIP_MIN_TILES (${TF.STRIP_MIN_TILES}) whole tiles — warmth ON (${on.w} px: ${on.whole} whole, the chip «${on.chip && on.chip.text}» ${on.chip && on.chip.w} px) and OFF (${off.w} px: ${off.whole} whole, «${off.chip && off.chip.text}»)`,
-    extra.length === 1 && on.w && off.w && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && !!on.chip && !!off.chip, { on, off, extra });
+    extra.length === 1 && gateOf(on.w) && gateOf(off.w) && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && !!on.chip && !!off.chip, { on, off, extra });
   check(`…every warm form fits the constant box whole (the longest ${longest} ≤ OVERFLOW_CHIP_WARM_BOX_PX ${TF.OVERFLOW_CHIP_WARM_BOX_PX} ≤ it + 2), and the room the verdict budgets is that box + its gaps (OVERFLOW_CHIP_WARM_PX ${TF.OVERFLOW_CHIP_WARM_PX})`,
     longest <= TF.OVERFLOW_CHIP_WARM_BOX_PX && TF.OVERFLOW_CHIP_WARM_BOX_PX <= longest + 2 && TF.OVERFLOW_CHIP_WARM_PX >= TF.OVERFLOW_CHIP_WARM_BOX_PX + 3 + (TF.STRIP_MIN_TILES - 1) * 2, forms);
   // r3: THE WORST CASE IS THE CASE — at the ON boundary the chip's box is the constant box, whatever it says there; RED: a
   // chip planted wider than the budget ⇒ the probe counts fewer whole tiles
   if (on.w) {
     check(`…at the ON boundary the shown chip's box IS the constant box (${on.chip && on.chip.w} px = ${TF.OVERFLOW_CHIP_WARM_BOX_PX}) and the strip keeps ${on.whole} ≥ ${TF.STRIP_MIN_TILES} whole tiles (the strip ${on.strip} px)`,
-      !!on.chip && on.chip.box && Math.abs(on.chip.w - TF.OVERFLOW_CHIP_WARM_BOX_PX) <= 0.5 && on.whole >= TF.STRIP_MIN_TILES, on);
+      !!on.chip && gateOf(on.chip.box) && Math.abs(on.chip.w - TF.OVERFLOW_CHIP_WARM_BOX_PX) <= 0.5 && on.whole >= TF.STRIP_MIN_TILES, on);
     await device(on.w, 700); await sleep(500);
     await evalJs(`(() => { const s = document.createElement('style'); s.id = '__red'; s.textContent = '#taskbar-overflow { min-width: ${TF.OVERFLOW_CHIP_WARM_PX + 120}px !important; }'; document.head.appendChild(s); return 1; })()`);
     await sleep(500); const r = await evalJs(FIT);
@@ -886,11 +886,11 @@ await step('⑪ scale and cost: the pass time, and no timer from a warmth functi
   const hits = await evalJs(`(window.__wc.on = false, window.__wc.hits.slice())`);
   const per = Math.max(...ms) / Math.max(1, state.known);
   console.log(`    the heaviest state ${J(state)}: passMs over 3 ticks = ${ms.map((x) => x.toFixed(2)).join(' / ')} ms — EXTRAPOLATION ×150 conversations (linear in the conversations, userW's scale): ≈ ${(per * 150).toFixed(1)} ms per 5 s tick`);
-  check(`the heaviest state (14 conversations, 8 desktops, a group, the compact form): one pass ≤ 50 ms on every tick (${ms.map((x) => x.toFixed(2)).join(' / ')} ms)`, state.desks === 8 && state.group && state.compact && ms.length === 3 && ms.every((x) => typeof x === 'number' && x < 50), { state, ms });
+  check(`the heaviest state (14 conversations, 8 desktops, a group, the compact form): one pass ≤ 50 ms on every tick (${ms.map((x) => x.toFixed(2)).join(' / ')} ms)`, state.desks === 8 && gateOf(state.group) && gateOf(state.compact) && ms.length === 3 && verdictOf(ms.every((x) => typeof x === 'number' && x < 50)), { state, ms });
   check('over three ticks (no popover open) NO setTimeout / setInterval / requestAnimationFrame came from a warmth-chrome.js function', hits.length === 0, hits);
   await evalJs(`(window.__wc.hits = [], window.__wc.on = true, 1)`);
   const c = await evalJs(`(() => { function noteWarmthAnswerControl() { requestAnimationFrame(() => {}); } noteWarmthAnswerControl(); window.__wc.on = false; return window.__wc.hits.slice(); })()`);
-  check('…CONTROL: a planted noteWarmthAnswerControl() calling requestAnimationFrame once raises the census by exactly 1 (subtracted: 0)', c.length === 1 && /noteWarmthAnswerControl/.test(c[0]) && c.length - 1 === 0, c);
+  check('…CONTROL: a planted noteWarmthAnswerControl() calling requestAnimationFrame once raises the census by exactly 1 (subtracted: 0)', c.length === 1 && gateOf(/noteWarmthAnswerControl/.test(c[0])) && c.length - 1 === 0, c);
   await bothThemes('A-desktop-12-heavy');
 });
 
@@ -906,7 +906,7 @@ await step('⑩ off and on, live (the hub\'s answer is the switch)', async () =>
   await sleep(1300); await nextTick(1);
   check('OFF (app.settings.set, no reload): zero marks — no tier, band, ring, phone band, summary chip or warmth title left', (await evalJs(MARKS)) === 0, await evalJs(`[...document.querySelectorAll('[data-warmth-tier], .tab-warmth, .warmth-ring, #taskbar-warmth, [data-warmth-tip]')].slice(0, 5).map((e) => e.className?.baseVal ?? e.className)`));
   const chip = await evalJs(`(() => { const c = document.getElementById('taskbar-overflow'); return c ? { text: c.textContent, n: (c._hiddenIds || []).length, dot: !!c.querySelector('.wsum-dot'), shown: !c.hidden, box: c.classList.contains('warmth-box') } : null; })()`);
-  check(`…the «+N» chip reads exactly «+N» («${chip && chip.text}») in its own box again (no constant box)`, chip && chip.text === '+' + chip.n && !chip.dot && !chip.box, chip);
+  check(`…the «+N» chip reads exactly «+N» («${chip && chip.text}») in its own box again (no constant box)`, gateOf(chip) && chip.text === '+' + chip.n && !chip.dot && !chip.box, chip);
   await evalJs(`(window.__offMut.on = true, 1)`);
   await nextTick(2);
   const mut = await evalJs(`(window.__offMut.on = false, window.__offMut)`);
@@ -925,12 +925,12 @@ await step('⑩ off and on, live (the hub\'s answer is the switch)', async () =>
   await evalJs(`(app._settingsUI.open({ category: 'Window' }), 1)`);
   await waitFor(`[...document.querySelectorAll('.settings-window *')].some((e) => e.childElementCount === 0 && e.textContent.trim() === 'Prompt-cache warmth on conversation boxes')`, 5000);
   const row = await evalJs(`(() => { const lab = [...document.querySelectorAll('.settings-window *')].find((e) => e.childElementCount === 0 && e.textContent.trim() === 'Prompt-cache warmth on conversation boxes'); if (!lab) return null; let r = lab; for (let i = 0; i < 5 && r && !r.querySelector('input[type=checkbox]'); i++) r = r.parentElement; const cb = r?.querySelector('input[type=checkbox]'); lab.scrollIntoView({ block: 'center' }); return { found: true, on: cb ? cb.checked : null, desc: /no request and no timer/.test(r?.textContent || '') }; })()`);
-  check('⑫ Settings → Window draws the row «Prompt-cache warmth on conversation boxes» with its description; it reads OFF now', row && row.found && row.on === false && row.desc, row);
+  check('⑫ Settings → Window draws the row «Prompt-cache warmth on conversation boxes» with its description; it reads OFF now', gateOf(row) && gateOf(row.found) && row.on === false && verdictOf(row.desc), row);
   await bothThemes('A-desktop-11-settings-row');
   await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'settings') app.wm.closeWindow(w.id); return 1; })()`);
   await evalJs(`app.settings.set('desktop.cacheWarmth', true), 1`);
   await sleep(1300); await nextTick(1);
-  check('ON again: the marks return on the next tick, with no reload', (await evalJs(MARKS)) > 0 && (await evalJs(`!!document.getElementById('taskbar-warmth')`)), await evalJs(MARKS));
+  check('ON again: the marks return on the next tick, with no reload', (await evalJs(MARKS)) > 0 && (verdictOf(await evalJs(`!!document.getElementById('taskbar-warmth')`))), await evalJs(MARKS));
 });
 
 await step('⑫ the theme editor\'s «Cache warmth» rows (opened through the product\'s door: ⚙ → Appearance → ✎)', async () => {
@@ -943,7 +943,7 @@ await step('⑫ the theme editor\'s «Cache warmth» rows (opened through the pr
   const opened = await waitFor(`!!document.querySelector('.theme-editor-name')`, 5000);
   const rows = opened ? await evalJs(`[...document.querySelectorAll('*')].filter((e) => e.childElementCount === 0 && /^--warmth-(fresh|mid|late|critical|expired)$|^(Fresh|Mid|Late|Critical|Expired)/.test(e.textContent.trim()) && e.closest('.theme-editor, [class*=theme-editor]')).map((e) => e.textContent.trim()).slice(0, 12)`) : [];
   const group = opened ? await evalJs(`[...document.querySelectorAll('*')].some((e) => e.childElementCount === 0 && e.textContent.trim() === 'Cache warmth')`) : false;
-  check('the theme editor opens through ⚙ → Appearance → ✎, and lists the «Cache warmth» group', opened && group, { head, opened, group, rows });
+  check('the theme editor opens through ⚙ → Appearance → ✎, and lists the «Cache warmth» group', gateOf(opened) && verdictOf(group), { head, opened, group, rows });
   const seeded = opened ? await evalJs(`(() => { const g = [...document.querySelectorAll('.theme-editor-group-label')].find((l) => l.textContent.trim() === 'Cache warmth'); return g ? [...g.parentElement.querySelectorAll('.theme-editor-row')].map((r) => r.querySelector('.theme-editor-text')?.value ?? null) : null; })()`) : null;
   check('r5: its five rows start as the raw-hue derivations (var(--green) · var(--blue, #3b82f6) · var(--yellow) · var(--red) · the dim text at 45 %)',
     JSON.stringify(seeded) === JSON.stringify(['var(--green)', 'var(--blue, #3b82f6)', 'var(--yellow)', 'var(--red)', 'color-mix(in srgb, var(--text-dim) 45%, transparent)']), seeded);
@@ -976,15 +976,15 @@ await step('⑬ the reasoned unknown and the provenance, through the REAL road (
   await attachS(); await nextTick(2);
   const raw = RW.lastRaw && RW.lastRaw.warmth;
   check('⑬ THE ROAD: the hub\'s own answer sends the compacted conversation as a REASONED unknown (`unknown: compacted`, no instant), the never-asked one as `no-request`, and the cache-stating one with its provenance (`ttlSource: record`, created 17000) — RED on 749aa7bf9',
-    !!raw && raw[X] && raw[X].unknown === 'compacted' && raw[X].lastRequestAt === null && raw[Y] && raw[Y].unknown === 'no-request' && raw[Z] && raw[Z].ttlSource === 'record' && raw[Z].cacheObserved === 'created' && raw[Z].cacheCreatedTokens === 17000,
+    !!raw && gateOf(raw[X]) && raw[X].unknown === 'compacted' && raw[X].lastRequestAt === null && gateOf(raw[Y]) && raw[Y].unknown === 'no-request' && gateOf(raw[Z]) && raw[Z].ttlSource === 'record' && raw[Z].cacheObserved === 'created' && raw[Z].cacheCreatedTokens === 17000,
     raw && { X: raw[X], Y: raw[Y], Z: raw[Z] });
   const e = { X: await evalJs(barS(X)), Y: await evalJs(barS(Y)), Z: await evalJs(barS(Z)), R: await evalJs(barS(R)) };
   check('⑬ THE PIN (en): the reasoned unknowns draw NOTHING — no band, no tier, no ring — and the bar\'s hover says why: «Cache reset — the conversation was compacted», «Cache: unknown — no request yet»',
-    e.X && !e.X.band && !e.X.tier && !e.X.ring && e.X.title === 'Cache reset — the conversation was compacted' && e.X.tip && e.Y && !e.Y.band && !e.Y.tier && !e.Y.ring && e.Y.title === 'Cache: unknown — no request yet', e);
+    gateOf(e.X) && !e.X.band && !e.X.tier && !e.X.ring && e.X.title === 'Cache reset — the conversation was compacted' && gateOf(e.X.tip) && gateOf(e.Y) && !e.Y.band && !e.Y.tier && !e.Y.ring && e.Y.title === 'Cache: unknown — no request yet', e);
   check('⑬ THE PIN (en): a response that stated its cache is a projection that says so — «Cache: about 60 min left — projected from the 1-hour cache of the last request (wrote 17k tokens at HH:MM)», the band drawn',
-    e.Z && e.Z.band && e.Z.tier === 'fresh' && /^Cache: about (59|60) min left — projected from the 1-hour cache of the last request \(wrote 17k tokens at \d\d:\d\d\)$/.test(e.Z.title || ''), e.Z);
+    gateOf(e.Z) && gateOf(e.Z.band) && e.Z.tier === 'fresh' && verdictOf(/^Cache: about (59|60) min left — projected from the 1-hour cache of the last request \(wrote 17k tokens at \d\d:\d\d\)$/.test(e.Z.title || '')), e.Z);
   check('⑬ THE PIN (round 2, C — words that are true): a RESUMED conversation that ran no turn here is sent `unseen` and says «Cache: unknown — the time of its last request is not known» — never «no request yet» (only the conversation this hub started says that); nothing drawn',
-    !!raw && raw[R] && raw[R].unknown === 'unseen' && e.R && !e.R.band && !e.R.tier && !e.R.ring && e.R.title === 'Cache: unknown — the time of its last request is not known' && e.Y && e.Y.title === 'Cache: unknown — no request yet', { raw: raw && raw[R], R: e.R });
+    !!raw && gateOf(raw[R]) && raw[R].unknown === 'unseen' && gateOf(e.R) && !e.R.band && !e.R.tier && !e.R.ring && e.R.title === 'Cache: unknown — the time of its last request is not known' && gateOf(e.Y) && e.Y.title === 'Cache: unknown — no request yet', { raw: raw && raw[R], R: e.R });
   const chip = await evalJs(`(() => { const c = document.getElementById('taskbar-warmth'); return c ? c.textContent.trim() : null; })()`);
   const rowsS = await evalJs(`(() => { const ids = ${J([X, Y])}.map((s) => { const w = ${'[...app.wm.windows.values()]'}.find((x) => app.sessions.get(x.id)?.sessionId === s); return w && w.id; }); return ids.filter(Boolean); })()`);
   await shot('A-desktop-13-reasoned-unknown-dark');
@@ -993,13 +993,13 @@ await step('⑬ the reasoned unknown and the provenance, through the REAL road (
     const { identifier } = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}` });
     await load(1280, 800); await attachS(); await nextTick(1);
     const b = { X: await evalJs(barS(X)), Y: await evalJs(barS(Y)), Z: await evalJs(barS(Z)), R: await evalJs(barS(R)) };
-    check(`⑬ (${lang}, after a reload): «${wantX}», «${wantY}», the resumed one «${wantR}» — nothing drawn; the provenance sentence translated`, b.X && !b.X.band && b.X.title === wantX && b.Y && !b.Y.band && b.Y.title === wantY && b.Z && b.Z.band && reZ.test(b.Z.title || '') && b.R && !b.R.band && b.R.title === wantR, b);
+    check(`⑬ (${lang}, after a reload): «${wantX}», «${wantY}», the resumed one «${wantR}» — nothing drawn; the provenance sentence translated`, gateOf(b.X) && !b.X.band && b.X.title === wantX && gateOf(b.Y) && !b.Y.band && b.Y.title === wantY && gateOf(b.Z) && gateOf(b.Z.band) && gateOf(reZ.test(b.Z.title || '')) && gateOf(b.R) && !b.R.band && b.R.title === wantR, b);
     if (lang === 'ja') {
       // the new context's first request ends the reset — through the same real road
       await say(X, 'Go on from the summary #cache'); await nextTick(2);
       const a = await evalJs(barS(X)), rawA = RW.lastRaw && RW.lastRaw.warmth && RW.lastRaw.warmth[X];
       check('⑬ THE PIN (ja): the next request after the compaction ⇒ the band is back (fresh), the hover the projection from its record — the reset is over',
-        a && a.band && a.tier === 'fresh' && /^キャッシュ残り約 (59|60) 分 — 前回リクエストの1 時間キャッシュから推定（\d\d:\d\d に 17k トークン書き込み）$/.test(a.title || '') && rawA && !rawA.unknown && rawA.lastRequestAt > 0, { a, rawA });
+        gateOf(a) && gateOf(a.band) && a.tier === 'fresh' && gateOf(/^キャッシュ残り約 (59|60) 分 — 前回リクエストの1 時間キャッシュから推定（\d\d:\d\d に 17k トークン書き込み）$/.test(a.title || '')) && gateOf(rawA) && !rawA.unknown && rawA.lastRequestAt > 0, { a, rawA });
     }
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier });
   }
@@ -1010,15 +1010,15 @@ await step('⑬ the reasoned unknown and the provenance, through the REAL road (
 await step('⑨ the phone (390 × 844, touch): session rows and switcher rows', async () => {
   plan(PLAN_K);
   await load(390, 844, true);
-  check('the phone class', await evalJs('app.isMobile'));
+  check('the phone class', verdictOf(await evalJs('app.isMobile')));
   await nextTick(2);
   await evalJs(`(app.sidebar.toggle?.(true), 1)`); await sleep(600);
   const cards = await evalJs(`[...document.querySelectorAll('.session-item-card')].filter((c) => c._webuiId && c.offsetParent).map((c) => { const b = c.querySelector(':scope > .sess-warmth'); const l = c.querySelector('.sess-warmth-left');
     return { sid: c._webuiId, band: !!b && parseFloat(getComputedStyle(b).width) > 0.5, w: b ? parseFloat(getComputedStyle(b).width) : 0, cw: c.clientWidth, frac: b ? parseFloat(b.style.getPropertyValue('--warmth-frac')) : null, tier: b?.getAttribute('data-warmth-tier') || null, words: l?.textContent || null, first: c.firstElementChild === b }; })`);
   const live = cards.filter((c) => c.band), exp = cards.find((c) => c.sid === SIDS[4]);
   check(`phone session rows: a live row carries the band (its first child, width ∝ frac ±2 px) and «N min left» (${live.length} live of ${cards.length} shown)`,
-    live.length >= 3 && live.every((c) => c.first && near(c.w, c.cw * c.frac) && /^\d+ min left$/.test(c.words || '')), cards.slice(0, 6));
-  check('…an expired row says «Expired» with no band; the unknown row neither', exp && !exp.band && exp.words === 'Expired' && (() => { const u = cards.find((c) => c.sid === SIDS[7]); return !u || (!u.band && !u.words); })(), { exp, unk: cards.find((c) => c.sid === SIDS[7]) });
+    live.length >= 3 && verdictOf(live.every((c) => c.first && near(c.w, c.cw * c.frac) && /^\d+ min left$/.test(c.words || ''))), cards.slice(0, 6));
+  check('…an expired row says «Expired» with no band; the unknown row neither', gateOf(exp) && !exp.band && exp.words === 'Expired' && verdictOf((() => { const u = cards.find((c) => c.sid === SIDS[7]); return !u || (!u.band && !u.words); })()), { exp, unk: cards.find((c) => c.sid === SIDS[7]) });
   await bothThemes('A-phone-6-sessions');
   await evalJs(`(app.sidebar.toggle?.(false), 1)`); await sleep(400);
   await evalJs(`(app._mobileNav._showWindowSwitcher(), 1)`);
@@ -1029,11 +1029,11 @@ await step('⑨ the phone (390 × 844, touch): session rows and switcher rows', 
   const badRows = sw.filter((r) => { const k = kOfSid(r.sid); if (k < 0) return false; const want = wantOf(k);
     return want === 'unknown' ? (r.band || !!r.words) : want === 'expired' ? (r.band || r.words !== 'Expired') : !(r.band && /^\d+ min left$/.test(r.words || '')); });
   check(`the window switcher: one row per tab (the group's four are listed), each live row its band + words, an expired row «Expired» and no band, the unknown one neither`,
-    [0, 2, 3, 4].every((k) => swk.includes(k)) && badRows.length === 0, { badRows, swk });
+    gateOf([0, 2, 3, 4].every((k) => swk.includes(k))) && badRows.length === 0, { badRows, swk });
   await bothThemes('A-phone-6-switcher');
 });
 
 console.log(`\n  shots (${SHOT_LIST.length}): ${SHOT_LIST.map((f) => path.basename(f)).join(', ')}`);
 check('no page error thrown during the walk', pageErrors.length === 0, pageErrors.slice(0, 4));
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

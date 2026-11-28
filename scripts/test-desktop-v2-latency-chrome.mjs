@@ -37,7 +37,7 @@ const BUNDLE = path.join(REPO, 'data/bin/vibespace-agentd.js');
 const NOVNC = path.join(REPO, 'public/novnc.js');
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 for (const f of [BUNDLE, NOVNC]) if (!fs.existsSync(f)) { ok(false, `${path.relative(REPO, f)} exists (npm run build first)`); process.exit(1); }
 
@@ -71,7 +71,7 @@ fs.writeFileSync(path.join(home, '.local/bin/powershell.exe'), FAKE_PS); fs.chmo
 const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const FACTS_PLAT = /(readDisplayFacts\(\{\s*)platform: process\.platform,/;
-ok(HELLO.test(bundleText) && FACTS_PLAT.test(bundleText) && /"display-facts"/.test(bundleText), 'the bundle carries the hello-ack platform, the display-facts op and its capability (the copy patches exactly those)');
+ok(gateOf(HELLO.test(bundleText)) && gateOf(FACTS_PLAT.test(bundleText)) && verdictOf(/"display-facts"/.test(bundleText)), 'the bundle carries the hello-ack platform, the display-facts op and its capability (the copy patches exactly those)');
 fs.mkdirSync(path.join(root, 'bundle'), { recursive: true });
 fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, (all, pre) => `${pre}platform: "win32",`).replace(FACTS_PLAT, (all, pre) => `${pre}platform: "win32",`));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
@@ -80,7 +80,7 @@ const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: 
 started.push(home);
 const dm = new DeviceManager({ dataDir, bundlePath: path.join(root, 'bundle', 'vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
 try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; }
-ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includes('display-facts'), 'a real agent, Windows-shaped, says display-facts');
+ok(dm.status().info.platform === 'win32' && verdictOf(dm.status().info.capabilities.includes('display-facts')), 'a real agent, Windows-shaped, says display-facts');
 
 // ── the machine's VNC server: a stub RFB 3.8 with the VNC-password sign-in, 2560×800 = two 1280×800 screens ──────────
 const FW = 2560, FH = 800, HALF = 1280;
@@ -284,7 +284,7 @@ console.log('① – ⑥ desk 1280 px (127.0.0.1 — a secure context)');
   const up = await open(p);
   await sleep(700);
   const e0 = log(0, 'enc');
-  ok(up && e0.length === 1 && e0[0].q === 8 && e0[0].c === 2, '① the first rung (8 / 2) rides noVNC\'s FIRST SetEncodings — nothing extra on connect', vnc.seen.log.slice(0, 6));
+  ok(gateOf(up) && e0.length === 1 && e0[0].q === 8 && e0[0].c === 2, '① the first rung (8 / 2) rides noVNC\'s FIRST SetEncodings — nothing extra on connect', vnc.seen.log.slice(0, 6));
   const s1 = await strip(p);
   ok(JSON.stringify(s1) === JSON.stringify(['WIN-DESK1 ▾', '1 · 2 · 全部', '⤢ 全屏', '⌨ 捕获快捷键', '已连接 · N ms · N fps', '清晰']), '① the strip: [WIN-DESK1 ▾][1 · 2 · 全部][⤢ 全屏][⌨ 捕获快捷键][已连接 · N ms · F fps][清晰]', s1);
 
@@ -317,12 +317,12 @@ console.log('① – ⑥ desk 1280 px (127.0.0.1 — a secure context)');
   vnc.st.animate = false;
   await sleep(2000);
   const e4 = ladderOf(m), r4 = await rung(p), slowTitle = await p.ev(`document.querySelector('${WIN} .desktop-strip-slow').title`);
-  ok(slowSeen && r4 === '均衡' && e4[e4.length - 1] === '6/4' && /实测 \d+ kbps —— 低于 2000 kbps/.test(slowTitle), '④ a slow link (the stub paced to 600 kbps) ⇒ 慢链路 (its title says the measure) and the still rung 均衡 6 / 4', { e4, r4, slowTitle });
+  ok(gateOf(slowSeen) && r4 === '均衡' && e4[e4.length - 1] === '6/4' && verdictOf(/实测 \d+ kbps —— 低于 2000 kbps/.test(slowTitle)), '④ a slow link (the stub paced to 600 kbps) ⇒ 慢链路 (its title says the measure) and the still rung 均衡 6 / 4', { e4, r4, slowTitle });
   await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
   await sleep(1200);
   const cmp = await p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-compare > div')].map((d) => d.textContent)`);
   // the .305 integration: lane stream-cursor added the pointer line (指针是你的) to the comparison row when the machine paints none
-  ok((cmp.length === 2 || (cmp.length === 3 && /指针是你的|Pointer: yours/.test(cmp[2]))) && /^本次：浏览器 ⇄ hub \d+ ms · hub ⇄ 机器 \d+ ms · 更新往返 (\d+|—) ms · \d+ fps · \d+ kbps$/.test(cmp[0]) && /42\.0 ms.*0\.70 ms/.test(cmp[1]), '④ the status chip opens the comparison row: today\'s numbers · the recorded reference 42.0 → 0.70 ms', cmp);
+  ok((cmp.length === 2 || (cmp.length === 3 && gateOf(/指针是你的|Pointer: yours/.test(cmp[2])))) && gateOf(/^本次：浏览器 ⇄ hub \d+ ms · hub ⇄ 机器 \d+ ms · 更新往返 (\d+|—) ms · \d+ fps · \d+ kbps$/.test(cmp[0])) && verdictOf(/42\.0 ms.*0\.70 ms/.test(cmp[1])), '④ the status chip opens the comparison row: today\'s numbers · the recorded reference 42.0 → 0.70 ms', cmp);
   await p.shot('ladder.png', WIN);
   vnc.st.kbps = 0;
   await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
@@ -340,23 +340,23 @@ console.log('① – ⑥ desk 1280 px (127.0.0.1 — a secure context)');
   const full = await p.until(`document.fullscreenElement === document.querySelector('${WIN} .desktop-machine-content')`, 5000);
   await sleep(400);
   const l1 = await p.ev('window.__locks'), kb = await keysBtn(p);
-  ok(full && JSON.stringify(l1) === '["lock:0","held"]' && kb.pressed === 'true' && kb.locked && /按住 Esc 2 秒退出全屏/.test(kb.title), '⑥ ⤢ 全屏: the window\'s CONTENT is full screen; navigator.keyboard.lock() (all keys) asked once and held; ⌨ says what it captures and "hold Esc 2 s"', { full, l1, kb });
+  ok(gateOf(full) && JSON.stringify(l1) === '["lock:0","held"]' && kb.pressed === 'true' && gateOf(kb.locked) && verdictOf(/按住 Esc 2 秒退出全屏/.test(kb.title)), '⑥ ⤢ 全屏: the window\'s CONTENT is full screen; navigator.keyboard.lock() (all keys) asked once and held; ⌨ says what it captures and "hold Esc 2 s"', { full, l1, kb });
   await p.shot('fullscreen.png');
   m = vnc.seen.log.length;
   await p.key('Escape', 'Escape', 27);
   await sleep(300);
   const esc = log(m, 'key').map((x) => `${x.down ? 'd' : 'u'}:${x.sym.toString(16)}`);
-  ok(JSON.stringify(esc) === '["d:ff1b","u:ff1b"]' && await p.ev('!!document.fullscreenElement'), '⑥ Esc reaches the machine as a key (ff1b down / up) and the page stays full screen', esc);
+  ok(JSON.stringify(esc) === '["d:ff1b","u:ff1b"]' && verdictOf(await p.ev('!!document.fullscreenElement')), '⑥ Esc reaches the machine as a key (ff1b down / up) and the page stays full screen', esc);
   await p.ev(`document.querySelector('${WIN} .desktop-strip-keys').click()`); await sleep(200);
   const off = await keysBtn(p);
   await p.ev(`document.querySelector('${WIN} .desktop-strip-keys').click()`); await sleep(300);
   const l2 = (await p.ev('window.__locks')).slice(2);
-  ok(JSON.stringify(l2) === '["unlock","lock:0","held"]' && off.pressed === 'false' && /快捷键留在这台电脑上/.test(off.title), '⑥ ⌨ off ⇒ unlock (its title says the shortcuts stay here); on ⇒ lock again', { l2, off });
+  ok(JSON.stringify(l2) === '["unlock","lock:0","held"]' && off.pressed === 'false' && verdictOf(/快捷键留在这台电脑上/.test(off.title)), '⑥ ⌨ off ⇒ unlock (its title says the shortcuts stay here); on ⇒ lock again', { l2, off });
   await p.click(...(await fullBtnAt(p)));
   const left = await p.until('!document.fullscreenElement', 5000);
   await sleep(200);
   const l3 = (await p.ev('window.__locks')).slice(5);
-  ok(left && JSON.stringify(l3) === '["unlock"]', '⑥ leaving full screen ⇒ unlock', { left, l3 });
+  ok(gateOf(left) && JSON.stringify(l3) === '["unlock"]', '⑥ leaving full screen ⇒ unlock', { left, l3 });
   p.close();
 }
 console.log('⑦ an http page (this box\'s LAN address — not a secure context)');
@@ -369,10 +369,10 @@ else {
   await p.ev(`document.querySelector('${WIN} .desktop-strip-keys').click()`);
   await sleep(300);
   const said = await p.ev(`document.body.innerText.includes('捕获快捷键要在 https 地址打开 VibeSpace —— 这一页是 http')`);
-  ok(up && ctx.secure === false && ctx.kbd === 'undefined' && kb.pressed === 'false' && /https/.test(kb.title) && said && (await keysBtn(p)).pressed === 'false', `⑦ http://${IP}: not a secure context, no navigator.keyboard; ⌨ reads off, its press says the https words, nothing locks`, { up, ctx, kb, said });
+  ok(gateOf(up) && ctx.secure === false && ctx.kbd === 'undefined' && kb.pressed === 'false' && gateOf(/https/.test(kb.title)) && gateOf(said) && (await keysBtn(p)).pressed === 'false', `⑦ http://${IP}: not a secure context, no navigator.keyboard; ⌨ reads off, its press says the https words, nothing locks`, { up, ctx, kb, said });
   await p.click(...(await fullBtnAt(p)));
   const full = await p.until(`document.fullscreenElement === document.querySelector('${WIN} .desktop-machine-content')`, 5000);
-  ok(full, '⑦ full screen still works on http (without the lock)');
+  ok(verdictOf(full), '⑦ full screen still works on http (without the lock)');
   p.close();
 }
 console.log('⑧ phone 390');
@@ -385,9 +385,9 @@ console.log('⑧ phone 390');
   await connected(p);
   await sleep(600);
   const row = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); const kids = [...s.children].filter((e) => !e.hidden).map((e) => e.getBoundingClientRect()); return { n: kids.length, h: Math.round(s.getBoundingClientRect().height), oneRow: Math.max(...kids.map((r) => r.top)) < Math.min(...kids.map((r) => r.bottom)), scrolls: s.scrollWidth > s.clientWidth }; })()`);
-  ok(row.n === 6 && row.oneRow && row.h <= 34, '⑧ the phone\'s strip with ⌨ and the rung is still ONE row (it scrolls sideways)', row);
+  ok(row.n === 6 && gateOf(row.oneRow) && row.h <= 34, '⑧ the phone\'s strip with ⌨ and the rung is still ONE row (it scrolls sideways)', row);
   await p.shot('phone.png');
   p.close();
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

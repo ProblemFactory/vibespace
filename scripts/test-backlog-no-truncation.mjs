@@ -30,12 +30,12 @@ const { TaskGroupManager } = require('../src/task-groups.js');
 const { setupAgentRoutes } = require('../src/agent-routes.js');
 
 let failed = 0, passed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
 // a leg that judges prints every fact it judges — on a pass too (B-6edc's legs)
-const checkP = (name, cond, facts) => { check(name, cond, facts); if (cond) console.log(`    ${facts}`); };
+const checkP = (name, cond, facts) => { check(name, verdictOf(cond), facts); if (cond) console.log(`    ${facts}`); };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-backlog-notrunc-'));
 // lane cli-one-text-arg: a CLI copy outside the checkout reads its ONE-text rule beside it (a host's layout: the boot-time copy)
@@ -53,7 +53,7 @@ const mk = (i) => ({ text: `item ${i}`, status: i % 100 === 0 ? 'dropped' : (i %
 const items = Array.from({ length: N }, (_, i) => mk(i));
 const after = tasks.update(g.id, { backlog: items }).backlog;
 check(`update() keeps all ${N} items (got ${after.length})`, after.length === N);
-check('ids minted for every item, all unique', after.every((b) => /^B-[0-9a-f]{4,8}$/i.test(b.id)) && new Set(after.map((b) => b.id)).size === N);
+check('ids minted for every item, all unique', gateOf(after.every((b) => /^B-[0-9a-f]{4,8}$/i.test(b.id))) && new Set(after.map((b) => b.id)).size === N);
 check('order kept (first/last text)', after[0].text === 'item 0' && after[N - 1].text === `item ${N - 1}`);
 check('statuses kept (open count)', after.filter((b) => b.status === 'open').length === items.filter((b) => b.status === 'open').length);
 // +1 on top of a big store: the new item is stored, everything else stays
@@ -101,30 +101,30 @@ const post = (body) => {
   const res = { json: (o) => { out = o; }, status: () => res };
   routes['GET /api/agent/task'](req, res);
   const openN = plusOne.filter((b) => b.status === 'open').length;
-  check(`the show route lists every open item of a 2001-item store (${openN})`, out && out.task && Array.isArray(out.task.backlog) && out.task.backlog.length === openN, out && JSON.stringify(out).slice(0, 160));
+  check(`the show route lists every open item of a 2001-item store (${openN})`, gateOf(out) && gateOf(out.task) && gateOf(Array.isArray(out.task.backlog)) && out.task.backlog.length === openN, out && JSON.stringify(out).slice(0, 160));
   tasks.update(g.id, { backlog: Array.from({ length: 600 }, (_, i) => mk(i)) });
 }
 const before = new Set(tasks.get(g.id).backlog.map((b) => b.id));
 const r = post({ add: 'parked on a full store', detail: '中文 (括号) / 斜杠' });
-check('route answers 200 with success', r.code === 200 && r.out && r.out.success === true, JSON.stringify(r.out).slice(0, 200));
-check('the echoed item is the one just added (by text + detail), with a FRESH id', r.out.item && r.out.item.text === 'parked on a full store' && r.out.item.detail === '中文 (括号) / 斜杠' && !before.has(r.out.item.id), JSON.stringify(r.out.item));
-check('the item is in the stored backlog afterwards (601)', tasks.get(g.id).backlog.length === 601 && tasks.get(g.id).backlog.some((b) => b.id === r.out.item.id));
-check('the echoed item is claimed by the caller', Array.isArray(r.out.item.claimedBy) && r.out.item.claimedBy.includes('claude:sess1'));
+check('route answers 200 with success', r.code === 200 && gateOf(r.out) && r.out.success === true, JSON.stringify(r.out).slice(0, 200));
+check('the echoed item is the one just added (by text + detail), with a FRESH id', gateOf(r.out.item) && r.out.item.text === 'parked on a full store' && r.out.item.detail === '中文 (括号) / 斜杠' && !before.has(r.out.item.id), JSON.stringify(r.out.item));
+check('the item is in the stored backlog afterwards (601)', tasks.get(g.id).backlog.length === 601 && verdictOf(tasks.get(g.id).backlog.some((b) => b.id === r.out.item.id)));
+check('the echoed item is claimed by the caller', gateOf(Array.isArray(r.out.item.claimedBy)) && verdictOf(r.out.item.claimedBy.includes('claude:sess1')));
 const r2 = post({ add: 'second on the same store' });
-check('a second add gets its own fresh id', r2.out && r2.out.item && r2.out.item.id !== r.out.item.id && tasks.get(g.id).backlog.length === 602);
+check('a second add gets its own fresh id', gateOf(r2.out) && gateOf(r2.out.item) && r2.out.item.id !== r.out.item.id && tasks.get(g.id).backlog.length === 602);
 // claim echo by ID survives a reorder of the array (a position is not an identity)
 const target = tasks.get(g.id).backlog[3];
 const rc = post({ claim: target.id });
-check('claim echoes the item by id', rc.out && rc.out.item && rc.out.item.id === target.id && rc.out.item.claimedBy.includes('claude:sess1'), JSON.stringify(rc.out).slice(0, 200));
+check('claim echoes the item by id', gateOf(rc.out) && gateOf(rc.out.item) && rc.out.item.id === target.id && verdictOf(rc.out.item.claimedBy.includes('claude:sess1')), JSON.stringify(rc.out).slice(0, 200));
 // the U4/U5 cure (主开发's as-if-must): a claim is NOT answered while task-groups.json does not hold it (two agents are never
 // both told they own a row) — answered once the writer landed it; the census cure (主开发 2026-11-19 08:56Z, the hunt's finding 2): an
 // ADD too — every writing verb answers once the row is on disk (a parked row is never lost in silence)
-check('a CLAIM is answered only once task-groups.json holds it (not in the route\'s own run; answered when the store landed)', rc.inRun === false && !!rc.out && JSON.parse(fs.readFileSync(path.join(tmp, 'task-groups.json'), 'utf8')).tasks[g.id].backlog.find((b) => b.id === target.id).claimedBy.includes('claude:sess1'), { inRun: rc.inRun });
+check('a CLAIM is answered only once task-groups.json holds it (not in the route\'s own run; answered when the store landed)', rc.inRun === false && !!rc.out && verdictOf(JSON.parse(fs.readFileSync(path.join(tmp, 'task-groups.json'), 'utf8')).tasks[g.id].backlog.find((b) => b.id === target.id).claimedBy.includes('claude:sess1')), { inRun: rc.inRun });
 {
   const disk = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(tmp, 'task-groups.json'), 'utf8')).tasks).find((t) => t.id === g.id).backlog; } catch { return []; } };
-  check('an ADD is answered only once task-groups.json holds its row (the census cure, finding 2: not in the route\'s own run; «parked» is never said for a row a kill would lose)', r.inRun === false && r2.inRun === false && disk().some((b) => b.id === r.out.item.id) && disk().some((b) => b.id === r2.out.item.id), { add: r.inRun, add2: r2.inRun });
+  check('an ADD is answered only once task-groups.json holds its row (the census cure, finding 2: not in the route\'s own run; «parked» is never said for a row a kill would lose)', r.inRun === false && r2.inRun === false && gateOf(disk().some((b) => b.id === r.out.item.id)) && verdictOf(disk().some((b) => b.id === r2.out.item.id)), { add: r.inRun, add2: r2.inRun });
   const rd = post({ done: r2.out.item.id });
-  check('a DONE is answered only once task-groups.json holds it (the census cure, finding 2: a resolved row never comes back open in silence)', rd.inRun === false && rd.out && rd.out.success === true && disk().find((b) => b.id === r2.out.item.id)?.status === 'done', { inRun: rd.inRun, out: rd.out && rd.out.success });
+  check('a DONE is answered only once task-groups.json holds it (the census cure, finding 2: a resolved row never comes back open in silence)', rd.inRun === false && gateOf(rd.out) && rd.out.success === true && disk().find((b) => b.id === r2.out.item.id)?.status === 'done', { inRun: rd.inRun, out: rd.out && rd.out.success });
 }
 
 // (3b) B-31d7 (2026-09-26, B-4ffb stored twice): the store keeps an item's ONE LINE to 500 characters
@@ -140,19 +140,19 @@ check('a CLAIM is answered only once task-groups.json holds it (not in the route
   const n0 = count();
   const long = mkText(612);
   const rl = post({ add: long, detail: 'the rest' });
-  check('B-31d7: a 612-character line is refused 400 by name — the cap, its length, --detail, nothing parked', rl.code === 400 && rl.out && /612/.test(rl.out.error || '') && /500/.test(rl.out.error || '') && /--detail/.test(rl.out.error || '') && /nothing parked/.test(rl.out.error || ''), JSON.stringify(rl));
+  check('B-31d7: a 612-character line is refused 400 by name — the cap, its length, --detail, nothing parked', rl.code === 400 && gateOf(rl.out) && gateOf(/612/.test(rl.out.error || '')) && gateOf(/500/.test(rl.out.error || '')) && gateOf(/--detail/.test(rl.out.error || '')) && verdictOf(/nothing parked/.test(rl.out.error || '')), JSON.stringify(rl));
   check('B-31d7: …and the store is unchanged (no clipped twin of it)', count() === n0 && !tasks.get(g.id).backlog.some((b) => b.text === long.slice(0, 500)), `count ${n0} → ${count()}`);
   const at = mkText(500);
   const ra = post({ add: at });
-  check('B-31d7: exactly 500 characters (①…⑨, →, CJK) is stored WHOLE and echoed by its fresh id', ra.code === 200 && ra.out.item && ra.out.item.text === at && tasks.get(g.id).backlog.some((b) => b.id === ra.out.item.id && b.text === at), JSON.stringify(ra).slice(0, 200));
+  check('B-31d7: exactly 500 characters (①…⑨, →, CJK) is stored WHOLE and echoed by its fresh id', ra.code === 200 && gateOf(ra.out.item) && ra.out.item.text === at && verdictOf(tasks.get(g.id).backlog.some((b) => b.id === ra.out.item.id && b.text === at)), JSON.stringify(ra).slice(0, 200));
   const mid = mkText(330);
   const rm = post({ add: mid, detail: '330 characters, as reported' });
-  check('B-31d7: the reported ~330-character CJK title is stored and echoed', rm.code === 200 && rm.out.item && rm.out.item.text === mid, JSON.stringify(rm).slice(0, 200));
+  check('B-31d7: the reported ~330-character CJK title is stored and echoed', rm.code === 200 && gateOf(rm.out.item) && rm.out.item.text === mid, JSON.stringify(rm).slice(0, 200));
   const rd = post({ add: 'a short line', detail: 'x'.repeat(6001) });
-  check('B-31d7: a 6001-character detail is refused 400 by name (never clipped silently)', rd.code === 400 && /6001/.test(rd.out.error || '') && /6000/.test(rd.out.error || ''), JSON.stringify(rd).slice(0, 200));
+  check('B-31d7: a 6001-character detail is refused 400 by name (never clipped silently)', rd.code === 400 && gateOf(/6001/.test(rd.out.error || '')) && verdictOf(/6000/.test(rd.out.error || '')), JSON.stringify(rd).slice(0, 200));
   const n1 = count();
   const re = post({ edit: ra.out.item.id, text: mkText(501) });
-  check('B-31d7: edit --text past the cap is refused 400 and the item keeps its words', re.code === 400 && /501/.test(re.out.error || '') && tasks.get(g.id).backlog.find((b) => b.id === ra.out.item.id).text === at && count() === n1, JSON.stringify(re).slice(0, 200));
+  check('B-31d7: edit --text past the cap is refused 400 and the item keeps its words', re.code === 400 && gateOf(/501/.test(re.out.error || '')) && tasks.get(g.id).backlog.find((b) => b.id === ra.out.item.id).text === at && count() === n1, JSON.stringify(re).slice(0, 200));
   const rde = post({ edit: ra.out.item.id, detail: 'y'.repeat(6001) });
   check('B-31d7: edit --detail past the cap is refused 400', rde.code === 400 && !tasks.get(g.id).backlog.find((b) => b.id === ra.out.item.id).detail, JSON.stringify(rde).slice(0, 200));
 }
@@ -228,13 +228,13 @@ const ar = strip(fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8')
 const cli = strip(fs.readFileSync(path.join(REPO, 'data/bin/vibespace-task'), 'utf8'));
 check('no `CAPS.backlogItems` (no store cap) anywhere in task-groups.js', !/CAPS\.backlogItems/.test(tg));
 check('no `.slice(0, CAPS.` on a backlog array in task-groups.js', !/backlog\.slice\(0, CAPS\./.test(tg));
-check('the route finds the added item by identity (addedAt + addedBy + text)', /updated\.backlog\.find\(\(b\) => b\.addedAt === added\.addedAt && b\.addedBy === key && b\.text === added\.text\)/.test(ar));
+check('the route finds the added item by identity (addedAt + addedBy + text)', verdictOf(/updated\.backlog\.find\(\(b\) => b\.addedAt === added\.addedAt && b\.addedBy === key && b\.text === added\.text\)/.test(ar)));
 check('the route never echoes by position', !/updated\.backlog\[actedIdx\]/.test(ar));
-check('the route refuses when the item is not found stored', /the item was not stored/.test(ar));
+check('the route refuses when the item is not found stored', verdictOf(/the item was not stored/.test(ar)));
 const addBranch = cli.slice(cli.indexOf("cmd === 'backlog-add'"), cli.indexOf("cmd === 'backlog-claim'"));
 check('the CLI reads r.item FIRST for backlog-add, the older-server fallback matches by EXACT text + open, never the last element',
-  /const mine = \(r && r\.item\) \|\| \(\(r && r\.backlog\) \|\| \[\]\)\.find\(\(b\) => b && b\.text === added && b\.status === 'open'\) \|\| null;/.test(addBranch)
-  && /const added = String\(arg\)\.trim\(\);/.test(addBranch)
+  gateOf(/const mine = \(r && r\.item\) \|\| \(\(r && r\.backlog\) \|\| \[\]\)\.find\(\(b\) => b && b\.text === added && b\.status === 'open'\) \|\| null;/.test(addBranch))
+  && gateOf(/const added = String\(arg\)\.trim\(\);/.test(addBranch))
   && !/backlog\[backlog\.length - 1\]|\.at\(-1\)|\.pop\(\)/.test(addBranch));
 
 // (5) the REAL CLI against an older server's answer shape
@@ -249,13 +249,13 @@ const CLI = path.join(REPO, 'data/bin/vibespace-task');
 const OLD_SHAPE = { success: true, backlog: [{ id: 'B-aaaa', text: 'another item', status: 'open' }, { id: 'B-bbbb', text: 'my parked item', status: 'open' }, { id: 'B-cccc', text: 'a later stranger', status: 'open' }] };
 reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open' }, backlog: OLD_SHAPE.backlog };
 let c = await runCli(CLI, ['backlog-add', 'my parked item']);
-check('a current server: the CLI echoes r.item', c.code === 0 && /parked as \[B-1111\]/.test(c.out), c.out);
+check('a current server: the CLI echoes r.item', c.code === 0 && verdictOf(/parked as \[B-1111\]/.test(c.out)), c.out);
 reply = OLD_SHAPE;
 c = await runCli(CLI, ['backlog-add', '  my parked item  ']);
-check('an older server (backlog only): the stored item found by its exact trimmed text — NOT the last element', c.code === 0 && /parked as \[B-bbbb\]/.test(c.out) && !/B-cccc/.test(c.out), c.out);
+check('an older server (backlog only): the stored item found by its exact trimmed text — NOT the last element', c.code === 0 && gateOf(/parked as \[B-bbbb\]/.test(c.out)) && !/B-cccc/.test(c.out), c.out);
 reply = { success: true, backlog: [{ id: 'B-aaaa', text: 'another item', status: 'open' }, { id: 'B-zzzz', text: 'a stranger that survived the slice', status: 'open' }] };
 c = await runCli(CLI, ['backlog-add', 'my parked item']);
-check('an older server that did NOT store it: refused (exit 1), the stranger never echoed', c.code === 1 && /did not store/.test(c.out) && !/B-zzzz/.test(c.out), c.out);
+check('an older server that did NOT store it: refused (exit 1), the stranger never echoed', c.code === 1 && gateOf(/did not store/.test(c.out)) && !/B-zzzz/.test(c.out), c.out);
 reply = { success: true, backlog: [{ id: 'B-dddd', text: 'my parked item', status: 'done' }] };
 c = await runCli(CLI, ['backlog-add', 'my parked item']);
 check('an older server whose only exact-text row is closed: refused (the fallback is open rows only)', c.code === 1 && !/B-dddd/.test(c.out), c.out);
@@ -263,13 +263,13 @@ check('an older server whose only exact-text row is closed: refused (the fallbac
 // field — the CLI says so instead of claiming it (add AND edit)
 reply = OLD_SHAPE;
 c = await runCli(CLI, ['backlog-add', 'my parked item', '--priority', 'high']);
-check('an older server + --priority high: parked, and the CLI says the priority was NOT recorded (never "priority high")', c.code === 0 && /parked as \[B-bbbb\]/.test(c.out) && /note: the server did not record --priority high/.test(c.out) && !/parked as \[B-bbbb\] priority high/.test(c.out), c.out);
+check('an older server + --priority high: parked, and the CLI says the priority was NOT recorded (never "priority high")', c.code === 0 && gateOf(/parked as \[B-bbbb\]/.test(c.out)) && gateOf(/note: the server did not record --priority high/.test(c.out)) && !/parked as \[B-bbbb\] priority high/.test(c.out), c.out);
 reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open', priority: 'high' }, backlog: [] };
 c = await runCli(CLI, ['backlog-add', 'my parked item', '--priority', 'high']);
-check('a current server + --priority high: "priority high", no unrecorded note', c.code === 0 && /parked as \[B-1111\] priority high/.test(c.out) && !/did not record/.test(c.out), c.out);
+check('a current server + --priority high: "priority high", no unrecorded note', c.code === 0 && gateOf(/parked as \[B-1111\] priority high/.test(c.out)) && !/did not record/.test(c.out), c.out);
 reply = { success: true, backlog: OLD_SHAPE.backlog }; // an old edit echoes no item
 c = await runCli(CLI, ['backlog-edit', 'B-bbbb', '--text', 'renamed', '--priority', 'low']);
-check('an older server + backlog-edit --priority: "updated text", never "priority low", plus the unrecorded note', c.code === 0 && /^updated text$/m.test(c.out) && !/priority low$/m.test(c.out) && /note: the server did not record --priority low/.test(c.out), c.out);
+check('an older server + backlog-edit --priority: "updated text", never "priority low", plus the unrecorded note', c.code === 0 && gateOf(/^updated text$/m.test(c.out)) && !/priority low$/m.test(c.out) && verdictOf(/note: the server did not record --priority low/.test(c.out)), c.out);
 const noNote = fs.readFileSync(CLI, 'utf8').replace("if (!priorityRecorded(mine)) printPriorityUnrecorded(mine.id);", '');
 const noNoteFile = path.join(tmp, 'vibespace-task.nonote'); fs.writeFileSync(noNoteFile, noNote);
 reply = OLD_SHAPE;
@@ -280,7 +280,7 @@ const preSrc = fs.readFileSync(CLI, 'utf8').replace(/const mine = \(r && r\.item
 const preFile = path.join(tmp, 'vibespace-task.pre'); fs.writeFileSync(preFile, preSrc);
 reply = OLD_SHAPE;
 c = await runCli(preFile, ['backlog-add', 'my parked item']);
-check('control: the r.item-only CLI reports "not stored" for an item the older server stored', preSrc !== fs.readFileSync(CLI, 'utf8') && c.code === 1 && /did not store/.test(c.out), c.out);
+check('control: the r.item-only CLI reports "not stored" for an item the older server stored', preSrc !== fs.readFileSync(CLI, 'utf8') && c.code === 1 && verdictOf(/did not store/.test(c.out)), c.out);
 // B-6edc: THE CLI — the plain --detail sends the add (no replaceDetail), --replace-detail asks for the replace by name, and the
 // answer's words say what happened to the detail, in characters; an older server that replaced is said as such
 {
@@ -310,4 +310,4 @@ srv.close();
 
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
-console.log(`\nALL PASS (${passed})`); // counted, never a literal (the literal said 20 over 19 checks)
+console.log(`\nALL PASS (${passed})`); import { verdictOf, gateOf } from './lib/check.mjs'; // counted, never a literal (the literal said 20 over 19 checks)

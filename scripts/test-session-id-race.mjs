@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 // ── 0. ROOT invariant: the socket name is DERIVED from the session id ──
 // Two independently-minted identities for one session is the actual defect;
@@ -25,7 +25,7 @@ for (const rel of ['src/ws-create.js', 'src/server/boot-restore.js']) {
   const mints = src.split('\n').filter((l) => /const sockName =/.test(l) && !/^\s*\/\//.test(l));
   ok(mints.length > 0, `${rel}: has a sockName mint site`);
   for (const m of mints) {
-    ok(/id\.slice\(/.test(m) && !/Date\.now\(\)/.test(m),
+    ok(gateOf(/id\.slice\(/.test(m)) && !/Date\.now\(\)/.test(m),
       `${rel}: sockName is DERIVED from the id, never minted independently`, m.trim().slice(0, 100));
   }
 }
@@ -69,7 +69,7 @@ const derived = (() => {
   return out;
 })();
 ok(new Set(derived.map((r) => r.sock)).size === 4, 'derived socket names are unique whenever the ids are');
-ok(derived.every((r) => r.sock === 'cw-' + r.id.slice(5)), 'the socket name IS the id (one identity, two prefixes)');
+ok(verdictOf(derived.every((r) => r.sock === 'cw-' + r.id.slice(5))), 'the socket name IS the id (one identity, two prefixes)');
 // even with a SAME-millisecond burst the derived names stay distinct, which
 // the old two-expression shape could not guarantee
 const sameMs = [21, 22, 23].map((n) => 'sess-' + n + '-1786434598000').map((id) => 'cw-' + id.slice(5));
@@ -80,8 +80,8 @@ ok(new Set(buggy.map((r) => r.sock)).size === 1,
   'negative control: the re-read shape gives all four creates the SAME sockName counter (the production symptom)');
 ok(new Set(fixed.map((r) => r.sock)).size === 4,
   'captured-value shape gives four DISTINCT sockName counters');
-ok(fixed.every((r) => r.id.split('-')[1] === r.sock.split('-')[1]),
+ok(verdictOf(fixed.every((r) => r.id.split('-')[1] === r.sock.split('-')[1])),
   'every session\'s id counter MATCHES its sockName counter (the field evidence showed 7/15 mismatched)');
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

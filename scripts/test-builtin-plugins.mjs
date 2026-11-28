@@ -21,7 +21,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); }
 };
@@ -60,7 +60,7 @@ const LIST_REL = 'src/plugins/index.js', CORE_REL = 'src/plugins.js';
 const listSrc = fs.readFileSync(path.join(REPO, LIST_REL), 'utf8');
 const listMut = listSrc.replace(/\];\s*$/, `  require(${JSON.stringify(ACME)}),\n];\n`);
 const added = listMut.split('\n').filter((l) => !listSrc.split('\n').includes(l));
-ok('the registration is ONE added line in src/plugins/index.js', added.length === 1 && added[0].includes(ACME), added);
+ok('the registration is ONE added line in src/plugins/index.js', added.length === 1 && verdictOf(added[0].includes(ACME)), added);
 const listCopy = M.load(LIST_REL, listMut, 'acme');
 const realList = require.resolve(path.join(REPO, LIST_REL)), realCore = require.resolve(path.join(REPO, CORE_REL));
 delete require.cache[realCore];
@@ -77,14 +77,14 @@ console.log('① the contract is checked at registration, refusals BY NAME');
   const def = (o) => ({ id: 'acme-x', label: 'Acme X', description: 'x', provides: [], create: () => ({ ...verbs }), ...o });
   const reg = (o) => refuse(() => new PluginManager({ dataDir, plugins: [def(o)] }));
   ok('a valid member registers', reg({}) === null, reg({}));
-  ok('an id that is not a kebab word', /built-in plugin Acme X: id must be a kebab-case word/.test(reg({ id: 'Acme X' }) || ''), reg({ id: 'Acme X' }));
-  ok('no label', /built-in plugin acme-x: label missing/.test(reg({ label: '' }) || ''), reg({ label: '' }));
-  ok('provides is not a list of capability words', /acme-x: provides must be/.test(reg({ provides: 'relay' }) || ''), reg({ provides: 'relay' }));
-  ok('a required verb missing (stop)', /acme-x: verb stop\(\) missing/.test(reg({ create: () => ({ ...verbs, stop: undefined }) }) || ''));
-  ok('a declared capability obliges its verbs (relay ⇒ publish)', /acme-x: verb publish\(\) missing/.test(reg({ provides: ['relay'] }) || ''));
-  ok('an optional verb that is not a function', /acme-x: setup must be a function/.test(reg({ create: () => ({ ...verbs, setup: 'yes' }) }) || ''));
-  ok('the same id twice', /acme-x: registered twice/.test(refuse(() => new PluginManager({ dataDir, plugins: [def({}), def({})] })) || ''));
-  ok('validatePlugin is the ONE check (exported for the static shape)', refuse(() => validatePlugin(def({}))) === null && /create\(h\) missing/.test(refuse(() => validatePlugin(def({ create: null }))) || ''));
+  ok('an id that is not a kebab word', verdictOf(/built-in plugin Acme X: id must be a kebab-case word/.test(reg({ id: 'Acme X' }) || '')), reg({ id: 'Acme X' }));
+  ok('no label', verdictOf(/built-in plugin acme-x: label missing/.test(reg({ label: '' }) || '')), reg({ label: '' }));
+  ok('provides is not a list of capability words', verdictOf(/acme-x: provides must be/.test(reg({ provides: 'relay' }) || '')), reg({ provides: 'relay' }));
+  ok('a required verb missing (stop)', verdictOf(/acme-x: verb stop\(\) missing/.test(reg({ create: () => ({ ...verbs, stop: undefined }) }) || '')));
+  ok('a declared capability obliges its verbs (relay ⇒ publish)', verdictOf(/acme-x: verb publish\(\) missing/.test(reg({ provides: ['relay'] }) || '')));
+  ok('an optional verb that is not a function', verdictOf(/acme-x: setup must be a function/.test(reg({ create: () => ({ ...verbs, setup: 'yes' }) }) || '')));
+  ok('the same id twice', verdictOf(/acme-x: registered twice/.test(refuse(() => new PluginManager({ dataDir, plugins: [def({}), def({})] })) || '')));
+  ok('validatePlugin is the ONE check (exported for the static shape)', refuse(() => validatePlugin(def({}))) === null && verdictOf(/create\(h\) missing/.test(refuse(() => validatePlugin(def({ create: null }))) || '')));
   const builtins = ['tailscale', 'frp', 'opencode-serve'].map((f) => require(path.join(REPO, `src/plugins/${f}.js`)));
   const real = new PluginManager({ dataDir, opencodeServe: FAKE_SERVE, plugins: builtins });
   const d = real.defs();
@@ -137,8 +137,8 @@ const judge = (o) => [
 
 console.log('② THE PROOF: a fake member registered through the one list drives the generic lifecycle');
 const real = await drive(core.PluginManager, 'real');
-for (const [n, c] of judge(real)) ok(n, c, c ? undefined : real);
-ok('…and every verb reached the member\'s own file', ['install', 'start', 'setup', 'config', 'start', 'stop'].every((v) => real.calls.includes(v)), real.calls);
+for (const [n, c] of judge(real)) ok(n, verdictOf(c), c ? undefined : real);
+ok('…and every verb reached the member\'s own file', verdictOf(['install', 'start', 'setup', 'config', 'start', 'stop'].every((v) => real.calls.includes(v))), real.calls);
 
 console.log('③ the relay surface reaches whichever plugin DECLARES relay');
 {
@@ -156,7 +156,7 @@ console.log('③ the relay surface reaches whichever plugin DECLARES relay');
   ok('publish / unpublish / setSelfDialSub land on it', pub?.url === 'https://r.invalid/svc' && JSON.stringify(calls) === JSON.stringify([['publish', 'svc', 8080, 'http'], ['unpublish', 'svc'], ['sub', 'stable']]), calls);
   const none = new core.PluginManager({ dataDir, plugins: [{ ...relay, id: 'acme-plain', provides: [] }] });
   let err = null; try { await none.frpPublish('svc', 8080); } catch (e) { err = e.message; }
-  ok('no relay member ⇒ refused by name', /no plugin on this instance provides relay/.test(err || ''), err);
+  ok('no relay member ⇒ refused by name', verdictOf(/no plugin on this instance provides relay/.test(err || '')), err);
 }
 
 console.log('④ CONTROL: the pre-fix id dispatch restored in a copy of src/plugins.js');
@@ -170,7 +170,7 @@ console.log('④ CONTROL: the pre-fix id dispatch restored in a copy of src/plug
   const failed = judge(red).filter(([, c]) => !c).map(([n]) => n);
   ok('CONTROL: the fake member\'s start is refused by the id branch ⇒ ② goes RED', red.start?.error === 'unknown plugin: acme-tunnel' && failed.length > 0, { start: red.start, failed });
 }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutant-copy (builtin-plugins): ' })) ok(r.name, r.pass, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutant-copy (builtin-plugins): ' })) ok(r.name, verdictOf(r.pass), r.detail);
 
 // ④ Dropline voice input (q-029 P0): the voice-input row — ONE line in the list, `dictation` declared, OFF by default,
 // refused ON until the `dropline` integration row holds a key, the language preference closed to auto | zh | en
@@ -186,13 +186,13 @@ for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutan
   const st0 = pm.status('voice-input');
   ok('voice-input: declares dictation (+ reminders — lane foryou-plugin-notices: its suggestions file For-you items), default OFF, not configured without a key', pm.defs()['voice-input']?.provides?.join() === 'dictation,reminders' && st0.enabled === false && st0.configured === false && st0.language === 'auto', { st0, row: !!row });
   let refused = null; try { pm.setEnabled('voice-input', true); } catch (e) { refused = e.message; }
-  ok('voice-input: turning it ON without a key is refused by name', /Dropline key/.test(refused || '') && !pm.status('voice-input').enabled, refused);
+  ok('voice-input: turning it ON without a key is refused by name', gateOf(/Dropline key/.test(refused || '')) && !pm.status('voice-input').enabled, refused);
   key = 'dl_test_0123456789';
   pm.setEnabled('voice-input', true);
-  ok('voice-input: with a key its toggle turns it ON (and the wiring\'s voiceBind reads the record)', pm.status('voice-input').enabled === true && bound && bound.peek().enabled === true);
+  ok('voice-input: with a key its toggle turns it ON (and the wiring\'s voiceBind reads the record)', pm.status('voice-input').enabled === true && gateOf(bound) && bound.peek().enabled === true);
   let bad = null; try { pm.setConfig('voice-input', { language: 'fr' }); } catch (e) { bad = e.message; }
   pm.setConfig('voice-input', { language: 'zh' });
-  ok('voice-input: language ∈ auto|zh|en (fr refused), zh kept', /auto \| zh \| en/.test(bad || '') && pm.status('voice-input').language === 'zh', bad);
+  ok('voice-input: language ∈ auto|zh|en (fr refused), zh kept', gateOf(/auto \| zh \| en/.test(bad || '')) && pm.status('voice-input').language === 'zh', bad);
   const recText = JSON.stringify(bound.peek());
   ok('voice-input: the key never lands in the plugin record (data/plugins.json)', !recText.includes('dl_test'), recText);
   pm.setEnabled('voice-input', false);
@@ -200,4 +200,4 @@ for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutan
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -36,7 +36,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUT = mutantCopies('desktop-seamless', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -80,15 +80,15 @@ console.log('§1 the verdict — the full matrix (192 rows) against the design\'
   const n = rows.filter(formula).length;
   ok(n === 5, `exactly 5 of 192 rows are seamless (${n}): connected with no lease / chain / phone, AND either the app's own frame choice hides ours (4 rows: any csd × any setting) or a CSD app under Auto + the setting auto (1)`, n);
   const V = (o) => S.seamlessVerdict({ csd: true, setting: 'auto', userToggle: 'auto', lease: false, chain: false, phone: false, connected: true, ...o });
-  ok(same(V({}), { seamless: true, why: 'csd' }), 'GNOME Calculator (decorations 0), defaults, connected, nobody else ⇒ seamless because of its CSD');
-  ok(same(V({ csd: false }), { seamless: false, why: 'ssd' }), 'xterm (no decorations key) ⇒ not seamless — it has no title bar of its own');
-  ok(same(V({ setting: 'off' }), { seamless: false, why: 'setting-off' }), 'desktop.seamless = off ⇒ never, for any CSD app (today\'s look back in one switch)');
-  ok(same(V({ csd: false, userToggle: 'on' }), { seamless: true, why: 'user' }) && same(V({ setting: 'off', userToggle: 'on' }), { seamless: true, why: 'user' }), 'PRECEDENCE: the per-app choice "frame Off" (userToggle on) beats an SSD app AND the global off');
-  ok(same(V({ userToggle: 'off' }), { seamless: false, why: 'user' }), 'PRECEDENCE: "frame On" (userToggle off) beats a CSD app');
-  for (const [k, why] of [['lease', 'lease'], ['chain', 'chain'], ['phone', 'phone']]) ok(same(V({ [k]: true }), { seamless: false, why }) && same(V({ [k]: true, userToggle: 'on' }), { seamless: false, why }), `PAUSE ${k}: a CSD app is held — and so is a forced 'on' (the design's honest list: ${k === 'lease' ? 'the user must SEE an agent is driving' : k === 'chain' ? 'the tab bar lives in the title bar' : 'the title bar is a phone\'s only way back'})`);
-  ok(same(V({ connected: false }), { seamless: false, why: 'disconnected' }), 'PAUSE disconnected: the status and Reconnect must show while the picture is not up');
-  ok(S.isPaused(V({ lease: true })) && !S.isPaused(V({ csd: false })) && !S.isPaused(V({})), 'isPaused: a wanted-but-held verdict (the menu says "paused"), not an unwanted one');
-  ok(S.normToggle('weird') === 'auto' && S.normSetting('on') === 'auto' && S.normSetting(undefined) === 'auto' && same(S.seamlessVerdict({ csd: true, connected: true, setting: 'bogus', userToggle: 42 }), { seamless: true, why: 'csd' }), 'unknown words are the defaults (auto) — never a throw, never a silent off');
+  ok(verdictOf(same(V({}), { seamless: true, why: 'csd' })), 'GNOME Calculator (decorations 0), defaults, connected, nobody else ⇒ seamless because of its CSD');
+  ok(verdictOf(same(V({ csd: false }), { seamless: false, why: 'ssd' })), 'xterm (no decorations key) ⇒ not seamless — it has no title bar of its own');
+  ok(verdictOf(same(V({ setting: 'off' }), { seamless: false, why: 'setting-off' })), 'desktop.seamless = off ⇒ never, for any CSD app (today\'s look back in one switch)');
+  ok(gateOf(same(V({ csd: false, userToggle: 'on' }), { seamless: true, why: 'user' })) && verdictOf(same(V({ setting: 'off', userToggle: 'on' }), { seamless: true, why: 'user' })), 'PRECEDENCE: the per-app choice "frame Off" (userToggle on) beats an SSD app AND the global off');
+  ok(verdictOf(same(V({ userToggle: 'off' }), { seamless: false, why: 'user' })), 'PRECEDENCE: "frame On" (userToggle off) beats a CSD app');
+  for (const [k, why] of [['lease', 'lease'], ['chain', 'chain'], ['phone', 'phone']]) ok(gateOf(same(V({ [k]: true }), { seamless: false, why })) && verdictOf(same(V({ [k]: true, userToggle: 'on' }), { seamless: false, why })), `PAUSE ${k}: a CSD app is held — and so is a forced 'on' (the design's honest list: ${k === 'lease' ? 'the user must SEE an agent is driving' : k === 'chain' ? 'the tab bar lives in the title bar' : 'the title bar is a phone\'s only way back'})`);
+  ok(verdictOf(same(V({ connected: false }), { seamless: false, why: 'disconnected' })), 'PAUSE disconnected: the status and Reconnect must show while the picture is not up');
+  ok(gateOf(S.isPaused(V({ lease: true }))) && !S.isPaused(V({ csd: false })) && !S.isPaused(V({})), 'isPaused: a wanted-but-held verdict (the menu says "paused"), not an unwanted one');
+  ok(S.normToggle('weird') === 'auto' && S.normSetting('on') === 'auto' && S.normSetting(undefined) === 'auto' && verdictOf(same(S.seamlessVerdict({ csd: true, connected: true, setting: 'bogus', userToggle: 42 }), { seamless: true, why: 'csd' })), 'unknown words are the defaults (auto) — never a throw, never a silent off');
   ok(S.seamlessVerdict().seamless === false && S.seamlessVerdict().why === 'ssd', 'no facts ⇒ not seamless (a window before its first main window)');
   // NEGATIVE CONTROL — a verdict that forgets the pauses (the naive "CSD ⇒ hide our bar")
   const src = read('src/lib/desktop-seamless.js');
@@ -96,7 +96,7 @@ console.log('§1 the verdict — the full matrix (192 rows) against the design\'
   ok(src.split(pauses).length === 2, 'the four pauses are spelled once, in order (the control removes exactly them)');
   const Mnaive = await import(pathToFileURL(MUT.write('src/lib/desktop-seamless.js', editAnchor(src, pauses, '', "src/lib/desktop-seamless.js"), 'nopause')).href);
   const badN = judge(Mnaive);
-  ok(badN.length > 0 && badN.some((b) => b.r.lease && b.v.seamless), `CONTROL: the pause-less verdict fails the matrix (${badN.length} rows — e.g. an agent lease left seamless)`);
+  ok(badN.length > 0 && verdictOf(badN.some((b) => b.r.lease && b.v.seamless)), `CONTROL: the pause-less verdict fails the matrix (${badN.length} rows — e.g. an agent lease left seamless)`);
 }
 
 console.log('§2 the reveal arithmetic (revealStep): hover 250 ms, Alt, the 1.5 s linger, leave = fold');
@@ -104,19 +104,19 @@ console.log('§2 the reveal arithmetic (revealStep): hover 250 ms, Alt, the 1.5 
   const run = (events) => { let st = S.revealInitial(); const out = []; for (const [t, ev] of events) { const r = S.revealStep(st, ev, t); st = r.state; out.push([t, r.revealed, r.wakeAt]); } return { st, out }; };
   ok(S.REVEAL_HOVER_MS === 250 && S.REVEAL_LINGER_MS === 1500 && S.HOT_ZONE_PX === 6, 'the numbers: 250 ms hover, 1.5 s linger, a 6 px hot zone (design §3.3 / D3)');
   let r = run([[1000, { type: 'zone-enter' }], [1100, { type: 'tick' }], [1249, { type: 'tick' }], [1250, { type: 'tick' }]]);
-  ok(same(r.out.map((x) => x[1]), [false, false, false, true]) && r.out[0][2] === 1250, 'a hover of the hot zone reveals at exactly 250 ms (the enter names wakeAt = +250; 249 ms is not enough)', r.out);
+  ok(gateOf(same(r.out.map((x) => x[1]), [false, false, false, true])) && r.out[0][2] === 1250, 'a hover of the hot zone reveals at exactly 250 ms (the enter names wakeAt = +250; 249 ms is not enough)', r.out);
   r = run([[1000, { type: 'zone-enter' }], [1200, { type: 'zone-leave' }], [1300, { type: 'tick' }]]);
-  ok(r.out.every((x) => !x[1]) && r.out[1][2] === null, 'a pointer CROSSING the edge on its way into the app (200 ms) reveals nothing and leaves nothing pending', r.out);
+  ok(gateOf(r.out.every((x) => !x[1])) && r.out[1][2] === null, 'a pointer CROSSING the edge on its way into the app (200 ms) reveals nothing and leaves nothing pending', r.out);
   r = run([[1000, { type: 'zone-enter' }], [1250, { type: 'tick' }], [2000, { type: 'zone-leave' }], [3499, { type: 'tick' }], [3500, { type: 'tick' }]]);
-  ok(same(r.out.map((x) => x[1]), [false, true, true, true, false]) && r.out[2][2] === 3500, 'revealed, then the pointer goes back INTO THE APP ⇒ the bars linger 1.5 s (wakeAt +1500), then fold', r.out);
+  ok(gateOf(same(r.out.map((x) => x[1]), [false, true, true, true, false])) && r.out[2][2] === 3500, 'revealed, then the pointer goes back INTO THE APP ⇒ the bars linger 1.5 s (wakeAt +1500), then fold', r.out);
   r = run([[1000, { type: 'zone-enter' }], [1250, { type: 'tick' }], [2000, { type: 'zone-leave' }], [2500, { type: 'zone-enter' }], [5000, { type: 'tick' }]]);
-  ok(same(r.out.map((x) => x[1]), [false, true, true, true, true]), 'back onto the bars inside the linger ⇒ they stay (the fold is cancelled)', r.out);
+  ok(verdictOf(same(r.out.map((x) => x[1]), [false, true, true, true, true])), 'back onto the bars inside the linger ⇒ they stay (the fold is cancelled)', r.out);
   r = run([[1000, { type: 'zone-enter' }], [1250, { type: 'tick' }], [2000, { type: 'window-leave' }]]);
-  ok(same(r.out.map((x) => x[1]), [false, true, false]) && r.out[2][2] === null, 'leaving the WINDOW folds at once ("leave = fold")', r.out);
+  ok(gateOf(same(r.out.map((x) => x[1]), [false, true, false])) && r.out[2][2] === null, 'leaving the WINDOW folds at once ("leave = fold")', r.out);
   r = run([[1000, { type: 'alt', down: true }], [1500, { type: 'window-leave' }], [9000, { type: 'tick' }], [9100, { type: 'alt', down: false }], [10599, { type: 'tick' }], [10600, { type: 'tick' }]]);
-  ok(same(r.out.map((x) => x[1]), [true, true, true, true, true, false]), 'Alt held reveals AT ONCE and holds through anything (even the pointer leaving); released ⇒ the 1.5 s linger, then fold', r.out);
+  ok(verdictOf(same(r.out.map((x) => x[1]), [true, true, true, true, true, false])), 'Alt held reveals AT ONCE and holds through anything (even the pointer leaving); released ⇒ the 1.5 s linger, then fold', r.out);
   r = run([[1000, { type: 'alt', down: true }], [1100, { type: 'reset' }]]);
-  ok(!r.out[1][1] && same(r.st, S.revealInitial()), 'a reset (the window stopped being seamless) folds and forgets everything');
+  ok(!r.out[1][1] && verdictOf(same(r.st, S.revealInitial())), 'a reset (the window stopped being seamless) folds and forgets everything');
   r = run([[1000, { type: 'alt', down: false }]]);
   ok(!r.out[0][1] && r.out[0][2] === null, 'an Alt release nobody pressed changes nothing');
 }
@@ -125,17 +125,17 @@ console.log('§3 the other PURE words');
 {
   const ops = [];
   for (let d = -1; d <= 12; d++) ops.push([d, S.moveResizeAction(d)]);
-  ok(same(ops.map(([, a]) => a && (a.op + (a.dir ? ':' + a.dir : ''))), [null, 'resize:nw', 'resize:n', 'resize:ne', 'resize:e', 'resize:se', 'resize:s', 'resize:sw', 'resize:w', 'move', 'resize:se', 'move', 'cancel', null]), 'moveResizeAction over −1…12: X\'s SIZE_TOPLEFT…SIZE_LEFT ⇒ the handle names nw n ne e se s sw w, 8/10 ⇒ move, 9 ⇒ resize from se (keyboard: the mouse takes over), 11 ⇒ cancel, anything else null', ops);
+  ok(verdictOf(same(ops.map(([, a]) => a && (a.op + (a.dir ? ':' + a.dir : ''))), [null, 'resize:nw', 'resize:n', 'resize:ne', 'resize:e', 'resize:se', 'resize:s', 'resize:sw', 'resize:w', 'move', 'resize:se', 'move', 'cancel', null])), 'moveResizeAction over −1…12: X\'s SIZE_TOPLEFT…SIZE_LEFT ⇒ the handle names nw n ne e se s sw w, 8/10 ⇒ move, 9 ⇒ resize from se (keyboard: the mouse takes over), 11 ⇒ cancel, anything else null', ops);
   ok(S.moveResizeAction('8') !== null && S.moveResizeAction(8.5) === null && S.moveResizeAction(null) === null, 'an integer string counts, a fraction / null never');
   const W = S.windowStateAction;
   ok(W({ maximized: true }, {}) === 'maximize' && W({ maximized: true }, { maximized: true }) === null && W({ maximized: false }, { maximized: true }) === 'restore' && W({ maximized: false }, {}) === null, 'windowStateAction maximized: SET semantics — maximize only an unmaximized window, restore only a maximized one (an echo never flips it back)');
   ok(W({ iconic: true }, {}) === 'minimize' && W({ iconic: true }, { minimized: true }) === null && W({ iconic: false }, { minimized: true }) === null, 'iconic: minimize ours; an app becoming un-iconic never restores ours by itself (the user restores the window)');
   ok(W({ title: 'x' }, {}) === null && W(null) === null && W({}, { maximized: true }) === null, 'only ANNOUNCED keys act (a window born maximized, a title change: nothing)');
-  ok(S.isCsd({ decorations: 0 }) && !S.isCsd({}) && !S.isCsd({ decorations: 1 }) && !S.isCsd({ decorations: false }) && !S.isCsd(null), 'isCsd ⇔ decorations === 0 exactly (§2.3 M3a: Calculator 0, xterm has no key)');
+  ok(gateOf(S.isCsd({ decorations: 0 })) && !S.isCsd({}) && !S.isCsd({ decorations: 1 }) && !S.isCsd({ decorations: false }) && !S.isCsd(null), 'isCsd ⇔ decorations === 0 exactly (§2.3 M3a: Calculator 0, xterm has no key)');
   ok(S.frameKeyOf({ appId: 'gnome-calculator', exec: '/usr/bin/gnome-calculator' }) === 'gnome-calculator' && S.frameKeyOf({ exec: '/usr/bin/xterm' }) === 'exec:xterm' && S.frameKeyOf({ exec: '/bin/we ird$' }) === 'exec:weird' && S.frameKeyOf({}) === null && S.frameKeyOf(null) === null, 'frameKeyOf: the registry app id, else exec:<basename> (cleaned), else null — every window of one app shares its choice');
   ok(S.frameChoiceOf({ 'gnome-calculator': 'on' }, 'gnome-calculator') === 'on' && S.frameChoiceOf({ x: 'junk' }, 'x') === 'auto' && S.frameChoiceOf(null, 'x') === 'auto' && S.frameChoiceOf({ toString: 'on' }, 'toString') === 'on' && S.frameChoiceOf({}, 'toString') === 'auto', 'frameChoiceOf: the stored word, own keys only, junk ⇒ auto');
-  ok(same(S.setFrameChoice({ a: 'on' }, 'b', 'off'), { a: 'on', b: 'off' }) && same(S.setFrameChoice({ a: 'on' }, 'a', 'auto'), {}) && same(S.setFrameChoice(null, null, 'on'), {}), 'setFrameChoice: auto REMOVES the key (the map never grows by choices that change nothing); no key, no write');
-  ok(same(S.frameMenuModel('off'), [{ choice: 'auto', current: false }, { choice: 'on', current: false }, { choice: 'off', current: true }]), 'frameMenuModel: Auto / On / Off, the current one checked — a live row, never greyed (B-b659: no `disabled` for the window to draw)');
+  ok(gateOf(same(S.setFrameChoice({ a: 'on' }, 'b', 'off'), { a: 'on', b: 'off' })) && gateOf(same(S.setFrameChoice({ a: 'on' }, 'a', 'auto'), {})) && verdictOf(same(S.setFrameChoice(null, null, 'on'), {})), 'setFrameChoice: auto REMOVES the key (the map never grows by choices that change nothing); no key, no write');
+  ok(verdictOf(same(S.frameMenuModel('off'), [{ choice: 'auto', current: false }, { choice: 'on', current: false }, { choice: 'off', current: true }])), 'frameMenuModel: Auto / On / Off, the current one checked — a live row, never greyed (B-b659: no `disabled` for the window to draw)');
   ok(S.userToggleOfFrame('on') === 'off' && S.userToggleOfFrame('off') === 'on' && S.userToggleOfFrame('auto') === 'auto' && S.userToggleOfFrame('x') === 'auto', 'the ONE crossing: frame On ⇒ never seamless (userToggle off), frame Off ⇒ always seamless (on), Auto ⇒ auto');
 }
 
@@ -182,7 +182,7 @@ console.log('§4 the REAL WindowManager seams over a fake DOM (the title bar\'s 
   const started = wm.beginDragFromPointer('w1', { press: { clientX: 300, clientY: 120 }, at: { clientX: 310, clientY: 125 } });
   await sleep(20);
   ok(started === true && wm.focused === 'w1' && live('pointermove') === 1 && live('pointerup') === 1, 'beginDragFromPointer enters the title bar\'s drag (focused, fed by POINTER events — the pane cancelled its pointerdown, so no mouse events come)');
-  ok(win.element.style.left === '110px' && win.element.style.top === '85px' && win.element.cls.has('dragging'), `the window already follows from the PRESS point (the gesture\'s first 10×5 px applied at once: ${win.element.style.left}, ${win.element.style.top})`);
+  ok(win.element.style.left === '110px' && win.element.style.top === '85px' && verdictOf(win.element.cls.has('dragging')), `the window already follows from the PRESS point (the gesture\'s first 10×5 px applied at once: ${win.element.style.left}, ${win.element.style.top})`);
   fireDoc('pointermove', { clientX: 420, clientY: 184, altKey: false, shiftKey: false, timeStamp: 10 });
   await sleep(20);
   ok(win.element.style.left === '220px' && win.element.style.top === '144px', `…and tracks the pointer (press → 420,184 = +120 / +64 ⇒ ${win.element.style.left}, ${win.element.style.top})`);
@@ -244,8 +244,8 @@ console.log('§4 the REAL WindowManager seams over a fake DOM (the title bar\'s 
     }, 20));
   };
   const mx = await maxLeg(WindowManager);
-  ok(!mx.atUnmax.max && mx.atUnmax.width === '900px' && same(mx.atUnmax.calls, [false]), `a drag off a MAXIMIZED window un-maximizes it (prevBounds ${mx.atUnmax.width}) and SAYS so — onResize once, seeing isMaximized false (${JSON.stringify(mx.atUnmax.calls)})`, mx);
-  ok(mx.cancelled && mx.after.max && same(mx.after.calls, [false, true]), `…and a CANCEL mid-drag re-maximizes and says that too (${JSON.stringify(mx.after.calls)})`, mx);
+  ok(!mx.atUnmax.max && mx.atUnmax.width === '900px' && verdictOf(same(mx.atUnmax.calls, [false])), `a drag off a MAXIMIZED window un-maximizes it (prevBounds ${mx.atUnmax.width}) and SAYS so — onResize once, seeing isMaximized false (${JSON.stringify(mx.atUnmax.calls)})`, mx);
+  ok(gateOf(mx.cancelled) && gateOf(mx.after.max) && verdictOf(same(mx.after.calls, [false, true])), `…and a CANCEL mid-drag re-maximizes and says that too (${JSON.stringify(mx.after.calls)})`, mx);
   // NEGATIVE CONTROL: window.js without the two notifications (the pre-fix lane) — the same drag un-maximizes SILENTLY
   const wsrc = read('src/lib/window.js');
   const fixA = "          if (win.onResize) { try { win.onResize(); } catch {} }\n        }\n        // Restore pre-snap size when dragging out of a snap";
@@ -253,27 +253,27 @@ console.log('§4 the REAL WindowManager seams over a fake DOM (the title bar\'s 
   ok(wsrc.split(fixA).length === 2 && wsrc.split(fixB).length === 2, 'CONTROL: each un-maximize notification is spelled exactly once in window.js (the control pulls exactly those)');
   const Wpre = await import(pathToFileURL(MUT.write('src/lib/window.js', editAnchor(editAnchor(wsrc, fixA, "        }\n        // Restore pre-snap size when dragging out of a snap", "src/lib/window.js"), fixB, '', "src/lib/window.js"), 'premax')).href);
   const mxc = await maxLeg(Wpre.WindowManager);
-  ok(!mxc.atUnmax.max && mxc.atUnmax.calls.length === 0 && mxc.after.max && mxc.after.calls.length === 0, `CONTROL: the pre-fix window.js un-maximizes on the drag and re-maximizes on the cancel with NO onResize (${JSON.stringify(mxc.after.calls)}) — the app is never told`, mxc);
+  ok(!mxc.atUnmax.max && mxc.atUnmax.calls.length === 0 && gateOf(mxc.after.max) && mxc.after.calls.length === 0, `CONTROL: the pre-fix window.js un-maximizes on the drag and re-maximizes on the cancel with NO onResize (${JSON.stringify(mxc.after.calls)}) — the app is never told`, mxc);
 }
 
 console.log('§5 wiring pins');
 {
   const schema = read('src/lib/settings-schema.js');
-  ok(/'desktop\.seamless': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: 'off'[^\]]*\],[\s\S]*?category: t\('Desktop apps'\), liveApply: true,/.test(schema), 'the setting: desktop.seamless, enum auto | off, default auto, category Window, liveApply');
+  ok(verdictOf(/'desktop\.seamless': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: 'off'[^\]]*\],[\s\S]*?category: t\('Desktop apps'\), liveApply: true,/.test(schema)), 'the setting: desktop.seamless, enum auto | off, default auto, category Window, liveApply');
   const daw = read('src/lib/desktop-app-window.js');
-  ok(/app\.settings\.get\('desktop\.seamless'\)/.test(daw) && /app\.settings\.on\('desktop\.seamless', applySeamless\)/.test(daw), 'the setting is READ by the window and re-applied live (a setting with working code — §10)');
-  ok(/entry\.started = a\.op === 'move' \? app\.wm\.beginDragFromPointer\(winInfo\.id, opts\) : app\.wm\.beginResizeFromPointer\(winInfo\.id, a\.dir, opts\);/.test(daw) && /app\.wm\.cancelPointerOp\(winInfo\.id\)/.test(daw) && /onMoveResize: onAppMoveResize/.test(daw), 'WIRING PIN: the view\'s onMoveResize → PURE moveResizeAction → WindowManager.beginDragFromPointer / beginResizeFromPointer / cancelPointerOp');
-  ok(/const v = seamlessVerdict\(\{/.test(daw) && /lease: !!lease, chain: !!winInfo\._tabChain, phone: !!phoneMq\?\.matches, connected: viewConnected,/.test(daw) && /winInfo\.element\.classList\.toggle\('seamless', v\.seamless\)/.test(daw), 'WIRING PIN: the ONE verdict over the lease, the chain, the phone, the connection — and it is the only writer of .seamless');
-  ok(/winInfo\.onChainChanged = applySeamless;/.test(daw) && /_notifyChainChange\(\[\.\.\.chain\.tabs\]\)/.test(read('src/lib/tab-group.js')) && /win\._tabChain = null;\n    this\._notifyChainChange\(\[win\.id\]\);/.test(read('src/lib/tab-group.js')), 'WIRING PIN: entering / leaving a tab chain re-decides (tab-group.js _notifyChainChange → winInfo.onChainChanged)');
-  ok(/windowStateAction\(changed, \{ maximized: !!winInfo\.isMaximized, minimized: !!winInfo\.isMinimized \}\)/.test(daw) && /view\.setAppState\(\{ iconified: false \}\)/.test(daw), 'WIRING PIN: the app\'s own maximize / minimize → ours (SET semantics); our restore tells the display (iconified false)');
+  ok(gateOf(/app\.settings\.get\('desktop\.seamless'\)/.test(daw)) && verdictOf(/app\.settings\.on\('desktop\.seamless', applySeamless\)/.test(daw)), 'the setting is READ by the window and re-applied live (a setting with working code — §10)');
+  ok(gateOf(/entry\.started = a\.op === 'move' \? app\.wm\.beginDragFromPointer\(winInfo\.id, opts\) : app\.wm\.beginResizeFromPointer\(winInfo\.id, a\.dir, opts\);/.test(daw)) && gateOf(/app\.wm\.cancelPointerOp\(winInfo\.id\)/.test(daw)) && verdictOf(/onMoveResize: onAppMoveResize/.test(daw)), 'WIRING PIN: the view\'s onMoveResize → PURE moveResizeAction → WindowManager.beginDragFromPointer / beginResizeFromPointer / cancelPointerOp');
+  ok(gateOf(/const v = seamlessVerdict\(\{/.test(daw)) && gateOf(/lease: !!lease, chain: !!winInfo\._tabChain, phone: !!phoneMq\?\.matches, connected: viewConnected,/.test(daw)) && verdictOf(/winInfo\.element\.classList\.toggle\('seamless', v\.seamless\)/.test(daw)), 'WIRING PIN: the ONE verdict over the lease, the chain, the phone, the connection — and it is the only writer of .seamless');
+  ok(gateOf(/winInfo\.onChainChanged = applySeamless;/.test(daw)) && gateOf(/_notifyChainChange\(\[\.\.\.chain\.tabs\]\)/.test(read('src/lib/tab-group.js'))) && verdictOf(/win\._tabChain = null;\n    this\._notifyChainChange\(\[win\.id\]\);/.test(read('src/lib/tab-group.js'))), 'WIRING PIN: entering / leaving a tab chain re-decides (tab-group.js _notifyChainChange → winInfo.onChainChanged)');
+  ok(gateOf(/windowStateAction\(changed, \{ maximized: !!winInfo\.isMaximized, minimized: !!winInfo\.isMinimized \}\)/.test(daw)) && verdictOf(/view\.setAppState\(\{ iconified: false \}\)/.test(daw)), 'WIRING PIN: the app\'s own maximize / minimize → ours (SET semantics); our restore tells the display (iconified false)');
   const win = read('src/lib/window.js');
-  ok(/const beginAt = \(x, y\) => \{/.test(win) && /beginAt\(e\.clientX, e\.clientY\);/.test(win) && /beginAt\(p0\.clientX, p0\.clientY\);/.test(win) && (win.match(/const processMove = \(e\) => \{/g) || []).length === 2, 'ONE drag implementation: the title bar\'s mousedown and beginDragFromPointer share beginAt → the same processMove (window.js still has exactly two processMove — the drag\'s and the resize\'s)');
-  ok(/startResize\(handle\.dataset\.dir, e\.clientX, e\.clientY, \{ pointerId: e\.pointerId, el: handle \}\);/.test(win) && /return startResize\(dir, p0\.clientX, p0\.clientY, \{ pointerId: [\s\S]*?, el: handle, at \}\);/.test(win), 'ONE resize implementation: a handle\'s pointerdown and beginResizeFromPointer share startResize (lane-drag-release: the pointer door)');
+  ok(gateOf(/const beginAt = \(x, y\) => \{/.test(win)) && gateOf(/beginAt\(e\.clientX, e\.clientY\);/.test(win)) && gateOf(/beginAt\(p0\.clientX, p0\.clientY\);/.test(win)) && (win.match(/const processMove = \(e\) => \{/g) || []).length === 2, 'ONE drag implementation: the title bar\'s mousedown and beginDragFromPointer share beginAt → the same processMove (window.js still has exactly two processMove — the drag\'s and the resize\'s)');
+  ok(gateOf(/startResize\(handle\.dataset\.dir, e\.clientX, e\.clientY, \{ pointerId: e\.pointerId, el: handle \}\);/.test(win)) && verdictOf(/return startResize\(dir, p0\.clientX, p0\.clientY, \{ pointerId: [\s\S]*?, el: handle, at \}\);/.test(win)), 'ONE resize implementation: a handle\'s pointerdown and beginResizeFromPointer share startResize (lane-drag-release: the pointer door)');
   const css = read('public/style.css');
-  ok(/\.window\.seamless > \.window-titlebar \{[^}]*height: 0;/.test(css) && /\.window\.seamless\.seamless-revealed > \.window-titlebar \{[^}]*height: var\(--title-height\)/.test(css) && !/\.window\.seamless[^{]*\{[^}]*display: none/.test(css), 'CSS: the bars FOLD to 0 height with a class (never display:none) and come back with .seamless-revealed');
-  ok(/\.window\.seamless\.seamless-revealed \.picture-shell > \.desktop-bar \{[^}]*top: calc\(var\(--title-height\) \* var\(--ui-scale, 1\)\)/.test(css), 'CSS: the revealed strip sits under the revealed title bar at its VIEWPORT height (inside the counter-zoomed shell)');
-  ok(/picture-shell-floating-chip > \.desktop-bar > \.desktop-copied-chip/.test(css) && /FLOATING_CHIP_MS = 10000/.test(read('src/lib/picture-shell.js')), 'the honest list: the plain-http copy chip FLOATS over a folded strip and hides itself after 10 s');
-  ok(!/\.resize-handle[^{]*\.seamless|\.seamless[^{]*\.resize-handle/.test(css) && /\.window\.window-active \{ border-color: var\(--border-active\)/.test(css), 'the resize handles and the active window\'s 1 px border are untouched by seamless');
+  ok(gateOf(/\.window\.seamless > \.window-titlebar \{[^}]*height: 0;/.test(css)) && gateOf(/\.window\.seamless\.seamless-revealed > \.window-titlebar \{[^}]*height: var\(--title-height\)/.test(css)) && !/\.window\.seamless[^{]*\{[^}]*display: none/.test(css), 'CSS: the bars FOLD to 0 height with a class (never display:none) and come back with .seamless-revealed');
+  ok(verdictOf(/\.window\.seamless\.seamless-revealed \.picture-shell > \.desktop-bar \{[^}]*top: calc\(var\(--title-height\) \* var\(--ui-scale, 1\)\)/.test(css)), 'CSS: the revealed strip sits under the revealed title bar at its VIEWPORT height (inside the counter-zoomed shell)');
+  ok(gateOf(/picture-shell-floating-chip > \.desktop-bar > \.desktop-copied-chip/.test(css)) && verdictOf(/FLOATING_CHIP_MS = 10000/.test(read('src/lib/picture-shell.js'))), 'the honest list: the plain-http copy chip FLOATS over a folded strip and hides itself after 10 s');
+  ok(!/\.resize-handle[^{]*\.seamless|\.seamless[^{]*\.resize-handle/.test(css) && verdictOf(/\.window\.window-active \{ border-color: var\(--border-active\)/.test(css)), 'the resize handles and the active window\'s 1 px border are untouched by seamless');
   // FIX r1 — the revealed bars sit UNDER the resize handles: the top edge's handle band stays a resize while they show
   const zOf = (re) => { const m = re.exec(css); return m ? Number(m[1]) : NaN; };
   const zHandle = zOf(/\n\.resize-handle \{[^}]*z-index: (\d+)/), zTb = zOf(/\.window\.seamless > \.window-titlebar \{[^}]*z-index: (\d+)/), zBar = zOf(/\.window\.seamless \.picture-shell > \.desktop-bar \{[^}]*z-index: (\d+)/);
@@ -282,8 +282,8 @@ console.log('§5 wiring pins');
   // every rule that places the floating chip / hint (the shared one + its own), joined — a `top:` in any of them is a finding
   const rulesOf = (sel) => [...css.matchAll(/([^{}]*)\{([^}]*)\}/g)].filter((m) => m[1].includes(`.picture-shell-floating-chip > .desktop-bar > ${sel}`)).map((m) => m[2]).join(';');
   const chipRule = rulesOf('.desktop-copied-chip'), hintRule = rulesOf('.desktop-copy-hint');
-  ok(/bottom: 8px/.test(chipRule) && !/[\s;{]top:/.test(chipRule) && /bottom: 36px/.test(hintRule) && !/[\s;{]top:/.test(hintRule) && /\.picture-shell-floating-chip > \.desktop-bar \{ top: auto; bottom: 0; pointer-events: none; \}/.test(css), 'CSS: the floating copy chip sits at the pane\'s BOTTOM-right, the hint above it; the folded bar (still 0 high) moves to the pane\'s bottom edge and takes no pointer (never over a header bar\'s own buttons)');
-  ok(/id: 'window\/desktop-app-frame'/.test(daw) && /id: 'window\/desktop-app-keep'/.test(daw) && /id: 'window\/desktop-app-stop'/.test(daw) && /id: 'window\/desktop-app-scale'/.test(daw), 'the escape hatch: the taskbar / window menu carries Show window frame ▸, Scale ▸, Keep running, Stop app');
+  ok(gateOf(/bottom: 8px/.test(chipRule)) && !/[\s;{]top:/.test(chipRule) && gateOf(/bottom: 36px/.test(hintRule)) && !/[\s;{]top:/.test(hintRule) && verdictOf(/\.picture-shell-floating-chip > \.desktop-bar \{ top: auto; bottom: 0; pointer-events: none; \}/.test(css)), 'CSS: the floating copy chip sits at the pane\'s BOTTOM-right, the hint above it; the folded bar (still 0 high) moves to the pane\'s bottom edge and takes no pointer (never over a header bar\'s own buttons)');
+  ok(gateOf(/id: 'window\/desktop-app-frame'/.test(daw)) && gateOf(/id: 'window\/desktop-app-keep'/.test(daw)) && gateOf(/id: 'window\/desktop-app-stop'/.test(daw)) && verdictOf(/id: 'window\/desktop-app-scale'/.test(daw)), 'the escape hatch: the taskbar / window menu carries Show window frame ▸, Scale ▸, Keep running, Stop app');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const block = daw.slice(daw.indexOf('// ── SEAMLESS: the per-app'), daw.indexOf('export function openDesktopApp')) + daw.slice(daw.indexOf('// ── SEAMLESS: the verdict'), daw.indexOf('function onAppMain')) + daw.slice(daw.indexOf('const isXpraApp'));
   const keys = [...block.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'")).concat([...schema.slice(schema.indexOf("'desktop.seamless'"), schema.indexOf("'desktop.backendPrefs'")).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'")));
@@ -305,13 +305,13 @@ console.log('§6 lane D (a) item C — CHROME draws its own frame (MEASURED 2026
   const live = { setting: 'auto', userToggle: 'auto', lease: false, chain: false, phone: false, connected: true };
   ok(P.windowKind(CHROME_DEFAULT) === 'main' && P.windowKind(TOOLTIP, true) === 'popup', 'Chrome\'s browser window (0x400004, the only one xpra forwards; the leader / clipboard / 1×1 helpers stay unmapped) is the MAIN; its menus and tooltips arrive override-redirect ⇒ popups — the first-main pick is right for Chrome, no evidence picker needed');
   const vDef = S.seamlessVerdict({ ...live, csd: S.isCsd(CHROME_DEFAULT) }), vOwn = S.seamlessVerdict({ ...live, csd: S.isCsd(CHROME_OWN) });
-  ok(!S.isCsd(CHROME_DEFAULT) && same(vDef, { seamless: false, why: 'ssd' }), `a fresh profile (decorations 1): not CSD ⇒ ${JSON.stringify(vDef)} — the owner's screenshot: OUR title bar (carrying Chrome's own title and icon) and OUR strip, both stacked`);
-  ok(S.isCsd(CHROME_OWN) && same(vOwn, { seamless: true, why: 'csd' }), `Chrome drawing its own frame (decorations 0) is CSD ⇒ ${JSON.stringify(vOwn)} — seamless like GNOME Calculator`);
+  ok(!S.isCsd(CHROME_DEFAULT) && verdictOf(same(vDef, { seamless: false, why: 'ssd' })), `a fresh profile (decorations 1): not CSD ⇒ ${JSON.stringify(vDef)} — the owner's screenshot: OUR title bar (carrying Chrome's own title and icon) and OUR strip, both stacked`);
+  ok(gateOf(S.isCsd(CHROME_OWN)) && verdictOf(same(vOwn, { seamless: true, why: 'csd' })), `Chrome drawing its own frame (decorations 0) is CSD ⇒ ${JSON.stringify(vOwn)} — seamless like GNOME Calculator`);
   // the keeper's decision → the profile → what Chrome reports (the measured map: custom_chrome_frame true ⇒ 0, false / absent ⇒ 1)
   const decoOf = (prefs) => (prefs && prefs.browser && prefs.browser.custom_chrome_frame === true ? 0 : 1);
   const pipeline = (mod, prefs) => { const v = mod.chromiumFramePrefs(prefs); const after = v.ok ? v.prefs : prefs; return S.seamlessVerdict({ ...live, csd: S.isCsd({ decorations: decoOf(after) }) }); };
   const PL = [[null, true], [{}, true], [{ browser: { custom_chrome_frame: false } }, false], [{ browser: { custom_chrome_frame: true } }, true]];
-  ok(PL.every(([pr, want]) => pipeline(M, pr).seamless === want), `the keeper's seeding → Chrome's frame → the verdict: a new / key-less profile ⇒ seamless; the user's own "Use system title bar" (false) kept ⇒ the frame shown (${PL.map(([pr]) => JSON.stringify(pipeline(M, pr))).join(' ')})`);
+  ok(verdictOf(PL.every(([pr, want]) => pipeline(M, pr).seamless === want)), `the keeper's seeding → Chrome's frame → the verdict: a new / key-less profile ⇒ seamless; the user's own "Use system title bar" (false) kept ⇒ the frame shown (${PL.map(([pr]) => JSON.stringify(pipeline(M, pr))).join(' ')})`);
   ok(S.frameKeyOf({ appId: 'chromium', exec: '/usr/bin/google-chrome', browser: 'chromium' }) === 'chromium', 'the chromium row\'s "Show window frame" key is its app id (a Scale ▸ relaunch keeps it)');
   // nothing in the verdict path singles out a browser row (the strip folds with the title bar under .window.seamless)
   const daw = read('src/lib/desktop-app-window.js'), seam = read('src/lib/desktop-seamless.js');
@@ -324,10 +324,10 @@ console.log('§6 lane D (a) item C — CHROME draws its own frame (MEASURED 2026
   ok(srcA.split(from).length === 2 && srcA.split(from0).length === 2, 'the seeding is spelled once per branch (the control patches exactly them)');
   const mf = MUT.write('src/desktop-browser-app.js', editAnchor(editAnchor(srcA, from, "  return { ok: true, changed: false, prefs, why: 'absent' }; // CONTROL: never seeded", "src/desktop-browser-app.js"), from0, "  if (prefs === null || prefs === undefined) return { ok: true, changed: false, prefs: null, why: 'new' }; // CONTROL", "src/desktop-browser-app.js"), 'noseed');
   const MC = require(mf);
-  ok(same(pipeline(MC, null), { seamless: false, why: 'ssd' }) && same(pipeline(MC, {}), { seamless: false, why: 'ssd' }), `CONTROL: without the seeding a fresh profile stays SSD (${JSON.stringify(pipeline(MC, null))}) — both bars stacked, as in the owner's screenshot`);
+  ok(gateOf(same(pipeline(MC, null), { seamless: false, why: 'ssd' })) && verdictOf(same(pipeline(MC, {}), { seamless: false, why: 'ssd' })), `CONTROL: without the seeding a fresh profile stays SSD (${JSON.stringify(pipeline(MC, null))}) — both bars stacked, as in the owner's screenshot`);
   // WIRING: the keeper seeds before the browser starts (a fresh scaffold, a kept profile, one carried to a relaunch)
   const serve = read('src/desktop-serve.js');
-  ok(serve.indexOf('await seedChromiumFrame(rec.profileDir)') > 0 && serve.indexOf('await seedChromiumFrame(rec.profileDir)') < serve.indexOf('display.startApp(') && /if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(serve), 'WIRING PIN: the keeper seeds a chromium profile inside bringUp, BEFORE display.startApp (so a carried profile is seeded where it lands)');
+  ok(serve.indexOf('await seedChromiumFrame(rec.profileDir)') > 0 && serve.indexOf('await seedChromiumFrame(rec.profileDir)') < serve.indexOf('display.startApp(') && verdictOf(/if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(serve)), 'WIRING PIN: the keeper seeds a chromium profile inside bringUp, BEFORE display.startApp (so a carried profile is seeded where it lands)');
 }
 
 console.log('§7 design 016 S2 (lane app-satellite-windows): a verdict PER WINDOW — the main window folds by the main\'s decorations, a satellite by its own');
@@ -349,10 +349,10 @@ console.log('§7 design 016 S2 (lane app-satellite-windows): a verdict PER WINDO
   ok(bad.length === 0, `PURE windowSeamless: ${rows.length} rows — each window by ITS decorations under the app's shared choice / setting / pauses`, bad);
   const daw = read('src/lib/desktop-app-window.js');
   const satBody = daw.slice(daw.indexOf('function openSatelliteWindow('), daw.indexOf('// ── WINDOW-TYPE REGISTRATION'));
-  ok(/windowSeamless\(meta, \{ \.\.\.ctx, chain: !!winInfo\._tabChain, connected: !!ctx\.connected && !!handle && handle\.bound \}\)/.test(satBody) && /winInfo\.element\.classList\.toggle\('seamless', v\.seamless\)/.test(satBody) && /beginDragFromPointer\(winInfo\.id, opts\)/.test(satBody),
+  ok(gateOf(/windowSeamless\(meta, \{ \.\.\.ctx, chain: !!winInfo\._tabChain, connected: !!ctx\.connected && !!handle && handle\.bound \}\)/.test(satBody)) && gateOf(/winInfo\.element\.classList\.toggle\('seamless', v\.seamless\)/.test(satBody)) && verdictOf(/beginDragFromPointer\(winInfo\.id, opts\)/.test(satBody)),
     'WIRING: the satellite window folds by ITS window\'s metadata (the main\'s context, its own chain and binding) and its header bar drags IT');
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

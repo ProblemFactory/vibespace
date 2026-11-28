@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 900) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 900) : '')); } };
 if (!fs.existsSync(path.join(REPO, 'src/machine-needs.js'))) { ok(false, 'the census exists (src/machine-needs.js)'); console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
 const MN = require(path.join(REPO, 'src/machine-needs.js'));
 const UI = fs.existsSync(path.join(REPO, 'src/ui-needs.js')) ? require(path.join(REPO, 'src/ui-needs.js')) : null; // the one runner's second table (lane ui-needs-a-button)
@@ -63,9 +63,9 @@ for (const e of C.rows.values()) {
 }
 console.log(`  · not needs: ${C.non.length} (${[...new Set(C.non.map((x) => x.why))].length} reasons)`);
 ok(caught > 50 && C.unclaimed.length === 0, `every one of the ${caught} sentences the net catches is claimed — by a need (${caught - C.non.length}) or a non-need with its reason (${C.non.length})`, C.unclaimed.slice(0, 8));
-ok([...C.rows.values()].every((e) => e.sentences.length > 0), 'every row claims at least one sentence of the tree (no dead row)', [...C.rows.values()].filter((e) => !e.sentences.length).map((e) => e.row.id));
-ok(MN.NEEDS.every((r) => ['a', 'b', 'c', '-'].includes(r.kind) && Array.isArray(r.platforms) && r.platforms.length && (!!r.door.present + !!r.door.none + !!r.door.deferred) === 1), 'every row has a kind, its platforms and exactly one door verdict (present / none / deferred)');
-ok(MN.NEEDS.filter((r) => r.door.deferred).every((r) => r.door.deferred === MN.DEFERRED), `every deferred door names the owner's backlog row («${MN.DEFERRED}»)`);
+ok(verdictOf([...C.rows.values()].every((e) => e.sentences.length > 0)), 'every row claims at least one sentence of the tree (no dead row)', [...C.rows.values()].filter((e) => !e.sentences.length).map((e) => e.row.id));
+ok(verdictOf(MN.NEEDS.every((r) => ['a', 'b', 'c', '-'].includes(r.kind) && Array.isArray(r.platforms) && r.platforms.length && (!!r.door.present + !!r.door.none + !!r.door.deferred) === 1)), 'every row has a kind, its platforms and exactly one door verdict (present / none / deferred)');
+ok(verdictOf(MN.NEEDS.filter((r) => r.door.deferred).every((r) => r.door.deferred === MN.DEFERRED)), `every deferred door names the owner's backlog row («${MN.DEFERRED}»)`);
 
 console.log('② A DOOR ON EVERY SURFACE THAT STATES IT');
 for (const e of C.rows.values()) if (e.row.door.present) ok(doorless(e).length === 0 && e.files.size > 0, `${e.row.id}: every surface that states it draws its door (${[...e.files].sort().join(', ')})`, doorless(e));
@@ -73,17 +73,17 @@ for (const e of C.rows.values()) if (e.row.door.present) ok(doorless(e).length =
 console.log('③ CONTROLS');
 const planted = new Map(words); planted.set('this machine needs the Frobnicator 3 runtime — install it there first', new Set(['src/lib/planted.js']));
 const P = census(planted);
-ok(P.unclaimed.length === 1 && /Frobnicator/.test(P.unclaimed[0].s), 'CONTROL: a new «needs X» sentence that no row claims is RED by name', P.unclaimed);
+ok(P.unclaimed.length === 1 && verdictOf(/Frobnicator/.test(P.unclaimed[0].s)), 'CONTROL: a new «needs X» sentence that no row claims is RED by name', P.unclaimed);
 const ff = C.rows.get('ffmpeg');
 const stripped = (f) => (f === 'src/lib/machine-app.js' ? (sources.get(f) || '').replace(/ffmpegDoor\(|ffmpegNeedCode\(/g, 'gone(') : sources.get(f) || '');
-ok(ff && JSON.stringify(doorless(ff, stripped)) === JSON.stringify(['src/lib/machine-app.js']), 'CONTROL: the app window stating «needs ffmpeg» with its door taken out is RED by name', ff && doorless(ff, stripped));
+ok(gateOf(ff) && JSON.stringify(doorless(ff, stripped)) === JSON.stringify(['src/lib/machine-app.js']), 'CONTROL: the app window stating «needs ffmpeg» with its door taken out is RED by name', ff && doorless(ff, stripped));
 
 console.log('④ WHAT IT IS — a net, and what it cannot see (the reader\'s item 8)');
 {
   const head = fs.readFileSync(path.join(REPO, 'src/machine-needs.js'), 'utf8').split('*/')[0];
   const kb = fs.readFileSync(path.join(REPO, 'docs/kb-features.md'), 'utf8');
-  ok(/A NET, NOT A PROOF/.test(head) && /a MACHINE word AND a NEED word/.test(head) && /IT CANNOT SEE/.test(head) && /A DEVICE'S OWN REFUSAL STRINGS/.test(head), 'the census\'s header says what it is (a net over sentences carrying a machine word and a need word) and what it cannot see (a need worded past them, a device\'s own refusal strings, a log line)');
-  ok(/It is a NET, not a proof/.test(kb) && /a device's own refusal strings/.test(kb), 'the kb says the same where a person reads about the census');
+  ok(gateOf(/A NET, NOT A PROOF/.test(head)) && gateOf(/a MACHINE word AND a NEED word/.test(head)) && gateOf(/IT CANNOT SEE/.test(head)) && verdictOf(/A DEVICE'S OWN REFUSAL STRINGS/.test(head)), 'the census\'s header says what it is (a net over sentences carrying a machine word and a need word) and what it cannot see (a need worded past them, a device\'s own refusal strings, a log line)');
+  ok(gateOf(/It is a NET, not a proof/.test(kb)) && verdictOf(/a device's own refusal strings/.test(kb)), 'the kb says the same where a person reads about the census');
 }
 
 console.log('⑤ EVERY NEED HAS ITS DOOR OR ITS WHY — and the old agent\'s door (B-bd27)');
@@ -107,7 +107,7 @@ console.log('⑤ EVERY NEED HAS ITS DOOR OR ITS WHY — and the old agent\'s doo
     for (const sn of av.sentences) for (const f of words.get(sn)) for (const line of (sources.get(f) || '').split('\n').filter((l) => l.includes(sn.slice(0, 36)))) for (const m of line.matchAll(/\b(?:code|refusal|c)\s*===\s*'([a-z_]+)'|\bcase '([a-z_]+)'/g)) keyed.push([f, m[1] || m[2]]);
     const missing = (Dm) => keyed.filter(([, c]) => !Dm.isAgentOld(c));
     ok(keyed.length >= 8 && missing(D).length === 0, `every code an «agent too old» sentence is keyed on opens the door (${[...new Set(keyed.map(([, c]) => c))].sort().join(', ')} — ${keyed.length} sites)`, missing(D));
-    ok(!D.isAgentOld('no_codename') && (sources.get('src/app-system-serve.js') || '').includes("no(kind, 'no_codename', 'this machine does not name its release"), 'a machine that does not name its release has its OWN code (an OS fact) — the old agent\'s door is not drawn for it');
+    ok(!D.isAgentOld('no_codename') && verdictOf((sources.get('src/app-system-serve.js') || '').includes("no(kind, 'no_codename', 'this machine does not name its release")), 'a machine that does not name its release has its OWN code (an OS fact) — the old agent\'s door is not drawn for it');
   ok(!/regEl\.firstElementChild\.append\(' ', agentUpdateDoor/.test(sources.get('src/lib/desktop-app-launcher.js') || ''), 'no door under the guess «may be too old» (an empty office list: the words say what is known)'); // stale-pins: kept — the deliberate absence check: no door under «may be too old»
   ok(['pairing', 'machines', 'machines', 'machines'].join() === [{ id: 'd1', transport: 'dial', deviceId: 'dev-1' }, { id: 's1', transport: 'ssh' }, { id: 'd2', transport: 'dial' }, null].map(D.agentDoorTarget).join(), 'the door leads to the machine\'s PAIRING SHEET for a paired dial device (its command, run again, installs the agent anew), to Manage agents › Machines for any other machine or none');
     const HOSTS = [{ id: 'd1', name: 'WIN-DESK1', transport: 'dial', deviceId: 'dev-1' }, { id: 's1', name: 'box', transport: 'ssh' }];
@@ -125,7 +125,7 @@ console.log('⑤ EVERY NEED HAS ITS DOOR OR ITS WHY — and the old agent\'s doo
       const order = [];
       const b = D.agentUpdateDoor('d1', { app, before: () => order.push('before') });
       b.onclick({ preventDefault() { }, stopPropagation() { } });
-      ok(b.tagName === 'BUTTON' && b.type === 'button' && b.textContent === 'Update its agent…' && /pairing command on that machine again/.test(b.title) && b.dataset.agentDoor === '1' && order.join() === 'before' && JSON.stringify(opened) === JSON.stringify([['pairing', 'd1']]), 'THE BUTTON «Update its agent…» says in its title what lands (the update at each connection; else the pairing command again) and a press closes its surface first, then opens the sheet', { text: b.textContent, title: b.title, opened });
+      ok(b.tagName === 'BUTTON' && b.type === 'button' && b.textContent === 'Update its agent…' && gateOf(/pairing command on that machine again/.test(b.title)) && b.dataset.agentDoor === '1' && order.join() === 'before' && JSON.stringify(opened) === JSON.stringify([['pairing', 'd1']]), 'THE BUTTON «Update its agent…» says in its title what lands (the update at each connection; else the pairing command again) and a press closes its surface first, then opens the sheet', { text: b.textContent, title: b.title, opened });
       opened.length = 0;
       const a = D.agentUpdateAction('s1', { app });
       a.run();
@@ -136,11 +136,11 @@ console.log('⑤ EVERY NEED HAS ITS DOOR OR ITS WHY — and the old agent\'s doo
     }
     // CONTROLS
     const mut = loadDoor(src.replace("export const isAgentOld = (code) => AGENT_OLD_CODES.includes(String(code || ''));", 'export const isAgentOld = () => false;'));
-    ok(src.includes("export const isAgentOld = (code) => AGENT_OLD_CODES.includes(String(code || ''));") && missing(mut).length === keyed.length, `CONTROL: the door's code check emptied ⇒ the codes leg is RED (${missing(mut).length} of ${keyed.length} sites unopened)`);
+    ok(gateOf(src.includes("export const isAgentOld = (code) => AGENT_OLD_CODES.includes(String(code || ''));")) && missing(mut).length === keyed.length, `CONTROL: the door's code check emptied ⇒ the codes leg is RED (${missing(mut).length} of ${keyed.length} sites unopened)`);
     const strippedRuns = (f) => (f === 'src/lib/exit-runs-dialog.js' ? (sources.get(f) || '').replace(/agentUpdateDoor\(/g, 'gone(') : sources.get(f) || '');
     ok(JSON.stringify(doorless(av, strippedRuns)) === JSON.stringify(['src/lib/exit-runs-dialog.js']), 'CONTROL: the runs dialog stating «too old to run commands» with its door taken out is RED by name', doorless(av, strippedRuns));
   }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -33,7 +33,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 500) : ''}`); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 500) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -60,7 +60,7 @@ console.log('— ① THE ROWS: each chat harness declares its own effort levels 
   ok(row('antigravity').effortLevels === AGY.AGY_EFFORTS && J(row('antigravity').effortLevels) === J(FIVE) && !row('antigravity').effortExtras,
     'antigravity: ui.effortLevels IS the adapter\'s AGY_EFFORTS (one array: low|medium|high|xhigh|max), no effortExtras', row('antigravity').effortLevels);
   const wrapperList = (read('data/bin/agy-wrapper.js').match(/const EFFORTS = Object\.freeze\((\[[^\]]*\])\)/) || [])[1];
-  ok(wrapperList && J(JSON.parse(wrapperList.replace(/'/g, '"'))) === J(['', ...FIVE]), 'the agy wrapper\'s own list (a standalone file) is the same five + agy\'s default', wrapperList);
+  ok(gateOf(wrapperList) && J(JSON.parse(wrapperList.replace(/'/g, '"'))) === J(['', ...FIVE]), 'the agy wrapper\'s own list (a standalone file) is the same five + agy\'s default', wrapperList);
   ok(row('claude').effortLevels === 'cli-help' && J((row('claude').effortExtras || []).map((x) => x.value)) === '["ultracode"]',
     'claude: \'cli-help\' (the CLI\'s parsed --effort levels) + its own ultracode extra');
   ok(row('codex').effortLevels === 'model-catalog' && !row('codex').effortExtras, 'codex: \'model-catalog\' (per model), no extras');
@@ -98,7 +98,7 @@ function judgeAnswers(fn) {
   const noXhigh = E.sessionOptionsAnswer({ backend: 'claude' }, { harnessOf: (id) => H.get(id), cliLevels: ['low', 'medium', 'high', 'max'] });
   ok(noXhigh.effortExtras.length === 0, 'claude whose CLI parsed no xhigh ⇒ ultracode is absent by name (the effort-ultracode gate, unchanged)');
   const route = read('server.js').match(/app\.get\('\/api\/session-options'[\s\S]*?\n\}\);/)?.[0] || '';
-  ok(/sessionOptionsAnswer\(req\.query, \{ harnessOf: [^}]*cliLevels: EFFORT_LEVELS, permissionModes: PERMISSION_MODES, catalog: AVAILABLE_MODELS \}\)/.test(route) && !/EFFORT_EXTRAS/.test(read('server.js')),
+  ok(gateOf(/sessionOptionsAnswer\(req\.query, \{ harnessOf: [^}]*cliLevels: EFFORT_LEVELS, permissionModes: PERMISSION_MODES, catalog: AVAILABLE_MODELS \}\)/.test(route)) && !/EFFORT_EXTRAS/.test(read('server.js')),
     'the route answers sessionOptionsAnswer(req.query, …) — no claude-only EFFORT_EXTRAS left in server.js', route.slice(0, 300));
 }
 
@@ -108,16 +108,16 @@ console.log('— ③ THE CLIENT BUILDER per backend: effortOptions(backend, the 
   const rows = (be) => { const a = answer(E.sessionOptionsAnswer, be); return am.effortOptions(be, a.effortLevels, a.effortExtras, { head, capitalize: false }).map((r) => r.value); };
   ok(J(rows('antigravity')) === J(['', ...FIVE]), 'antigravity: Default + low … max — no ultracode', rows('antigravity'));
   ok(J(rows('claude')) === J(['', ...FIVE, 'ultracode']), 'claude: Default + low … max + ultracode', rows('claude'));
-  ok(am.hasEffortMenu('antigravity') && am.hasEffortMenu('claude') && am.hasEffortMenu('codex') && !am.hasEffortMenu('opencode') && !am.hasEffortMenu('no-such-harness'),
+  ok(gateOf(am.hasEffortMenu('antigravity')) && gateOf(am.hasEffortMenu('claude')) && gateOf(am.hasEffortMenu('codex')) && !am.hasEffortMenu('opencode') && !am.hasEffortMenu('no-such-harness'),
     'hasEffortMenu = the declared row: antigravity / claude / codex yes, opencode / an unknown harness no');
   ok(J(am.effortSeedLevels('antigravity')) === J(FIVE) && J(am.effortSeedLevels('claude')) === J(FIVE) && J(am.effortSeedLevels('opencode')) === '[]',
     'the seed (before / without an answer): the declared list (antigravity), the classic five (claude\'s --help), none (opencode)');
   const caps = ['claude', 'codex', 'shell', 'opencode', 'antigravity'].filter((id) => 'effort' in (am.BACKEND_META[id].caps || {}));
   ok(caps.length === 0, 'the client-only caps.effort flag is gone (it said false for antigravity while the bar offered claude\'s ladder) — one fact, the declared row', caps);
   const app = read('src/lib/app.js'), props = read('src/lib/session-props.js');
-  ok(app.includes("['row-effort', isShell || !hasEffortMenu(backend)]") && props.includes("if (hasEffortMenu(s.backend || 'claude'))")
-    && app.includes("efforts: effortOptions('antigravity', uiRow('antigravity').effortLevels, uiRow('antigravity').effortExtras,")
-    && app.includes("fetchJson('/api/session-options?backend=claude')"),
+  ok(gateOf(app.includes("['row-effort', isShell || !hasEffortMenu(backend)]")) && gateOf(props.includes("if (hasEffortMenu(s.backend || 'claude'))"))
+    && gateOf(app.includes("efforts: effortOptions('antigravity', uiRow('antigravity').effortLevels, uiRow('antigravity').effortExtras,"))
+    && verdictOf(app.includes("fetchJson('/api/session-options?backend=claude')")),
     'the New Session dialog\'s effort row and Session Properties\' follow hasEffortMenu; the dialog\'s antigravity rows are its declared levels; claude\'s fetch asks for claude');
 }
 
@@ -157,17 +157,17 @@ class FakeEl {
     return x ? { text: un(x[3]), raw: un(x[1]), title: un(x[2]) } : null;
   };
   const asked = chip('antigravity', { model: 'gemini-4-argon-high', effort: 'high' });
-  ok(asked && asked.text === 'High' && asked.raw === 'high' && /^high — Reasoning effort as asked at start \(the CLI reports no per-turn effort\)/.test(asked.title),
+  ok(gateOf(asked) && asked.text === 'High' && asked.raw === 'high' && verdictOf(/^high — Reasoning effort as asked at start \(the CLI reports no per-turn effort\)/.test(asked.title)),
     'antigravity, effort asked at start: the face says its WORD («High»), the raw value «high» first in its title and in data-raw — «as asked at start (the CLI reports no per-turn effort)» (was «?» territory)', asked);
   const none = chip('antigravity', { model: 'gemini-4-argon-high' });
-  ok(none && none.text === 'effort: not reported' && /^No effort was asked at start and the CLI reports none/.test(none.title),
+  ok(gateOf(none) && none.text === 'effort: not reported' && verdictOf(/^No effort was asked at start and the CLI reports none/.test(none.title)),
     'antigravity, nothing asked: «effort: not reported» (was «?», lane ui-language) — and its title says why (nothing asked, nothing reported, agy\'s own default)', none);
   ok(chip('opencode', { model: 'm' }) === null, 'opencode (no effort levels): NO effort chip — not a «?» that opens claude\'s ladder');
   const cl = chip('claude', { model: 'claude-fable-5-1', effort: 'xhigh' }), cx = chip('codex', { model: 'gpt-a', effort: 'high' });
-  ok(cl && /as last commanded/.test(cl.title) && cx && /as reported per turn/.test(cx.title), 'claude (commanded) and codex (per turn) keep their own titles', [cl?.title, cx?.title]);
+  ok(gateOf(cl) && gateOf(/as last commanded/.test(cl.title)) && gateOf(cx) && verdictOf(/as reported per turn/.test(cx.title)), 'claude (commanded) and codex (per turn) keep their own titles', [cl?.title, cx?.title]);
   const bar = read('src/lib/chat-status-bar.js');
-  ok(bar.includes("fetch(`/api/session-options?backend=${encodeURIComponent(this._backend || 'claude')}`)") && !bar.includes("fetch('/api/session-options')")
-    && bar.includes('addItems(ladder(effortSeedLevels(this._backend)));'),
+  ok(gateOf(bar.includes("fetch(`/api/session-options?backend=${encodeURIComponent(this._backend || 'claude')}`)")) && !bar.includes("fetch('/api/session-options')")
+    && verdictOf(bar.includes('addItems(ladder(effortSeedLevels(this._backend)));')),
     'the bar\'s menu asks /api/session-options WITH its backend; a failed ask falls back to THIS harness\'s seed (never claude\'s five + ultracode)');
 }
 
@@ -177,7 +177,7 @@ console.log('— ④c THE ⚙ DEFAULT-MODEL SELECT (the reader\'s F7): the serve
   const mk = (x, p) => '‹' + String(x).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? p[k] : m)) + '›';
   const opts = typeof VW.modelOptions === 'function' ? VW.modelOptions([{ id: '', label: 'Default' }, { id: 'opus', label: 'opus (latest, 200k)' }, { id: 'gpt-x' }], mk) : null;
   const appSrc = read('src/lib/app.js');
-  ok(!!opts && opts[0].value === '' && opts[0].label === '‹Default›' && opts[1].label.startsWith('opus') && opts[2].label === 'gpt-x' && /const toSchemaOptions = \(models\) => modelOptions\(models, t\);/.test(appSrc),
+  ok(!!opts && opts[0].value === '' && opts[0].label === '‹Default›' && gateOf(opts[1].label.startsWith('opus')) && opts[2].label === 'gpt-x' && verdictOf(/const toSchemaOptions = \(models\) => modelOptions\(models, t\);/.test(appSrc)),
     'the settings select\'s served model rows go through value-words modelOptions: the default row is worded (‹Default›), a model keeps its name; app.js reads it', opts);
 }
 console.log('— ④d THE PHONE PERMISSION MENU (the reader\'s F3): its decision words are never squeezed to one character per line');
@@ -188,8 +188,8 @@ console.log('— ④d THE PHONE PERMISSION MENU (the reader\'s F3): its decision
   const rule = (sel) => { const m = new RegExp('(?:^|\\n)' + sel.replace(/[.]/g, '\\.') + '\\s*\\{([^}]*)\\}').exec(css); return m ? m[1] : ''; };
   const item = rule('.chat-status-perm-item'), value = rule('.chat-status-perm-value'), words = rule('.chat-status-perm-words');
   const bar = read('src/lib/chat-status-bar.js');
-  ok(/flex-wrap:\s*wrap/.test(item) && /min-width:\s*min\(\d+(\.\d+)?em,\s*100%\)/.test(words) && /flex:\s*1 1 auto/.test(words) && /flex:\s*0 1 auto/.test(value) && /min-width:\s*0/.test(value)
-    && /val\.className = 'chat-status-perm-value';/.test(bar) && /words\.className = 'chat-status-perm-words';/.test(bar),
+  ok(gateOf(/flex-wrap:\s*wrap/.test(item)) && gateOf(/min-width:\s*min\(\d+(\.\d+)?em,\s*100%\)/.test(words)) && gateOf(/flex:\s*1 1 auto/.test(words)) && gateOf(/flex:\s*0 1 auto/.test(value)) && gateOf(/min-width:\s*0/.test(value))
+    && gateOf(/val\.className = 'chat-status-perm-value';/.test(bar)) && verdictOf(/words\.className = 'chat-status-perm-words';/.test(bar)),
     'the permission menu row WRAPS: the mode VERBATIM shrinks, its words take the rest with a min-width and drop under it on a narrow menu (no one-character column on a phone)', { item, value, words });
 }
 console.log('— ④a THE READER\'S MUST (pick 4): a POOL auto-continue wait with a cause is DRAWN — its lines name the reset in the page\'s one format');
@@ -205,7 +205,7 @@ console.log('— ④a THE READER\'S MUST (pick 4): a POOL auto-continue wait wit
     const el = bar.element.children.find((c) => c.getAttribute('data-chip') === 'autoresume');
     title = el ? el.title : '(no chip)';
   } catch (e) { threw = String(e && e.message); }
-  ok(!threw && /Earliest usable account: B-Stack Max \(7d resets at [^)]*\d[^)]*\)/.test(title) && /userP: 5h resets at [^.]*\d/.test(title),
+  ok(!threw && gateOf(/Earliest usable account: B-Stack Max \(7d resets at [^)]*\d[^)]*\)/.test(title)) && verdictOf(/userP: 5h resets at [^.]*\d/.test(title)),
     'a pool auto-continue wait with a cause draws its chip: the rejector\'s reset and the soonest account\'s reset, each a time (no TypeError — the reader\'s F1)', threw || title);
 }
 console.log('— ④b THE PERMISSION CHIP OPENS THE HARNESS\'S MODES: a status naming no modes (`[]`) keeps the declared list');
@@ -233,7 +233,7 @@ async function permMenu(mod, backend, status) {
   const mod = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-status-bar.js')).href);
   const FOUR = am.BACKEND_META.antigravity.permissionModes;
   const cut = await permMenu(mod, 'antigravity', { model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', permissionModes: [] });
-  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && cut.raw === 'bypassPermissions' && /Allow all$/.test(cut.label),
+  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && cut.raw === 'bypassPermissions' && verdictOf(/Allow all$/.test(cut.label)),
     'antigravity, a status with permissionModes [] (its journal head cut): the chip still holds bypassPermissions (its data-raw; its FACE «Allow all» — the cure of 644a67ec2) and its click opens agy\'s FOUR declared modes, the current one marked', cut);
   const told = await permMenu(mod, 'antigravity', { permissionMode: 'plan', permissionModes: ['plan', 'auto'] });
   ok(!!told && J(told.items) === J(['plan', 'auto']) && J(told.list) === J(['plan', 'auto']), 'a status that NAMES modes still replaces the seed (the live list wins)', told);
@@ -249,7 +249,7 @@ const registry = () => createAdapterRegistry({
 const caught = (fn) => { try { fn(); return null; } catch (e) { return e; } };
 {
   const e1 = caught(() => AGY.agyFlags({ effort: 'ultracode' }));
-  ok(e1?.code === 'effort_not_supported' && J(e1.levels) === J(FIVE) && /Antigravity has no reasoning effort "ultracode" — agy --effort takes low, medium, high, xhigh, max/.test(e1.message),
+  ok(e1?.code === 'effort_not_supported' && J(e1.levels) === J(FIVE) && verdictOf(/Antigravity has no reasoning effort "ultracode" — agy --effort takes low, medium, high, xhigh, max/.test(e1.message)),
     'agyFlags({effort: ultracode}) THROWS effort_not_supported naming agy\'s five (was: silently no --effort)', e1?.message);
   ok(J(AGY.agyFlags({ effort: 'max' })) === '["--effort","max"]' && J(AGY.agyFlags({ effort: '' })) === '[]', 'a level agy has rides --effort; Default (\'\') rides nothing');
   const agy = registry().get('antigravity');
@@ -258,7 +258,7 @@ const caught = (fn) => { try { fn(); return null; } catch (e) { return e; } };
   ok(agy.buildSessionArgs({ mode: 'chat', effort: 'xhigh' }).env.AGY_WEBUI_EFFORT === 'xhigh' && JSON.parse(agy.formatSetEffort('low')).effort === 'low',
     'a level agy has: AGY_WEBUI_EFFORT carries it; the pick is the ACP set-effort frame');
   const ws = read('src/ws-handler.js');
-  ok(/try \{ effortLine = adapter\.formatSetEffort\(data\.effort\); \}\s*catch \(e\) \{\s*if \(e\?\.code === 'effort_not_supported'\) \{ try \{ ws\.send\(JSON\.stringify\(\{ type: 'error', code: e\.code, scope: 'action', sessionId: data\.sessionId, effort: e\.effort, levels: e\.levels/.test(ws)
+  ok(gateOf(/try \{ effortLine = adapter\.formatSetEffort\(data\.effort\); \}\s*catch \(e\) \{\s*if \(e\?\.code === 'effort_not_supported'\) \{ try \{ ws\.send\(JSON\.stringify\(\{ type: 'error', code: e\.code, scope: 'action', sessionId: data\.sessionId, effort: e\.effort, levels: e\.levels/.test(ws))
     && ws.indexOf('effortLine = adapter.formatSetEffort') < ws.indexOf('session._effort = data.effort || null;'),
     'ws set-effort: a refused pick answers the client by name BEFORE anything is written or remembered as the session\'s effort');
 }
@@ -310,7 +310,7 @@ console.log('— ⑥ MUTANTS: each restores the base shape in a copy ⇒ the leg
   ok(src.split(A).length === 2, 'setup: the answer is ONE identifiable statement in src/harness-efforts.js');
   const base = M.load('src/harness-efforts.js', editAnchor(src, A, "  return { backend, ...effortAnswerFor(harnessOf('claude'), { cliLevels }), permissionModes: permissionModes || [] }; // the base: claude's answer to every backend\n", "src/harness-efforts.js"), 'claude-for-all');
   const v = judgeAnswers(base.sessionOptionsAnswer);
-  ok(/^antigravity: \[\["low","medium","high","xhigh","max"\],\["ultracode"\]\]/.test(v[0]) && /^opencode: /.test(v[5]),
+  ok(gateOf(/^antigravity: \[\["low","medium","high","xhigh","max"\],\["ultracode"\]\]/.test(v[0])) && verdictOf(/^opencode: /.test(v[5])),
     'MUTANT the route answering claude\'s rows to every backend (2.369.336) ⇒ ② RED: antigravity gets ultracode, opencode a ladder', v.filter(Boolean));
   const asrc = read('src/adapters/agy.js');
   const R = "  if (!v || AGY_EFFORTS.includes(v)) return null;\n";
@@ -319,7 +319,7 @@ console.log('— ⑥ MUTANTS: each restores the base shape in a copy ⇒ the leg
   const reg = registry(), real = reg.get('antigravity');
   const mutAgy = new mut.AgyAdapter(real.config);
   const x = await drive(wsCreate, { backend: 'antigravity', effort: 'ultracode' }, { ...reg, get: (id) => (id === 'antigravity' ? mutAgy : reg.get(id)) });
-  ok(/^SPAWNED \(AGY_WEBUI_EFFORT=""\)/.test(refusedByName(x)), 'MUTANT the agy adapter dropping instead of refusing (2.369.336) ⇒ ⑤ RED: it spawns with no effort, without a word', refusedByName(x));
+  ok(verdictOf(/^SPAWNED \(AGY_WEBUI_EFFORT=""\)/.test(refusedByName(x))), 'MUTANT the agy adapter dropping instead of refusing (2.369.336) ⇒ ⑤ RED: it spawns with no effort, without a word', refusedByName(x));
   const bsrc = read('src/lib/chat-status-bar.js');
   const G1 = '    if (status.permissionModes?.length) this._permissionModes = status.permissionModes;\n';
   const G2 = "    const modes = this._permissionModes?.length ? this._permissionModes : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];\n";
@@ -327,7 +327,7 @@ console.log('— ⑥ MUTANTS: each restores the base shape in a copy ⇒ the leg
   const baseBar = await import(pathToFileURL(M.write('src/lib/chat-status-bar.js', editAnchor(editAnchor(bsrc, G1, '    if (status.permissionModes) this._permissionModes = status.permissionModes;\n', "src/lib/chat-status-bar.js"),
     G2, "    const modes = this._permissionModes || ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];\n", "src/lib/chat-status-bar.js"), 'perm-empty', { esm: true })).href);
   const e = await permMenu(baseBar, 'antigravity', { model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', permissionModes: [] });
-  ok(!!e && Array.isArray(e.items) && e.items.length === 0 && J(e.list) === '[]', 'MUTANT the base guards (2.369.353: `[]` is truthy) ⇒ ④b RED: the status\'s [] replaced the declared list and the chip opens an EMPTY menu', e);
+  ok(!!e && gateOf(Array.isArray(e.items)) && e.items.length === 0 && J(e.list) === '[]', 'MUTANT the base guards (2.369.353: `[]` is truthy) ⇒ ④b RED: the status\'s [] replaced the declared list and the chip opens an EMPTY menu', e);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -150,7 +150,7 @@ fs.mkdirSync(deskBin, { recursive: true });
 fs.writeFileSync(path.join(deskBin, 'Xtigervnc'), '#!/bin/sh\necho "test-desktop-small-chrome: a stub Xtigervnc - this suite starts no desktop" >&2\nexit 1\n', { mode: 0o755 });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the stub CLI: one assistant turn per user line — a reply that wraps at every width, with a code block ──
@@ -792,13 +792,13 @@ const runViewport = async ([VW, VH], font) => {
     await evalJs(`(() => { window.__tc = null; if (window.__tcKeep) app.wm.toggleMaximize(window.__tcKeep); return 1; })()`); await sleep(300);
     console.log(`    the close's toast (${tag}): before the close ${tcCleared.length ? 'the stack held ' + J(tcCleared) + ' (cleared)' : 'no toast'} · found by ${tcOwnBy} · arrival ${J(tcArrive)} · its own ✕ ${tcX ? 'pressed' : 'NOT FOUND'} · its whole life to the ✕ ${J(tcLife)} (${J(tcSet)})`);
     const TC_ARRIVAL = 3;   // the leg's own law for one toast's arrival: 1 to 3 reads of the stack's rect
-    check(`⑧ ${tag} (lane window-close-stall — RED on 5c77612ef): a running chat's ✕ with a maximized chat's composer and title bar in the toast's column — its toast is placed with 0 hit tests (the click's task and the frames after), in ${tcArrive.placed} placements${tcArrive.others ? ` (+ ${tcArrive.others} toast(s) of another kind that arrived inside the window, named, not counted: ${J(tcArrive.words)})` : ''}`, tcSet.maximized && tcSet.composer && tcArrive.toasts >= 1 && tcArrive.hits === 0 && tcArrive.placed >= 1 && tcArrive.placed <= TC_ARRIVAL + TC_ARRIVAL * tcArrive.others, { tcSet, tcArrive });
-    check(`⑧ ${tag}: the close's toast is GONE 400 ms after its own ✕ (found by ${tcOwnBy}) — its whole life (shown, then its ✕) in ${tcLife.placed} placements (≤ 4, + ${TC_ARRIVAL} for each toast of another kind that arrived inside the window) and 0 hit tests, never a storm${tcLife.left.length ? ` (the stack stays for ${tcLife.left.length} other toast(s), named, not counted: ${J(tcLife.left)})` : ''}`, tcArrive.own && tcX && tcLife.ownGone && tcLife.hits === 0 && tcLife.placed <= 4 + TC_ARRIVAL * tcLife.left.length, { tcCleared, tcOwnBy, tcArrive, tcLife });
+    check(`⑧ ${tag} (lane window-close-stall — RED on 5c77612ef): a running chat's ✕ with a maximized chat's composer and title bar in the toast's column — its toast is placed with 0 hit tests (the click's task and the frames after), in ${tcArrive.placed} placements${tcArrive.others ? ` (+ ${tcArrive.others} toast(s) of another kind that arrived inside the window, named, not counted: ${J(tcArrive.words)})` : ''}`, gateOf(tcSet.maximized) && gateOf(tcSet.composer) && tcArrive.toasts >= 1 && tcArrive.hits === 0 && tcArrive.placed >= 1 && tcArrive.placed <= TC_ARRIVAL + TC_ARRIVAL * tcArrive.others, { tcSet, tcArrive });
+    check(`⑧ ${tag}: the close's toast is GONE 400 ms after its own ✕ (found by ${tcOwnBy}) — its whole life (shown, then its ✕) in ${tcLife.placed} placements (≤ 4, + ${TC_ARRIVAL} for each toast of another kind that arrived inside the window) and 0 hit tests, never a storm${tcLife.left.length ? ` (the stack stays for ${tcLife.left.length} other toast(s), named, not counted: ${J(tcLife.left)})` : ''}`, gateOf(tcArrive.own) && gateOf(tcX) && gateOf(tcLife.ownGone) && tcLife.hits === 0 && tcLife.placed <= 4 + TC_ARRIVAL * tcLife.left.length, { tcCleared, tcOwnBy, tcArrive, tcLife });
     if (TC_PORT_CTL.tag === tag && !TC_PORT_CTL.judged) {
       TC_PORT_CTL.judged = true;
       const named = TC_PORT_CTL.ports.every((port) => tcLife.left.some((w) => w.includes(`port ${port}`)));
       const old603 = tcLife.hits === 0 && tcLife.placed <= 4;   // line 603's life bound, the arrivals counted as the close's
-      check(`⑧ ${tag} CONTROL (r3574): two notices of a new listening port (ports ${TC_PORT_CTL.ports.join(', ')}) arrived inside the window through the page's own handler — line 603's bound alone is RED for that named cause (${tcLife.placed} placements > 4), the leg's judgment with each arrival's own bound green`, named && !old603 && tcLife.ownGone && tcLife.placed <= 4 + TC_ARRIVAL * tcLife.left.length, { named, old603, tcLife });
+      check(`⑧ ${tag} CONTROL (r3574): two notices of a new listening port (ports ${TC_PORT_CTL.ports.join(', ')}) arrived inside the window through the page's own handler — line 603's bound alone is RED for that named cause (${tcLife.placed} placements > 4), the leg's judgment with each arrival's own bound green`, gateOf(named) && !old603 && gateOf(tcLife.ownGone) && tcLife.placed <= 4 + TC_ARRIVAL * tcLife.left.length, { named, old603, tcLife });
     }
     await evalJs(`(() => { app.showNewSessionDialog(); return 1; })()`); await sleep(700);
     const h4 = await evalJs(HITS);
@@ -806,15 +806,15 @@ const runViewport = async ([VW, VH], font) => {
     const bad = [...new Set([...h1, ...h2, ...h3, ...h4])];
     check(`⑧ ${tag}: every visible clickable — the first screen, a session row hovered, a code block hovered, a toast, the New Session dialog — is ≥ 24×24 or inside a ≥ 24×24 clickable (exceptions named: ${Object.keys(HIT_EXCEPTIONS).join(', ')})`, bad.length === 0, bad);
     const gaps = await evalJs(WIN_BTN_GAPS);
-    check(`⑧ ${tag}: the window buttons stand ≥ 4 px apart (${[...new Set(gaps)].join(', ')} px)`, gaps.length > 0 && gaps.every((g) => g >= 4), gaps);
+    check(`⑧ ${tag}: the window buttons stand ≥ 4 px apart (${[...new Set(gaps)].join(', ')} px)`, gaps.length > 0 && verdictOf(gaps.every((g) => g >= 4)), gaps);
     await evalJs(`document.querySelectorAll('#global-toasts').forEach((t) => t.remove())`);
   });
 
   console.log(`— ⑦ the chat window (${tag})`);
   await step(`${tag} ⑦ the chat window`, async () => {
     const c = await legNarrowChat();
-    check(`⑦ ${tag}: a ${c.narrow.w} px chat window's status bar is the strip's SAME two rows (${c.narrow.rows} rows, ${c.narrow.bar} px ≤ 60; row 1 «${c.narrow.row1}», row 2 «${c.narrow.row2}») — each mark on the row the table gives it (P2-4)`, barLaw(c.narrow), c.narrow);
-    check(`⑦ ${tag}: nothing behind «show more» — no ⋯, nothing folded, every mark inside the bar (${c.narrow.hidden.length ? 'cut: ' + c.narrow.hidden.join(', ') : 'none cut'})`, !c.narrow.more && c.narrow.folded === 0 && c.narrow.hidden.length === 0 && /\bmodel\b/.test(c.narrow.row1) && /\bsettings\b/.test(c.narrow.row2), c.narrow);
+    check(`⑦ ${tag}: a ${c.narrow.w} px chat window's status bar is the strip's SAME two rows (${c.narrow.rows} rows, ${c.narrow.bar} px ≤ 60; row 1 «${c.narrow.row1}», row 2 «${c.narrow.row2}») — each mark on the row the table gives it (P2-4)`, verdictOf(barLaw(c.narrow)), c.narrow);
+    check(`⑦ ${tag}: nothing behind «show more» — no ⋯, nothing folded, every mark inside the bar (${c.narrow.hidden.length ? 'cut: ' + c.narrow.hidden.join(', ') : 'none cut'})`, !c.narrow.more && c.narrow.folded === 0 && c.narrow.hidden.length === 0 && gateOf(/\bmodel\b/.test(c.narrow.row1)) && verdictOf(/\bsettings\b/.test(c.narrow.row2)), c.narrow);
     check(`⑦ ${tag}: a ${c.short.h} px high chat window keeps ≥ 45 % of itself for messages (${Math.round(c.short.share * 100)} %, ${c.short.list} px)`, c.short.share >= 0.45, c.short);
     const over = await hoverWords(c.id);
     check(`⑦ ${tag}: the Open in editor / Fork buttons never stand on a message's words (${over && over.messages} messages with buttons, hovered; ${over && over.spaces} hanging spaces under one — no word) (P2-5)`, !!over && over.messages > 0 && over.bad.length === 0, over);
@@ -823,32 +823,32 @@ const runViewport = async ([VW, VH], font) => {
   console.log(`— ③ menus inside the screen (${tag})`);
   await step(`${tag} ③ menus inside the screen`, async () => {
     const t = await legTitleMenu();
-    check(`③ ${tag}: the title-bar menu of a lower-row chat window (right-clicked at y ${Math.round(t.at.y)}) lies inside the viewport, its first row at y ${t.m && t.m.firstTop} ≥ 0, «Move» takes a press (P2-3)`, !!t.m && t.m.inside && t.m.firstTop >= 0 && t.m.moveHit, t.m);
+    check(`③ ${tag}: the title-bar menu of a lower-row chat window (right-clicked at y ${Math.round(t.at.y)}) lies inside the viewport, its first row at y ${t.m && t.m.firstTop} ≥ 0, «Move» takes a press (P2-3)`, !!t.m && gateOf(t.m.inside) && t.m.firstTop >= 0 && verdictOf(t.m.moveHit), t.m);
     const chip = await evalJs(`(() => { const ws = [...document.querySelectorAll('.window')].filter((w) => w.querySelector('.chat-status-model') && w.offsetWidth).sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top); const c = ws[0] && ws[0].querySelector('.chat-status-model'); if (!c) return null; const r = c.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
     if (chip) {
       await click(chip); await sleep(400);
       const dd = await evalJs(INVIEW('.chat-status-dropdown'));
-      check(`③ ${tag}: the model dropdown of a lower-row cell lies inside the viewport and scrolls when capped (the walk's unverified «cut at the cell's floor»)`, !!dd && dd.inside && dd.scrolls, dd);
+      check(`③ ${tag}: the model dropdown of a lower-row cell lies inside the viewport and scrolls when capped (the walk's unverified «cut at the cell's floor»)`, !!dd && gateOf(dd.inside) && verdictOf(dd.scrolls), dd);
       await esc();
     }
     const wl = await centre('#taskbar-status');
-    if (wl) { await click(wl); await sleep(400); const l = await evalJs(INVIEW('.overlap-switcher')); check(`③ ${tag}: the window list lies inside the viewport`, !!l && l.inside && l.scrolls, l); await esc(); }
+    if (wl) { await click(wl); await sleep(400); const l = await evalJs(INVIEW('.overlap-switcher')); check(`③ ${tag}: the window list lies inside the viewport`, !!l && gateOf(l.inside) && verdictOf(l.scrolls), l); await esc(); }
   });
 
   console.log(`— ① the release never buries a window (${tag})`);
   await step(`${tag} ① the release never buries a window`, async () => {
     const d = await legDragOverTaskbar(tag);
-    check(`① ${tag}: Quad — a title bar released over the taskbar keeps ${d.after.bar[0]}×${d.after.bar[1]} of it inside the workspace (≥ 80×32) (P2-1)`, reachableBar(d.after), d.after);
+    check(`① ${tag}: Quad — a title bar released over the taskbar keeps ${d.after.bar[0]}×${d.after.bar[1]} of it inside the workspace (≥ 80×32) (P2-1)`, verdictOf(reachableBar(d.after)), d.after);
     if (!B6CF9_FACT_SEEN && !/RED/.test(tag)) {   // B-6cf9, once per run (the first real face): a title changed inside a tile's press — the press still takes
       B6CF9_FACT_SEEN = true;
       const f = await stripRebuildFact(d.id);
       console.log(`  ⓘ B-6cf9 ${tag}: the CONTROL press (no title change) ${f.control.pressed ? (f.control.took ? 'TOOK (minimized)' : 'did NOT take') : 'was not made: ' + f.control.why} · the PLANTED press (its title changed in its own mousedown) ${f.planted.pressed ? (f.planted.took ? 'TOOK (minimized)' : 'did NOT take') + (f.planted.rebuiltBetween ? ', the strip rebuilt between its press and release' : ', no rebuild between its press and release') : 'was not made: ' + f.planted.why} — the control's record ${J(f.control.rec)} · the plant's record ${J(f.planted.rec)}`);
-      check(`① ${tag}: B-6cf9 — a tile press whose window's title changes in its own mousedown TAKES (minimized), the strip NOT rebuilt between its press and release (${f.planted.rebuilds} rebuilds), as the control's press (${f.control.took ? 'took' : 'did NOT take'}) — the title is painted in place (the base rebuilt every tile and lost the press)`, f.control.pressed && f.control.took && f.planted.pressed && f.planted.planted === true && f.planted.took && f.planted.rebuilds === 0, f);
+      check(`① ${tag}: B-6cf9 — a tile press whose window's title changes in its own mousedown TAKES (minimized), the strip NOT rebuilt between its press and release (${f.planted.rebuilds} rebuilds), as the control's press (${f.control.took ? 'took' : 'did NOT take'}) — the title is painted in place (the base rebuilt every tile and lost the press)`, gateOf(f.control.pressed) && gateOf(f.control.took) && gateOf(f.planted.pressed) && f.planted.planted === true && gateOf(f.planted.took) && f.planted.rebuilds === 0, f);
       const pf = await paintInPlaceFact(d.id);   // B-6cf9 follow (r1649): the painter's own leg
       check(`① ${tag}: B-6cf9 follow — a tile's window renamed reads its new title on THE SAME tile, a grouped tab renamed while its chooser is open reads it in the chooser's row, 0 rebuilds of the strip (${pf.single && pf.single.removed} / ${pf.group && pf.group.removed}); five renames in one task painted ${pf.burst && pf.burst.paints} time(s) (at most twice: once a frame) and ending on the last`,
-        !pf.error && !!pf.single && pf.single.same && pf.single.tip === pf.single.want && pf.single.removed === 0 && !!pf.group && pf.group.tile && pf.group.chooser && pf.group.same && pf.group.removed === 0 && typeof pf.group.row === 'string' && pf.group.row.includes('B · renamed') && !!pf.burst && pf.burst.paints >= 1 && pf.burst.paints <= 2 && pf.burst.tip === pf.burst.want, pf);
+        !pf.error && !!pf.single && gateOf(pf.single.same) && pf.single.tip === pf.single.want && pf.single.removed === 0 && !!pf.group && gateOf(pf.group.tile) && gateOf(pf.group.chooser) && gateOf(pf.group.same) && pf.group.removed === 0 && typeof pf.group.row === 'string' && gateOf(pf.group.row.includes('B · renamed')) && !!pf.burst && pf.burst.paints >= 1 && pf.burst.paints <= 2 && pf.burst.tip === pf.burst.want, pf);
     }
-    check(`① ${tag}: …and its tile, clicked twice, leaves it reachable (${d.afterTiles.bar[0]}×${d.afterTiles.bar[1]})`, d.pressed && reachableBar(d.afterTiles) && !d.afterTiles.min, d.pressed ? d.afterTiles : { notPressed: 'the tile was not on screen', strip: d.strip });
+    check(`① ${tag}: …and its tile, clicked twice, leaves it reachable (${d.afterTiles.bar[0]}×${d.afterTiles.bar[1]})`, gateOf(d.pressed) && gateOf(reachableBar(d.afterTiles)) && !d.afterTiles.min, d.pressed ? d.afterTiles : { notPressed: 'the tile was not on screen', strip: d.strip });
     await layout('freeform');
     await evalJs(`app.settings.set('layout.enableDragSnap', false)`);
     const id = d.id;
@@ -858,7 +858,7 @@ const runViewport = async ([VW, VH], font) => {
       const ws = await evalJs(WS);
       await dragTo(await titleGrip(id), to(ws));
       const b = await evalJs(BOX(id)); rel.push([name, b.bar]);
-      check(`① ${tag}: free drop (snap off) ${name} — the title bar keeps ${b.bar[0]}×${b.bar[1]} inside (≥ 80×32)`, reachableBar(b), b);
+      check(`① ${tag}: free drop (snap off) ${name} — the title bar keeps ${b.bar[0]}×${b.bar[1]} inside (≥ 80×32)`, verdictOf(reachableBar(b)), b);
     }
     await evalJs(`app.settings.set('layout.enableDragSnap', true)`);
     await evalJs(`app.sidebar.toggle(false)`); await sleep(700);
@@ -872,7 +872,7 @@ const runViewport = async ([VW, VH], font) => {
     const brand = await evalJs(`(() => { const t = document.querySelector('#toolbar .toolbar-title'); if (!t) return null; const cs = getComputedStyle(t); return { drawn: cs.display !== 'none' && cs.visibility !== 'hidden' && t.getBoundingClientRect().width > 0, sw: t.scrollWidth, cw: t.clientWidth }; })()`);
     check(`④ ${tag}: after the viewport shrank and grew back, the brand is still whole or not drawn (the fold's last pass ran before the title settled — the title re-judges its own box)`, !brand || !brand.drawn || brand.sw <= brand.cw + 1, brand);
     const unreach = (rows) => rows.filter((r) => !(r.bar[0] >= 79.5 && r.bar[1] >= 31.5));
-    check(`① ${tag}: the sidebar folded / opened and the viewport shrunk to ${VW - 140}×${VH - 90} and back — every window's title bar keeps ≥ 80×32 inside`, [folded, opened, small, back].every((r) => r.length > 0 && unreach(r).length === 0), { folded: unreach(folded), opened: unreach(opened), small: unreach(small), back: unreach(back) });
+    check(`① ${tag}: the sidebar folded / opened and the viewport shrunk to ${VW - 140}×${VH - 90} and back — every window's title bar keeps ≥ 80×32 inside`, verdictOf([folded, opened, small, back].every((r) => r.length > 0 && unreach(r).length === 0)), { folded: unreach(folded), opened: unreach(opened), small: unreach(small), back: unreach(back) });
   });
 
   console.log(`— ② the recovery loop (${tag})`);
@@ -884,13 +884,13 @@ const runViewport = async ([VW, VH], font) => {
     const tile = await centre(`.taskbar-item[data-win-id="${id}"]`);
     await click(tile); await sleep(400);
     const byTile = await evalJs(BOX(id));
-    check(`② ${tag}: a buried window (title bar ${buried.bar[0]}×${buried.bar[1]} inside) — its taskbar tile brings its rect INSIDE the workspace (not only raised)`, !reachableBar(buried) && byTile.inside && !byTile.min, { buried, byTile });
+    check(`② ${tag}: a buried window (title bar ${buried.bar[0]}×${buried.bar[1]} inside) — its taskbar tile brings its rect INSIDE the workspace (not only raised)`, !reachableBar(buried) && gateOf(byTile.inside) && !byTile.min, { buried, byTile });
     await bury(); await sleep(200);
     await press('#taskbar-status'); await sleep(400);
     const row = await evalJs(`(() => { const rows = [...document.querySelectorAll('.overlap-switcher .overlap-switcher-item')]; const want = app.wm.windows.get(${J(id)}).title; const r = rows.find((x) => x.textContent.includes(want)); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
     if (row) await click(row); await sleep(400);
     const byRow = await evalJs(BOX(id));
-    check(`② ${tag}: …and its window-list row does too`, !!row && byRow.inside, byRow);
+    check(`② ${tag}: …and its window-list row does too`, !!row && verdictOf(byRow.inside), byRow);
   });
 
   console.log(`— ⑥ the taskbar (${tag})`);
@@ -898,7 +898,7 @@ const runViewport = async ([VW, VH], font) => {
     const t = await legTaskbar();
     const s = t.s0, hidden = s.rows.filter((r) => !r.whole), visibleBad = s.rows.filter((r) => r.whole && !r.hits), narrow = s.rows.filter((r) => r.w < 90);
     check(`⑥ ${tag}: ${s.n} windows — every tile ≥ 90 px (P2-2: 60 px, a 1–2 character label)`, s.n >= 15 && narrow.length === 0, narrow.slice(0, 4));
-    check(`⑥ ${tag}: every whole tile's centre hits that tile; the ${hidden.length} cut ones are counted on a visible «+N» chip («${s.chip && s.chip.text}»)`, visibleBad.length === 0 && hidden.length > 0 && !!s.chip && s.chip.hit && s.chip.text === '+' + hidden.length, { visibleBad, hidden: hidden.length, chip: s.chip });
+    check(`⑥ ${tag}: every whole tile's centre hits that tile; the ${hidden.length} cut ones are counted on a visible «+N» chip («${s.chip && s.chip.text}»)`, visibleBad.length === 0 && hidden.length > 0 && !!s.chip && gateOf(s.chip.hit) && s.chip.text === '+' + hidden.length, { visibleBad, hidden: hidden.length, chip: s.chip });
     check(`⑥ ${tag}: the wheel's deltaY scrolls the strip sideways (scrollLeft ${t.s0.scroll[0]} → ${t.s1.scroll[0]})`, t.s1.scroll[0] > t.s0.scroll[0], [t.s0.scroll, t.s1.scroll]);
     check(`⑥ ${tag}: 8 desktops — the switcher is ONE «‹name› k/N» button (${J(t.s8.compact)}), no pile of previews`, t.s8.compact === 'Desktop 1 1/8' && t.s8.previews === 0, { compact: t.s8.compact, previews: t.s8.previews });
     // the «+N» list = exactly the cut tiles, a row raises its window
@@ -922,14 +922,14 @@ const runViewport = async ([VW, VH], font) => {
     while (!(picked.active && picked.whole) && Date.now() - t6 < 3000) { await sleep(100); picked = await evalJs(PICKED); }
     picked = { ...picked, waitedMs: Date.now() - t6 };
     if (picked.waitedMs > 450 || !(picked.active && picked.whole)) console.log(`  ⓘ NAMED ⑥ ${tag}: the raised tile waited ${picked.waitedMs} ms for «active and whole»${picked.active && picked.whole ? '' : ' and ended on the 3 s bound'} ${J(picked)}`);
-    check(`⑥ ${tag}: …a row raises its window and brings its tile into the strip`, picked.active && picked.whole, picked);
+    check(`⑥ ${tag}: …a row raises its window and brings its tile into the strip`, gateOf(picked.active) && verdictOf(picked.whole), picked);
     // the compact switcher's list switches and adds
     await press('.desktop-switch-compact'); await sleep(350);
     const dl = await evalJs(`(() => { const m = document.querySelector('.desktop-switch-menu'); if (!m) return null; const r = m.getBoundingClientRect(); const rows = [...m.querySelectorAll('.context-menu-item')]; const two = rows.find((x) => x.dataset.desktopId === app.desktopManager.desktops[1].id); const b = two && two.getBoundingClientRect(); return { rows: rows.length, inside: r.top >= -0.5 && r.bottom <= innerHeight + 0.5 && r.left >= -0.5 && r.right <= innerWidth + 0.5, two: b ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null }; })()`);
-    check(`⑥ ${tag}: the button's list holds the 8 desktops + «Add desktop», inside the viewport`, !!dl && dl.rows === 9 && dl.inside, dl);
+    check(`⑥ ${tag}: the button's list holds the 8 desktops + «Add desktop», inside the viewport`, !!dl && dl.rows === 9 && verdictOf(dl.inside), dl);
     if (dl && dl.two) await click(dl.two); await sleep(700);
     const sw = await evalJs(`({ active: app.desktopManager.activeDesktopId === app.desktopManager.desktops[1].id, label: (() => { const b = document.querySelector('.desktop-switch-compact'); return b ? [...b.querySelectorAll('span')].map((x) => x.textContent.trim()).filter(Boolean).join(' ') : null; })() })`);
-    check(`⑥ ${tag}: …a row switches to that desktop («${sw.label}»)`, sw.active && sw.label === 'Desktop 2 2/8', sw);
+    check(`⑥ ${tag}: …a row switches to that desktop («${sw.label}»)`, gateOf(sw.active) && sw.label === 'Desktop 2 2/8', sw);
     await evalJs(`app.desktopManager.switchTo(app.desktopManager.desktops[0].id)`); await sleep(700);
     await shot(`${tag}-p22-taskbar.png`);
 
@@ -940,7 +940,7 @@ const runViewport = async ([VW, VH], font) => {
       const rows = [...m.querySelectorAll('.context-menu-item')].map((x) => { const r = x.getBoundingClientRect(); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && x.contains(h); });
       const st = document.getElementById('global-toasts'), R = (r) => [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)];
       return { menu: true, toasts: toasts.length, overMenu: toasts.some((t) => meets(t.getBoundingClientRect(), mr)), overComposer: toasts.some((t) => comps.some((c) => meets(t.getBoundingClientRect(), c))), rowsHit: rows.every(Boolean), at: { toast: R(toasts[0].getBoundingClientRect()), menu: R(mr), comps: comps.map(R), top: st.style.top, bottom: st.style.bottom } }; })()`);
-    check(`⑨ ${tag}: a toast shown while the desktop list is open stands over neither the menu nor a composer, and every row of the menu takes its press`, tm.menu && tm.toasts > 0 && !tm.overMenu && !tm.overComposer && tm.rowsHit, tm);
+    check(`⑨ ${tag}: a toast shown while the desktop list is open stands over neither the menu nor a composer, and every row of the menu takes its press`, gateOf(tm.menu) && tm.toasts > 0 && !tm.overMenu && !tm.overComposer && verdictOf(tm.rowsHit), tm);
     await shot(`${tag}-toast-menu.png`);
     await esc();
     await evalJs(`(() => { const dm = app.desktopManager; for (const d of dm.desktops.slice(1)) dm.deleteDesktop(d.id); return dm.desktops.length; })()`).catch(() => 0); await sleep(500);
@@ -951,7 +951,7 @@ const runViewport = async ([VW, VH], font) => {
     await closeAll(); await layout('freeform');
     for (let i = 0; i < 3; i++) { await evalJs(`(() => { app.openFileExplorer(${J(CWD)}); return 1; })()`); await sleep(450); }
     const vis = await evalJs(`(() => [...app.wm.windows.values()].map((w) => { const tb = w.titleBar.getBoundingClientRect(); let v = 0, a = 0; for (let x = tb.left + 3; x < tb.right - 3; x += 6) for (let y = tb.top + 4; y < tb.bottom - 2; y += 6) { a++; const h = document.elementFromPoint(x, y); if (h && w.element.contains(h)) v++; } return Math.round(100 * v / Math.max(1, a)); }))()`);
-    check(`⑪ ${tag}: three windows opened on an empty desktop keep ≥ 80 % of each title bar visible (${vis.join(' / ')} %) — the cascade buries none`, vis.length === 3 && vis.every((v) => v >= 80), vis);
+    check(`⑪ ${tag}: three windows opened on an empty desktop keep ≥ 80 % of each title bar visible (${vis.join(' / ')} %) — the cascade buries none`, vis.length === 3 && verdictOf(vis.every((v) => v >= 80)), vis);
     await shot(`${tag}-cascade.png`);
   });
 
@@ -963,7 +963,7 @@ const runViewport = async ([VW, VH], font) => {
     const door = await openDesktopDoor(); await sleep(800);
     check(`⑩ ${tag}: the hub offers the Desktop (/api/vnc/status available — the stub Xtigervnc) and its door takes the press (${door || 'no door'})`, !!vnc && vnc.available === true && !!door, { vnc, door });
     const p = await evalJs(`(() => { const b = document.querySelector('.desktop-picker'); if (!b) return null; const r = b.getBoundingClientRect(); return { notes: [...b.querySelectorAll('.desktop-picker-row .desktop-picker-note')].map((n) => n.textContent.trim()), inside: r.left >= -0.5 && r.top >= -0.5 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5 }; })()`);
-    check(`⑩ ${tag}: the Desktop popover lies inside the viewport and the local row's note is a whole sentence ending with a period (P3-1 — it stopped at «the virtual desktop can»)`, !!p && p.inside && p.notes.length > 0 && p.notes.every((n) => /[.。]$/.test(n)), p);
+    check(`⑩ ${tag}: the Desktop popover lies inside the viewport and the local row's note is a whole sentence ending with a period (P3-1 — it stopped at «the virtual desktop can»)`, !!p && gateOf(p.inside) && p.notes.length > 0 && verdictOf(p.notes.every((n) => /[.。]$/.test(n))), p);
     const fr = await evalJs(`(() => { const f = [...document.querySelectorAll('.window iframe')].find((x) => x.offsetWidth > 0 && getComputedStyle(x).display !== 'none'); if (!f) return null; const r = f.getBoundingClientRect(); return { x: r.left + Math.min(220, r.width / 2), y: r.top + Math.min(140, r.height / 2) }; })()`);
     if (fr) await click(fr); await sleep(400);
     const afterPress = await evalJs(`({ open: !!document.querySelector('.desktop-picker'), active: document.activeElement && document.activeElement.tagName })`);
@@ -981,7 +981,7 @@ const runViewport = async ([VW, VH], font) => {
     await evalJs(`(() => { app._settingsUI.open(); return 1; })()`); await sleep(1500);
     await evalJs(`(() => { const c = document.querySelector('.settings-content'); if (c) c.scrollTop = c.scrollHeight; return 1; })()`); await sleep(400);
     const st = await evalJs(`(() => { const n = document.querySelector('.settings-nav'), c = document.querySelector('.settings-content'), f = document.querySelector('.settings-foot'), w = n && n.closest('.window'); if (!n || !c) return null; const fr = f && f.getBoundingClientRect(), wr = w && w.getBoundingClientRect(), nr = n.getBoundingClientRect(); return { scrolled: c.scrollTop > 1000, navInWindow: !!wr && nr.top >= wr.top && nr.top < wr.top + 140, foot: !!f && fr.height > 0 && !!wr && fr.bottom <= wr.bottom + 0.5 && fr.top >= wr.top, text: f && f.textContent }; })()`);
-    check(`P3-3 ${tag}: with the content scrolled to its end the nav still stands at the top of its column and the window's foot says the save rule`, !!st && st.scrolled && st.navInWindow && st.foot && /saves as you make it/.test(st.text || ''), st);
+    check(`P3-3 ${tag}: with the content scrolled to its end the nav still stands at the top of its column and the window's foot says the save rule`, !!st && gateOf(st.scrolled) && gateOf(st.navInWindow) && gateOf(st.foot) && verdictOf(/saves as you make it/.test(st.text || '')), st);
     await closeAll();
   });
 
@@ -1001,7 +1001,7 @@ const legRedFont = async () => {
   await evalJs(`document.getElementById('ds-red8')?.remove()`); await sleep(250);
   const back8 = await evalJs(HITS);
   await esc(); await sleep(300);
-  check(`RED ⑧: the New Session switches without their min-height — the census finds them under 24 px in DejaVu Sans (${red8.filter((k) => /×2[0-3]$/.test(k)).length})`, red8.some((k) => /×2[0-3]$/.test(k)), red8);
+  check(`RED ⑧: the New Session switches without their min-height — the census finds them under 24 px in DejaVu Sans (${red8.filter((k) => /×2[0-3]$/.test(k)).length})`, verdictOf(red8.some((k) => /×2[0-3]$/.test(k))), red8);
   check('CONTROL ⑧: the min-height back — the same dialog, no target under 24 px', back8.length === 0, back8);
   const c = await legNarrowChat();
   await inject('ds-red7', '.chat-msg .chat-text { padding-right: 0 !important; }');
@@ -1503,14 +1503,14 @@ const acceptanceAndControls = async () => {
     await load(951, 585); await closeAll(); await sleep(400);
     const y = await legToastYield();
     const { s1, s2, s3, s4, s5, s6, s7, s8 } = y;
-    check(`⑳ the plant: the panel opened by a ${y.opened}; A (a long plain toast, ${s1 && s1.A.w}×${s1 && s1.A.h}) drawn clear of the short panel and SEEN (drawn within 4 s of the press)`, y.opened === 'press' && y.openSeen && !!s1 && s1.open && s1.A.drawn && !s1.A.onPanel && s1.A.seen === true, { opened: y.opened, s1 });
-    check(`⑳ THE SCENE PROVES ITSELF: the panel grown from its content (${J(s2 && s2.panel)}) leaves no room for A above it, on its left or its right (${J(y.noRoom)})`, yieldNoRoom(y), { noRoom: y.noRoom, s2 });
-    check('⑳ the panel GROWING re-places the stack: A is HELD — not drawn, still there', !!s2 && s2.open && s2.grown && s2.A.there && s2.A.held && !s2.A.drawn, s2);
-    check('⑳ B, a plain toast born after a press while the stack yields, is held at its birth — and its history entry is NOT seen', y.pressedInside && !!s3 && s3.open && s3.B.there && s3.B.held && !s3.B.drawn && s3.B.seen === false, { pressedInside: y.pressedInside, s3 });
-    check(`⑳ E, the person's failed act (an error toast) born while the stack yields, is DRAWN at once inside the viewport (${s4 && s4.E.onPanel ? 'over the panel\'s edge — nothing else fits' : 'clear of the panel'}); A and B stay held`, !!s4 && s4.grown && s4.E.there && !s4.E.held && s4.E.drawn && s4.E.inView && s4.A.held && s4.B.held, s4);
-    check('⑳ past A\'s whole time, A and B are still THERE (held: their time stopped) — the panel still grown (its planted block in it)', !!s5 && s5.open && s5.grown && s5.A.there && s5.A.held && s5.B.there && s5.B.held, s5);
-    check('⑳ the panel closed by its button: A and B DRAWN; B judged at its draw (drawn within 4 s of the close press ⇒ seen)', !!s6 && !s6.open && s6.A.drawn && !s6.A.held && s6.B.drawn && !s6.B.held && s6.B.seen === true, { closed: y.closed, s6 });
-    check('⑳ their time started WHOLE at the close: still drawn at 2/3 of it, gone after it', !!s7 && s7.A.drawn && s7.B.drawn && !!s8 && !s8.A.there && !s8.B.there, { s7, s8 });
+    check(`⑳ the plant: the panel opened by a ${y.opened}; A (a long plain toast, ${s1 && s1.A.w}×${s1 && s1.A.h}) drawn clear of the short panel and SEEN (drawn within 4 s of the press)`, y.opened === 'press' && gateOf(y.openSeen) && !!s1 && gateOf(s1.open) && gateOf(s1.A.drawn) && !s1.A.onPanel && s1.A.seen === true, { opened: y.opened, s1 });
+    check(`⑳ THE SCENE PROVES ITSELF: the panel grown from its content (${J(s2 && s2.panel)}) leaves no room for A above it, on its left or its right (${J(y.noRoom)})`, verdictOf(yieldNoRoom(y)), { noRoom: y.noRoom, s2 });
+    check('⑳ the panel GROWING re-places the stack: A is HELD — not drawn, still there', !!s2 && gateOf(s2.open) && gateOf(s2.grown) && gateOf(s2.A.there) && gateOf(s2.A.held) && !s2.A.drawn, s2);
+    check('⑳ B, a plain toast born after a press while the stack yields, is held at its birth — and its history entry is NOT seen', gateOf(y.pressedInside) && !!s3 && gateOf(s3.open) && gateOf(s3.B.there) && gateOf(s3.B.held) && !s3.B.drawn && s3.B.seen === false, { pressedInside: y.pressedInside, s3 });
+    check(`⑳ E, the person's failed act (an error toast) born while the stack yields, is DRAWN at once inside the viewport (${s4 && s4.E.onPanel ? 'over the panel\'s edge — nothing else fits' : 'clear of the panel'}); A and B stay held`, !!s4 && gateOf(s4.grown) && gateOf(s4.E.there) && !s4.E.held && gateOf(s4.E.drawn) && gateOf(s4.E.inView) && gateOf(s4.A.held) && verdictOf(s4.B.held), s4);
+    check('⑳ past A\'s whole time, A and B are still THERE (held: their time stopped) — the panel still grown (its planted block in it)', !!s5 && gateOf(s5.open) && gateOf(s5.grown) && gateOf(s5.A.there) && gateOf(s5.A.held) && gateOf(s5.B.there) && verdictOf(s5.B.held), s5);
+    check('⑳ the panel closed by its button: A and B DRAWN; B judged at its draw (drawn within 4 s of the close press ⇒ seen)', !!s6 && !s6.open && gateOf(s6.A.drawn) && !s6.A.held && gateOf(s6.B.drawn) && !s6.B.held && s6.B.seen === true, { closed: y.closed, s6 });
+    check('⑳ their time started WHOLE at the close: still drawn at 2/3 of it, gone after it', !!s7 && gateOf(s7.A.drawn) && gateOf(s7.B.drawn) && !!s8 && !s8.A.there && !s8.B.there, { s7, s8 });
     check('⑳ zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
   });
 
@@ -1521,10 +1521,10 @@ const acceptanceAndControls = async () => {
     await load(951, 585); await closeAll(); await sleep(400);
     const y = await legToastYield();
     const { s1, s2, s3, s4, s5 } = y;
-    check('RED r7: the plant took (A drawn clear of the short panel and seen) and the scene is a yield scene', y.opened === 'press' && !!s1 && s1.A.drawn && !s1.A.onPanel && s1.A.seen === true && yieldNoRoom(y), { s1, noRoom: y.noRoom });
-    check('RED r7 ①: the panel\'s growth never re-places the stack — A stands ON the grown panel', !!s2 && s2.A.drawn && s2.A.onPanel, s2);
-    check('RED r7 ②: B, hidden with the whole stack, is called SEEN in the history', !!s3 && s3.B.there && !s3.B.drawn && s3.B.seen === true, s3);
-    check('RED r7 ③: E, the person\'s failed act, is NOT drawn (the whole stack hidden)', !!s4 && s4.E.there && !s4.E.drawn, s4);
+    check('RED r7: the plant took (A drawn clear of the short panel and seen) and the scene is a yield scene', y.opened === 'press' && !!s1 && gateOf(s1.A.drawn) && !s1.A.onPanel && s1.A.seen === true && verdictOf(yieldNoRoom(y)), { s1, noRoom: y.noRoom });
+    check('RED r7 ①: the panel\'s growth never re-places the stack — A stands ON the grown panel', !!s2 && gateOf(s2.A.drawn) && verdictOf(s2.A.onPanel), s2);
+    check('RED r7 ②: B, hidden with the whole stack, is called SEEN in the history', !!s3 && gateOf(s3.B.there) && !s3.B.drawn && s3.B.seen === true, s3);
+    check('RED r7 ③: E, the person\'s failed act, is NOT drawn (the whole stack hidden)', !!s4 && gateOf(s4.E.there) && !s4.E.drawn, s4);
     check('RED r7 ④: past its whole time A is GONE — it expired unseen', !!s5 && !s5.A.there, s5);
     mutantOn = null;
   });
@@ -1535,17 +1535,17 @@ const acceptanceAndControls = async () => {
     pageErrors.length = 0;
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const z = await legResizeTop();
-    check(`⑮ r2: a north edge dragged past the workspace's top — the title bar keeps ≥ 32 px inside (bar ${z.after && J(z.after.bar)})`, !!z.handle && reachableBar(z.after), z);
+    check(`⑮ r2: a north edge dragged past the workspace's top — the title bar keeps ≥ 32 px inside (bar ${z.after && J(z.after.bar)})`, !!z.handle && verdictOf(reachableBar(z.after)), z);
     const t = await legTail();
-    check(`⑭ r2: 26 windows («${t.chip}») — the «+N» list stands inside the viewport, capped and scrolling (${t.l0 && t.l0.n} rows)`, /^\+\d+$/.test(t.chip || '') && +t.chip.slice(1) >= 18 && !!t.l0 && t.l0.inside && t.l0.scrolls, t);
-    check('⑭ r2: …the wheel brings its LAST row in, and that row takes the click (its window raised)', !!t.l1 && t.l1.lastHit && t.picked, { l1: t.l1, picked: t.picked });
+    check(`⑭ r2: 26 windows («${t.chip}») — the «+N» list stands inside the viewport, capped and scrolling (${t.l0 && t.l0.n} rows)`, gateOf(/^\+\d+$/.test(t.chip || '')) && +t.chip.slice(1) >= 18 && !!t.l0 && gateOf(t.l0.inside) && verdictOf(t.l0.scrolls), t);
+    check('⑭ r2: …the wheel brings its LAST row in, and that row takes the click (its window raised)', !!t.l1 && gateOf(t.l1.lastHit) && verdictOf(t.picked), { l1: t.l1, picked: t.picked });
     const d = await legDoors(false);
     check(`⑬ r2: 8 desktops — the button names the desktop on show («${d.button0}»); a row's right-click opens its doors (${J(d.rowMenu)})`, d.button0 === d.name0 + ' 1/8' && J(d.rowMenu) === J(['Rename…', 'Delete', 'Move down']), { button0: d.button0, rowMenu: d.rowMenu });
     check(`⑬ r2: …Rename… ⇒ the new name on the row (the list back) and on the button (${J(d.renamed)})`, !!d.renamed && d.renamed.name === 'Taxes' && d.renamed.row === 'Taxes' && d.renamed.button === 'Taxes 1/8', d.renamed);
     check(`⑬ r2: …a row's ⋯ (${d.more && d.more.w + '×' + d.more.h}) → Delete ⇒ N−1 (${J(d.deleted)})`, !!d.more && d.more.w >= 24 && d.more.h >= 24 && d.deleted.n === 7 && d.deleted.rows === 7 && d.deleted.button === 'Taxes 1/7', { more: d.more, deleted: d.deleted });
-    check('⑬ r2: …a title-bar drag held on the button springs the list open; released on a row, the window is on that desktop (this screen stays) and the list closes', d.sprang && d.moved.on && d.moved.stayed && !d.moved.list, { sprang: d.sprang, moved: d.moved });
-    check(`⑬ r2: …on that desktop the window shows with its title bar reachable (bar ${d.there && J(d.there.bar)})`, d.shown && reachableBar(d.there), { shown: d.shown, there: d.there });
-    check('⑬ r2: …a row\'s Move down reorders — and ANOTHER client of the hub follows (layout-sync)', d.wantOrder && Array.isArray(d.other) && J(d.other) === J(d.order), { order: d.order, other: d.other });
+    check('⑬ r2: …a title-bar drag held on the button springs the list open; released on a row, the window is on that desktop (this screen stays) and the list closes', gateOf(d.sprang) && gateOf(d.moved.on) && gateOf(d.moved.stayed) && !d.moved.list, { sprang: d.sprang, moved: d.moved });
+    check(`⑬ r2: …on that desktop the window shows with its title bar reachable (bar ${d.there && J(d.there.bar)})`, gateOf(d.shown) && verdictOf(reachableBar(d.there)), { shown: d.shown, there: d.there });
+    check('⑬ r2: …a row\'s Move down reorders — and ANOTHER client of the hub follows (layout-sync)', gateOf(d.wantOrder) && gateOf(Array.isArray(d.other)) && J(d.other) === J(d.order), { order: d.order, other: d.other });
     check('⑫ r2: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
   });
 
@@ -1554,17 +1554,17 @@ const acceptanceAndControls = async () => {
     pageErrors.length = 0;
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const h = await legSpringHtml5();
-    check('⑯ r3: a taskbar tile\'s drag is Chrome\'s OWN HTML5 drag (intercepted, its data the window\'s id)', h.btn && h.intercepted, { btn: h.btn, intercepted: h.intercepted });
-    check('⑯ r3: …~100 ms across the button, off it, Esc ⇒ no list ever (right after, 0.6 s, 2.1 s), no timer, no ref, no listener', Array.isArray(h.passCancel) && h.passCancel.length === 3 && h.passCancel.every(springIdle), h.passCancel);
-    check('⑯ r3: …the same dropped back on the strip ⇒ no list ever, no timer', Array.isArray(h.passDrop) && h.passDrop.every(springIdle), h.passDrop);
-    check('⑯ r3: …held ≥ 350 ms the list springs; off the button and the list it closes (the title-bar road\'s rule); dropped away ⇒ closed, no timer, no ref, no listener', !!h.holdAway && h.holdAway.opened.list && !h.holdAway.off.list && springIdle(h.holdAway.after), h.holdAway);
-    check('⑯ r3: …held, then Esc ⇒ closed, no timer, no ref, no listener', !!h.holdEsc && h.holdEsc.opened.list && springIdle(h.holdEsc.after), h.holdEsc);
-    check('⑯ r3: …held, dropped on a row ⇒ the window on that desktop (this screen stays), the list and its ref gone', !!h.rowDrop && h.rowDrop.row && h.rowDrop.on4 && h.rowDrop.stayed && springIdle(h.rowDrop.st), h.rowDrop);
+    check('⑯ r3: a taskbar tile\'s drag is Chrome\'s OWN HTML5 drag (intercepted, its data the window\'s id)', gateOf(h.btn) && verdictOf(h.intercepted), { btn: h.btn, intercepted: h.intercepted });
+    check('⑯ r3: …~100 ms across the button, off it, Esc ⇒ no list ever (right after, 0.6 s, 2.1 s), no timer, no ref, no listener', gateOf(Array.isArray(h.passCancel)) && h.passCancel.length === 3 && verdictOf(h.passCancel.every(springIdle)), h.passCancel);
+    check('⑯ r3: …the same dropped back on the strip ⇒ no list ever, no timer', gateOf(Array.isArray(h.passDrop)) && verdictOf(h.passDrop.every(springIdle)), h.passDrop);
+    check('⑯ r3: …held ≥ 350 ms the list springs; off the button and the list it closes (the title-bar road\'s rule); dropped away ⇒ closed, no timer, no ref, no listener', !!h.holdAway && gateOf(h.holdAway.opened.list) && !h.holdAway.off.list && verdictOf(springIdle(h.holdAway.after)), h.holdAway);
+    check('⑯ r3: …held, then Esc ⇒ closed, no timer, no ref, no listener', !!h.holdEsc && gateOf(h.holdEsc.opened.list) && verdictOf(springIdle(h.holdEsc.after)), h.holdEsc);
+    check('⑯ r3: …held, dropped on a row ⇒ the window on that desktop (this screen stays), the list and its ref gone', !!h.rowDrop && gateOf(h.rowDrop.row) && gateOf(h.rowDrop.on4) && gateOf(h.rowDrop.stayed) && verdictOf(springIdle(h.rowDrop.st)), h.rowDrop);
     const st = await legStaleRow();
-    check(`⑰ r3: a title-bar drag released on a STALE row (its desktop deleted on another client) — refused by name, the window stays here, on show, reachable (${st.pointer && J(st.pointer.toast)})`, staleOk(st.pointer, st.pointer && st.pointer.name), st.pointer);
-    check('⑰ r3: …a taskbar tile dropped on a stale row — the same', !!st.html5 && st.html5.dragged && staleOk(st.html5, st.html5.name), st.html5);
+    check(`⑰ r3: a title-bar drag released on a STALE row (its desktop deleted on another client) — refused by name, the window stays here, on show, reachable (${st.pointer && J(st.pointer.toast)})`, verdictOf(staleOk(st.pointer, st.pointer && st.pointer.name)), st.pointer);
+    check('⑰ r3: …a taskbar tile dropped on a stale row — the same', !!st.html5 && gateOf(st.html5.dragged) && verdictOf(staleOk(st.html5, st.html5.name)), st.html5);
     const rc = await legRenameCancel();
-    check('⑱ r3: a row\'s Rename… cancelled ⇒ nothing comes back — no list, no menu, no dialog, the name kept', rc.menu && rc.dialog && !rc.list && rc.menus === 0 && !rc.open && rc.name === rc.name0, rc);
+    check('⑱ r3: a row\'s Rename… cancelled ⇒ nothing comes back — no list, no menu, no dialog, the name kept', gateOf(rc.menu) && gateOf(rc.dialog) && !rc.list && rc.menus === 0 && !rc.open && rc.name === rc.name0, rc);
     check('⑫ r3: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
   });
 
@@ -1574,10 +1574,10 @@ const acceptanceAndControls = async () => {
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const f = await legFollow(false);
     const why = f.a && '“' + f.a.v.name + '” is no longer there';
-    check(`⑲ r2 ①: the compact list OPEN, desktop 5 deleted and desktop 3 renamed on ANOTHER client — the list redraws: the renamed row by its new name, the deleted one KEPT AT ITS PLACE, greyed WITH «${why}» (${J((f.a.after || []).map((x) => (x.gone ? '[' + x.why + ']' : x.name)))})`, followOk(f.a), f.a);
-    check(`⑲ r3 ②: …the list is PATCHED IN PLACE — the same list, the ${f.a.kept && f.a.kept.held} rows it showed the same nodes (${f.a.kept && f.a.kept.inPage} in it still), the pointer still on the renamed row's own node, the desktop added there a NEW row at its place (${J(f.a.kept && f.a.kept.added)}), the list grown downward inside the viewport (25151f0b: a new popover)`, keptOk(f.a), f.a.kept);
-    check('⑲ r2 ①: …that row\'s right-click opens ITS DOORS — four, every one greyed with the why that names it (8c680dcf: an empty box)', !!f.a.doors && J(f.a.doors.items.map((x) => x.label)) === J(['Rename…', 'Delete', 'Move up', 'Move down']) && f.a.doors.items.every((x) => x.off && x.why === why) && f.a.doors.h > 40, f.a.doors);
-    check(`⑲ r2 ②: …a press on a row deleted elsewhere says its why and switches nowhere (${J(f.b && f.b.toast)})`, !!f.b && f.b.arrived && f.b.row && f.b.active === f.b.active0 && f.b.toast.includes('“' + f.b.v.name + '” is no longer there') && !f.b.list, f.b);
+    check(`⑲ r2 ①: the compact list OPEN, desktop 5 deleted and desktop 3 renamed on ANOTHER client — the list redraws: the renamed row by its new name, the deleted one KEPT AT ITS PLACE, greyed WITH «${why}» (${J((f.a.after || []).map((x) => (x.gone ? '[' + x.why + ']' : x.name)))})`, verdictOf(followOk(f.a)), f.a);
+    check(`⑲ r3 ②: …the list is PATCHED IN PLACE — the same list, the ${f.a.kept && f.a.kept.held} rows it showed the same nodes (${f.a.kept && f.a.kept.inPage} in it still), the pointer still on the renamed row's own node, the desktop added there a NEW row at its place (${J(f.a.kept && f.a.kept.added)}), the list grown downward inside the viewport (25151f0b: a new popover)`, verdictOf(keptOk(f.a)), f.a.kept);
+    check('⑲ r2 ①: …that row\'s right-click opens ITS DOORS — four, every one greyed with the why that names it (8c680dcf: an empty box)', !!f.a.doors && J(f.a.doors.items.map((x) => x.label)) === J(['Rename…', 'Delete', 'Move up', 'Move down']) && gateOf(f.a.doors.items.every((x) => x.off && x.why === why)) && f.a.doors.h > 40, f.a.doors);
+    check(`⑲ r2 ②: …a press on a row deleted elsewhere says its why and switches nowhere (${J(f.b && f.b.toast)})`, !!f.b && gateOf(f.b.arrived) && gateOf(f.b.row) && f.b.active === f.b.active0 && gateOf(f.b.toast.includes('“' + f.b.v.name + '” is no longer there')) && !f.b.list, f.b);
     check('⑫ doors-table r2: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
   });
 
@@ -1586,10 +1586,10 @@ const acceptanceAndControls = async () => {
     pageErrors.length = 0;
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const p = await legPlace(false);
-    check(`⑲ r4: the compact list open NEAR THE VIEWPORT'S HEIGHT, uncapped (${p.n} desktops, ${p.p0 && Math.round(p.p0.h)} of ${p.g && p.g.room} px — three more rows overflow it), the pointer resting on desktop 3's row`, placeNear(p), { g: p.g, p0: p.p0 });
-    check(`⑲ r4 ①: …three desktops added on ANOTHER client — the list stays INSIDE the viewport (${J(p.p1 && p.p1.box)}), capped and scrolling, its first row reachable, the pointer's row unmoved (its own node, under the pointer still) (daf19adf: the top negative, the first rows out of reach, no scroll)`, grownOk(p), p.p1);
-    check(`⑲ r4 ②: …a desktop renamed there WIDER than the viewport — the list inside on all four sides (${J(p.p2 && p.p2.box)}), every row's ⋯ on screen, the pointer's row unmoved`, wideOk(p), p.p2);
-    check(`⑲ r4 ③: …the wheel on the list brings its last row («${p.p3 && p.p3.last}») in — the element at its point`, !!p.p3 && p.p3.lastHit && p.p3.inside, p.p3);
+    check(`⑲ r4: the compact list open NEAR THE VIEWPORT'S HEIGHT, uncapped (${p.n} desktops, ${p.p0 && Math.round(p.p0.h)} of ${p.g && p.g.room} px — three more rows overflow it), the pointer resting on desktop 3's row`, verdictOf(placeNear(p)), { g: p.g, p0: p.p0 });
+    check(`⑲ r4 ①: …three desktops added on ANOTHER client — the list stays INSIDE the viewport (${J(p.p1 && p.p1.box)}), capped and scrolling, its first row reachable, the pointer's row unmoved (its own node, under the pointer still) (daf19adf: the top negative, the first rows out of reach, no scroll)`, verdictOf(grownOk(p)), p.p1);
+    check(`⑲ r4 ②: …a desktop renamed there WIDER than the viewport — the list inside on all four sides (${J(p.p2 && p.p2.box)}), every row's ⋯ on screen, the pointer's row unmoved`, verdictOf(wideOk(p)), p.p2);
+    check(`⑲ r4 ③: …the wheel on the list brings its last row («${p.p3 && p.p3.last}») in — the element at its point`, !!p.p3 && gateOf(p.p3.lastHit) && verdictOf(p.p3.inside), p.p3);
     check('⑫ doors-table r4: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
   });
 
@@ -1598,9 +1598,9 @@ const acceptanceAndControls = async () => {
     pageErrors.length = 0;
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const o = await legOffset(false);
-    check(`⑲ r5: the compact list CAPPED (${o.n} desktops, ${o.o0 && Math.round(o.o0.room)} px to scroll), the wheel on it ${o.o1 && Math.round(o.o1.st)} px down, the pointer resting on a row`, offNear(o), { g: o.g, o0: o.o0, o1: o.o1, p1: o.p1 });
-    check(`⑲ r5 ①: …the viewport grown to 951×900, a desktop renamed on ANOTHER client — the list KEEPS ITS OFFSET (${o.o3 && Math.round(o.o3.st)} px), the pointer's row unmoved (its node, its height, under the pointer), grown downward inside the viewport (${J(o.p1 && o.p1.box)} → ${J(o.p3 && o.p3.box)}), scrolling still (5a98bf0f: the cap lifted whole, the offset 0, every row 100 px down)`, offKept(o), { o2: o.o2, o3: o.o3, p2: o.p2, p3: o.p3 });
-    check(`⑲ r5 ②: …wheeled back to the top, the next remote change lifts the cap whole (${J(o.p5 && o.p5.box)}) — nothing left to scroll, its first and last rows reachable, the pointer's row unmoved`, offTop(o), { o4: o.o4, o5: o.o5, p4: o.p4, p5: o.p5 });
+    check(`⑲ r5: the compact list CAPPED (${o.n} desktops, ${o.o0 && Math.round(o.o0.room)} px to scroll), the wheel on it ${o.o1 && Math.round(o.o1.st)} px down, the pointer resting on a row`, verdictOf(offNear(o)), { g: o.g, o0: o.o0, o1: o.o1, p1: o.p1 });
+    check(`⑲ r5 ①: …the viewport grown to 951×900, a desktop renamed on ANOTHER client — the list KEEPS ITS OFFSET (${o.o3 && Math.round(o.o3.st)} px), the pointer's row unmoved (its node, its height, under the pointer), grown downward inside the viewport (${J(o.p1 && o.p1.box)} → ${J(o.p3 && o.p3.box)}), scrolling still (5a98bf0f: the cap lifted whole, the offset 0, every row 100 px down)`, verdictOf(offKept(o)), { o2: o.o2, o3: o.o3, p2: o.p2, p3: o.p3 });
+    check(`⑲ r5 ②: …wheeled back to the top, the next remote change lifts the cap whole (${J(o.p5 && o.p5.box)}) — nothing left to scroll, its first and last rows reachable, the pointer's row unmoved`, verdictOf(offTop(o)), { o4: o.o4, o5: o.o5, p4: o.p4, p5: o.p5 });
     check('⑫ doors-table r5: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
   });
 
@@ -1614,7 +1614,7 @@ const acceptanceAndControls = async () => {
     if (d.pressed) check('RED P2-1: …and its tile, clicked twice, leaves it buried', !reachableBar(d.afterTiles), d.afterTiles);
     else console.log(`  ⓘ NAMED RED P2-1: …its tile was not on screen, so it was never clicked — this control claims nothing about the two presses (B-6cf9: every kept log; the strip ${J(d.strip)})`);
     const t = await legTaskbar();
-    check('RED P2-2: 15 windows — no «+N» chip, 60 px tiles, the wheel inert, 8 desktops piled as previews', !t.s0.chip && t.s0.rows.some((r) => r.w < 90) && t.s1.scroll[0] === t.s0.scroll[0] && t.s8.compact === null && t.s8.previews === 8, { chip: t.s0.chip, w: t.s0.rows.slice(0, 2), scroll: [t.s0.scroll[0], t.s1.scroll[0]], compact: t.s8.compact, previews: t.s8.previews });
+    check('RED P2-2: 15 windows — no «+N» chip, 60 px tiles, the wheel inert, 8 desktops piled as previews', !t.s0.chip && gateOf(t.s0.rows.some((r) => r.w < 90)) && t.s1.scroll[0] === t.s0.scroll[0] && t.s8.compact === null && t.s8.previews === 8, { chip: t.s0.chip, w: t.s0.rows.slice(0, 2), scroll: [t.s0.scroll[0], t.s1.scroll[0]], compact: t.s8.compact, previews: t.s8.previews });
     await evalJs(`(() => { const dm = app.desktopManager; for (const x of dm.desktops.slice(1)) dm.deleteDesktop(x.id); return 1; })()`).catch(() => 0); await sleep(500);
     const m = await legTitleMenu();
     check('RED P2-3: the lower-row title menu runs off the top (first row at y < 0)', !!m.m && m.m.firstTop < 0, m.m);
@@ -1626,7 +1626,7 @@ const acceptanceAndControls = async () => {
     const d2 = await legDragOverTaskbar('RED-back');
     const m2 = await legTitleMenu();
     const c2 = await legNarrowChat();
-    check('CONTROL: the real bundle back — the same legs pass (the release reachable, the menu inside, the bar the strip\'s same two rows: ⑦\'s own law)', reachableBar(d2.after) && !!m2.m && m2.m.firstTop >= 0 && barLaw(c2.narrow), { d: d2.after, m: m2.m, c: c2.narrow });
+    check('CONTROL: the real bundle back — the same legs pass (the release reachable, the menu inside, the bar the strip\'s same two rows: ⑦\'s own law)', gateOf(reachableBar(d2.after)) && !!m2.m && m2.m.firstTop >= 0 && verdictOf(barLaw(c2.narrow)), { d: d2.after, m: m2.m, c: c2.narrow });
   });
 
   // ═════════════════════════════════════════ THE RED CONTROL r2 (951×585) ═════════════════════════════════════════
@@ -1649,11 +1649,11 @@ const acceptanceAndControls = async () => {
     mutantOn = MUTANT3;
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const h = await legSpringHtml5();
-    check('RED r3 ①: the HTML5 road never ends the spring — the list springs AFTER a cancelled pass, stays after a drop away, and a row drop orphans its ref', !!h.passCancel && h.passCancel.some((x) => x.list) && !!h.holdAway && h.holdAway.after.list && !!h.rowDrop && h.rowDrop.st.ref && !h.rowDrop.st.refLive, h);
+    check('RED r3 ①: the HTML5 road never ends the spring — the list springs AFTER a cancelled pass, stays after a drop away, and a row drop orphans its ref', !!h.passCancel && gateOf(h.passCancel.some((x) => x.list)) && !!h.holdAway && gateOf(h.holdAway.after.list) && !!h.rowDrop && gateOf(h.rowDrop.st.ref) && !h.rowDrop.st.refLive, h);
     const st = await legStaleRow();
-    check('RED r3 ③: a stale row moves the window under the gone desktop\'s id — off every desktop, hidden', !!st.pointer && !st.pointer.known && st.pointer.hidden, st);
+    check('RED r3 ③: a stale row moves the window under the gone desktop\'s id — off every desktop, hidden', !!st.pointer && !st.pointer.known && verdictOf(st.pointer.hidden), st);
     const rc = await legRenameCancel();
-    check('RED r3 ④: a cancelled Rename… brings the list back', rc.dialog && rc.list, rc);
+    check('RED r3 ④: a cancelled Rename… brings the list back', gateOf(rc.dialog) && verdictOf(rc.list), rc);
     mutantOn = null;
   });
 
@@ -1664,7 +1664,7 @@ const acceptanceAndControls = async () => {
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const f = await legFollow(true);
     const g = f.a && Array.isArray(f.a.after) ? f.a.after.find((x) => x.id === f.a.v.id) : null;
-    check('RED r4 ①: an open list is never told — the row of a desktop deleted elsewhere stays a LIVE row (no why, its name drawn), the renamed one keeps its old name, and its right-click opens an EMPTY box', !!g && !g.gone && !g.why && g.nameShown && !f.a.after.some((x) => x.name === 'Renamed elsewhere') && !!f.a.doors && f.a.doors.items.length === 0, f.a);
+    check('RED r4 ①: an open list is never told — the row of a desktop deleted elsewhere stays a LIVE row (no why, its name drawn), the renamed one keeps its old name, and its right-click opens an EMPTY box', !!g && !g.gone && !g.why && gateOf(g.nameShown) && !f.a.after.some((x) => x.name === 'Renamed elsewhere') && !!f.a.doors && f.a.doors.items.length === 0, f.a);
     mutantOn = null;
   });
 
@@ -1674,7 +1674,7 @@ const acceptanceAndControls = async () => {
     mutantOn = MUTANT5;
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const p = await legPlace(true);
-    check(`RED r5: three desktops added there lift the list PAST THE TOP (${J(p.p1 && p.p1.box)} — its first row out of reach, nothing scrolls, the pointer's row moved) and a name wider than the viewport runs it past the right edge (${J(p.p2 && p.p2.box)})`, placeNearRed(p) && !!p.p1 && p.p1.box[1] < 0 && !p.p1.firstHit && !p.p1.scrolls && !rowKept(p, p.p1) && !!p.p2 && p.p2.box[2] > 951 && !p.p2.moreInside, { p0: p.p0, p1: p.p1, p2: p.p2 });
+    check(`RED r5: three desktops added there lift the list PAST THE TOP (${J(p.p1 && p.p1.box)} — its first row out of reach, nothing scrolls, the pointer's row moved) and a name wider than the viewport runs it past the right edge (${J(p.p2 && p.p2.box)})`, gateOf(placeNearRed(p)) && !!p.p1 && p.p1.box[1] < 0 && !p.p1.firstHit && !p.p1.scrolls && !rowKept(p, p.p1) && !!p.p2 && p.p2.box[2] > 951 && !p.p2.moreInside, { p0: p.p0, p1: p.p1, p2: p.p2 });
     mutantOn = null;
   });
 
@@ -1685,7 +1685,7 @@ const acceptanceAndControls = async () => {
     await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const o = await legOffset(true);
     const moved = o.p1 && o.p1.row && o.p3 && o.p3.row ? o.p3.row.top - o.p1.row.top : null;
-    check(`RED r6: the wheeled list, the room grown, a remote change — the cap lifted whole, the offset ${o.o3 && Math.round(o.o3.st)} (was ${o.o1 && Math.round(o.o1.st)}), the pointer's row ${moved == null ? '?' : Math.round(moved)} px DOWN`, offNear(o) && !!o.o3 && o.o3.st === 0 && moved != null && Math.abs(moved - o.o1.st) < 1.5 && !!o.p3 && !o.p3.scrolls, { o1: o.o1, o3: o.o3, p1: o.p1, p3: o.p3 });
+    check(`RED r6: the wheeled list, the room grown, a remote change — the cap lifted whole, the offset ${o.o3 && Math.round(o.o3.st)} (was ${o.o1 && Math.round(o.o1.st)}), the pointer's row ${moved == null ? '?' : Math.round(moved)} px DOWN`, gateOf(offNear(o)) && !!o.o3 && o.o3.st === 0 && moved != null && Math.abs(moved - o.o1.st) < 1.5 && !!o.p3 && !o.p3.scrolls, { o1: o.o1, o3: o.o3, p1: o.p1, p3: o.p3 });
     mutantOn = null;
   });
 };
@@ -1708,4 +1708,4 @@ for (const [font, part] of [...FONT_LEGS.map((f) => [f, 'the viewports']), [FONT
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed) — shots in ${SHOTS}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

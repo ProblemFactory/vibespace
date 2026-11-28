@@ -25,7 +25,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? `\n      ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? `\n      ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : '')); } };
 
 console.log('① the PURE identity table (src/channel-identity.js)');
 {
@@ -43,24 +43,24 @@ console.log('① the PURE identity table (src/channel-identity.js)');
   const bad = T.filter(([h, o, k]) => { const m = ID.identityMismatch(h, o); return k === null ? m !== null : !(m && m.key === k); });
   ok(bad.length === 0, `the PURE identity table: ${T.length} rows — ${bad.length} wrong`, JSON.stringify(bad.map((r) => r[3])));
   ok(ID.heldIdentity({ auth: { user: 'Legacy@X.com' } }).email === 'legacy@x.com' && Object.keys(ID.heldIdentity({ auth: { user: 'Member A' } })).length === 0 && ID.heldIdentity({ identity: { email: 'S@x.com' }, auth: { user: 'other@x.com' } }).email === 's@x.com', 'a legacy record (no stamp) is judged by its auth.user only when that is an email; a stamp outranks auth.user');
-  ok(ID.heldIdentity({ auth: { user: 'Member A' } }, { openId: 'ou1', name: 'Member A' }).openId === 'ou1' && ID.heldIdentity({ identity: { email: 'S@x.com' } }, { email: 'o@x.com' }).email === 's@x.com' && ID.heldIdentity({ identity: {}, auth: { user: 'L@x.com' } }, null).email === 'l@x.com' && /did not say which account signed in \(profile: 500\)/.test(ID.namelessSentence('Google', 'profile: 500')), 'verify r6: the held identity is read off the token the record HOLDS when it carries no stamp (a legacy Lark record: its open_id; the display name is never an id); a stamp outranks the token; an empty stamp falls through; the nameless sentence');
-  ok(/connected as a@x\.com; this sign-in is b@x\.com/.test(ID.mismatchSentence('Mail', { key: 'email', held: 'a@x.com', offered: 'b@x.com' })), 'the refusal sentence names both identities');
+  ok(ID.heldIdentity({ auth: { user: 'Member A' } }, { openId: 'ou1', name: 'Member A' }).openId === 'ou1' && ID.heldIdentity({ identity: { email: 'S@x.com' } }, { email: 'o@x.com' }).email === 's@x.com' && ID.heldIdentity({ identity: {}, auth: { user: 'L@x.com' } }, null).email === 'l@x.com' && verdictOf(/did not say which account signed in \(profile: 500\)/.test(ID.namelessSentence('Google', 'profile: 500'))), 'verify r6: the held identity is read off the token the record HOLDS when it carries no stamp (a legacy Lark record: its open_id; the display name is never an id); a stamp outranks the token; an empty stamp falls through; the nameless sentence');
+  ok(verdictOf(/connected as a@x\.com; this sign-in is b@x\.com/.test(ID.mismatchSentence('Mail', { key: 'email', held: 'a@x.com', offered: 'b@x.com' }))), 'the refusal sentence names both identities');
   // verify r7: an `email` is an identity only when it LOOKS LIKE AN ADDRESS — a Lark display name with an '@' in it was stamped at boot as an email (a guess), a whitespace / bare-word profile answer bound nothing
-  ok(Object.keys(ID.heldIdentity({ auth: { user: 'Alice @ Sales' } })).length === 0 && Object.keys(ID.heldIdentity({ auth: { user: 'alice@corp' } })).length === 0 && Object.keys(ID.identityOf({ email: '   ' })).length === 0 && Object.keys(ID.identityOf({ email: 'not-an-email' })).length === 0 && ID.identityOf({ email: ' A@X.com ' }).email === 'a@x.com' && ID.looksLikeEmail('a@x.com') && !ID.looksLikeEmail('a @ x.com'), 'verify r7: a display name with an @ / a bare word / whitespace is NOBODY (never a guessed email); an address is trimmed + case-folded');
-  ok(/was cancelled while it was being completed — nothing was connected/.test(ID.cancelledSentence('Gmail', 'cancelled')) && /replaced by a newer sign-in/.test(ID.cancelledSentence('Gmail', 'superseded')) && /past its time limit/.test(ID.cancelledSentence('Gmail', 'timeout')) && /ended to make room for newer sign-ins/.test(ID.cancelledSentence('Gmail', 'over-limit')) && !/cancelled while/.test(ID.cancelledSentence('Gmail', 'over-limit')), 'verify r7: the cancelled-consent sentence names the cause (client-from-mount verify r4: the consent machine\'s cap has its own words — never "cancelled")');
+  ok(Object.keys(ID.heldIdentity({ auth: { user: 'Alice @ Sales' } })).length === 0 && Object.keys(ID.heldIdentity({ auth: { user: 'alice@corp' } })).length === 0 && Object.keys(ID.identityOf({ email: '   ' })).length === 0 && Object.keys(ID.identityOf({ email: 'not-an-email' })).length === 0 && ID.identityOf({ email: ' A@X.com ' }).email === 'a@x.com' && gateOf(ID.looksLikeEmail('a@x.com')) && !ID.looksLikeEmail('a @ x.com'), 'verify r7: a display name with an @ / a bare word / whitespace is NOBODY (never a guessed email); an address is trimmed + case-folded');
+  ok(gateOf(/was cancelled while it was being completed — nothing was connected/.test(ID.cancelledSentence('Gmail', 'cancelled'))) && gateOf(/replaced by a newer sign-in/.test(ID.cancelledSentence('Gmail', 'superseded'))) && gateOf(/past its time limit/.test(ID.cancelledSentence('Gmail', 'timeout'))) && gateOf(/ended to make room for newer sign-ins/.test(ID.cancelledSentence('Gmail', 'over-limit'))) && !/cancelled while/.test(ID.cancelledSentence('Gmail', 'over-limit')), 'verify r7: the cancelled-consent sentence names the cause (client-from-mount verify r4: the consent machine\'s cap has its own words — never "cancelled")');
 }
 
 console.log('② the door and the rebind ask the judge and refuse on its answer (src/server/channels-engine.js)');
 {
   const src = engineSource(REPO);
-  ok(/const \{[^}]*\bidentityMismatch\b[^}]*\bheldIdentity\b[^}]*\} = require\('\.\.\/channel-identity\.js'\);/.test(src), 'the engine takes identityMismatch + heldIdentity from src/channel-identity.js (one judge)');
+  ok(verdictOf(/const \{[^}]*\bidentityMismatch\b[^}]*\bheldIdentity\b[^}]*\} = require\('\.\.\/channel-identity\.js'\);/.test(src)), 'the engine takes identityMismatch + heldIdentity from src/channel-identity.js (one judge)');
   // THE DOOR: inside the serialized store update, a consent naming nobody is refused, then the held identity (off the
   // token the record holds) is judged against the offered one and a mismatch writes nothing — then thrown as `forbidden`.
   const door = /await store\.adapters\.update\(\(\) => \{[\s\S]{0,900}?if \(!Object\.keys\(offered\)\.length\) \{ verdict = \{ written: false, nameless: true \}; return; \}[\s\S]{0,200}?const held = heldIdentity\(rec, read\(\)\.token\);\s*const mm = identityMismatch\(held, offered\);\s*if \(mm\) \{ verdict = \{ written: false, mismatch: mm \}; return; \}/;
-  ok(door.test(src), 'THE DOOR: inside the serialized store update — a nameless consent refused, the held identity judged against the offered one, a mismatch writes nothing');
-  ok(/if \(verdict\.mismatch\) throw new ChannelError\('forbidden', mismatchSentence\(/.test(src) && /if \(verdict\.nameless\) throw new ChannelError\('forbidden', namelessSentence\(/.test(src), '…and the refusal is a `forbidden` naming both identities (or the nameless cause)');
+  ok(verdictOf(door.test(src)), 'THE DOOR: inside the serialized store update — a nameless consent refused, the held identity judged against the offered one, a mismatch writes nothing');
+  ok(gateOf(/if \(verdict\.mismatch\) throw new ChannelError\('forbidden', mismatchSentence\(/.test(src)) && verdictOf(/if \(verdict\.nameless\) throw new ChannelError\('forbidden', namelessSentence\(/.test(src)), '…and the refusal is a `forbidden` naming both identities (or the nameless cause)');
   const rebind = /const held = heldIdentity\(rec, tokensFor\(rec\)\.read\(\)\.token\);\s*const offered = p\.identity \|\| \{\};\s*const mm = identityMismatch\(held, offered\) \|\| \(Object\.keys\(held\)\.length && !Object\.keys\(offered\)\.length \? \{ nameless: true \} : null\);\s*if \(mm\) \{/;
-  ok(rebind.test(src), 'THE REBIND: a re-authorize whose consent names another identity (or nobody, over a held one) keeps the account\'s client and token');
+  ok(verdictOf(rebind.test(src)), 'THE REBIND: a re-authorize whose consent names another identity (or nobody, over a held one) keeps the account\'s client and token');
   // CONTROLS — the pins are not decorative: the same patterns over a source with the check removed fail.
   const noDoor = src.replace('            if (mm) { verdict = { written: false, mismatch: mm }; return; }\n', '');
   ok(noDoor !== src && !door.test(noDoor), 'CONTROL: the door\'s pin fails on a copy without the mismatch refusal');
@@ -69,4 +69,4 @@ console.log('② the door and the rebind ask the judge and refuse on its answer 
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -74,7 +74,7 @@ const fakeHome = scratchHome('chan-e2e-home', fs);
 const chromeDir = scratch('chan-e2e-chrome');
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -158,7 +158,7 @@ process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 
 const waitServer = async () => { for (let i = 0; i < 120; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-ok(await waitServer(), 'the worktree server booted');
+ok(verdictOf(await waitServer()), 'the worktree server booted');
 
 // ── CDP plumbing (one connection per PAGE — the multi-client leg needs two) ──
 const WebSocket = require('ws');
@@ -195,7 +195,7 @@ async function newPage() {
 
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 const p1 = await newPage();
-ok(await p1.load(), 'page 1 loaded the app');
+ok(verdictOf(await p1.load()), 'page 1 loaded the app');
 
 // ── ① the panel lists the fake adapter's conversations, with chips ──
 // R4 verify r4 (the r3 note): the panel is read only once EVERY expected row is there — the three fake
@@ -228,16 +228,16 @@ const OPEN_PANEL = `(async () => {
   return { ok: false, why: 'rows missing after 40 s', missing: expected.filter((k) => !have.includes(k)), have, html: document.querySelector('.rail-panel-channels')?.textContent?.slice(0, 200) };
 })()`;
 const panel = await p1.evaljs(OPEN_PANEL);
-ok(panel.ok, 'the Channels rail panel renders', JSON.stringify(panel));
-ok(panel.sections.length === 5 && ['fake-poll', 'fake-push', 'fake-scan', 'Webhook', 'Agents'].every((s) => panel.sections.includes(s)), 'the three fake adapters, the built-in Webhook adapter (seeded where the server mounts its door) AND the built-in Agents adapter (P3, seeded whenever the wiring names live sessions) are sections', JSON.stringify(panel.sections));
+ok(verdictOf(panel.ok), 'the Channels rail panel renders', JSON.stringify(panel));
+ok(panel.sections.length === 5 && verdictOf(['fake-poll', 'fake-push', 'fake-scan', 'Webhook', 'Agents'].every((s) => panel.sections.includes(s))), 'the three fake adapters, the built-in Webhook adapter (seeded where the server mounts its door) AND the built-in Agents adapter (P3, seeded whenever the wiring names live sessions) are sections', JSON.stringify(panel.sections));
 ok(panel.rows.length >= 6, `EXIT ①: fake-adapter conversations APPEAR IN THE PANEL (${panel.rows.length} rows)`, JSON.stringify(panel.rows.slice(0, 2)));
 // EVERY ROW IS FETCHED (2026-09-26, the aggregated IM) — so every row claims
 // its cadence with ONE freshness pill, and no row says "not tracked".
-ok(panel.rows.every((r) => r.chip && r.chip.length > 0), 'every discovered row carries its freshness pill — every conversation is fetched on its own cadence', JSON.stringify(panel.rows.map((r) => [r.conv, r.chip])));
+ok(verdictOf(panel.rows.every((r) => r.chip && r.chip.length > 0)), 'every discovered row carries its freshness pill — every conversation is fetched on its own cadence', JSON.stringify(panel.rows.map((r) => [r.conv, r.chip])));
 {
   const wire = await (await fetch(`http://127.0.0.1:${PORT}/api/channels`)).json();
   const states = (wire.conversations || []).filter((c) => c.adapterId !== 'agents').map((c) => c.freshness && c.freshness.state);
-  ok(states.length >= 6 && states.every((x) => x && x !== 'off') && (wire.conversations || []).every((c) => !('tracked' in c)), 'the WIRE carries every row\'s cadence claim (none `off`) and no tracked flag', JSON.stringify(states));
+  ok(states.length >= 6 && gateOf(states.every((x) => x && x !== 'off')) && verdictOf((wire.conversations || []).every((c) => !('tracked' in c))), 'the WIRE carries every row\'s cadence claim (none `off`) and no tracked flag', JSON.stringify(states));
 }
 
 // ── ② the conversation opens as a WINDOW ──
@@ -259,19 +259,19 @@ const OPEN_WIN = (adapter, conv) => `(async () => {
   return { fail: 'window never rendered' };
 })()`;
 const win1 = await p1.evaljs(OPEN_WIN('fake-poll', 'fake-poll-ops'));
-ok(win1.type === 'channel' && win1.spec && win1.spec.action === 'openChannel', 'EXIT ②: it opens as a registered `channel` window carrying its openSpec', JSON.stringify(win1));
+ok(win1.type === 'channel' && gateOf(win1.spec) && win1.spec.action === 'openChannel', 'EXIT ②: it opens as a registered `channel` window carrying its openSpec', JSON.stringify(win1));
 // THE TITLE BAR NAMES THE CONVERSATION (r3): `winInfo.setTitle?.(…)` was a
 // permanent no-op (the literal has no such member), so every channel window
 // read "Channel" and two open conversations were indistinguishable.
 ok(win1.wmTitle === win1.title && win1.titleSpan === win1.title && win1.title !== 'Channel',
   `the window's title bar and taskbar entry carry the conversation's title ("${win1.title}"), not the generic "Channel"`, JSON.stringify({ wm: win1.wmTitle, span: win1.titleSpan, bar: win1.title }));
 const again = await p1.evaljs(`(() => { const a = window.app.openChannel('fake-poll','fake-poll-ops'); const b = window.app.openChannel('fake-poll','fake-poll-ops'); return { same: a.id === b.id, n: [...window.app.wm.windows.values()].filter((w) => w.type === 'channel').length }; })()`);
-ok(again.same && again.n === 1, 'opening the SAME conversation twice focuses the one window (singleton per CONVERSATION, not per kind)', JSON.stringify(again));
+ok(gateOf(again.same) && again.n === 1, 'opening the SAME conversation twice focuses the one window (singleton per CONVERSATION, not per kind)', JSON.stringify(again));
 
 // ── ⑥ the read-only conversation renders NO send control AT ALL ──
 const ro = await p1.evaljs(OPEN_WIN('fake-poll', 'fake-poll-announce'));
 ok(ro.composer === 0, 'EXIT ⑥: a READ-ONLY conversation renders NO send control at all', JSON.stringify(ro));
-ok(ro.readonly && /read-only/i.test(ro.readonly), '…and it SAYS why, with the adapter\'s own reason (an absent control with no explanation is the silent failure this forbids)', ro.readonly);
+ok(gateOf(ro.readonly) && verdictOf(/read-only/i.test(ro.readonly)), '…and it SAYS why, with the adapter\'s own reason (an absent control with no explanation is the silent failure this forbids)', ro.readonly);
 
 // POSITIVE CONTROL: the sendable one DOES draw a composer — an assertion that
 // nothing is drawn proves nothing unless something is drawn elsewhere.
@@ -288,11 +288,11 @@ const send = await p1.evaljs(`(async () => {
 ok(send.composer === 1, 'POSITIVE CONTROL: the SENDABLE conversation does draw one (the read-only zero is a decision, not an empty window)', JSON.stringify(send));
 ok(send.msgs > 0, 'the conversation renders its ingested messages (no track step)', JSON.stringify(send));
 // §25 (2026-09-27, the owner: the footer was "a long sentence"): ONE short line, the policy sentence behind its ⓘ
-ok(send.note === 'Sent at once, as you' && /outbox/i.test(send.noteWhy || ''), 'the composer SAYS what a Send does here in ONE short line — "Sent at once, as you" — and its ⓘ says the rest: the outbox holds only agent drafts (g3, §22.2 ①) — never a control that silently does nothing', JSON.stringify([send.note, send.noteWhy]));
+ok(send.note === 'Sent at once, as you' && verdictOf(/outbox/i.test(send.noteWhy || '')), 'the composer SAYS what a Send does here in ONE short line — "Sent at once, as you" — and its ⓘ says the rest: the outbox holds only agent drafts (g3, §22.2 ①) — never a control that silently does nothing', JSON.stringify([send.note, send.noteWhy]));
 // a poll-lane row says how long its evidence may be — its OWN cadence
 const tracked1 = await p1.evaljs(OPEN_PANEL);
 const opsRow = tracked1.ok && tracked1.rows.find((r) => r.conv === 'fake-poll/fake-poll-ops');
-ok(opsRow && /^within /.test(opsRow.chip), 'a poll-lane row says how long its evidence may be ("within …", never a bare "Updated N min ago")', JSON.stringify(opsRow));
+ok(gateOf(opsRow) && verdictOf(/^within /.test(opsRow.chip)), 'a poll-lane row says how long its evidence may be ("within …", never a bare "Updated N min ago")', JSON.stringify(opsRow));
 
 // ── ⑤ two simultaneous passes each advance their own cursor (real routes) ──
 {
@@ -307,10 +307,10 @@ ok(opsRow && /^within /.test(opsRow.chip), 'a poll-lane row says how long its ev
   // writer's pace, which the 2.5 s sleep only outran by timing.
   const w5 = await onDisk(() => readIndex().conversations, (c) => c['fake-push/fake-push-ops'].anchor && c['fake-scan/fake-scan-ops'].anchor, INDEX_BOUND_MS);
   const ix = w5.v && !w5.v.unreadable ? w5.v : {};
-  ok(w5.ok,
+  ok(verdictOf(w5.ok),
     'EXIT ⑤: two simultaneous passes each advanced their OWN cursor, through the REAL store',
     JSON.stringify({ push: ix['fake-push/fake-push-ops']?.anchor, scan: ix['fake-scan/fake-scan-ops']?.anchor, before: Object.keys(before.conversations).length, ms: w5.ms, ...(w5.v && w5.v.unreadable ? { unreadable: w5.v.unreadable } : {}) }) + late(w5, 'both cursors'));
-  ok(ix['fake-poll/fake-poll-ops']?.anchor && ix['fake-poll/fake-poll-announce']?.anchor, '…and the earlier pass\'s cursors are still there (nothing clobbered anything)');
+  ok(gateOf(ix['fake-poll/fake-poll-ops']?.anchor) && verdictOf(ix['fake-poll/fake-poll-announce']?.anchor), '…and the earlier pass\'s cursors are still there (nothing clobbered anything)');
   const logs = fs.readdirSync(path.join(wt, 'data/channels/msgs'));
   ok(logs.length === 3, 'each adapter owns its own message-log directory', logs.join(','));
   // THE SCAN LANE'S CHIP AND ITS LOG AGREE (r3): the pass PRODUCED
@@ -321,17 +321,17 @@ ok(opsRow && /^within /.test(opsRow.chip), 'a poll-lane row says how long its ev
   const scanRow = await p1.evaljs(`fetch('/api/channels').then(r=>r.json()).then(d=>JSON.stringify(d.conversations.find(c=>c.id==='fake-scan-ops')))`).then(JSON.parse);
   const adapters = JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/adapters.json'), 'utf-8')).adapters;
   const scanRec = adapters.find((a) => a.id === 'fake-scan');
-  ok(scanRec.scan && scanRec.scan.hostFacts && scanRec.scan.hostFacts.platform, 'the scan pass PRODUCED `scan.hostFacts` on the adapter row (the field had no producer before)', JSON.stringify(scanRec.scan));
+  ok(gateOf(scanRec.scan) && gateOf(scanRec.scan.hostFacts) && verdictOf(scanRec.scan.hostFacts.platform), 'the scan pass PRODUCED `scan.hostFacts` on the adapter row (the field had no producer before)', JSON.stringify(scanRec.scan));
   ok(scanRow.lane.via === 'scan' && scanRow.lane.source !== null && scanRow.freshness.state === 'aged',
     `the scan row's lane has a SOURCE (${scanRow.lane.source}) and its chip says "scanned … ago" — the same answer the ingest was gated on`, JSON.stringify({ lane: scanRow.lane, freshness: scanRow.freshness }));
 }
 
 // ── ④ two clients, one list ──
 const p2 = await newPage();
-ok(await p2.load(), 'page 2 loaded the app');
+ok(verdictOf(await p2.load()), 'page 2 loaded the app');
 const p2rows = await p2.evaljs(OPEN_PANEL);
 const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
-ok(p2rows.ok && sameSet(p2rows.rows.map((r) => r.conv), panel.rows.map((r) => r.conv)) && p2rows.rows.every((r) => r.chip), 'EXIT ④(a): the second client sees the SAME rows (the same conversation set, waited for by name) with their chips', JSON.stringify({ p2: p2rows.rows.map((r) => [r.conv, r.chip]), p1: panel.rows.map((r) => r.conv), why: p2rows.why, missing: p2rows.missing }));
+ok(gateOf(p2rows.ok) && gateOf(sameSet(p2rows.rows.map((r) => r.conv), panel.rows.map((r) => r.conv))) && verdictOf(p2rows.rows.every((r) => r.chip)), 'EXIT ④(a): the second client sees the SAME rows (the same conversation set, waited for by name) with their chips', JSON.stringify({ p2: p2rows.rows.map((r) => [r.conv, r.chip]), p1: panel.rows.map((r) => r.conv), why: p2rows.why, missing: p2rows.missing }));
 // Now PAUSE a conversation from page 1 and watch page 2 repaint off the broadcast — never a poll.
 await p1.evaljs(`fetch('/api/channels/fake-poll/fake-poll-ops/refresh', { method:'PUT', headers:{'Content-Type':'application/json'}, body:'{"every":"paused"}' }).then(r=>r.json())`);
 const synced = await p2.evaljs(`(async () => {
@@ -342,7 +342,7 @@ const synced = await p2.evaljs(`(async () => {
   }
   return { ok: false };
 })()`);
-ok(synced.ok, `EXIT ④(b): a change on ONE client repaints the OTHER from the broadcast (${synced.after}ms), with no refresh`, JSON.stringify(synced));
+ok(verdictOf(synced.ok), `EXIT ④(b): a change on ONE client repaints the OTHER from the broadcast (${synced.after}ms), with no refresh`, JSON.stringify(synced));
 
 // ── ⑩ P3: PROPOSE → INLINE CARD → APPROVE → SENT → POINTER RETRACTED (design §9) ──
 // The user drafts from the composer. fake-poll has no conversation policy
@@ -389,10 +389,10 @@ const PROPOSE = (text) => `(async () => {
   const propose = await p1.evaljs(PROPOSE('Hello from the e2e user'));
   ok(!propose.fail, 'EXIT P3 ①: a user-drafted PROPOSAL lands in awaiting-approval (fake-poll reads `review`) and its card appears INLINE in the open window', JSON.stringify(propose));
   ok(propose.text === 'Hello from the e2e user', 'the inline card carries the drafted text (textContent, never innerHTML)', JSON.stringify(propose));
-  ok(!!propose.identity && /Will send as/.test(propose.identity), 'the card carries the IDENTITY ROW ("Will send as …")', String(propose.identity));
+  ok(!!propose.identity && verdictOf(/Will send as/.test(propose.identity)), 'the card carries the IDENTITY ROW ("Will send as …")', String(propose.identity));
   ok(!!propose.warn, "fake-poll declares identityMarking:'unknown' ⇒ the card WARNS (unverified is as loud as marked — §9.5)", String(propose.identity));
-  ok(!!propose.policy && /approval/i.test(propose.policy), "the card says WHY it waits (the policy's reasons in words)", String(propose.policy));
-  ok(propose.approve && propose.buttons === 3, 'an awaiting card offers Approve / Edit… / Reject…', JSON.stringify(propose));
+  ok(!!propose.policy && verdictOf(/approval/i.test(propose.policy)), "the card says WHY it waits (the policy's reasons in words)", String(propose.policy));
+  ok(gateOf(propose.approve) && propose.buttons === 3, 'an awaiting card offers Approve / Edit… / Reject…', JSON.stringify(propose));
   const pid = propose.id;
 
   // the pointer: ONE For-you item per conversation, its id on the index row
@@ -401,7 +401,7 @@ const PROPOSE = (text) => `(async () => {
   ok(ptr.length === 1, 'EXIT P3 ②: exactly ONE open "For you" pointer is filed for the conversation (count-free text)', JSON.stringify((todos.open || []).map((t) => [t.sessionKey, t.text])));
   const w1 = await waitRow((r) => !!r.pendingTodoId);
   const ix1 = w1.row || {};
-  ok(w1.ok && ptr.length === 1 && ix1.pendingTodoId === ptr[0].id, "the pointer's id is PERSISTED on the conversation row (`pendingTodoId`) — the retraction link", JSON.stringify({ row: ix1.pendingTodoId, item: ptr[0] && ptr[0].id }) + late(w1, "the pointer's id"));
+  ok(gateOf(w1.ok) && ptr.length === 1 && ix1.pendingTodoId === ptr[0].id, "the pointer's id is PERSISTED on the conversation row (`pendingTodoId`) — the retraction link", JSON.stringify({ row: ix1.pendingTodoId, item: ptr[0] && ptr[0].id }) + late(w1, "the pointer's id"));
 
   // the second client: panel button + row badge + the Outbox window, same proposal, same store
   const p2ob = await p2.evaljs(`(async () => {
@@ -418,8 +418,8 @@ const PROPOSE = (text) => `(async () => {
     return { fail: 'no outbox card / button / row badge on client 2', btn: document.querySelector('.rail-panel-channels [data-outbox-button]')?.textContent || null };
   })()`);
   ok(!p2ob.fail && p2ob.id === pid && p2ob.type === 'channel-outbox', "EXIT P3 ③: the OTHER client's Outbox window shows the SAME proposal (one store, two places)", JSON.stringify(p2ob));
-  ok(!p2ob.fail && /1/.test(p2ob.btn) && /1/.test(p2ob.rowBadge), "its panel button and the row badge carry the awaiting count (the pointer's degrade surface)", JSON.stringify({ btn: p2ob.btn, row: p2ob.rowBadge }));
-  ok(!!p2ob.where && /Ops room/.test(p2ob.where), 'the Outbox card names its conversation (the inline one does not need to)', String(p2ob.where));
+  ok(!p2ob.fail && gateOf(/1/.test(p2ob.btn)) && verdictOf(/1/.test(p2ob.rowBadge)), "its panel button and the row badge carry the awaiting count (the pointer's degrade surface)", JSON.stringify({ btn: p2ob.btn, row: p2ob.rowBadge }));
+  ok(!!p2ob.where && verdictOf(/Ops room/.test(p2ob.where)), 'the Outbox card names its conversation (the inline one does not need to)', String(p2ob.where));
 
   // approve on the INLINE card (client 1) → sent; client 2 repaints off the broadcast
   const approved = await p1.evaljs(`(async () => {
@@ -443,7 +443,7 @@ const PROPOSE = (text) => `(async () => {
     }
     return { ok: false };
   })()`);
-  ok(p2sent.ok, `the other client's Outbox window repainted to sent off \`channel-outbox-updated\` (${p2sent.after}ms), no refresh`, JSON.stringify(p2sent));
+  ok(verdictOf(p2sent.ok), `the other client's Outbox window repainted to sent off \`channel-outbox-updated\` (${p2sent.after}ms), no refresh`, JSON.stringify(p2sent));
 
   // the pointer is RETRACTED by the engine; the row's link is cleared
   const todos2 = await readTodos();
@@ -451,26 +451,26 @@ const PROPOSE = (text) => `(async () => {
   const ptrDone = (todos2.resolved || []).find((t) => ptr[0] && t.id === ptr[0].id);
   const w2 = await waitRow((r) => !r.pendingTodoId);
   const ix2 = w2.row || {};
-  ok(w2.ok && ptrGone && !!ptrDone && ptrDone.resolvedBy === 'system' && !ix2.pendingTodoId, 'EXIT P3 ⑤: the pointer is RETRACTED (by the engine, as `system`) when the last proposal leaves awaiting-approval, and the row forgets its id', JSON.stringify({ gone: ptrGone, done: ptrDone && [ptrDone.status, ptrDone.resolvedBy], row: ix2.pendingTodoId }) + late(w2, "the row's cleared link"));
+  ok(gateOf(w2.ok) && gateOf(ptrGone) && !!ptrDone && ptrDone.resolvedBy === 'system' && !ix2.pendingTodoId, 'EXIT P3 ⑤: the pointer is RETRACTED (by the engine, as `system`) when the last proposal leaves awaiting-approval, and the row forgets its id', JSON.stringify({ gone: ptrGone, done: ptrDone && [ptrDone.status, ptrDone.resolvedBy], row: ix2.pendingTodoId }) + late(w2, "the row's cleared link"));
 
   // the audit log: attempt BEFORE outcome, the identity fields on every line
   const audit = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && a.proposalId === pid);
   const ops = audit.map((a) => a.op);
   ok(ops.indexOf('propose') >= 0 && ops.indexOf('approve') > ops.indexOf('propose') && ops.indexOf('attempt') > ops.indexOf('approve') && ops.indexOf('outcome') > ops.indexOf('attempt'), 'EXIT P3 ⑥: the audit log holds propose → approve → ATTEMPT → OUTCOME in that order', ops.join(' → '));
   const outcome = audit.find((a) => a.op === 'outcome');
-  ok(!!outcome && outcome.draftedBy && outcome.draftedBy.kind === 'user' && outcome.approvedBy === 'user' && outcome.sentAs === 'user' && outcome.identityMarking === 'unknown', 'every line carries draftedBy / approvedBy / sentAs / identityMarking', JSON.stringify(outcome));
+  ok(!!outcome && gateOf(outcome.draftedBy) && outcome.draftedBy.kind === 'user' && outcome.approvedBy === 'user' && outcome.sentAs === 'user' && outcome.identityMarking === 'unknown', 'every line carries draftedBy / approvedBy / sentAs / identityMarking', JSON.stringify(outcome));
 
   // REJECT with a reason — the other decision — and the pointer goes with it
   const second = await p1.evaljs(PROPOSE('Second draft, to be rejected'));
   ok(!second.fail && second.id !== pid, 'a second proposal lands in awaiting-approval (a new id)', JSON.stringify(second));
   const ptrB = (await readTodos()).open.filter((t) => t.sessionKey === 'channels' && /awaiting approval/.test(t.text));
-  ok(ptrB.length === 1 && ptr[0] && ptrB[0].id === ptr[0].id, 'the pointer is RE-FILED as the SAME item (dedupe by text = the idempotence we want), not a second one', JSON.stringify({ before: ptr[0] && ptr[0].id, now: ptrB.map((t) => t.id) }));
+  ok(ptrB.length === 1 && gateOf(ptr[0]) && ptrB[0].id === ptr[0].id, 'the pointer is RE-FILED as the SAME item (dedupe by text = the idempotence we want), not a second one', JSON.stringify({ before: ptr[0] && ptr[0].id, now: ptrB.map((t) => t.id) }));
   // item 8 (store-writer follow-up): THE RE-FILE'S LINK IS ON DISK BEFORE THE REJECT. The first retraction (EXIT P3 ⑤) left
   // the row with no id on disk, and the retraction below is read as «no id» — which that older version already holds: the
   // poll could pass seeing neither the re-file nor its clear. With the re-file's id read on disk first, «no id» below can
   // only be the retraction's own version (or a later one).
   const wB = await waitRow((r) => !!ptrB[0] && r.pendingTodoId === ptrB[0].id);
-  ok(wB.ok, "the RE-FILED pointer's id is persisted on the row again — on disk before the reject (the version its retraction must replace)", JSON.stringify({ row: wB.row && wB.row.pendingTodoId, item: ptrB[0] && ptrB[0].id }) + late(wB, 'the re-filed id'));
+  ok(verdictOf(wB.ok), "the RE-FILED pointer's id is persisted on the row again — on disk before the reject (the version its retraction must replace)", JSON.stringify({ row: wB.row && wB.row.pendingTodoId, item: ptrB[0] && ptrB[0].id }) + late(wB, 'the re-filed id'));
   const rejected = await p1.evaljs(`(async () => {
     const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
     const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${second.id}"]');
@@ -486,13 +486,13 @@ const PROPOSE = (text) => `(async () => {
     }
     return { fail: 'never rejected' };
   })()`);
-  ok(!rejected.fail && /wrong tone/.test(rejected.reason || '') && !rejected.approve, 'Reject with a reason repaints the card as rejected, carrying the reason verbatim', JSON.stringify(rejected));
+  ok(!rejected.fail && gateOf(/wrong tone/.test(rejected.reason || '')) && !rejected.approve, 'Reject with a reason repaints the card as rejected, carrying the reason verbatim', JSON.stringify(rejected));
   const todos3 = await readTodos();
   const wC = await waitRow((r) => !r.pendingTodoId);   // item 8 (store-writer follow-up): after wB, only the retraction's own version holds this
   const rowC = wC.row || {};
-  ok(wB.ok && wC.ok && !(todos3.open || []).some((t) => ptrB[0] && t.id === ptrB[0].id) && !rowC.pendingTodoId, 'the pointer is retracted again after the rejection (no awaiting proposal remains)', JSON.stringify({ open: (todos3.open || []).map((t) => t.text), row: rowC.pendingTodoId, refiledOnDisk: wB.ok }) + late(wC, "the rejection's cleared link"));
+  ok(gateOf(wB.ok) && gateOf(wC.ok) && !(todos3.open || []).some((t) => ptrB[0] && t.id === ptrB[0].id) && !rowC.pendingTodoId, 'the pointer is retracted again after the rejection (no awaiting proposal remains)', JSON.stringify({ open: (todos3.open || []).map((t) => t.text), row: rowC.pendingTodoId, refiledOnDisk: wB.ok }) + late(wC, "the rejection's cleared link"));
   const auditB = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && a.proposalId === second.id).map((a) => a.op);
-  ok(auditB.includes('reject') && !auditB.includes('attempt'), 'a rejected proposal has a reject line and NO attempt line (nothing was sent)', auditB.join(' → '));
+  ok(gateOf(auditB.includes('reject')) && !auditB.includes('attempt'), 'a rejected proposal has a reject line and NO attempt line (nothing was sent)', auditB.join(' → '));
   // ⑩c lane channel-enter-ime (inc-mv7mdv6b-emxq, 2026-10-14 — the owner's rejection left mid-word: the ring's
   // `KEY Enter [composing]` in input.chan-opt-input, the server's receipt a second later): THE INPUT METHOD'S ENTER NEVER
   // SENDS THE REASON. CDP's own IME path on the real reject box (test-chat-enter-ime-chrome's order): words typed, a
@@ -523,7 +523,7 @@ const PROPOSE = (text) => `(async () => {
   const held = await p1.evaljs(`(() => { const card = ${CARD}; const inp = card && card.querySelector('.chan-prop-rejectbox input.chan-opt-input'); return { cls: card && card.className, value: inp ? inp.value : null, keys: window.__rjKeys }; })()`);
   const imeKey = (held.keys || []).find((k) => k.key === 'Enter');
   ok(!!imeKey && (imeKey.composing === true || imeKey.code === 229), '⑩c the IME\'s Enter reached the reject box AS the input method\'s (isComposing / keyCode 229 — the ring\'s [composing])', JSON.stringify(held.keys));
-  ok(/chan-prop-awaiting-approval/.test(held.cls || '') && rejectLines() === 0, '⑩c … and posted NOTHING: the card still awaits approval, no reject line in the audit (inc-mv7mdv6b-emxq rejected here)', JSON.stringify({ cls: held.cls, rejects: rejectLines() }));
+  ok(gateOf(/chan-prop-awaiting-approval/.test(held.cls || '')) && rejectLines() === 0, '⑩c … and posted NOTHING: the card still awaits approval, no reject line in the audit (inc-mv7mdv6b-emxq rejected here)', JSON.stringify({ cls: held.cls, rejects: rejectLines() }));
   ok(held.value === 'wrong 时间', '⑩c … the committed word stays in the box after the words before it', JSON.stringify(held.value));
   if (process.env.VS_PNG_DIR) {   // the Ops window raised, the card in view, the caret back in the box (the plain Enter below types there)
     const r = await p1.evaljs(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops'); window.app.wm.focusWindow(w.id); const card = ${CARD}; card.scrollIntoView({ block: 'center' }); card.querySelector('.chan-prop-rejectbox input.chan-opt-input')?.focus(); const b = card.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; })()`);
@@ -535,7 +535,7 @@ const PROPOSE = (text) => `(async () => {
   await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
   const imeSent = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const c = ${CARD}; if (c && /chan-prop-rejected/.test(c.className)) return { cls: c.className, reason: c.querySelector('.chan-prop-reason')?.textContent || null }; await new Promise((r) => setTimeout(r, 250)); } return { fail: 'never rejected' }; })()`);
   await sleep(500);
-  ok(!imeSent.fail && rejectLines() === 1 && (imeSent.reason || '').includes('wrong 时间'), '⑩c a plain Enter after it rejects ONCE, the whole reason verbatim', JSON.stringify({ ...imeSent, rejects: rejectLines() }));
+  ok(!imeSent.fail && rejectLines() === 1 && verdictOf((imeSent.reason || '').includes('wrong 时间')), '⑩c a plain Enter after it rejects ONCE, the whole reason verbatim', JSON.stringify({ ...imeSent, rejects: rejectLines() }));
   // client 2's Outbox window is closed again so the restart leg below restores only the channel windows it measures
   await p2.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel-outbox')) window.app.wm.closeWindow(w.id); return true; })()`);
 }
@@ -558,10 +558,10 @@ const PROPOSE = (text) => `(async () => {
     await new Promise((r) => setTimeout(r, 600));
     return { cleared: ta.value === '', label: b.textContent, cardsBefore, cardsAfter: w.content.querySelectorAll('.chanwin-outbox .chan-prop-awaiting-approval').length, toast: [...document.querySelectorAll('.global-toast')].map((t) => t.textContent).pop() || null };
   })()`);
-  ok(!direct.fail && direct.cleared && /Send/.test(direct.label) && direct.cardsAfter === direct.cardsBefore && /^Sent/.test(direct.toast || ''), 'g3: the composer SENDS the owner\'s own words at once — no approval card appears, the toast says Sent (a link does not hold it)', JSON.stringify(direct));
+  ok(!direct.fail && gateOf(direct.cleared) && gateOf(/Send/.test(direct.label)) && direct.cardsAfter === direct.cardsBefore && verdictOf(/^Sent/.test(direct.toast || '')), 'g3: the composer SENDS the owner\'s own words at once — no approval card appears, the toast says Sent (a link does not hold it)', JSON.stringify(direct));
   const ob = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/outbox?conv=fake-poll/fake-poll-ops`)).json();
   const mine = (ob.proposals || []).find((p) => p.text === 'My own words, see https://example.com/doc');
-  ok(mine && mine.state === 'sent' && mine.sendAs === 'user' && mine.draftedBy && mine.draftedBy.kind === 'user' && mine.approvedBy === 'policy', 'the record is SENT as the user, drafted by the user', JSON.stringify(mine && { state: mine.state, sendAs: mine.sendAs, draftedBy: mine.draftedBy, approvedBy: mine.approvedBy }));
+  ok(gateOf(mine) && mine.state === 'sent' && mine.sendAs === 'user' && gateOf(mine.draftedBy) && mine.draftedBy.kind === 'user' && mine.approvedBy === 'policy', 'the record is SENT as the user, drafted by the user', JSON.stringify(mine && { state: mine.state, sendAs: mine.sendAs, draftedBy: mine.draftedBy, approvedBy: mine.approvedBy }));
   const opsD = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && mine && a.proposalId === mine.id).map((a) => a.op);
   ok(JSON.stringify(opsD) === '["propose","attempt","outcome"]', 'its audit is propose → attempt → outcome — no approve line (the policy and its guards never judged the owner\'s own words)', opsD.join(' → '));
 }
@@ -600,15 +600,15 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     return { fail: 'never unknown', cls: w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid3}"]')?.className || null };
   })()`);
   ok(!unknown.fail && !unknown.approve, 'EXIT P4 ①: a send whose answer was LOST repaints the card as UNKNOWN — not failed, no decision buttons', JSON.stringify(unknown));
-  ok(!unknown.fail && unknown.reasons.some((r) => /answer was lost/.test(r)) && unknown.reasons.some((r) => /never retried automatically/i.test(r)), "the card carries the adapter's reason verbatim and the sentence that it is never retried", JSON.stringify(unknown.reasons));
-  ok(!unknown.fail && unknown.reconcile && !unknown.honesty, 'the card offers Check outcome (fake-poll declares an idempotency mechanism) and no sender-line note (the switch is off)', JSON.stringify(unknown));
+  ok(!unknown.fail && gateOf(unknown.reasons.some((r) => /answer was lost/.test(r))) && verdictOf(unknown.reasons.some((r) => /never retried automatically/i.test(r))), "the card carries the adapter's reason verbatim and the sentence that it is never retried", JSON.stringify(unknown.reasons));
+  ok(!unknown.fail && gateOf(unknown.reconcile) && !unknown.honesty, 'the card offers Check outcome (fake-poll declares an idempotency mechanism) and no sender-line note (the switch is off)', JSON.stringify(unknown));
   const todosU = await readTodos();
   const unk = (todosU.open || []).filter((t) => /UNKNOWN outcome/.test(t.text));
   ok(unk.length === 1, 'EXIT P4 ②: exactly ONE For-you item asks the user to look at the platform', JSON.stringify((todosU.open || []).map((t) => t.text)));
   const oc = readAudit(pid3).find((a) => a.op === 'outcome');
   ok(!!oc && oc.lost === true && oc.state === 'unknown', 'the audit OUTCOME line says LOST (state unknown)', JSON.stringify(oc));
   const v1 = await readView(pid3);
-  ok(!!v1 && v1.state === 'unknown' && v1.canReconcile === true && Number.isFinite(v1.attemptAt) && v1.wire && v1.wire.text === LOST_TEXT && v1.wire.honestyLine === false, 'the API view: unknown, canReconcile, the attempt instant and the WIRE text stamped (what the check compares against)', JSON.stringify(v1 && { state: v1.state, canReconcile: v1.canReconcile, attemptAt: v1.attemptAt, wire: v1.wire }));
+  ok(!!v1 && v1.state === 'unknown' && v1.canReconcile === true && gateOf(Number.isFinite(v1.attemptAt)) && gateOf(v1.wire) && v1.wire.text === LOST_TEXT && v1.wire.honestyLine === false, 'the API view: unknown, canReconcile, the attempt instant and the WIRE text stamped (what the check compares against)', JSON.stringify(v1 && { state: v1.state, canReconcile: v1.canReconcile, attemptAt: v1.attemptAt, wire: v1.wire }));
 
   // Check outcome from the card ⇒ sent
   const settled = await p1.evaljs(`(async () => {
@@ -624,7 +624,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     return { fail: 'never sent', cls: w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid3}"]')?.className || null };
   })()`);
   ok(!settled.fail && !settled.reconcile, 'EXIT P4 ③: Check outcome from the card settles it to SENT and the button is gone', JSON.stringify(settled));
-  ok(!settled.fail && /Checked 1/.test(settled.line || '') && /landed/.test(settled.line || ''), 'the card says "Checked 1× — last answer: it landed"', String(settled.line));
+  ok(!settled.fail && gateOf(/Checked 1/.test(settled.line || '')) && verdictOf(/landed/.test(settled.line || '')), 'the card says "Checked 1× — last answer: it landed"', String(settled.line));
   const todosV = await readTodos();
   const unkDone = (todosV.resolved || []).find((t) => unk[0] && t.id === unk[0].id);
   ok(!(todosV.open || []).some((t) => unk[0] && t.id === unk[0].id) && !!unkDone && unkDone.resolvedBy === 'system', 'the unknown-outcome item is RETRACTED by the engine (as `system`)', JSON.stringify({ done: unkDone && [unkDone.status, unkDone.resolvedBy] }));
@@ -633,7 +633,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   const rco = readAudit(pid3).find((a) => a.op === 'reconcile-outcome');
   ok(!!rco && rco.answer === 'landed' && rco.sentAs === 'user' && rco.state === 'sent', 'the reconcile-outcome line says LANDED with the identity fields', JSON.stringify(rco));
   const v2 = await readView(pid3);
-  ok(!!v2 && v2.state === 'sent' && v2.result && v2.result.reconciled === true && !!v2.result.vendorMessageId && v2.receipt && v2.receipt.reconciled === true && v2.reconcile && v2.reconcile.n === 1 && v2.reconcile.lastAnswer === 'landed', 'the proposal records the vendor id, the receipt says it was established by reconcile, one check counted', JSON.stringify(v2 && { result: v2.result, receipt: v2.receipt, reconcile: v2.reconcile }));
+  ok(!!v2 && v2.state === 'sent' && gateOf(v2.result) && v2.result.reconciled === true && !!v2.result.vendorMessageId && gateOf(v2.receipt) && v2.receipt.reconciled === true && gateOf(v2.reconcile) && v2.reconcile.n === 1 && v2.reconcile.lastAnswer === 'landed', 'the proposal records the vendor id, the receipt says it was established by reconcile, one check counted', JSON.stringify(v2 && { result: v2.result, receipt: v2.receipt, reconcile: v2.reconcile }));
 
   // THE SENDER HONESTY SWITCH (§9.5): OFF by default, per channel, never on a user's own draft.
   // a4 (docs/design-communication-panel-ui.md §4.2): the switch is a CHECKABLE ROW of the
@@ -653,7 +653,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   const SW_READ = `(() => { const m = ${SW_MENU}; if (!m) return null; const out = { state: m.chk.dataset.honestyLine, label: m.item.textContent.trim() }; m.menu.remove(); return out; })()`;
   const SW_CLICK = (which) => `(() => { const m = ${SW_MENU}; if (!m) return false; const target = ${which === 'switch' ? 'm.item' : "[...m.menu.querySelectorAll('.context-menu-item')].find((x) => x !== m.item && /instance default/i.test(x.textContent))"}; if (!target) { m.menu.remove(); return false; } target.click(); for (const x of document.querySelectorAll('.context-menu')) x.remove(); return true; })()`;
   const sw0 = (await p1.evaljs(SW_READ)) || { fail: 'no switch' };
-  ok(!sw0.fail && sw0.state === 'off' && /instance default/.test(sw0.label), "EXIT P4 ④: the section menu's Sender line row reads OFF (instance default) — decision 17 as overruled", JSON.stringify(sw0));
+  ok(!sw0.fail && sw0.state === 'off' && verdictOf(/instance default/.test(sw0.label)), "EXIT P4 ④: the section menu's Sender line row reads OFF (instance default) — decision 17 as overruled", JSON.stringify(sw0));
   const sw1 = await p1.evaljs(`(async () => {
     if (!${SW_CLICK('switch')}) return { fail: 'no switch' };
     for (let i = 0; i < 80; i++) {
@@ -665,10 +665,10 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   })()`);
   ok(!sw1.fail && sw1.state === 'on' && !/instance default/.test(sw1.label), "turning the channel's switch ON repaints the row off `channels-updated` (a per-channel choice, no longer the instance default)", JSON.stringify(sw1));
   const auditSw = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'policy' && a.op === 'sender-honesty-line');
-  ok(auditSw.some((a) => a.adapterId === 'fake-poll' && a.value === true), 'the switch change is audited', JSON.stringify(auditSw));
+  ok(verdictOf(auditSw.some((a) => a.adapterId === 'fake-poll' && a.value === true)), 'the switch change is audited', JSON.stringify(auditSw));
   const fourth = await p1.evaljs(PROPOSE('My own words, no line'));
   const fourthCard = fourth.fail ? null : await p1.evaljs(`(() => { const w = ${WIN}; const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${fourth.id}"]'); return card ? { honesty: !!card.querySelector('.chan-prop-honesty'), text: card.querySelector('.chan-prop-text')?.textContent || null } : { fail: 'no card' }; })()`);
-  ok(!fourth.fail && fourthCard && !fourthCard.fail && fourthCard.honesty === false && fourthCard.text === 'My own words, no line', "a USER's own draft carries NO sender-line note even with the channel's switch on (nothing to disclose)", JSON.stringify(fourthCard));
+  ok(!fourth.fail && gateOf(fourthCard) && !fourthCard.fail && fourthCard.honesty === false && fourthCard.text === 'My own words, no line', "a USER's own draft carries NO sender-line note even with the channel's switch on (nothing to disclose)", JSON.stringify(fourthCard));
   const v4 = fourth.fail ? null : await readView(fourth.id);
   ok(!!v4 && v4.honestyLine === null, 'the API view agrees: honestyLine null for a user draft', JSON.stringify(v4 && v4.honestyLine));
   // back to the instance default, and the pending draft rejected so the restart leg measures what ⑩ left
@@ -702,13 +702,13 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   // the server's 500 ms write) and index.json holding the ④ refresh override (the store writer's paced write). Each by a
   // bounded poll, never the 3.5 s that let the pace beat the kill: the leg measures the RESTART, not the pace.
   const g3 = await onDisk(() => ({ convs: bootChannelConvs(), every: ((indexRow('fake-poll/fake-poll-ops') || {}).refresh || {}).every }), (v) => Array.isArray(v.convs) && v.convs.includes('fake-poll-ops') && v.every === 'paused', KILL_GATE_MS);
-  ok(Array.isArray(g3.v.convs) && g3.v.convs.includes('fake-poll-ops'), 'the channel window is in the saved layout (its openSpec, not its contents)', JSON.stringify(g3.v.convs) + late(g3, 'the layout the boot restores'));
+  ok(gateOf(Array.isArray(g3.v.convs)) && verdictOf(g3.v.convs.includes('fake-poll-ops')), 'the channel window is in the saved layout (its openSpec, not its contents)', JSON.stringify(g3.v.convs) + late(g3, 'the layout the boot restores'));
   ok(g3.v.every === 'paused', '…and the ④ refresh override is in index.json — on disk BEFORE the kill (a SIGKILL writes nothing more)', JSON.stringify(g3.v.every === undefined ? null : g3.v.every) + late(g3, 'the override'));
   srv.kill('SIGKILL');
   await sleep(1200);
   srv = bootServer();
-  ok(await waitServer(), 'the server rebooted');
-  ok(await p1.load(), 'page 1 reloaded');
+  ok(verdictOf(await waitServer()), 'the server rebooted');
+  ok(verdictOf(await p1.load()), 'page 1 reloaded');
   const back = await p1.evaljs(`(async () => {
     // Wait for the TRACKED conversation's window to have finished its own
     // fetch — a window that has drawn its context bar has not necessarily
@@ -725,15 +725,15 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const ws = [...window.app.wm.windows.values()].filter((w) => w.type === 'channel');
     return { n: ws.length, convs: ws.map((w) => w._openSpec && w._openSpec.convId), msgs: ws.map((w) => w.content.querySelectorAll('.chanmsg').length), opsMsgs: 0 };
   })()`);
-  ok(back.n >= 1 && back.convs.includes('fake-poll-ops'), 'EXIT ③: the conversation window came back from its openSpec after a SIGKILL + reboot', JSON.stringify(back));
+  ok(back.n >= 1 && verdictOf(back.convs.includes('fake-poll-ops')), 'EXIT ③: the conversation window came back from its openSpec after a SIGKILL + reboot', JSON.stringify(back));
   ok(back.opsMsgs > 0, '…and it re-read its messages from the store that survived with it', JSON.stringify(back));
   const state = await p1.evaljs(`fetch('/api/channels').then(r=>r.json()).then(d=>({paused:d.conversations.filter(c=>c.refresh && c.refresh.every==='paused').map(c=>c.id).sort(), unreadTotal:d.unreadTotal}))`);
   ok(JSON.stringify(state.paused) === JSON.stringify(['fake-poll-ops']),
     '…and the refresh override survived too (the index is atomic + flushed on exit)', JSON.stringify(state));
   const ob = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/outbox`)).json();
-  ok(Array.isArray(ob.proposals) && ob.proposals.some((p) => p.state === 'sent') && ob.proposals.some((p) => p.state === 'rejected'),
+  ok(gateOf(Array.isArray(ob.proposals)) && gateOf(ob.proposals.some((p) => p.state === 'sent')) && verdictOf(ob.proposals.some((p) => p.state === 'rejected')),
     'EXIT P3 ⑦: the outbox (a sent and a rejected proposal) survived the SIGKILL + reboot — outbox.json is written atomically', JSON.stringify((ob.proposals || []).map((p) => [p.id, p.state])));
-  ok((ob.proposals || []).some((p) => p.state === 'sent' && p.reconcile && p.reconcile.n === 1 && p.reconcile.lastAnswer === 'landed' && p.result && p.result.reconciled === true && Number.isFinite(p.attemptAt) && p.wire && p.wire.text),
+  ok(verdictOf((ob.proposals || []).some((p) => p.state === 'sent' && p.reconcile && p.reconcile.n === 1 && p.reconcile.lastAnswer === 'landed' && p.result && p.result.reconciled === true && Number.isFinite(p.attemptAt) && p.wire && p.wire.text)),
     'EXIT P4 ⑤: the reconciled proposal survived the reboot with its attempt instant, wire text and reconcile record on disk', JSON.stringify((ob.proposals || []).map((p) => [p.id, p.state, p.reconcile && p.reconcile.n])));
 }
 
@@ -822,7 +822,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   // item 8 (store-writer follow-up): the mark on disk, by a bounded poll on its own value — 0 is this act's (the window's
   // mark on open was its newest message's instant), and a ghost's /read would write a later instant over it, never 0
   const wR = await onDisk(() => (indexRow('fake-poll/fake-poll-ops') || {}).readAt, (v) => v === 0, INDEX_BOUND_MS);
-  ok(wR.ok, 'and the read mark we set to 0 is still 0 — no ghost window overwrote it', String(wR.v) + late(wR, 'the mark 0'));
+  ok(verdictOf(wR.ok), 'and the read mark we set to 0 is still 0 — no ghost window overwrote it', String(wR.v) + late(wR, 'the mark 0'));
 }
 
 // ── ⑨ THE FRESHNESS CHIP IS IN THE DEVICE'S LANGUAGE (r2) ─────────────────
@@ -835,14 +835,14 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   // 2026-09-26: the identity warning rides the conversation's FULL view (the digest row is slim)
   const wire = await p1.evaljs(`fetch('/api/channels').then(r=>r.json()).then(async (d) => { const c = d.conversations[0]; const full = c ? await fetch('/api/channels/' + encodeURIComponent(c.adapterId) + '/' + encodeURIComponent(c.id)).then((r) => r.json()) : null; return JSON.stringify({fresh:c&&c.freshness, warn:full&&(full.identityWarning || (full.conversation && full.conversation.identityWarning))}); })`);
   const w = JSON.parse(wire);
-  ok(w.fresh && w.fresh.state && !('text' in w.fresh), 'the WIRE carries {kind,state,seconds} and no sentence', wire);
-  ok(w.warn && !('text' in w.warn), '…and the identity warning carries {level,marking,verbatim} only', wire);
+  ok(gateOf(w.fresh) && gateOf(w.fresh.state) && !('text' in w.fresh), 'the WIRE carries {kind,state,seconds} and no sentence', wire);
+  ok(gateOf(w.warn) && !('text' in w.warn), '…and the identity warning carries {level,marking,verbatim} only', wire);
   const zh = await p1.evaljs(`(async () => {
     localStorage.setItem('vibespace.lang', 'zh');
     return true;
   })()`);
   ok(zh === true, 'the device language is switched for the next load');
-  ok(await p1.load(), 'page 1 reloaded in zh');
+  ok(verdictOf(await p1.load()), 'page 1 reloaded in zh');
   const chips = await p1.evaljs(`(async () => {
     const sb = window.app.sidebar;
     sb._railGo('channels');
@@ -853,8 +853,8 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     }
     return null;
   })()`);
-  ok(Array.isArray(chips) && chips.length && chips.every(Boolean), 'every row still carries a chip in zh', JSON.stringify(chips));
-  ok(chips.some((x) => /[一-鿿]/.test(x)),
+  ok(gateOf(Array.isArray(chips)) && gateOf(chips.length) && verdictOf(chips.every(Boolean)), 'every row still carries a chip in zh', JSON.stringify(chips));
+  ok(verdictOf(chips.some((x) => /[一-鿿]/.test(x))),
     'THE CHIP IS TRANSLATED — the honesty contract of this whole feature now speaks the reader\'s language', JSON.stringify(chips));
   await p1.evaljs(`localStorage.removeItem('vibespace.lang'), 1`);
 }
@@ -890,15 +890,15 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const geo = { panel: panel && [Math.round(R(panel).left), Math.round(R(panel).width), panel.scrollWidth, panel.clientWidth], list: (() => { const l = window.app.sidebar.listEl; return l && [Math.round(R(l).left), Math.round(R(l).width), l.scrollLeft, l.scrollWidth, l.clientWidth]; })(), wide: [...panel.querySelectorAll('*')].filter((e) => R(e).right > R(panel).right + 1).slice(0, 6).map((e) => e.className + ':' + Math.round(R(e).width)) };
     return { rows: rows.length, trackedRows, pills, badges, titles, lineOne, pillSpread: spread(pills), badgeSpread: spread(badges), titleSpread: spread(titles), geo };
   })()`);
-  ok(grid.rows >= 4 && grid.pills.length === grid.rows && grid.pills.every((x) => Math.abs(x) <= 1), `(a) every row's freshness pill ends where its line-2 badges begin, or at the line's right edge (±1px over ${grid.rows} rows)`, JSON.stringify(grid));
+  ok(grid.rows >= 4 && grid.pills.length === grid.rows && verdictOf(grid.pills.every((x) => Math.abs(x) <= 1)), `(a) every row's freshness pill ends where its line-2 badges begin, or at the line's right edge (±1px over ${grid.rows} rows)`, JSON.stringify(grid));
   ok(grid.badgeSpread <= 1 && grid.titleSpread <= 1, `(a) the line-2 badges share a right edge and the titles a left edge (spreads ${grid.badgeSpread} / ${grid.titleSpread})`, JSON.stringify(grid));
-  ok(grid.lineOne.every(([, n, n2]) => n === 0 && n2 === 1), '(a) line 1 = the name and the time (no pill, no badge); line 2 carries exactly ONE pill on every row — the freshness claim — beside the unread / awaiting badges (int214, call B)', JSON.stringify(grid.lineOne));
+  ok(verdictOf(grid.lineOne.every(([, n, n2]) => n === 0 && n2 === 1)), '(a) line 1 = the name and the time (no pill, no badge); line 2 carries exactly ONE pill on every row — the freshness claim — beside the unread / awaiting badges (int214, call B)', JSON.stringify(grid.lineOne));
   // the badge PAIR is the default; the ONE-pill collapse belongs to the narrow rail only. The rows
   // are inline-size containers themselves, so an unnamed @container query used to resolve against
   // the 166px row and collapse the pair at the 260px default (round 3) — pinned at both widths.
   const KINDS = `(() => { const R = (el) => el.getBoundingClientRect(); const vis = (el) => !!el && R(el).width > 0; const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')]; return { width: R(document.querySelector('.rail-panel-channels')).width, unread: rows.filter((r) => vis(r.querySelector('.chan-unread'))).length, needs: rows.filter((r) => vis(r.querySelector('.chan-row-needs'))).length, chips: rows.filter((r) => vis(r.querySelector('.chan-row-sub .chan-chip'))).length, label: vis(document.querySelector('.rail-panel-channels .chan-outbox-label')), count: vis(document.querySelector('.rail-panel-channels .chan-sec-count')), name: vis(document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-name')), headTitle: (document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-head') || {}).title || '' }; })()`;
   const k260 = await p1.evaljs(KINDS);
-  ok(k260.unread > 0 && k260.needs === 0 && k260.count && k260.name && k260.chips > 0, `(a) at the default rail (${Math.round(k260.width)}px of panel) the unread count and the awaiting pill are SEPARATE badges, the section name, count and the freshness pills show`, JSON.stringify(k260));
+  ok(k260.unread > 0 && k260.needs === 0 && gateOf(k260.count) && gateOf(k260.name) && k260.chips > 0, `(a) at the default rail (${Math.round(k260.width)}px of panel) the unread count and the awaiting pill are SEPARATE badges, the section name, count and the freshness pills show`, JSON.stringify(k260));
   await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(200); sb._applySidebarLayoutWidth(200); return 1; })()`);
   await sleep(400);
   const k200 = await p1.evaljs(KINDS);
@@ -906,7 +906,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   // verifier r4: a "5…" freshness claim is worse than none, and a three-letter name stub says nothing —
   // under the narrow container the pill hides (its sentence rides the title's tooltip), the head keeps
   // the kind glyph + dot + COUNT and drops the name (the label rides the head's tooltip)
-  ok(k200.chips === 0 && !k200.name && k200.count && k200.headTitle.length > 0, `(a) at the 200px rail the freshness pills and the section names hide, the section count stays and the head carries its label as a tooltip ("${k200.headTitle}")`, JSON.stringify(k200));
+  ok(k200.chips === 0 && !k200.name && gateOf(k200.count) && k200.headTitle.length > 0, `(a) at the 200px rail the freshness pills and the section names hide, the section count stays and the head carries its label as a tooltip ("${k200.headTitle}")`, JSON.stringify(k200));
   await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(260); sb._applySidebarLayoutWidth(260); return 1; })()`);
   await sleep(400);
 
@@ -954,7 +954,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   })()`);
   const stc = colours.states;
   const distinct = new Set(['awaiting-approval', 'sent', 'failed', 'unknown', 'rejected'].map((k) => stc[k]).filter(Boolean)).size;
-  ok(stc['awaiting-approval'] && stc.sent && stc.failed && stc.unknown && stc.rejected && distinct === 5 && stc.renderedAgree === true, '(d) the five card states render in FIVE distinct colours (one colour per meaning), and the rendered cards agree', JSON.stringify(stc));
+  ok(gateOf(stc['awaiting-approval']) && gateOf(stc.sent) && gateOf(stc.failed) && gateOf(stc.unknown) && gateOf(stc.rejected) && distinct === 5 && stc.renderedAgree === true, '(d) the five card states render in FIVE distinct colours (one colour per meaning), and the rendered cards agree', JSON.stringify(stc));
   ok(stc.unknown !== stc.failed && stc.rejected !== stc.failed, "(d) `unknown` (not a failure, §9.4) and `rejected` never wear `failed`'s red", JSON.stringify(stc));
   const ages = colours.chips.filter((x) => !x.live && !x.off).map((x) => x.color), lives = colours.chips.filter((x) => x.live).map((x) => x.color);
   ok(new Set(ages).size <= 1 && (!lives.length || (new Set(lives).size === 1 && !ages.includes(lives[0]))), '(d) every freshness AGE is the one neutral pill; `live` alone is a different (green) colour', JSON.stringify(colours.chips));
@@ -971,7 +971,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     for (const w of window.app.wm.windows.values()) if (w.type === 'channel' || w.type === 'channel-outbox') for (const el of w.content.querySelectorAll('.chan-prop, .chanwin-bar, .chanwin-foot, .chan-prop-actions')) { const r = el.getBoundingClientRect(); if (r.right > innerWidth + 1) wide.push(el.className + ' right=' + Math.round(r.right)); }
     return { ...out, wide, vw: innerWidth };
   })()`);
-  ok(narrow.vw === 375 && narrow.panel && !narrow.panel.over && narrow.window && !narrow.window.over && narrow.outbox && !narrow.outbox.over, '(b) at 375px the panel, a conversation window and the Outbox have NO sideways overflow', JSON.stringify(narrow));
+  ok(narrow.vw === 375 && gateOf(narrow.panel) && !narrow.panel.over && gateOf(narrow.window) && !narrow.window.over && gateOf(narrow.outbox) && !narrow.outbox.over, '(b) at 375px the panel, a conversation window and the Outbox have NO sideways overflow', JSON.stringify(narrow));
   ok(narrow.wide.length === 0, '(b) no card, bar, foot or action row reaches past the 375px viewport', JSON.stringify(narrow.wide));
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false });
   await sleep(400);
@@ -1012,7 +1012,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   ok(m.broadcasts >= 4, `FIXTURE: the five route actions reached the page as broadcasts (${m.broadcasts})`, JSON.stringify(m));
   ok(m.panelRemoved === 0 && m.panelAdded === 0, `D12: across ${m.broadcasts} broadcasts the panel is NEVER torn down and rebuilt (removed ${m.panelRemoved}, added ${m.panelAdded} — it was 7/7 for 7)`, JSON.stringify(m));
   ok(m.fetches === 0, `D12: ZERO /api/channels fetches across ${m.broadcasts} broadcasts — the digest on the broadcast is the computation (it was one per broadcast)`, JSON.stringify(m));
-  ok(Math.abs(m.scrollNow - m.scrollSet) <= 1 && m.samples.length >= 4 && m.samples.every((x) => Math.abs(x - m.scrollSet) <= 1), `D12: the scroller stays at ${m.scrollSet}px through every repaint (samples ${JSON.stringify(m.samples)}; it used to clamp to 0)`, JSON.stringify(m));
+  ok(Math.abs(m.scrollNow - m.scrollSet) <= 1 && m.samples.length >= 4 && verdictOf(m.samples.every((x) => Math.abs(x - m.scrollSet) <= 1)), `D12: the scroller stays at ${m.scrollSet}px through every repaint (samples ${JSON.stringify(m.samples)}; it used to clamp to 0)`, JSON.stringify(m));
   ok(m.foldedAfter === armed.folded && m.rows >= 4, 'D12: a section the user folded stays folded and the rows are still there', JSON.stringify(m));
   // …and every section open again, as the legs after this one measure their rows (the defaults folded some)
   await p1.evaljs(`(() => { for (const h of document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed > .chan-sec-head')) h.click(); return 1; })()`);
@@ -1032,7 +1032,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(${w}); return 1; })()`);
     await sleep(400);
     const notes = await p1.evaljs(NOTES);
-    ok(notes.length >= 1 && notes.every((n) => !n.missing && n.gap >= 0 && n.gap <= 8 && n.icW <= 16 && n.sameLine), `at a ${w}px rail every warning line's glyph is a ≤16px slot whose right edge is within 8px of its sentence, on the same line (${notes.length} lines)`, JSON.stringify(notes));
+    ok(notes.length >= 1 && verdictOf(notes.every((n) => !n.missing && n.gap >= 0 && n.gap <= 8 && n.icW <= 16 && n.sameLine)), `at a ${w}px rail every warning line's glyph is a ≤16px slot whose right edge is within 8px of its sentence, on the same line (${notes.length} lines)`, JSON.stringify(notes));
   }
   await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(260); sb._applySidebarLayoutWidth(260); return 1; })()`);
   await sleep(300);
@@ -1045,17 +1045,17 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   const J = { 'Content-Type': 'application/json' };
   // ⑨ left the page in zh (the language switch takes effect on load) — this leg matches the ⋯ menu's English words
   await p1.evaljs(`localStorage.removeItem('vibespace.lang'), 1`);
-  ok(await p1.load(), 'page 1 reloaded in en for the menu words');
+  ok(verdictOf(await p1.load()), 'page 1 reloaded in en for the menu words');
   // the product's own settled signal: the boot fetch of the task mirror has landed (verify r1 —
   // the group used to be created while two boot GETs were still in flight; a stale one parsing
   // after the broadcast emptied every roster on 1 of 3 runs; the mirror now refuses that, and
   // this leg no longer races it either)
-  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if (window.app.sidebar._tasksLoaded === true) return true; await new Promise((r) => setTimeout(r, 125)); } return false; })()`), 'the task mirror is loaded before the group is created');
+  ok(verdictOf(await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if (window.app.sidebar._tasksLoaded === true) return true; await new Promise((r) => setTimeout(r, 125)); } return false; })()`)), 'the task mirror is loaded before the group is created');
   const mk = await (await fetch(`http://127.0.0.1:${PORT}/api/tasks`, { method: 'POST', headers: J, body: JSON.stringify({ title: 'Ops triage' }) })).json();
   const gid = mk.task && mk.task.id;
-  ok(!!gid && /^T-/.test(gid) && gid !== 'Ops triage', 'FIXTURE: a Task Group whose generated `T-…` id differs from its title', JSON.stringify(mk));
+  ok(!!gid && gateOf(/^T-/.test(gid)) && gid !== 'Ops triage', 'FIXTURE: a Task Group whose generated `T-…` id differs from its title', JSON.stringify(mk));
   const nameOnly = await (await fetch(`http://127.0.0.1:${PORT}/api/tasks`, { method: 'POST', headers: J, body: JSON.stringify({ name: 'Only a name' }) })).json();
-  ok(!!nameOnly.error && /title/.test(nameOnly.error), 'NEGATIVE CONTROL: the store has no `name` — a name-only group is REFUSED by name, so `name` can never be what a row is named by', JSON.stringify(nameOnly));
+  ok(!!nameOnly.error && verdictOf(/title/.test(nameOnly.error)), 'NEGATIVE CONTROL: the store has no `name` — a name-only group is REFUSED by name, so `name` can never be what a row is named by', JSON.stringify(nameOnly));
   const seen = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const g = (window.app.sidebar._tasks || []).find((x) => x.id === ${JSON.stringify(gid)}); if (g) return { title: g.title, hasName: 'name' in g, old: g.name || g.id }; await new Promise((r) => setTimeout(r, 250)); } return null; })()`);
   ok(!!seen && seen.title === 'Ops triage' && !seen.hasName && seen.old === gid, 'CONTROL: the client\'s task row carries `title` and no `name`, so the pre-a3 formula (`name || id`) names it by its id — the defect this leg pins', JSON.stringify(seen));
   const assign = await p1.evaljs(`(async () => {
@@ -1069,7 +1069,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     for (const o of document.querySelectorAll('.dialog-overlay')) o.remove();
     return opts;
   })()`);
-  ok(assign.some((o) => /Ops triage/.test(o)) && !assign.some((o) => o.includes(gid)), 'PIN: the Grant access… picker names the group by its TITLE and never shows its id', JSON.stringify(assign));
+  ok(gateOf(assign.some((o) => /Ops triage/.test(o))) && !assign.some((o) => o.includes(gid)), 'PIN: the Grant access… picker names the group by its TITLE and never shows its id', JSON.stringify(assign));
   // a grant that carries only {kind, id} (an assignment's shape) must be named from the roster
   const granted = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/fake-poll-ops/reach`, { method: 'PUT', headers: J, body: JSON.stringify({ principal: { kind: 'group', id: gid }, level: 'visible' }) })).json();
   ok(!!granted && !granted.error, 'FIXTURE: the group is granted reach with a name-less principal', JSON.stringify(granted));
@@ -1089,8 +1089,8 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     for (const o of document.querySelectorAll('.dialog-overlay, .pp-pop')) o.remove();
     return { rows, roster };
   })()`);
-  ok(!reach.fail && reach.rows.some((x) => /Ops triage/.test(x)) && !reach.rows.some((x) => x.includes(gid)), 'PIN: the Reach dialog names the granted group by its TITLE (resolved from the roster — the grant carried no name) and never its id', JSON.stringify(reach));
-  ok(!reach.fail && reach.roster.some((x) => /Ops triage/.test(x)) && !reach.roster.some((x) => x.includes(gid)), 'PIN: the Reach roster (the picker) names the group by its TITLE and never its id', JSON.stringify(reach));
+  ok(!reach.fail && gateOf(reach.rows.some((x) => /Ops triage/.test(x))) && !reach.rows.some((x) => x.includes(gid)), 'PIN: the Reach dialog names the granted group by its TITLE (resolved from the roster — the grant carried no name) and never its id', JSON.stringify(reach));
+  ok(!reach.fail && gateOf(reach.roster.some((x) => /Ops triage/.test(x))) && !reach.roster.some((x) => x.includes(gid)), 'PIN: the Reach roster (the picker) names the group by its TITLE and never its id', JSON.stringify(reach));
   await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/fake-poll-ops/reach`, { method: 'PUT', headers: J, body: JSON.stringify({ principal: { kind: 'group', id: gid }, level: null }) });
   await p1.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(w.id); return 1; })()`);
 }
@@ -1141,7 +1141,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   ];
   const fnAt = capsSrc.indexOf('function freshnessText(');
   const cases = [...capsSrc.slice(fnAt, capsSrc.indexOf('\n}\n', fnAt)).matchAll(/case '([\w-]+)':/g)].map((m) => m[1]);
-  ok(cases.length >= 8 && cases.every((c) => CLAIMS.some((x) => x.state === c)), `CENSUS: every state \`freshnessText\` words (${cases.join(', ')}) is in the pill census's claims table — a new state cannot dodge the width census`, JSON.stringify(cases));
+  ok(cases.length >= 8 && verdictOf(cases.every((c) => CLAIMS.some((x) => x.state === c))), `CENSUS: every state \`freshnessText\` words (${cases.join(', ')}) is in the pill census's claims table — a new state cannot dodge the width census`, JSON.stringify(cases));
   // the pill's words exactly as chip() composes them (channels-panel.js)
   const pillWords = (mod, lang) => [...new Set(CLAIMS.map((c) => mod.freshnessText(c, { t: tFor(lang), short: true }) || tFor(lang)('unknown')))];
   const longest = (mod, lang) => CLAIMS.map((c) => mod.freshnessText(c, { t: tFor(lang) }) || '').sort((x, y) => y.length - x.length)[0];
@@ -1159,7 +1159,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     ['.chan-row-who { flex: 1; min-width: 0;', '.chan-row-who { flex: 1; min-width: 60px;'],
     ['.chan-row-sub .chan-chip { flex: 0 0 auto; }', '.chan-row-sub .chan-chip { flex: 0 0 auto; max-width: calc(100% - 66px); overflow: hidden; text-overflow: ellipsis; }'],
   ];
-  ok(CSS_EDITS.every(([a]) => cssNow.split(a).length === 2), 'the two rules the control reverts are spelled once in style.css', JSON.stringify(CSS_EDITS.map(([a]) => cssNow.split(a).length - 1)));
+  ok(verdictOf(CSS_EDITS.every(([a]) => cssNow.split(a).length === 2)), 'the two rules the control reverts are spelled once in style.css', JSON.stringify(CSS_EDITS.map(([a]) => cssNow.split(a).length - 1)));
   const cssPreFile = path.join(MUT.dir, 'style-r4-cap.css');
   fs.writeFileSync(cssPreFile, CSS_EDITS.reduce((x, [a, b]) => editAnchor(x, a, b, "the text a fold hands its step"), cssNow));
   MUT.files.push(cssPreFile);
@@ -1218,12 +1218,12 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const reg = FACE ? await p1.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "html, body { font-family: '${FACE}', sans-serif !important; }"; document.head.appendChild(st); });` }) : null;
     for (const lang of ['zh', 'ja', 'en']) {
       await p1.evaljs(`(() => { ${lang === 'en' ? "localStorage.removeItem('vibespace.lang')" : `localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})`}; return 1; })()`);
-      ok(await p1.load(), `${tag}page 1 reloaded in ${lang}`);
+      ok(verdictOf(await p1.load()), `${tag}page 1 reloaded in ${lang}`);
       ok((await p1.evaljs(OPEN)) >= 4, `${tag}${lang}: the channels panel lists the fixture's rows`);
       const r = await p1.evaljs(ROWS);
-      if (FACE) ok(new RegExp(FACE).test(r.font), `${tag}${lang}: the forced face is in force (body font-family: ${r.font})`);
+      if (FACE) ok(verdictOf(new RegExp(FACE).test(r.font)), `${tag}${lang}: the forced face is in force (body font-family: ${r.font})`);
       console.log(`    ${tag}${lang} rows @${Math.round(r.width)}px: ` + brief(r.rows));
-      ok(r.rows.length >= 4 && r.rows.every((x) => x.chip && x.whole && x.inside), `${tag}${lang}: a · at the ${Math.round(r.width)}px panel every row's pill is drawn whole (no ellipsis, never clipped by the row)`, JSON.stringify(r.rows));
+      ok(r.rows.length >= 4 && verdictOf(r.rows.every((x) => x.chip && x.whole && x.inside)), `${tag}${lang}: a · at the ${Math.round(r.width)}px panel every row's pill is drawn whole (no ellipsis, never clipped by the row)`, JSON.stringify(r.rows));
       const words = pillWords(capsNow, lang);
       const pb = await p1.evaljs(PROBE(words));
       console.log(`    ${tag}${lang} words: ` + brief(pb.rows || []));
@@ -1234,7 +1234,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
       const lp = await p1.evaljs(PROBE([long], [false]));
       const lr = (lp.rows || [])[0];
       if (lr && lr.natural <= PILL_BUDGET) console.log(`    ${tag}${lang}: c · no ${lang} sentence outgrows the budget ("${long}" ${lr.natural} px) — the structure is proven in the other languages`);
-      else { structural[FACE || 'default'] = (structural[FACE || 'default'] || 0) + 1; ok(!lp.fail && !!lr && lr.whole && lr.inside && Math.abs(lr.title + lr.w + lr.gap - lr.line) <= 1, `${tag}${lang}: c · a pill carrying the longest sentence ("${long}", ${lr && lr.natural} px > the budget) is still drawn whole — the message yields (${brief(lp.rows || [])})`, JSON.stringify(lp)); }
+      else { structural[FACE || 'default'] = (structural[FACE || 'default'] || 0) + 1; ok(!lp.fail && !!lr && gateOf(lr.whole) && gateOf(lr.inside) && Math.abs(lr.title + lr.w + lr.gap - lr.line) <= 1, `${tag}${lang}: c · a pill carrying the longest sentence ("${long}", ${lr && lr.natural} px > the budget) is still drawn whole — the message yields (${brief(lp.rows || [])})`, JSON.stringify(lp)); }
       if (lang === 'en') {
         // THE CONTROL: the pre-fix product through the SAME probes
         ok((await setCss(true)) === 'r4-cap', `${tag}CONTROL: the page now runs the pre-fix style.css (the scratch copy with the r4 cap)`);
@@ -1245,7 +1245,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
         console.log(`    ${tag}CONTROL pre-fix words: ` + brief(pre.rows || []));
         control[FACE || 'default'] = { plainPaused: prePaused, cutWords: (pre.rows || []).filter((x) => !x.whole).length, longCut: (preLong.rows || []).some((x) => !x.whole) };
         ok(!!prePaused, `${tag}CONTROL: the pre-fix words carry the mirror's pill "refresh paused"`, JSON.stringify(pre.rows));
-        ok((preLong.rows || []).some((x) => !x.whole), `${tag}CONTROL: under the r4 cap the longest sentence IS cut — c has teeth on any face`, JSON.stringify(preLong));
+        ok(verdictOf((preLong.rows || []).some((x) => !x.whole)), `${tag}CONTROL: under the r4 cap the longest sentence IS cut — c has teeth on any face`, JSON.stringify(preLong));
       }
     }
     if (reg && reg.result) await p1.cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: reg.result.identifier });
@@ -1256,7 +1256,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   // (a NOTE, not an assert: on the runner this box's face IS DejaVu Sans, so the default pass cuts it too)
   console.log(`    CONTROL, this box's own face: the pre-fix product draws "refresh paused" ${cd && cd.whole ? 'WHOLE' : 'CUT'} in a plain row (${cd && cd.w}/${cd && cd.natural} px)${cd && cd.whole ? ' — why the local gate stayed green on .185' : ''}`);
   if (hasDejaVu) ok(!!cv && cv.whole === false && cv.natural > cv.w, `CONTROL: under DejaVu Sans the pre-fix product cuts it (${cv && cv.w} of ${cv && cv.natural} px — the .185 mirror measured 82 px, fits:false) — the leg above reddens on the pre-fix product HERE`, JSON.stringify(cv));
-  for (const x of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(x.pass, 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
+  for (const x of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(verdictOf(x.pass), 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // ── ⑰ R3 (2026-09-26, design §23): THE ATTENTION TAG — ITS WORDS ARE DRAWN WHOLE, ITS AGENT'S NAME YIELDS.
@@ -1283,7 +1283,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const ages = code === 'read' || code === 'new-since-read' || code === 'replied' ? [NOWT - 10e3, NOWT - 59 * 60e3, NOWT - 23 * 3600e3] : [NOWT];
     for (const at of ages) for (const held of code === 'assigned' ? [false, true] : [false]) CASES.push({ code, n: 99, at, held, name: 'X' });
   }
-  ok(CASES.length >= 12 && Fo.TAG_ORDER.every((c) => CASES.some((x) => x.code === c)), `CENSUS: every tag code of TAG_ORDER is in the width census (${CASES.length} cases: ${Fo.TAG_ORDER.join(', ')})`);
+  ok(CASES.length >= 12 && verdictOf(Fo.TAG_ORDER.every((c) => CASES.some((x) => x.code === c))), `CENSUS: every tag code of TAG_ORDER is in the width census (${CASES.length} cases: ${Fo.TAG_ORDER.join(', ')})`);
   const partsFor = (lang) => CASES.map((c) => { const p = Wd.statusTagParts(c, { now: NOWT, t: tForT(lang) }); return { code: c.code, named: !!p.who, before: p.before, after: p.after, icon: !!p.icon, tone: p.tone }; });
   const PROBE_TAGS = (list, who) => `(() => {
     const host = document.querySelector('.rail-panel-channels .chan-groups');
@@ -1322,8 +1322,8 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const reg = FACE ? await p1.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "html, body { font-family: '${FACE}', sans-serif !important; }"; document.head.appendChild(st); });` }) : null;
     for (const lang of ['zh', 'ja', 'en']) {
       await p1.evaljs(`(() => { ${lang === 'en' ? "localStorage.removeItem('vibespace.lang')" : `localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})`}; return 1; })()`);
-      ok(await p1.load(), `${tag}page 1 reloaded in ${lang} (⑰)`);
-      ok(await p1.evaljs(OPEN_T), `${tag}${lang}: the first screen's list is in the rail panel`);
+      ok(verdictOf(await p1.load()), `${tag}page 1 reloaded in ${lang} (⑰)`);
+      ok(verdictOf(await p1.evaljs(OPEN_T)), `${tag}${lang}: the first screen's list is in the rail panel`);
       const parts = partsFor(lang);
       const bare = await p1.evaljs(PROBE_TAGS(parts, ''));
       const worst = (bare.rows || []).reduce((a, x) => (x.natural > (a ? a.natural : -1) ? x : a), null);
@@ -1339,7 +1339,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
         await p1.evaljs(`(() => { const st = document.createElement('style'); st.id = 'vs-tag-control'; st.textContent = '.chan-tag-words { flex-shrink: 1 !important; overflow: hidden !important; text-overflow: ellipsis !important; min-width: 0 !important; white-space: nowrap !important; } .chan-tag-who { flex-shrink: 0 !important; }'; document.head.appendChild(st); return 1; })()`);
         const ctl = await p1.evaljs(PROBE_TAGS(named, LONG));
         await p1.evaljs(`(() => { document.getElementById('vs-tag-control').remove(); return 1; })()`);
-        ok((ctl.rows || []).some((x) => !x.wordsWhole), `CONTROL: a stylesheet whose words may shrink cuts them behind a long name — "words whole" reddens on it (${(ctl.rows || []).filter((x) => !x.wordsWhole).length} of ${(ctl.rows || []).length} cut)`, JSON.stringify(ctl));
+        ok(verdictOf((ctl.rows || []).some((x) => !x.wordsWhole)), `CONTROL: a stylesheet whose words may shrink cuts them behind a long name — "words whole" reddens on it (${(ctl.rows || []).filter((x) => !x.wordsWhole).length} of ${(ctl.rows || []).length} cut)`, JSON.stringify(ctl));
       }
     }
     if (reg && reg.result) await p1.cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: reg.result.identifier });
@@ -1350,9 +1350,9 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
 // ── the routes' host parameter is a PARAMETER with a named refusal ──
 {
   const r = await (await fetch(`http://127.0.0.1:${PORT}/api/channels?host=some-other-machine`)).json();
-  ok(/only/.test(r.error || '') , 'a question about ANOTHER machine gets a NAMED refusal, never this machine\'s answer (hostId is a parameter from day one — decision 15)', JSON.stringify(r));
+  ok(verdictOf(/only/.test(r.error || '')) , 'a question about ANOTHER machine gets a NAMED refusal, never this machine\'s answer (hostId is a parameter from day one — decision 15)', JSON.stringify(r));
   const ok404 = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/not-a-conversation`)).json();
-  ok(/No such conversation/.test(ok404.error || ''), 'an unknown conversation is a 404 with a reason');
+  ok(verdictOf(/No such conversation/.test(ok404.error || '')), 'an unknown conversation is a 404 with a reason');
 }
 
 // ── ⑰ LANE R5: a vendor RATE refusal and the FIRST READ, said on the account's section (zh) ──
@@ -1373,7 +1373,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   // boot restores from it is judged after the reboot (below), by the page itself — never by re-deriving the client's
   // choice of desktop here (the first round's reader picked a desktop the boot does not restore from: a false red)
   const g17 = await onDisk(() => { try { return fs.readFileSync(path.join(wt, 'data/layouts.json'), 'utf-8'); } catch { return null; } }, (t) => t !== null && t !== layBefore17, KILL_GATE_MS);
-  ok(g17.ok, '⑰ the closing\'s layout autosave is on disk before the kill', (g17.ok ? 'landed' : 'unchanged') + late(g17, "the closed windows' layout"));
+  ok(verdictOf(g17.ok), '⑰ the closing\'s layout autosave is on disk before the kill', (g17.ok ? 'landed' : 'unchanged') + late(g17, "the closed windows' layout"));
   try { srv.kill('SIGKILL'); } catch {}
   await sleep(400);
   // lane discovery-cursor-persist (int235): a restart RESUMES — an account listed whole is not re-listed until its periodic
@@ -1387,11 +1387,11 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     if (pr && pr.discovery) { pr.discovery.completeAt -= 2 * 86400e3; pr.discovery.at = pr.discovery.completeAt; fs.writeFileSync(af, JSON.stringify(aj, null, 2)); }
   }
   srv = bootServer({ VIBESPACE_CHANNELS_FAKE_PACE: '2', VIBESPACE_CHANNELS_FAKE_VENDOR: 'Google', VIBESPACE_CHANNELS_FAKE_RATE_LIMIT: '1:20', VIBESPACE_CHANNELS_FAKE_CONVS: '40' });
-  ok(await waitServer(), '⑰ the server rebooted with the fixture seams: the poll fake paced at 2/s, named Google, refusing its first read (Retry-After 20 s), 40 new rooms');
+  ok(verdictOf(await waitServer()), '⑰ the server rebooted with the fixture seams: the poll fake paced at 2/s, named Google, refusing its first read (Retry-After 20 s), 40 new rooms');
   await p1.evaljs(`(() => { localStorage.setItem('vibespace.lang', 'zh'); return 1; })()`);
-  ok(await p1.load(), '⑰ page 1 reloaded in zh');
+  ok(verdictOf(await p1.load()), '⑰ page 1 reloaded in zh');
   const wins = await p1.evaljs(`${CHAN_WINS}.map((w) => w._openSpec && w._openSpec.convId)`);
-  ok(Array.isArray(wins) && wins.length === 0, '⑰ …with no conversation window restored (a window\'s open would be a human refresh ahead of the listing)', JSON.stringify(wins));
+  ok(gateOf(Array.isArray(wins)) && wins.length === 0, '⑰ …with no conversation window restored (a window\'s open would be a human refresh ahead of the listing)', JSON.stringify(wins));
   const CARD = `(async () => {
     const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels');
     const sec = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"]');
@@ -1434,17 +1434,17 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     await sleep(700);
   }
   console.log(`    ⑰ card: rate "${seen.rate}", first-read samples ${JSON.stringify(seen.reads.slice(0, 3))} … ${JSON.stringify(seen.reads.slice(-2))}, after: "${seen.gone}" (first read of the card: ${JSON.stringify(seen.first).slice(0, 300)})`);
-  ok(!!seen.rate && /^Google 限速中 · \d+ 秒后继续$/.test(seen.rate), `⑰ the account card says the vendor's rate refusal by its name with the wait: "${seen.rate}"`);
+  ok(!!seen.rate && verdictOf(/^Google 限速中 · \d+ 秒后继续$/.test(seen.rate)), `⑰ the account card says the vendor's rate refusal by its name with the wait: "${seen.rate}"`);
   const pj = seen.pausedJudged || {};
   const rowsTold = seen.rowsSeen.length ? `${seen.rowsSeen.length} poll(s) during the countdown read ${seen.rowsSeen[0]} → ${seen.rowsSeen[seen.rowsSeen.length - 1]} rows` : 'no poll during the countdown';
   ok(!!seen.pausedJudged && pj.notOverride.length === 0 && pj.serverNotOverride.length === 0 && pj.rows >= ROWS_WANT && !seen.failLine, seen.pausedJudged
     ? `⑰ …never as a paused pill — during the wait ${pj.serverPaused} of ${pj.rows} rooms read "paused" on the server and ${pj.pills} on the card, every one the owner's OWN override (④) — and never as a failed-passes line (a rate wait is not a failure)`
     : `⑰ …the listing never came: the pills cannot be judged during the rate wait — ${rowsTold}, the server never held ${ROWS_WANT} while the wait was counted down (B-f9e8: the precondition, not the pills)`, JSON.stringify({ pj, failLine: seen.failLine, rowsSeen: seen.rowsSeen }));
   const rising = seen.reads.every((x, i) => i === 0 || x[0] >= seen.reads[i - 1][0]);
-  ok(seen.reads.length >= 2 && rising && seen.reads[0][1] >= 40 && seen.reads[seen.reads.length - 1][0] > seen.reads[0][0], `⑰ during the paced first read the card says "首次读取中 · 已 N/M 个会话", rising (${seen.reads.length} samples: ${seen.reads[0] && seen.reads[0].join('/')} → ${seen.reads.length && seen.reads[seen.reads.length - 1].join('/')})`, JSON.stringify(seen.reads));
+  ok(seen.reads.length >= 2 && gateOf(rising) && seen.reads[0][1] >= 40 && seen.reads[seen.reads.length - 1][0] > seen.reads[0][0], `⑰ during the paced first read the card says "首次读取中 · 已 N/M 个会话", rising (${seen.reads.length} samples: ${seen.reads[0] && seen.reads[0].join('/')} → ${seen.reads.length && seen.reads[seen.reads.length - 1].join('/')})`, JSON.stringify(seen.reads));
   ok(!!seen.gone && !/首次读取中/.test(seen.gone), `⑰ …and says nothing of it once every room was read ("${seen.gone}")`);
 }
 
 p1.close(); p2.close();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

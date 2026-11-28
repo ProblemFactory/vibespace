@@ -10,25 +10,25 @@ const require = createRequire(import.meta.url);
 const { REMOTE_PRELUDE, nodeFinder, buildRemoteShellPrelude } = require('../src/remote-shell.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 { // dc-twins M9 drift guard: claude's chat transport flags are spelled ONCE (src/harnesses/claude-transport.js) — the
   // local chat-wrapper and ws-create's remote leg both read that list (adapter.chatTransportArgs()), never a literal
   const rd = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
   const sites = ['src/ws-create.js', 'data/bin/chat-wrapper.js', 'src/adapters/claude-code.js', 'src/harnesses/claude-transport.js'].filter((f) => /['"]--output-format['"]|['"]--permission-prompt-tool['"]/.test(rd(f)));
-  ok(sites.join() === 'src/harnesses/claude-transport.js' && /chatTransportArgs\(\)/.test(rd('src/ws-create.js')) && /claude-transport\.js'\)\)\.CHAT_TRANSPORT_ARGS/.test(rd('data/bin/chat-wrapper.js')), `M9 drift guard: the stream-json flags have ONE spelling (${sites.join(', ')}); ws-create + chat-wrapper read it`);
+  ok(sites.join() === 'src/harnesses/claude-transport.js' && gateOf(/chatTransportArgs\(\)/.test(rd('src/ws-create.js'))) && verdictOf(/claude-transport\.js'\)\)\.CHAT_TRANSPORT_ARGS/.test(rd('data/bin/chat-wrapper.js'))), `M9 drift guard: the stream-json flags have ONE spelling (${sites.join(', ')}); ws-create + chat-wrapper read it`);
 }
-ok(REMOTE_PRELUDE.includes('$HOME/.local/bin'), 'prelude puts ~/.local/bin on PATH (native claude installer target)');
-ok(REMOTE_PRELUDE.includes('nvm.sh'), 'prelude sources nvm (the #1 "node: not found" cause on dev machines)');
-ok(REMOTE_PRELUDE.trimEnd().endsWith(';'), 'prelude is a composable ;-terminated prefix');
+ok(verdictOf(REMOTE_PRELUDE.includes('$HOME/.local/bin')), 'prelude puts ~/.local/bin on PATH (native claude installer target)');
+ok(verdictOf(REMOTE_PRELUDE.includes('nvm.sh')), 'prelude sources nvm (the #1 "node: not found" cause on dev machines)');
+ok(verdictOf(REMOTE_PRELUDE.trimEnd().endsWith(';')), 'prelude is a composable ;-terminated prefix');
 const nf = nodeFinder();
-ok(nf.includes('command -v node') && nf.includes('.nvm/versions/node') && nf.includes('/opt/homebrew/bin/node'),
+ok(gateOf(nf.includes('command -v node')) && gateOf(nf.includes('.nvm/versions/node')) && verdictOf(nf.includes('/opt/homebrew/bin/node')),
   'node finder covers PATH → nvm → common absolute paths');
-ok(nf.includes('export PATH="$(dirname "$VS_NODE")'),
+ok(verdictOf(nf.includes('export PATH="$(dirname "$VS_NODE")')),
   'node finder EXPORTS node dir onto PATH (revives env-node shebang tools on dash hosts)');
-ok(buildRemoteShellPrelude({ toolsOnPath: true }).includes('.vibespace/bin'), 'toolsOnPath adds the agent-tool dir');
+ok(verdictOf(buildRemoteShellPrelude({ toolsOnPath: true }).includes('.vibespace/bin')), 'toolsOnPath adds the agent-tool dir');
 ok(!buildRemoteShellPrelude().includes('.vibespace/bin'), 'toolsOnPath is opt-in (a pristine spawn must not see agent tools)');
-ok(buildRemoteShellPrelude({ withNodeFinder: true }).includes('VS_NODE'), 'withNodeFinder composes');
+ok(verdictOf(buildRemoteShellPrelude({ withNodeFinder: true }).includes('VS_NODE')), 'withNodeFinder composes');
 
 // THE DRIFT GUARD: no remote-command file may re-inline the prelude or finder.
 const LIT_PRE = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ]';
@@ -48,19 +48,19 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
     tokenAssign: 'T="$(cat /x)" ', acctEnv: 'A="$(cat /y)" ',
     parts: ['K=v', shq('claude'), shq('--resume')],
   });
-  ok(line.startsWith("cd '/home/u/my dir' 2>/dev/null; VIBESPACE_SESSION_CWD='/home/u/my dir'; export VIBESPACE_SESSION_CWD; PRE; RES; "), 'composition order: cd → the session cwd export (lane L r5) → pre → resolve');
-  ok(line.includes(AMBIENT_OAT_UNSET), 'ambient oat strip present STRUCTURALLY (was five hand-edits in 2.267.0)');
+  ok(verdictOf(line.startsWith("cd '/home/u/my dir' 2>/dev/null; VIBESPACE_SESSION_CWD='/home/u/my dir'; export VIBESPACE_SESSION_CWD; PRE; RES; ")), 'composition order: cd → the session cwd export (lane L r5) → pre → resolve');
+  ok(verdictOf(line.includes(AMBIENT_OAT_UNSET)), 'ambient oat strip present STRUCTURALLY (was five hand-edits in 2.267.0)');
   ok(line.indexOf(AMBIENT_OAT_UNSET) < line.indexOf('T="$(cat /x)"'), 'strip runs BEFORE the deliberate token assign (never unsets it)');
-  ok(line.endsWith(`exec env K=v 'claude' '--resume'`), 'exec env carries pre-quoted parts verbatim');
+  ok(verdictOf(line.endsWith(`exec env K=v 'claude' '--resume'`)), 'exec env carries pre-quoted parts verbatim');
   const hostile = buildRemoteExec({ cwd: `/tmp/$(rm -rf ~)'x`, shq, parts: ['a'] });
-  ok(!hostile.includes('$(rm') || hostile.includes(`'/tmp/$(rm`), 'hostile cwd stays inside quotes');
+  ok(!hostile.includes('$(rm') || verdictOf(hostile.includes(`'/tmp/$(rm`)), 'hostile cwd stays inside quotes');
   // ── lane L r5 F3: the SESSION's directory is exported beside the `cd`, STRUCTURALLY (all five builders compose
   // buildRemoteExec — the count below), so a remote agent's `vibespace-browser` fences its writes to the session's
   // project and never to wherever its shell has `cd`ed. The value is the `cd`'s own, quoted by the same shq.
   const { sessionCwdExport } = require('../src/remote-shell.js');
-  ok(line.includes(sessionCwdExport('/home/u/my dir', shq)) && sessionCwdExport('/home/u/my dir', shq) === "VIBESPACE_SESSION_CWD='/home/u/my dir'; export VIBESPACE_SESSION_CWD; ", 'lane L r5 F3: buildRemoteExec exports VIBESPACE_SESSION_CWD = the cd\'s own quoted cwd');
+  ok(gateOf(line.includes(sessionCwdExport('/home/u/my dir', shq))) && sessionCwdExport('/home/u/my dir', shq) === "VIBESPACE_SESSION_CWD='/home/u/my dir'; export VIBESPACE_SESSION_CWD; ", 'lane L r5 F3: buildRemoteExec exports VIBESPACE_SESSION_CWD = the cd\'s own quoted cwd');
   ok(hostile.split(`'/tmp/$(rm -rf ~)'"'"'x'`).length === 3, 'lane L r5 F3: …a hostile cwd is quoted in the export exactly as in the cd (both occurrences inside quotes)');
-  ok(tailLineHas(buildRemoteExec({ cwd: '/w', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' })), 'lane L r5 F3: …the keeper tail form carries it too (the keeper hands its env to the detached CLI)');
+  ok(verdictOf(tailLineHas(buildRemoteExec({ cwd: '/w', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' }))), 'lane L r5 F3: …the keeper tail form carries it too (the keeper hands its env to the detached CLI)');
   {
     // a REAL sh runs the composed line: the exported value reaches the exec'd command; a hostile cwd runs nothing
     const { execFileSync } = await import('node:child_process');
@@ -80,7 +80,7 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
   const tailLine = buildRemoteExec({ cwd: '/w', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' });
-  ok(tailLine.endsWith('exec env K=v node keeper run sid 0 --'), 'tail form (keeper runTail) appends verbatim');
+  ok(verdictOf(tailLine.endsWith('exec env K=v node keeper run sid 0 --')), 'tail form (keeper runTail) appends verbatim');
   // drift guard: ws-handler must never hand-assemble a spawn line again
   let ws = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf-8')
     + fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf-8');
@@ -88,7 +88,7 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   const handRolled = (ws.match(/exec env `/g) || []).length + (ws.match(/`exec env/g) || []).length;
   ok(handRolled === 0, `no hand-assembled 'exec env' spawn lines left in ws-handler (found ${handRolled})`);
   ok((ws.match(/buildRemoteExec\(\{/g) || []).length === 5, 'all five builders route through buildRemoteExec');
-  ok((ws.match(/VIBESPACE_SESSION_CWD=/g) || []).length === 1 && /`VIBESPACE_SESSION_CWD=\$\{spawnCwd\}`/.test(ws), 'lane L r5 F3 drift guard: ws-create spells VIBESPACE_SESSION_CWD ONCE — the LOCAL argv pair; every remote builder gets it from buildRemoteExec, never a hand-written copy');
+  ok((ws.match(/VIBESPACE_SESSION_CWD=/g) || []).length === 1 && verdictOf(/`VIBESPACE_SESSION_CWD=\$\{spawnCwd\}`/.test(ws)), 'lane L r5 F3 drift guard: ws-create spells VIBESPACE_SESSION_CWD ONCE — the LOCAL argv pair; every remote builder gets it from buildRemoteExec, never a hand-written copy');
 
   // ── PER-SESSION GIT WORKTREE reaches a REMOTE spawn (owner ruling 9) ──
   // The flag is not a special case anywhere in the transport: the ADAPTER
@@ -104,12 +104,12 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
     return buildRemoteExec({ cwd: '/home/u/proj', shq, pre: buildRemoteShellPrelude({ toolsOnPath: true }), parts: ['TERM=xterm-256color', rcmd, ...spec.args.map(shq)] });
   };
   const wtNew = remoteLine({ worktree: true });
-  ok(wtNew.includes(` '--worktree'`), 'a remote NEW session carries --worktree, quoted like every other arg (no bespoke transport branch)');
+  ok(verdictOf(wtNew.includes(` '--worktree'`)), 'a remote NEW session carries --worktree, quoted like every other arg (no bespoke transport branch)');
   ok((wtNew.match(/--worktree/g) || []).length === 1, '…exactly once (no duplicate from a second builder)');
   ok(!wtNew.includes('--tmux'), '…and NEVER --tmux (dtach is our persistence layer; the CLI would open a tmux nobody attaches to)');
   ok(!remoteLine({ worktree: true, resumeId: 'abc' }).includes('--worktree'),
     'a remote RESUME carries NO --worktree (the CLI re-enters its own recorded worktree — a second flag would add a SECOND tree on the host)');
-  ok(remoteLine({ worktree: true, resumeId: 'abc', fork: true }).includes(` '--worktree'`),
+  ok(verdictOf(remoteLine({ worktree: true, resumeId: 'abc', fork: true }).includes(` '--worktree'`)),
     'a remote FORK carries it again (--fork-session strips the binding)');
   ok(!remoteLine({}).includes('--worktree'), 'an ordinary remote spawn carries nothing new');
   // A hand-written builder would need the flag as a STRING LITERAL; prose in a
@@ -126,11 +126,11 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   // (lane L: the same flag also carries the agent-tool allow rules — read the quoted JSON by CONTENT)
   const acJson = (() => { const m = /'--settings' '(\{[^']*\})'/.exec(acLine); try { return m ? JSON.parse(m[1]) : null; } catch { return null; } })();
   ok(!!acJson && acJson.autoContinueAtUsageLimit === false, 'a remote claude spawn carries --settings autoContinueAtUsageLimit:false, quoted like every other arg', acLine.slice(-160));
-  ok(!!acJson && Array.isArray(acJson.permissions?.allow) && acJson.permissions.allow.includes('Bash(vibespace-browser:*)'), 'lane L: …and the SAME quoted flag carries the agent-tool allow rules to the remote CLI (no transport branch)');
+  ok(!!acJson && gateOf(Array.isArray(acJson.permissions?.allow)) && verdictOf(acJson.permissions.allow.includes('Bash(vibespace-browser:*)')), 'lane L: …and the SAME quoted flag carries the agent-tool allow rules to the remote CLI (no transport branch)');
   ok(!/permissions/.test(remoteLine({ settings: { allowAgentTools: false } })), 'lane L NEGATIVE CONTROL: the row off ⇒ the remote line carries no allow rules');
   ok(!remoteLine({ settings: { autoContinueAtUsageLimit: true } }).includes('autoContinueAtUsageLimit'), 'NEGATIVE CONTROL: the row ON ⇒ the remote line carries nothing (the leg above can say no)');
   const termSpec = ad.buildSessionArgs({ cwd: '/home/u/proj', mode: 'terminal' });
-  ok(termSpec.args.includes('--settings') && JSON.parse(termSpec.args[termSpec.args.indexOf('--settings') + 1]).autoContinueAtUsageLimit === false, 'a terminal-mode spec (ssh terminal / dial pty / local dtach) carries it too');
+  ok(gateOf(termSpec.args.includes('--settings')) && JSON.parse(termSpec.args[termSpec.args.indexOf('--settings') + 1]).autoContinueAtUsageLimit === false, 'a terminal-mode spec (ssh terminal / dial pty / local dtach) carries it too');
   // TWIN SWEEP (drift guard): ONE buildSessionArgs call feeds every spawn path
   // (local dtach/r6Argv + the five remote builders all read sessionSpec.args ⇒
   // spawnArgs), and every ws-create site that rewrites the --settings value
@@ -149,7 +149,7 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   // the statusline merge itself, run on the adapter's real args (the remote terminal injection's exact shape)
   { let spawnArgs = [...termSpec.args]; let settingsObj = {}; const si = spawnArgs.indexOf('--settings'); if (si >= 0 && spawnArgs[si + 1]) { try { settingsObj = JSON.parse(spawnArgs[si + 1]) || {}; } catch {} } settingsObj.statusLine = { type: 'command', command: 'x', padding: 0 }; const sjson = JSON.stringify(settingsObj); if (si >= 0) spawnArgs[si + 1] = sjson; else spawnArgs = [...spawnArgs, '--settings', sjson];
     const o = JSON.parse(spawnArgs[spawnArgs.indexOf('--settings') + 1]);
-    ok(o.autoContinueAtUsageLimit === false && o.statusLine && spawnArgs.filter((a) => a === '--settings').length === 1, 'the statusline injection keeps the switch on the ONE flag'); }
+    ok(o.autoContinueAtUsageLimit === false && gateOf(o.statusLine) && spawnArgs.filter((a) => a === '--settings').length === 1, 'the statusline injection keeps the switch on the ONE flag'); }
 }
 
 // ── THE BROWSER SHIM STAYS FIRST ON A REMOTE PATH (design-browser-takeover §4, T2) ──
@@ -168,12 +168,12 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   // `prelude =` would hand every integrated ssh spawn whose ship landed the register alone — no PATH, no node finder, no tools
   const sshSrc = fs.readFileSync(new URL('../src/spawn/ssh.js', import.meta.url), 'utf8');
   const appendsOnce = (s) => (s.match(/prelude \+= \(ownerWriteRefusal\(\) \? '' :/g) || []).length === 1 && !/^\s*prelude = /m.test(s);
-  ok(appendsOnce(sshSrc), 'the ssh setup\'s after-ship branch APPENDS the register to its one composition (`prelude += …`, no `prelude =` reassignment)');
+  ok(verdictOf(appendsOnce(sshSrc)), 'the ssh setup\'s after-ship branch APPENDS the register to its one composition (`prelude += …`, no `prelude =` reassignment)');
   const slip = sshSrc.replace("prelude += (ownerWriteRefusal() ? '' :", "prelude = (ownerWriteRefusal() ? '' :");
   ok(slip !== sshSrc && !appendsOnce(slip), 'CONTROL: the one-character slip (`prelude = (ownerWriteRefusal() …`) is RED by the same judge');
   const hs = fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8');
-  ok(/AGENT_TOOLS = \[[^\]]*'agent-browser'/.test(hs), 'the shim is an agent tool (it ships where the prelude puts it first)');
-  ok((wc.match(/"\$HOME\/\.vibespace\/bin\/agent-browser"|"\$\{bin\}\/agent-browser"/g) || []).length === 2 && /chmod \+x "\$HOME\/\.vibespace\/bin"\/vibespace-\* "\$HOME\/\.vibespace\/bin\/agent-browser"/.test(hs), 'every ship path chmods the shim (it does not match the vibespace-* glob)');
+  ok(verdictOf(/AGENT_TOOLS = \[[^\]]*'agent-browser'/.test(hs)), 'the shim is an agent tool (it ships where the prelude puts it first)');
+  ok((wc.match(/"\$HOME\/\.vibespace\/bin\/agent-browser"|"\$\{bin\}\/agent-browser"/g) || []).length === 2 && verdictOf(/chmod \+x "\$HOME\/\.vibespace\/bin"\/vibespace-\* "\$HOME\/\.vibespace\/bin\/agent-browser"/.test(hs)), 'every ship path chmods the shim (it does not match the vibespace-* glob)');
 
   // a REAL `sh` over a fake home: no node on PATH, so the finder falls to the
   // (fake) nvm install whose bin dir ALSO holds a fake real browser CLI; the
@@ -215,10 +215,10 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
     + 'if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; '
     + '[ -n "$VS_NODE" ] && export PATH="$(dirname "$VS_NODE"):$PATH"; ';
   ok(nodeFinder() === RELEASED_NF && nodeFinder({}) === RELEASED_NF && nodeFinder({ agentNode: false }) === RELEASED_NF, 'B-b83c: with no agent node handed, the node finder is byte for byte the release\'s text (an older agent, the ssh road: asked nothing new)');
-  ok(nodeFinder({ agentNode: true }).endsWith(RELEASED_NF) && nodeFinder({ agentNode: true }).includes('"$VS_AGENT_NODE"') && !/VS_AGENT_NODE=[^"]/.test(nodeFinder({ agentNode: true })), 'B-b83c: handed, the finder reads the agent\'s node from the run\'s env first (VS_AGENT_NODE, quoted), then the release\'s rungs — the path is never typed into the text');
+  ok(gateOf(nodeFinder({ agentNode: true }).endsWith(RELEASED_NF)) && gateOf(nodeFinder({ agentNode: true }).includes('"$VS_AGENT_NODE"')) && !/VS_AGENT_NODE=[^"]/.test(nodeFinder({ agentNode: true })), 'B-b83c: handed, the finder reads the agent\'s node from the run\'s env first (VS_AGENT_NODE, quoted), then the release\'s rungs — the path is never typed into the text');
   ok(agentNodeOf({ nodePath: '/opt/agent/node/bin/node' }) === '/opt/agent/node/bin/node' && agentNodeOf({ nodePath: 'C:\\Program Files\\vibespace\\node.exe', platform: 'win32' }) === 'C:/Program Files/vibespace/node.exe' && agentNodeOf({ nodePath: 'd:/n/node.exe', platform: 'win32' }) === 'd:/n/node.exe'
     && agentNodeOf({ nodePath: 'C:/x/node', platform: 'linux' }) === null && agentNodeOf({ nodePath: '/' + 'x'.repeat(1024) }) === null && agentNodeOf({ nodePath: '/' + 'x'.repeat(1023) }) === '/' + 'x'.repeat(1023)
-    && [undefined, null, '', 'node', 'bin/node', '/a\nb', '/a\u0000b', 42, '\u202e/node', '/opt/\u202enode', '/opt/\u2066x\u2069/node', '/opt/\u200fnode', '/opt/\u061cnode'].every((v) => agentNodeOf({ nodePath: v }) === null) && agentNodeOf(null) === null && agentNodeOf({}) === null,
+    && gateOf([undefined, null, '', 'node', 'bin/node', '/a\nb', '/a\u0000b', 42, '\u202e/node', '/opt/\u202enode', '/opt/\u2066x\u2069/node', '/opt/\u200fnode', '/opt/\u061cnode'].every((v) => agentNodeOf({ nodePath: v }) === null)) && agentNodeOf(null) === null && agentNodeOf({}) === null,
     'B-b83c: the hub reads the hello\'s nodePath only as a PATH (absolute POSIX; a drive path from a Windows agent, given forward slashes); a name, a relative path, a control character, over 1024 characters, a drive path from another platform, not a string, absent ⇒ none');
   // the finder in a REAL sh: the agent's node (a planted executable) wins over the PATH's; not executable / not handed ⇒ the release's rungs
   const os = await import('node:os'), pth = await import('node:path');
@@ -245,10 +245,10 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   // the wiring: the hello says it, the hub judges its shape, the dial road's two finder sites and the scanner's fallback take it
   const rd = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
   const AG = rd('src/agentd/agentd.js'), CL = rd('src/agentd/client.js'), DL = rd('src/spawn/dial.js'), HS = rd('src/hosts.js');
-  ok(AG.includes('          nodePath: process.execPath, //') && CL.includes("if (msg.nodePath != null && typeof msg.nodePath !== 'string') return no('its nodePath is not a string');"),
+  ok(gateOf(AG.includes('          nodePath: process.execPath, //')) && verdictOf(CL.includes("if (msg.nodePath != null && typeof msg.nodePath !== 'string') return no('its nodePath is not a string');")),
     'WIRING: the agent\'s hello-ack says nodePath (process.execPath); the hub\'s greeting judge refuses a nodePath that is no string (its size is the hello\'s own bound: a long real path never locks a device out)');
-  ok(DL.includes('+ nodeFinder({ agentNode: !!agentNode })') && DL.includes('...(agentNode ? { VS_AGENT_NODE: agentNode } : {})') && HS.includes("nodeFinder({ agentNode: !!agentNode })") && HS.includes('...(agentNode ? { env: { VS_AGENT_NODE: agentNode } } : {})')
-    && HS.includes('await dm.runStream(HostManager.scannerNodeOf(dm), [scanPath]') && HS.includes("static scannerNodeOf(dm) { return agentNodeOf(helloOf(dm)) || 'node'; }") && HS.includes("const helloOf = (dm) => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } };") && (HS.match(/\.\.\.\(env \? \{ env \} : \{\}\)/g) || []).length === 2,
+  ok(gateOf(DL.includes('+ nodeFinder({ agentNode: !!agentNode })')) && gateOf(DL.includes('...(agentNode ? { VS_AGENT_NODE: agentNode } : {})')) && gateOf(HS.includes("nodeFinder({ agentNode: !!agentNode })")) && gateOf(HS.includes('...(agentNode ? { env: { VS_AGENT_NODE: agentNode } } : {})'))
+    && gateOf(HS.includes('await dm.runStream(HostManager.scannerNodeOf(dm), [scanPath]')) && gateOf(HS.includes("static scannerNodeOf(dm) { return agentNodeOf(helloOf(dm)) || 'node'; }")) && gateOf(HS.includes("const helloOf = (dm) => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } };")) && (HS.match(/\.\.\.\(env \? \{ env \} : \{\}\)/g) || []).length === 2,
     'WIRING: the dial road\'s hook register (spawn/dial.js) and the tools status (hosts.js) hand VS_AGENT_NODE in the run\'s env with the agent\'s rung; the dial run carries that env; the scanner\'s fallback runs the agent\'s node first');
 }
 
@@ -267,13 +267,13 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   const beyond = BEYOND.filter(([re]) => re.test(FULL)).map(([, n]) => n);
   ok(!beyond.length, `B-99b9: the remote script uses nothing beyond a plain POSIX sh (none of ${BEYOND.length} bash / zsh forms)${beyond.length ? ' — found: ' + beyond.join(', ') : ''}`);
   const LS1 = FULL.slice(FULL.indexOf('ls1() {'), FULL.indexOf('\n', FULL.indexOf('ls1() {')));
-  ok(LS1.indexOf('[ -L "$e" ]') > 0 && LS1.indexOf('[ -L "$e" ]') < LS1.indexOf('[ -e "$e" ]') && LS1.includes('p=${d%/}; for e in "$p"/*'),
+  ok(LS1.indexOf('[ -L "$e" ]') > 0 && LS1.indexOf('[ -L "$e" ]') < LS1.indexOf('[ -e "$e" ]') && verdictOf(LS1.includes('p=${d%/}; for e in "$p"/*')),
     'B-99b9: in the lister a LINK is asked about BEFORE any test that would follow it (`[ -L ]` before `[ -e ]`), and the children of / are /x (never //x)');
   // (2) THE WRITER AND ITS READER, one set of rows: every row the script prints is one parseSlice reads, and every row it reads is printed
   const SRC = rd('src/dir-slice-script.js');
   const wrote = new Set([...FULL.matchAll(/(?:printf '|\\n|print ")([A-Za-z])\\t/g)].map((m) => m[1]));   // a printf's first row, a row after a \n in one format, an awk print's row
   const reads = new Set([...SRC.slice(SRC.indexOf('function parseSlice')).matchAll(/case '([A-Za-z])':/g)].map((m) => m[1]));
-  ok(wrote.size >= 14 && [...wrote].every((t) => reads.has(t)) && [...reads].every((t) => wrote.has(t)) && FULL.endsWith('echo VS-SLICE-END'),
+  ok(wrote.size >= 14 && gateOf([...wrote].every((t) => reads.has(t))) && gateOf([...reads].every((t) => wrote.has(t))) && verdictOf(FULL.endsWith('echo VS-SLICE-END')),
     `B-99b9: the script's rows and its reader's are ONE set (${[...wrote].sort().join('')} = ${[...reads].sort().join('')}) and it ends with VS-SLICE-END`);
   // (3) RUN under each shell this machine has: a folder listed with a kid; a BROKEN link listed by its target AS WRITTEN (never tested,
   // never followed — the release dropped it after a test); a name holding a TAB never listed (it could fake a row); a probe stated
@@ -290,16 +290,16 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
     return { name, ok: x.done && x.home === H && a.kids.some((k) => k.name === 'kid') && !!lnk && lnk.link === path.join(H, 'gone', 'nowhere') && !a.kids.some((k) => k.name.includes('\t')) && x.probes.some((p) => p.path === path.join(H, 'b') && p.exists), lnk: lnk && lnk.link };
   });
   fs.rmSync(H, { recursive: true, force: true });
-  ok(SHELLS.length >= 1 && ran.every((r) => r.ok), `B-99b9: the script under ${ran.map((r) => r.name).join(', ') || 'no shell'}: the folder listed, a broken link listed by its target as written (${JSON.stringify(ran.map((r) => r.lnk))}: never tested, never followed), a name with a tab not listed, the probe stated`);
+  ok(SHELLS.length >= 1 && verdictOf(ran.every((r) => r.ok)), `B-99b9: the script under ${ran.map((r) => r.name).join(', ') || 'no shell'}: the folder listed, a broken link listed by its target as written (${JSON.stringify(ran.map((r) => r.lnk))}: never tested, never followed), a name with a tab not listed, the probe stated`);
   const absent = ['dash', 'busybox sh', 'bash --posix'].filter((n) => !ran.some((r) => r.name === n));
   if (absent.length) console.log(`  · not on this machine, so not run here: ${absent.join(', ')} (the forms they share are checked in (1))`);
   // (4) THE HUB READS WHAT IT WROTE: both asks (the typed folders and the rest) are this one script, read by this one reader; the ssh
   // rung runs it under plain sh, never the login prelude
   const HS2 = rd('src/hosts.js');
-  ok(HS2.includes('e.p = run(DS.sliceScript({ list, files })).then((out) => {') && HS2.includes('r2.p = run(DS.sliceScript({ ...want, files })).then((out) => {') && (HS2.split('const r = DS.parseSlice(out);').length - 1) >= 2
-    && HS2.includes("return String(await this._ssh(h, `exec sh -c '${script.replace(/'/g, `'\\\\''`)}'`, { timeoutMs: RUN_MS, connectTimeoutS: 3 }));"),
+  ok(gateOf(HS2.includes('e.p = run(DS.sliceScript({ list, files })).then((out) => {')) && gateOf(HS2.includes('r2.p = run(DS.sliceScript({ ...want, files })).then((out) => {')) && (HS2.split('const r = DS.parseSlice(out);').length - 1) >= 2
+    && verdictOf(HS2.includes("return String(await this._ssh(h, `exec sh -c '${script.replace(/'/g, `'\\\\''`)}'`, { timeoutMs: RUN_MS, connectTimeoutS: 3 }));")),
     'B-99b9 WIRING: the host rung writes both asks with the one script builder and reads both with the one reader; the ssh rung runs it under plain sh (no login prelude)');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

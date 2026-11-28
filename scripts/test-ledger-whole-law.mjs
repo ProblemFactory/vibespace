@@ -138,7 +138,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); if (d !== undefined) console.error('    ' + JSON.stringify(d).slice(0, 700)); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); if (d !== undefined) console.error('    ' + JSON.stringify(d).slice(0, 700)); } };
 const legMs = [];
 const leg = async (name, fn) => { const t0 = performance.now(); try { await fn(); } catch (e) { fail++; console.error(`  ✗ ${name} — threw: ${String((e && e.stack) || e).split('\n').slice(0, 3).join(' | ')}`); } legMs.push(`${name} ${Math.round(performance.now() - t0)} ms`); };
 /** One loop turn's work, timed (the boot law's unit): → [its value, ms]. */
@@ -223,13 +223,13 @@ await leg('①', async () => {
   const said = []; let wholes = 0, sweeps = 0, sweptReq = -1, sweptPartial = null;
   const sweep = () => { sweeps++; const c = costBetweenMulti(uh, ids, from, to); sweptReq = c.requests; sweptPartial = !!c.partial; };
   const r1 = gate ? gate.run(sweep) : (sweep(), 'ran'), r2 = gate ? gate.run(sweep) : 'ran', held = gate ? gate.holds() : false;
-  ok(r1 === 'waiting' && r2 === 'waiting' && sweeps === 0 && held === true && said.length === 1 && /ledger still loading/.test(said[0]), `① the anchor sweep WAITS (${r1}, a second ask joins it — ${sweeps} run), the automatic pool decision is skipped (holds: ${held}), said once: «${said[0] || ''}»`, { r1, r2, sweeps, said });
+  ok(r1 === 'waiting' && r2 === 'waiting' && sweeps === 0 && held === true && said.length === 1 && verdictOf(/ledger still loading/.test(said[0])), `① the anchor sweep WAITS (${r1}, a second ask joins it — ${sweeps} run), the automatic pool decision is skipped (holds: ${held}), said once: «${said[0] || ''}»`, { r1, r2, sweeps, said });
   while (q.length) q.shift()();
   await warm; await tick(); await tick();
   const c2 = costBetweenMulti(uh, ids, from, to);
   ok(sweeps === 1 && sweptReq === N && sweptPartial === false && wholes === 1 && c2.requests === N && !c2.partial, `① the warm ends ⇒ the sweep runs ONCE on the whole ledger (${sweptReq} requests), the pools are decided again (onWhole ×${wholes}), costBetweenMulti whole: ${c2.requests} requests, $${c2.total}`, { sweeps, sweptReq, wholes, c2: c2.requests });
   ue.ratesFor('ident-1'); ue.flushRates?.(); // usage-ledger-walk B3: written once a tick
-  ok(fs.existsSync(path.join(ad, 'rates.json')), '① on the whole ledger the rates are learned and written again (the first ask after the warm)');
+  ok(verdictOf(fs.existsSync(path.join(ad, 'rates.json'))), '① on the whole ledger the rates are learned and written again (the first ask after the warm)');
   // (① the wiring pin of src/server/usage-pool-engine.js: MOVED to the fast scripts/test-ledger-whole-law-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 });
 
@@ -245,7 +245,7 @@ await leg('②', async () => {
   const before = loadedRows(uh);
   const [res] = await quietAsync(() => uh.dedupShard(sh, { archiveDir: path.join(d, 'archive'), sliceMs: 40 }));
   const c = uh._evCache;
-  ok(res && res.renamed && res.removed === 2 * N && c && c.pending && uh.ledgerLoading && uh.ledgerLoading(), `② the dedup ends mid-warm (${before} rows loaded, ${res && res.removed} repeated rows removed): a warm is PENDING again — ${c ? `${loadedRows(uh)} rows, pending ${!!c.pending}` : 'the cache is gone'} (e11e1f61: the cache nulled, the warm ended)`, { before, removed: res && res.removed, cache: !!c, pending: !!(c && c.pending) });
+  ok(gateOf(res) && gateOf(res.renamed) && res.removed === 2 * N && gateOf(c) && gateOf(c.pending) && gateOf(uh.ledgerLoading) && verdictOf(uh.ledgerLoading()), `② the dedup ends mid-warm (${before} rows loaded, ${res && res.removed} repeated rows removed): a warm is PENDING again — ${c ? `${loadedRows(uh)} rows, pending ${!!c.pending}` : 'the cache is gone'} (e11e1f61: the cache nulled, the warm ended)`, { before, removed: res && res.removed, cache: !!c, pending: !!(c && c.pending) });
   const r0 = loadedRows(uh);
   const [, ms] = turn(() => uh._loadEvents());
   const r1 = loadedRows(uh);
@@ -253,7 +253,7 @@ await leg('②', async () => {
   let maxMs = 0, steps = 0;
   while (q.length) { const [, m] = turn(() => q.shift()()); steps++; if (m > maxMs) maxMs = m; }
   const w = await warm;
-  ok(w && w.restarts === 1 && loadedRows(uh) === N && maxMs < 250, `② the restarted warm runs to its end stepped (${steps} more steps, the longest ${maxMs.toFixed(1)} ms < 250 — the boot law): ${loadedRows(uh)} rows, restarts ${w && w.restarts}`, w);
+  ok(gateOf(w) && w.restarts === 1 && loadedRows(uh) === N && maxMs < 250, `② the restarted warm runs to its end stepped (${steps} more steps, the longest ${maxMs.toFixed(1)} ms < 250 — the boot law): ${loadedRows(uh)} rows, restarts ${w && w.restarts}`, w);
   let waited = false;
   const uh2 = newUh(dirOf('w2b')); fs.writeFileSync(shardOf(path.join(tmp, 'w2b')), lines.join('\n') + '\n');
   uh2.takeoverMaxBytes = 256 * KiB; const q2 = [];
@@ -264,7 +264,7 @@ await leg('②', async () => {
   const pendingAfterDedup = !waited;
   while (q2.length) q2.shift()();
   await warm2; await p;
-  ok(pendingAfterDedup && waited && loadedRows(uh2) === N, '② whenWarm() stays pending through the restart and resolves when the restarted warm ends (the readers that wait for it read the whole, deduped ledger)');
+  ok(gateOf(pendingAfterDedup) && gateOf(waited) && loadedRows(uh2) === N, '② whenWarm() stays pending through the restart and resolves when the restarted warm ends (the readers that wait for it read the whole, deduped ledger)');
 });
 
 const ASK = opt('/src/server/hub-act-ask.js');
@@ -306,22 +306,22 @@ await leg('③', async () => {
   const w = asker('w3');
   const c0 = await heldOut(w, HARVEST);
   const u = w.items().find((i) => /^Usage of mac1 is not being recorded/.test(i.text));
-  ok(c0 === 'ask_expired' && u && u.status === 'open', '③ the usage harvest\'s first act held and refused ⇒ its standing item («Usage of mac1 is not being recorded»)', w.items().map((i) => i.text));
+  ok(c0 === 'ask_expired' && gateOf(u) && u.status === 'open', '③ the usage harvest\'s first act held and refused ⇒ its standing item («Usage of mac1 is not being recorded»)', w.items().map((i) => i.text));
   const pw = w.asker.check(w.hid, SWEEP); await tick();
   const n2 = w.items().length;
   w.clock.t += 61000; w.fire(); const g = await pw;
   const mine = w.items().filter((i) => i !== u && i.action.by === 'system:writer-sweep');
-  ok(n2 === 2 && g && g.code === 'ask_expired' && mine.length === 1 && mine[0].status === 'open' && !/^Usage of/.test(mine[0].text) && w.items().find((i) => i.id === u.id).action.count === 1, `③ the writer sweep's act of the SAME kind on the SAME machine ⇒ its OWN standing item in its own words («${mine[0] ? mine[0].text : ''}»), held its own 60 s (${g && g.code}); the harvest's count untouched (e11e1f61: ask_standing at once, counted under the harvest's words)`, { n2, code: g && g.code, items: w.items().map((i) => [i.text, i.action.by, i.action.count]) });
+  ok(n2 === 2 && gateOf(g) && g.code === 'ask_expired' && mine.length === 1 && mine[0].status === 'open' && !/^Usage of/.test(mine[0].text) && w.items().find((i) => i.id === u.id).action.count === 1, `③ the writer sweep's act of the SAME kind on the SAME machine ⇒ its OWN standing item in its own words («${mine[0] ? mine[0].text : ''}»), held its own 60 s (${g && g.code}); the harvest's count untouched (e11e1f61: ask_standing at once, counted under the harvest's words)`, { n2, code: g && g.code, items: w.items().map((i) => [i.text, i.action.by, i.action.count]) });
   const c2 = await w.asker.check(w.hid, SWEEP);
   const counts = Object.fromEntries((w.asker.standingList ? w.asker.standingList() : []).map((x) => [x.by, x.count]));
-  ok(c2 && c2.code === 'ask_standing' && w.items().length === 2 && counts['system:writer-sweep'] === 2 && counts['system:usage-harvest'] === 1, `③ the writer sweep's next act: refused at once on ITS item, counted there (${counts['system:writer-sweep']}; the harvest's ${counts['system:usage-harvest']})`, { c2, counts });
+  ok(gateOf(c2) && c2.code === 'ask_standing' && w.items().length === 2 && counts['system:writer-sweep'] === 2 && counts['system:usage-harvest'] === 1, `③ the writer sweep's next act: refused at once on ITS item, counted there (${counts['system:writer-sweep']}; the harvest's ${counts['system:usage-harvest']})`, { c2, counts });
   await w.asker.answer(u.action.askId, { answer: 'once', by: 'user', answeredBy: 'human:0123456789ab' });
   const pm = w.asker.check(w.hid, MOUNTS); await tick();
   const mHeld = w.asker.list().some((k) => k.by === 'system:machine-mounts');
   w.clock.t += 61000; w.fire(); const gm = await pm;
   let ghNow = null; const ph = w.asker.check(w.hid, HARVEST).then((x) => { ghNow = ghNow || x; return x; }); await tick(); await tick();
   const gh = ghNow; w.clock.t += 61000; w.fire(); await ph; // (e11e1f61: the harvest's act is held again — its once was spent)
-  ok(mHeld && gm && gm.ok !== true && gh && gh.ok === true, `③ Allow once on the harvest's item: the machine-mounts act is NOT let go by it (${gm && (gm.code || gm.ask)} — e11e1f61: allowed), the harvest's own next act goes (${gh && gh.ask})`, { gm, gh });
+  ok(gateOf(mHeld) && gateOf(gm) && gm.ok !== true && gateOf(gh) && gh.ok === true, `③ Allow once on the harvest's item: the machine-mounts act is NOT let go by it (${gm && (gm.code || gm.ask)} — e11e1f61: allowed), the harvest's own next act goes (${gh && gh.ask})`, { gm, gh });
 });
 
 console.log('④ A STANDING ITEM CLOSES — allowed by any road, the setting, a week silent; a boot re-judges');
@@ -338,17 +338,17 @@ await leg('④', async () => {
   const s = w.items().find((i) => i.action.by === 'system:writer-sweep' && i.status === 'open');
   setting = 'everyone';
   const n = typeof w.asker.reevaluate === 'function' ? w.asker.reevaluate() : 0;
-  ok(s && n === 1 && w.todos.get(s.id).status === 'done' && w.todos.get(s.id).resolvedBy === 'always', `④ the setting alone (no act comes): the next re-judge closes it (${s && w.todos.get(s.id).resolvedBy})`, s && w.todos.get(s.id));
+  ok(gateOf(s) && n === 1 && w.todos.get(s.id).status === 'done' && w.todos.get(s.id).resolvedBy === 'always', `④ the setting alone (no act comes): the next re-judge closes it (${s && w.todos.get(s.id).resolvedBy})`, s && w.todos.get(s.id));
   setting = 'auto';
   await heldOut(w, MOUNTS);
   const m = w.items().find((i) => i.action.by === 'system:machine-mounts' && i.status === 'open');
   w.clock.t += 7 * 24 * 3600e3;
   if (typeof w.asker.reevaluate === 'function') w.asker.reevaluate();
-  ok(m && w.todos.get(m.id).status === 'done' && w.todos.get(m.id).resolvedBy === 'no-longer-asked', `④ a subject silent for 7 days: its item closes «no longer asked» (${m && w.todos.get(m.id).resolvedBy})`, m && w.todos.get(m.id));
+  ok(gateOf(m) && w.todos.get(m.id).status === 'done' && w.todos.get(m.id).resolvedBy === 'no-longer-asked', `④ a subject silent for 7 days: its item closes «no longer asked» (${m && w.todos.get(m.id).resolvedBy})`, m && w.todos.get(m.id));
   const pNext = w.asker.check(w.hid, MOUNTS); await tick();
   const fresh = w.asker.list().some((k) => k.by === 'system:machine-mounts');
   w.clock.t += 61000; w.fire(); await pNext;
-  ok(fresh, '④ …and its next act asks afresh (held its 60 s), never refused under the closed item');
+  ok(verdictOf(fresh), '④ …and its next act asks afresh (held its 60 s), never refused under the closed item');
   // a boot: an open standing item from before the restart is RE-JUDGED (the setting allows it now ⇒ closed), never restored
   const open = w.items().filter((i) => i.status === 'open');
   setting = 'everyone';
@@ -374,10 +374,10 @@ await leg('⑤', async () => {
   finally { fs.chmodSync(path.dirname(sh), 0o755); }
   const n1 = notices(), last = said[said.length - 1] || {};
   const rem = last.remedy || {};
-  ok(r1 && r1.paused && n1.length === 1 && rem.state === 'failed' && rem.code === 'EACCES' && rem.nextAt > Date.now() - 1000, `⑤ a dedup that FAILS: the machine stays paused and is said again with the outcome (${rem.state} ${rem.code}, the next try at a later pause)`, { said: said.map((e) => [e.kind, e.remedy && e.remedy.state]) });
-  ok(n1[0] && /What happened: removing the repeated rows failed — EACCES/.test(n1[0].detail) && /tries again after \d\d:\d\d UTC/.test(n1[0].detail) && !/resumes by itself/.test(n1[0].detail) && !/resumes/.test(n1[0].detail.split('\n')[2] || ''), '⑤ the notice says what happened, when it is tried again, what to do — never «resumes by itself» (e11e1f61: it did, while paused for the life of the process)', n1[0] && n1[0].detail);
+  ok(gateOf(r1) && gateOf(r1.paused) && n1.length === 1 && rem.state === 'failed' && rem.code === 'EACCES' && rem.nextAt > Date.now() - 1000, `⑤ a dedup that FAILS: the machine stays paused and is said again with the outcome (${rem.state} ${rem.code}, the next try at a later pause)`, { said: said.map((e) => [e.kind, e.remedy && e.remedy.state]) });
+  ok(gateOf(n1[0]) && gateOf(/What happened: removing the repeated rows failed — EACCES/.test(n1[0].detail)) && gateOf(/tries again after \d\d:\d\d UTC/.test(n1[0].detail)) && !/resumes by itself/.test(n1[0].detail) && !/resumes/.test(n1[0].detail.split('\n')[2] || ''), '⑤ the notice says what happened, when it is tried again, what to do — never «resumes by itself» (e11e1f61: it did, while paused for the life of the process)', n1[0] && n1[0].detail);
   const [r2] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
-  ok(r2.paused && !(uh._dedupJobs && uh._dedupJobs.size) && notices().length === 1, '⑤ a pause inside the backoff: no new run, the ONE notice (no second item)');
+  ok(gateOf(r2.paused) && !(uh._dedupJobs && uh._dedupJobs.size) && notices().length === 1, '⑤ a pause inside the backoff: no new run, the ONE notice (no second item)');
   await sleep(320);
   const [r3] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
   const job = uh._dedupJobs && [...uh._dedupJobs.values()][0];
@@ -387,8 +387,8 @@ await leg('⑤', async () => {
   // r4 re-derived: it PINNED «in shape ⇒ the re-sent batch appended (5)»; the batch was refused whole while paused. It PINS
   // NOW: the 5 events were HELD at the pauses (once), and in shape they are in the ledger exactly once — the hold's drain
   // appended them, the re-sent batch is 5 duplicates
-  ok(r3.paused && job && onceIn(sh, [9000, 9001, 9002, 9003, 9004]) && r4.duplicates === 5 && !uh.ingestPaused().length && n4.length === 1 && n4[0].status === 'done' && n4[0].resolvedBy === 'shape-ok', `⑤ past the backoff the next pause RETRIES (a run in flight: ${!!job}); in shape ⇒ recorded again: the 5 events held across the pauses are in the ledger ONCE (the hold drained; the re-sent batch ${r4.duplicates} duplicates) and the one notice closes (${n4[0] && n4[0].resolvedBy}) — e11e1f61: never retried, paused for good`, { r3: !!r3.paused, r4, n: n4.map((i) => [i.status, i.resolvedBy]) });
-  ok(wired && typeof wired.reconcile === 'function', '⑤ the wiring answers {open, reconcile} (the boot door ⑥ proves)');
+  ok(gateOf(r3.paused) && gateOf(job) && gateOf(onceIn(sh, [9000, 9001, 9002, 9003, 9004])) && r4.duplicates === 5 && !uh.ingestPaused().length && n4.length === 1 && n4[0].status === 'done' && n4[0].resolvedBy === 'shape-ok', `⑤ past the backoff the next pause RETRIES (a run in flight: ${!!job}); in shape ⇒ recorded again: the 5 events held across the pauses are in the ledger ONCE (the hold drained; the re-sent batch ${r4.duplicates} duplicates) and the one notice closes (${n4[0] && n4[0].resolvedBy}) — e11e1f61: never retried, paused for good`, { r3: !!r3.paused, r4, n: n4.map((i) => [i.status, i.resolvedBy]) });
+  ok(gateOf(wired) && typeof wired.reconcile === 'function', '⑤ the wiring answers {open, reconcile} (the boot door ⑥ proves)');
 });
 
 console.log('⑥ F4 ONE NOTICE PER MACHINE, RECONCILED AT BOOT');
@@ -412,7 +412,7 @@ await leg('⑥', async () => {
   const L2 = life(); // a restart
   const [n2] = await quiet(() => (L2.wired && L2.wired.reconcile ? L2.wired.reconcile() : -1));
   const after = notices();
-  ok(first.length === 1 && n2 === 0 && after.length === 1 && after[0].id === first[0].id && after[0].status === 'open' && /3\.50 GiB/.test(after[0].detail) && L2.uh.ingestPaused().some((p) => p.host === 'host-m'), `⑥ a restart, the shard still out of shape: the SAME notice stays (1 item), its size re-worded in place (3.50 GiB), the machine paused again from boot (e11e1f61: no reconcile; a new size string is a second item)`, after.map((i) => [i.status, i.text, i.detail.split('\n')[0]]));
+  ok(first.length === 1 && n2 === 0 && after.length === 1 && after[0].id === first[0].id && after[0].status === 'open' && gateOf(/3\.50 GiB/.test(after[0].detail)) && verdictOf(L2.uh.ingestPaused().some((p) => p.host === 'host-m')), `⑥ a restart, the shard still out of shape: the SAME notice stays (1 item), its size re-worded in place (3.50 GiB), the machine paused again from boot (e11e1f61: no reconcile; a new size string is a second item)`, after.map((i) => [i.status, i.text, i.detail.split('\n')[0]]));
   fs.truncateSync(sh, small);
   const L3 = life();
   const [n3] = await quiet(() => (L3.wired && L3.wired.reconcile ? L3.wired.reconcile() : -1));
@@ -420,7 +420,7 @@ await leg('⑥', async () => {
   // r5 re-derived — PINNED «the reconcile closes it» (n3 = 1, the held rows drained after); PINS NOW the drain FIRST: the
   // reconcile keeps the notice while the month's hold is on disk (n3 = 0), the boot's drain records the 5 held events
   // (each once), and only then the pause ends and the notice closes
-  ok(end.length === 1 && end[0].status === 'done' && end[0].resolvedBy === 'shape-ok' && !L3.uh.ingestPaused().length && onceIn(sh, [9000, 9001, 9002, 9003, 9004]), `⑥ a restart with the shard back in shape: its 5 held events drained first (each in the ledger once), then the notice closes (${end[0] && end[0].resolvedBy}), nothing paused`, end.map((i) => [i.status, i.resolvedBy]));
+  ok(end.length === 1 && end[0].status === 'done' && end[0].resolvedBy === 'shape-ok' && !L3.uh.ingestPaused().length && verdictOf(onceIn(sh, [9000, 9001, 9002, 9003, 9004])), `⑥ a restart with the shard back in shape: its 5 held events drained first (each in the ledger once), then the notice closes (${end[0] && end[0].resolvedBy}), nothing paused`, end.map((i) => [i.status, i.resolvedBy]));
 });
 
 console.log('⑦ F4 THE SHAPE JUDGED WHOLE — head, middle, tail; a 448 MiB sparse shard, first 64 MiB unique, the rest 3×');
@@ -436,19 +436,19 @@ await leg('⑦', async () => {
   const uniqueHead = order.slice(0, 64).length, rows = order.length, distinct = new Set(order).size;
   const s = LD.shapeOf ? LD.shapeOf(sh) : {};
   const wins = s.windows || [];
-  ok(wins.length === 16 && wins[0] === 0 && wins[15] === s.size - MiB && wins.some((x) => Math.abs(x - s.size / 2) < s.size / 15) && wins.every((x, i) => !i || x > wins[i - 1]), `⑦ the sample spans the head, the middle and the tail: 16 windows at ${wins.slice(0, 3).map((x) => (x / MiB).toFixed(0)).join(', ')} … ${wins.slice(-2).map((x) => (x / MiB).toFixed(0)).join(', ')} MiB of ${(s.size / MiB).toFixed(0)} — and it reads the shard ~${s.ratio == null ? '—' : s.ratio.toFixed(2)}× (a repeat far from its first copy is never in two windows)`, { wins, ratio: s.ratio });
+  ok(wins.length === 16 && wins[0] === 0 && wins[15] === s.size - MiB && gateOf(wins.some((x) => Math.abs(x - s.size / 2) < s.size / 15)) && verdictOf(wins.every((x, i) => !i || x > wins[i - 1])), `⑦ the sample spans the head, the middle and the tail: 16 windows at ${wins.slice(0, 3).map((x) => (x / MiB).toFixed(0)).join(', ')} … ${wins.slice(-2).map((x) => (x / MiB).toFixed(0)).join(', ')} MiB of ${(s.size / MiB).toFixed(0)} — and it reads the shard ~${s.ratio == null ? '—' : s.ratio.toFixed(2)}× (a repeat far from its first copy is never in two windows)`, { wins, ratio: s.ratio });
   const uh = newUh(d);
   const [r1] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
   await quietAsync(() => uh.ingestIndexSettled());
   const s0 = size(sh);
   const [r2] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
-  ok(r1.deferred && r2.paused && r2.paused.why === 'ratio' && r2.appended === 0 && size(sh) === s0, `⑦ a ${(s0 / MiB).toFixed(0)} MiB shard, ${uniqueHead} unique rows over its first 64 MiB then one window 3×: its index read it whole ⇒ PAUSED, why ratio ${r2.paused && r2.paused.ratio}× (${rows} rows / ${distinct} distinct), nothing appended (e11e1f61: in shape — appended ${r2.appended})`, { r1, r2 });
+  ok(gateOf(r1.deferred) && gateOf(r2.paused) && r2.paused.why === 'ratio' && r2.appended === 0 && size(sh) === s0, `⑦ a ${(s0 / MiB).toFixed(0)} MiB shard, ${uniqueHead} unique rows over its first 64 MiB then one window 3×: its index read it whole ⇒ PAUSED, why ratio ${r2.paused && r2.paused.ratio}× (${rows} rows / ${distinct} distinct), nothing appended (e11e1f61: in shape — appended ${r2.appended})`, { r1, r2 });
   const job = uh._dedupJobs && [...uh._dedupJobs.values()][0];
   const [res] = await quietAsync(async () => (job ? job : null));
   const [r3] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
   // r4 re-derived: it PINNED «resumed ⇒ the re-sent batch appended (5)»; it PINS NOW: the batch held at the pause is in the
   // ledger ONCE after the dedup (the hold drained at the resume), the re-sent batch 5 duplicates
-  ok(res && res.renamed && res.removed === rows - distinct && onceIn(sh, [9000, 9001, 9002, 9003, 9004]) && r3.duplicates === 5 && !uh.ingestPaused().length, `⑦ the remedy dedups it (${res && res.removed} repeated rows removed — the holes stepped over, never copied: ${(size(sh) / KiB).toFixed(0)} KiB left) and the machine is recorded again: the 5 held events in the ledger once (the re-sent batch ${r3.duplicates} duplicates)`, { res, r3 });
+  ok(gateOf(res) && gateOf(res.renamed) && res.removed === rows - distinct && gateOf(onceIn(sh, [9000, 9001, 9002, 9003, 9004])) && r3.duplicates === 5 && !uh.ingestPaused().length, `⑦ the remedy dedups it (${res && res.removed} repeated rows removed — the holes stepped over, never copied: ${(size(sh) / KiB).toFixed(0)} KiB left) and the machine is recorded again: the 5 held events in the ledger once (the re-sent batch ${r3.duplicates} duplicates)`, { res, r3 });
 });
 
 console.log('⑧ CONSENT IS PER SUBJECT ON EVERY ROAD — a background act never joins an agent\'s card (round 3)');
@@ -467,12 +467,12 @@ await leg('⑧', async () => {
   const atOnce = gh;
   await w.asker.answer(card.action.askId, { answer: 'once', ...ANS });
   const ga = await pa; await ph;
-  ok(card && ga && ga.ok === true && atOnce && atOnce.code === 'ask_standing' && gh && gh.code === 'ask_standing' && w.todos.get(u.id).status === 'open' && countOf('system:usage-harvest') === 2,
+  ok(gateOf(card) && gateOf(ga) && ga.ok === true && gateOf(atOnce) && atOnce.code === 'ask_standing' && gateOf(gh) && gh.code === 'ask_standing' && w.todos.get(u.id).status === 'open' && countOf('system:usage-harvest') === 2,
     `⑧ the harvest's act while an AGENT's card is up: refused at once on its OWN item (${gh && (gh.code || gh.ask)}, counted ${countOf('system:usage-harvest')}) — the owner's Allow of the agent let the agent's act go and no other (d9753fa8: it joined the agent's card and went, its item still open)`, { atOnce, gh, item: w.todos.get(u.id).status });
   // the harvest's OWN Allow once: its item closes, its next act goes
   await w.asker.answer(u.action.askId, { answer: 'once', ...ANS });
   const g1 = await w.asker.check(w.hid, HARVEST);
-  ok(w.todos.get(u.id).status === 'done' && w.todos.get(u.id).resolvedBy === 'allowed' && g1 && g1.ok === true, `⑧ the harvest's OWN Allow once: its item closes (${w.todos.get(u.id).resolvedBy}) and its next act goes`, { item: w.todos.get(u.id), g1 });
+  ok(w.todos.get(u.id).status === 'done' && w.todos.get(u.id).resolvedBy === 'allowed' && gateOf(g1) && g1.ok === true, `⑧ the harvest's OWN Allow once: its item closes (${w.todos.get(u.id).resolvedBy}) and its next act goes`, { item: w.todos.get(u.id), g1 });
   // THE PROBE: a DENIED harvest + an agent's card allowed once ⇒ the harvest stays refused
   await heldOut(w, HARVEST); // it asks afresh: its one item reopened
   await w.asker.answer(u.action.askId, { answer: 'deny', ...ANS });
@@ -481,25 +481,25 @@ await leg('⑧', async () => {
   let gd = null; const pd = w.asker.check(w.hid, HARVEST).then((x) => { gd = x; return x; }); await tick(); await tick();
   await w.asker.answer(card2.action.askId, { answer: 'once', ...ANS });
   const ga2 = await pa2; await pd;
-  ok(ga2 && ga2.ok === true && gd && gd.ok !== true && gd.code === 'hub_act_denied', `⑧ THE PROBE — a DENIED harvest + an agent's card allowed once: the agent's act goes, the harvest stays refused (${gd && (gd.code || gd.ask)}; d9753fa8: allowed — it joined the card)`, { gd });
+  ok(gateOf(ga2) && ga2.ok === true && gateOf(gd) && gd.ok !== true && gd.code === 'hub_act_denied', `⑧ THE PROBE — a DENIED harvest + an agent's card allowed once: the agent's act goes, the harvest stays refused (${gd && (gd.code || gd.ask)}; d9753fa8: allowed — it joined the card)`, { gd });
   // the Deny holds through a silent week …
   w.clock.t += 7 * 24 * 3600e3 + 1000;
   if (w.asker.reevaluate) w.asker.reevaluate();
   const ps = w.asker.check(w.hid, HARVEST); await tick();
   const heldAfterWeek = w.asker.list().some((k) => k.by === 'system:usage-harvest');
   w.clock.t += 61000; w.fire(); const gs = await ps;
-  ok(!heldAfterWeek && gs && gs.code === 'hub_act_denied' && w.todos.get(u.id).status !== 'open', `⑧ the Deny HOLDS through a silent week: refused at once (${gs && (gs.code || gs.ask)}), never asked afresh (d9753fa8: «no longer asked» lifted it — held, its item reopened)`, { heldAfterWeek, gs, item: w.todos.get(u.id).status });
+  ok(!heldAfterWeek && gateOf(gs) && gs.code === 'hub_act_denied' && w.todos.get(u.id).status !== 'open', `⑧ the Deny HOLDS through a silent week: refused at once (${gs && (gs.code || gs.ask)}), never asked afresh (d9753fa8: «no longer asked» lifted it — held, its item reopened)`, { heldAfterWeek, gs, item: w.todos.get(u.id).status });
   // … and a restart
   const a2 = w.mk(); a2.reconcile();
   const pr = a2.check(w.hid, HARVEST); await tick();
   const heldAfterBoot = a2.list().some((k) => k.by === 'system:usage-harvest');
   w.clock.t += 61000; w.fire(); const gr = await pr;
-  ok(!heldAfterBoot && gr && gr.code === 'hub_act_denied' && w.todos.get(u.id).status !== 'open' && w.todos.get(u.id).resolvedBy === 'denied', `⑧ the Deny HOLDS across a restart: the next life refuses the harvest at once (${gr && (gr.code || gr.ask)}), its item stays denied (d9753fa8: asked again, the denied item reopened)`, { heldAfterBoot, gr, item: [w.todos.get(u.id).status, w.todos.get(u.id).resolvedBy] });
+  ok(!heldAfterBoot && gateOf(gr) && gr.code === 'hub_act_denied' && w.todos.get(u.id).status !== 'open' && w.todos.get(u.id).resolvedBy === 'denied', `⑧ the Deny HOLDS across a restart: the next life refuses the harvest at once (${gr && (gr.code || gr.ask)}), its item stays denied (d9753fa8: asked again, the denied item reopened)`, { heldAfterBoot, gr, item: [w.todos.get(u.id).status, w.todos.get(u.id).resolvedBy] });
   // … until the owner allows THAT subject: its item reopened, Allow once
   w.todos.setStatus(u.id, 'open', 'user');
   await a2.answer(u.action.askId, { answer: 'once', ...ANS });
   const go = await a2.check(w.hid, HARVEST);
-  ok(go && go.ok === true && w.todos.get(u.id).status === 'done' && w.todos.get(u.id).resolvedBy === 'allowed', '⑧ …until the owner allows THAT subject: its item reopened and allowed once ⇒ its next act goes and the item closes (allowed)', { go, item: [w.todos.get(u.id).status, w.todos.get(u.id).resolvedBy] });
+  ok(gateOf(go) && go.ok === true && w.todos.get(u.id).status === 'done' && w.todos.get(u.id).resolvedBy === 'allowed', '⑧ …until the owner allows THAT subject: its item reopened and allowed once ⇒ its next act goes and the item closes (allowed)', { go, item: [w.todos.get(u.id).status, w.todos.get(u.id).resolvedBy] });
   // … or the instance-wide setting allows it — then the Deny is over for good: a next life asks again, never restores it
   w.clock.t += P.QUIET_MS + 1000;
   const pq = a2.check(w.hid, HARVEST); await tick(); w.clock.t += 61000; w.fire(); await pq;
@@ -511,11 +511,11 @@ await leg('⑧', async () => {
   const p3 = a3.check(w.hid, HARVEST); await tick();
   const asksAgain = a3.list().some((k) => k.by === 'system:usage-harvest');
   w.clock.t += 61000; w.fire(); await p3;
-  ok(gAll === null && w.todos.get(u.id).resolvedBy !== 'denied' && asksAgain, `⑧ a Deny the instance-wide setting overrode: the act goes, its item no longer says denied (${w.todos.get(u.id).resolvedBy}), and the next life asks again instead of restoring the Deny`, { gAll, item: w.todos.get(u.id).resolvedBy, asksAgain });
+  ok(gAll === null && w.todos.get(u.id).resolvedBy !== 'denied' && verdictOf(asksAgain), `⑧ a Deny the instance-wide setting overrode: the act goes, its item no longer says denied (${w.todos.get(u.id).resolvedBy}), and the next life asks again instead of restoring the Deny`, { gAll, item: w.todos.get(u.id).resolvedBy, asksAgain });
   const how = (it) => String((it && it.detail) || '').split('\n')[1] || '';
   // r9: PINNED the harvest item's «Allow once lets the next act of …» / «Deny keeps … refused» → PINS NOW its way out (the
   // standing item is a notice — no answers drawn, so its words name none): the machine's Hub automation, the harvest named
-  ok(/with the other acts of this kind by agent:claude:c1 waiting beside it — no one else's/.test(how(card)) && /every kind and every asker/.test(how(card)) && /To let system:usage-harvest act on mac1, set its Hub automation to Always allow/.test(how(w.todos.get(u.id))) && !/Allow once|Deny/.test(how(w.todos.get(u.id))),
+  ok(gateOf(/with the other acts of this kind by agent:claude:c1 waiting beside it — no one else's/.test(how(card))) && gateOf(/every kind and every asker/.test(how(card))) && gateOf(/To let system:usage-harvest act on mac1, set its Hub automation to Always allow/.test(how(w.todos.get(u.id)))) && !/Allow once|Deny/.test(how(w.todos.get(u.id))),
     '⑧ the words name the subject they cover: the agent card\'s Allow once = that conversation\'s acts, no one else\'s; Always on this machine = every kind and every asker; the harvest\'s item names the harvest and its way out — no answer it does not draw (d9753fa8: «with any act of the same kind waiting beside it»)', [how(card), how(w.todos.get(u.id))]);
   w.fire();
 });
@@ -536,7 +536,7 @@ await leg('⑨', async () => {
   const remNow = () => (uh.ingestPaused()[0] || {}).remedy || {};
   await quietAsync(async () => { await uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)); await drain(); });
   const s1 = remNow(), n1 = notices();
-  ok(runs === 1 && s1.state === 'proven-over' && n1.length === 1 && n1[0].status === 'open' && /already deduplicated/.test(n1[0].detail) && /stopped trying/.test(n1[0].detail) && !/removing the repeated rows in the background/.test(n1[0].detail),
+  ok(runs === 1 && s1.state === 'proven-over' && n1.length === 1 && n1[0].status === 'open' && gateOf(/already deduplicated/.test(n1[0].detail)) && gateOf(/stopped trying/.test(n1[0].detail)) && !/removing the repeated rows in the background/.test(n1[0].detail),
     `⑨ over the bound, and its dedup found no repeated row: paused, state ${s1.state || '—'}, said «over 2 GiB and already deduplicated» — removing rows cannot help, VibeSpace stopped trying (d9753fa8: resumed — a proven shard was never paused for its size)`, { s1, n: n1.map((i) => [i.status, i.resolvedBy]) });
   const ino0 = fs.statSync(sh).ino;
   fs.copyFileSync(sh, sh + '.repair'); fs.renameSync(sh + '.repair', sh); // a tmp + rename repair: the same rows under a NEW inode
@@ -577,15 +577,15 @@ await leg('⑩', async () => {
   await quietAsync(() => L1.uh.ingestIndexSettled());
   const [r1] = await quiet(() => L1.uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
   const first = notices();
-  ok(s.ratio != null && s.ratio <= 2 && r1.paused && r1.paused.why === 'ratio' && r1.paused.ratio > 2 && first.length === 1 && first[0].status === 'open', `⑩ a shard the sample reads in shape (${s.ratio == null ? '—' : s.ratio.toFixed(2)}×) and its index out of it (${r1.paused && r1.paused.ratio}× — ${order.length} rows / ${new Set(order).size} distinct): paused by the exact count, ONE notice`, { s: s.ratio, r1 });
+  ok(s.ratio != null && s.ratio <= 2 && gateOf(r1.paused) && r1.paused.why === 'ratio' && r1.paused.ratio > 2 && first.length === 1 && first[0].status === 'open', `⑩ a shard the sample reads in shape (${s.ratio == null ? '—' : s.ratio.toFixed(2)}×) and its index out of it (${r1.paused && r1.paused.ratio}× — ${order.length} rows / ${new Set(order).size} distinct): paused by the exact count, ONE notice`, { s: s.ratio, r1 });
   const L2 = life(); // a restart: no index loaded 3 s after boot
   const [n2] = await quiet(() => L2.wired.reconcile());
   const mid = notices(), p2 = L2.uh.ingestPaused()[0];
-  ok(n2 === 0 && mid.length === 1 && mid[0].id === first[0].id && mid[0].status === 'open' && p2 && p2.remedy && (p2.remedy.state === 'judging' ? /judges the file by it/.test(mid[0].detail) : p2.remedy.state === 'running' && p2.why === 'ratio' && /removing the repeated rows in the background/.test(mid[0].detail)), `⑩ the restart's reconcile does NOT close it (r8: the hold's read-back is async — by its end the warmed index may have judged it, by the same rule: ${p2 && p2.remedy && p2.remedy.state}) (closed ${n2}; d9753fa8: closed by the sample, shape-ok) — the machine stays paused «judging» until the index is read after the ledger loads`, { n2, items: mid.map((i) => [i.status, i.resolvedBy]), remedy: p2 && p2.remedy });
+  ok(n2 === 0 && mid.length === 1 && mid[0].id === first[0].id && mid[0].status === 'open' && gateOf(p2) && gateOf(p2.remedy) && (p2.remedy.state === 'judging' ? verdictOf(/judges the file by it/.test(mid[0].detail)) : p2.remedy.state === 'running' && p2.why === 'ratio' && verdictOf(/removing the repeated rows in the background/.test(mid[0].detail))), `⑩ the restart's reconcile does NOT close it (r8: the hold's read-back is async — by its end the warmed index may have judged it, by the same rule: ${p2 && p2.remedy && p2.remedy.state}) (closed ${n2}; d9753fa8: closed by the sample, shape-ok) — the machine stays paused «judging» until the index is read after the ledger loads`, { n2, items: mid.map((i) => [i.status, i.resolvedBy]), remedy: p2 && p2.remedy });
   await quietAsync(async () => { await L2.uh.whenWarm(); for (let i = 0; i < 400 && L2.uh._judgeKick && L2.uh._judgeKick.size; i++) await sleep(5); });
   const [r3] = await quiet(() => L2.uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
   const end = notices(), p3 = L2.uh.ingestPaused()[0];
-  ok(end.length === 1 && end[0].id === first[0].id && end[0].status === 'open' && !moves.length && r3.paused && r3.paused.why === 'ratio' && p3 && p3.remedy.state === 'running' && /removing the repeated rows in the background/.test(end[0].detail), `⑩ the index read, the SAME rule judges it: still ${r3.paused && r3.paused.ratio}× ⇒ paused, its dedup running — the one notice never closed nor reopened across the restart (${moves.length} status move(s); d9753fa8: closed at boot, reopened at the next ingest — a flap at every restart)`, { moves, r3 });
+  ok(end.length === 1 && end[0].id === first[0].id && end[0].status === 'open' && !moves.length && gateOf(r3.paused) && r3.paused.why === 'ratio' && gateOf(p3) && p3.remedy.state === 'running' && verdictOf(/removing the repeated rows in the background/.test(end[0].detail)), `⑩ the index read, the SAME rule judges it: still ${r3.paused && r3.paused.ratio}× ⇒ paused, its dedup running — the one notice never closed nor reopened across the restart (${moves.length} status move(s); d9753fa8: closed at boot, reopened at the next ingest — a flap at every restart)`, { moves, r3 });
 });
 
 console.log('⑪ F4 AN `ids` PAUSE IS NO DEDUP LOOP — its own words, the remedy stops');
@@ -606,10 +606,10 @@ await leg('⑪', async () => {
   // r4 re-derived: it PINNED one 'paused' emission over the 4 pauses; each pause now HOLDS its new row, and a held count
   // that moves is news (the same item re-worded in place) — it PINS NOW one emission per count (1 → 4), each in state ids
   const pz = said.filter((e) => e.kind === 'paused'), paused = pz.length, counts = pz.map((e) => e.held);
-  ok(r0.appended === 5 && p.why === 'ids' && runs === 0 && rem.state === 'ids' && paused === 4 && counts.join() === '1,2,3,4' && pz.every((e) => e.remedy && e.remedy.state === 'ids') && n.length === 1 && /more distinct records than the index keeps/.test(n[0].detail) && /stopped trying/.test(n[0].detail) && !/were removed/.test(n[0].detail) && /4 events of 2026-10 held/.test(n[0].detail),
+  ok(r0.appended === 5 && p.why === 'ids' && runs === 0 && rem.state === 'ids' && paused === 4 && counts.join() === '1,2,3,4' && gateOf(pz.every((e) => e.remedy && e.remedy.state === 'ids')) && n.length === 1 && gateOf(/more distinct records than the index keeps/.test(n[0].detail)) && gateOf(/stopped trying/.test(n[0].detail)) && !/were removed/.test(n[0].detail) && verdictOf(/4 events of 2026-10 held/.test(n[0].detail)),
     `⑪ a month with more distinct rows than the index keeps: paused 'ids', NO dedup (${runs} run(s) over 4 pauses past the backoff — d9753fa8: one at every backoff, each removing 0), state ${rem.state || '—'}, said in its own words, ONE item re-worded only as its held count moved (${counts.join(' → ')}), never «rows were removed»`, { runs, rem, counts, now: n[0] && n[0].detail.split('\n')[2] });
   const note = N.ledgerNote({ ingestPaused: uh.ingestPaused() })[0];
-  ok(note && note.words === N.LEDGER_NOTE_WORDS.pausedIds, '⑪ the Usage window says it in a row of its own (pausedIds)', note);
+  ok(gateOf(note) && note.words === N.LEDGER_NOTE_WORDS.pausedIds, '⑪ the Usage window says it in a row of its own (pausedIds)', note);
 });
 
 console.log('⑫ F4 A PAUSE IS PER SHARD (host × month) — a proven-over October never stops November; held, counted, bounded, drained in order (round 4)');
@@ -627,10 +627,10 @@ await leg('⑫', async () => {
   // the batch: 5 October events (the over month) + 5 November ones, read from the device cursor {…}
   const [r1] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5) + batchOf(NOV, 5), { cursors: { '/home/u/.claude/projects/p/a.jsonl': 4242 }, since: 'hub' }));
   const cur = uh.hostCursorOf ? uh.hostCursorOf('host-m') : null;
-  ok(r1 && r1.appended === 5 && onceIn(nov, [NOV, NOV + 1, NOV + 2, NOV + 3, NOV + 4]) && size(sh) === oct0 && r1.held === 5 && r1.paused && r1.paused.why === 'size' && r1.paused.remedy && r1.paused.remedy.state === 'proven-over' && r1.paused.held === 5 && cur && cur.cursors && cur.cursors['/home/u/.claude/projects/p/a.jsonl'] === 4242,
+  ok(gateOf(r1) && r1.appended === 5 && gateOf(onceIn(nov, [NOV, NOV + 1, NOV + 2, NOV + 3, NOV + 4])) && size(sh) === oct0 && r1.held === 5 && gateOf(r1.paused) && r1.paused.why === 'size' && gateOf(r1.paused.remedy) && r1.paused.remedy.state === 'proven-over' && r1.paused.held === 5 && gateOf(cur) && gateOf(cur.cursors) && cur.cursors['/home/u/.claude/projects/p/a.jsonl'] === 4242,
     `⑫ a proven-over October + a batch of October and November: November APPENDED (${r1 && r1.appended}), October HELD and counted (${r1 && r1.held}; its file untouched), the hub's cursor past the whole batch — here November's file holds ${ridsOf(nov).length} row(s) (4e94e377: the whole batch refused, 0 appended, November never written)`, { r1, cur: cur && cur.cursors });
   const n1 = notices(), w0 = LSN.noticeOf ? LSN.noticeOf({ ...(r1 && r1.paused), holdMax: undefined }) : {};
-  ok(n1.length === 1 && n1[0].status === 'open' && /^Usage of M for 2026-10 is held/.test(n1[0].text) && /5 events of 2026-10 held until the file is back in shape/.test(n1[0].detail) && /its other months are recorded as usual/.test(n1[0].detail) && /at most 64 MiB/.test(w0.detail || ''),
+  ok(n1.length === 1 && n1[0].status === 'open' && gateOf(/^Usage of M for 2026-10 is held/.test(n1[0].text)) && gateOf(/5 events of 2026-10 held until the file is back in shape/.test(n1[0].detail)) && gateOf(/its other months are recorded as usual/.test(n1[0].detail)) && verdictOf(/at most 64 MiB/.test(w0.detail || '')),
     `⑫ said: ONE notice for M × 2026-10 — «${n1[0] ? n1[0].text : ''}», «5 events of 2026-10 held until the file is back in shape», the other months recorded, the bound named (64 MiB in the product)`, n1.map((i) => [i.text, i.detail.split('\n')[1]]));
   const notes = N.ledgerNote({ ingestPaused: uh.ingestPaused() });
   ok(notes.length === 2 && notes[0].words === N.LEDGER_NOTE_WORDS.pausedProvenOver && notes[1].words === N.LEDGER_NOTE_WORDS.pausedHeld && notes[1].vars.held === '5' && notes[1].vars.month === '2026-10', '⑫ the Usage window says it: the month\'s row (pausedProvenOver) and what is held (pausedHeld: 5 of 2026-10)', notes);
@@ -639,7 +639,7 @@ await leg('⑫', async () => {
   // a re-send of the same October window + 3 new and one the LEDGER already holds (req 5: in the October file)
   const [r3] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 8) + remote(5) + '\n'));
   const p3 = uh.ingestPaused().find((p) => p.host === 'host-m') || {};
-  ok(r2 && r2.appended === 3 && p3.shard === SHARD && r3 && r3.appended === 0 && r3.held === 4 && r3.duplicates === 5 && p3.held === 9 && size(sh) === oct0,
+  ok(gateOf(r2) && r2.appended === 3 && p3.shard === SHARD && gateOf(r3) && r3.appended === 0 && r3.held === 4 && r3.duplicates === 5 && p3.held === 9 && size(sh) === oct0,
     `⑫ November alone: appended (${r2 && r2.appended}), October still paused; the window re-sent: held ONCE (+${r3 && r3.held}, ${r3 && r3.duplicates} duplicates — ${p3.held} held), the October file untouched`, { r2, r3, held: p3.held });
   // THE BOUND: another machine's October, 12 batches of 4 rows (~1 KiB each) into a 4 KiB hold of 1 KiB segments
   const b = 'host-b';
@@ -651,10 +651,10 @@ await leg('⑫', async () => {
   const all = fs.existsSync(heldDir) ? fs.readdirSync(heldDir).filter((f) => f.includes('~host-b.')) : [], files = all.filter((f) => f.endsWith('.ndjson'));
   const onDisk = files.reduce((a, f) => a + size(path.join(heldDir, f)), 0), keptB = files.sort((x, y) => Number(x.split('.')[1]) - Number(y.split('.')[1])).flatMap((f) => ridsOf(path.join(heldDir, f)));
   const setB = new Set(); for (const f of all.filter((x) => x.endsWith('.dropped'))) for (const l of fs.readFileSync(path.join(heldDir, f), 'utf8').split('\n')) { try { const j = JSON.parse(l); for (const r of j.gone || []) setB.add(r); for (const r of j.back || []) setB.delete(r); } catch { } }
-  ok(pb.dropped > 0 && pb.held + pb.dropped === rowsB.length && onDisk <= 4 * KiB && keptB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join() && setB.size === pb.dropped && rowsB.slice(0, pb.dropped).every((i) => setB.has(hidOf(i, b))),
+  ok(pb.dropped > 0 && pb.held + pb.dropped === rowsB.length && onDisk <= 4 * KiB && keptB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join() && setB.size === pb.dropped && verdictOf(rowsB.slice(0, pb.dropped).every((i) => setB.has(hidOf(i, b)))),
     `⑫ the hold is BOUNDED: ${onDisk} B of held rows on disk for B's October (≤ 4 KiB, the product's 64 MiB scaled) — past it the ${pb.dropped} OLDEST held rows dropped and COUNTED (${pb.held} held + ${pb.dropped} dropped = ${rowsB.length} sent; the set beside it names those ${setB.size} rows), the newest kept in order`, { held: pb.held, dropped: pb.dropped, onDisk, files: all, set: setB.size });
   const nb = notices().find((i) => /^Usage of B for 2026-10/.test(i.text));
-  ok(nb && new RegExp(`Past the bound: the ${pb.dropped} oldest held events of 2026-10 were dropped`).test(nb.detail) && N.ledgerNote({ ingestPaused: [pb] }).some((x) => (x.words === N.LEDGER_NOTE_WORDS.pausedDropped || x.words === N.LEDGER_NOTE_WORDS.pausedDroppedMaybe) && x.vars.dropped === String(pb.dropped)), // r8: B's rows were held while the month's index was not in memory — «may already be recorded»
+  ok(gateOf(nb) && gateOf(new RegExp(`Past the bound: the ${pb.dropped} oldest held events of 2026-10 were dropped`).test(nb.detail)) && verdictOf(N.ledgerNote({ ingestPaused: [pb] }).some((x) => (x.words === N.LEDGER_NOTE_WORDS.pausedDropped || x.words === N.LEDGER_NOTE_WORDS.pausedDroppedMaybe) && x.vars.dropped === String(pb.dropped))), // r8: B's rows were held while the month's index was not in memory — «may already be recorded»
     `⑫ the drop is SAID, never silent: B's own notice «Past the bound: the ${pb.dropped} oldest held events of 2026-10 were dropped — counted here, never recorded» and the Usage window's pausedDropped row`, nb && nb.detail.split('\n'));
   // A RESTART: the holds read back — the counts and the dropped count the same, the same notices
   const before = notices().map((i) => i.id).sort().join();
@@ -670,11 +670,11 @@ await leg('⑫', async () => {
   const octRids = ridsOf(sh), tailM = octRids.slice(400);
   const heldM = [9000, 9001, 9002, 9003, 9004, 9005, 9006, 9007].map((i) => hidOf(i));
   const nm = notices().find((i) => /^Usage of M for 2026-10/.test(i.text)), stillB = L2.uh.ingestPaused().some((p) => p.host === b);
-  ok(r5 && r5.appended === 2 && tailM.join() === heldM.join() && octRids.filter((r) => r === hidOf(5)).length === 1 && nm && nm.status === 'done' && nm.resolvedBy === 'shape-ok' && stillB && !(fs.existsSync(heldDir) && fs.readdirSync(heldDir).some((f) => f.includes('~host-m.'))),
+  ok(gateOf(r5) && r5.appended === 2 && tailM.join() === heldM.join() && octRids.filter((r) => r === hidOf(5)).length === 1 && gateOf(nm) && nm.status === 'done' && nm.resolvedBy === 'shape-ok' && gateOf(stillB) && !(fs.existsSync(heldDir) && fs.readdirSync(heldDir).some((f) => f.includes('~host-m.'))),
     `⑫ the bound raised, M's next ingest: its October RESUMED — the ${heldM.length} held events appended IN ORDER (req 5 the ledger already had: 0 bytes, the ledger law), its hold gone, its notice closed (${nm && nm.resolvedBy}); B's October waits for B's own ingest`, { r5, tailM, nm: nm && [nm.status, nm.resolvedBy], stillB });
   const [r6] = await quiet(() => L2.uh.ingestRemoteEvents(b, 'B', batchOf(NOV + 20, 1)));
   const tailB = ridsOf(sh).slice(400 + heldM.length);
-  ok(r6 && r6.appended === 1 && tailB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join() && !L2.uh.ingestPaused().length && notices().every((i) => i.status !== 'open'),
+  ok(gateOf(r6) && r6.appended === 1 && tailB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join() && !L2.uh.ingestPaused().length && verdictOf(notices().every((i) => i.status !== 'open')),
     `⑫ B's next ingest: its ${tailB.length} held events appended in order (the ${pb.dropped} dropped never), nothing paused, every notice closed`, { r6, tailB: tailB.length });
 });
 
@@ -707,11 +707,11 @@ await leg('⑬', async () => {
     let undo = refuseAppend((f) => f === W.sh); // … and the disk full for the month's file
     await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV, 2))); // the machine's next ingest (November): October's drain fails
     const p1 = pausedOf(uh), n1 = W.notices();
-    ok(p1 && p1.drain && p1.drain.state === 'failed' && p1.drain.code === 'ENOSPC' && p1.held === 5 && n1.length === 1 && n1[0].status === 'open' && /5 held events could not be recorded: ENOSPC — retrying/.test(n1[0].detail) && W.heldFiles().length > 0 && ridsOf(W.sh).length === 400,
+    ok(gateOf(p1) && gateOf(p1.drain) && p1.drain.state === 'failed' && p1.drain.code === 'ENOSPC' && p1.held === 5 && n1.length === 1 && n1[0].status === 'open' && gateOf(/5 held events could not be recorded: ENOSPC — retrying/.test(n1[0].detail)) && W.heldFiles().length > 0 && ridsOf(W.sh).length === 400,
       `⑬ a drain that FAILS (ENOSPC) once the month is back in shape: the month stays PAUSED (${p1 ? `drain-failed, ${p1.held} held` : 'no pause'}), its notice open and re-worded «5 held events could not be recorded: ENOSPC — retrying», the rows still held (ff094d46: resumed BEFORE the drain — no pause, the notice closed, the rows stranded)`, { p1, n: n1.map((i) => [i.status, i.text, i.detail.split('\n')[3]]) });
     await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV + 2, 1))); // still full: tried again at the machine's next ingest (any month)
     const p2 = pausedOf(uh);
-    ok(p2 && p2.drain && p2.drain.tries === 2 && p2.held === 5 && W.notices().length === 1, `⑬ tried again at the machine's every ingest, ANY month (a November batch): still full ⇒ try ${p2 && p2.drain ? p2.drain.tries : 0}, still held, still one notice (ff094d46: never — the month was no longer paused)`, p2);
+    ok(gateOf(p2) && gateOf(p2.drain) && p2.drain.tries === 2 && p2.held === 5 && W.notices().length === 1, `⑬ tried again at the machine's every ingest, ANY month (a November batch): still full ⇒ try ${p2 && p2.drain ? p2.drain.tries : 0}, still held, still one notice (ff094d46: never — the month was no longer paused)`, p2);
     undo();
     await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV + 3, 1))); // room again: the machine's next ingest drains it
     const n3 = W.notices();
@@ -730,7 +730,7 @@ await leg('⑬', async () => {
     const M3 = V.life(); M3.uh.shapeMaxBytes = 2 * GiB;
     await quiet(() => M3.wired.reconcile());
     const ve = V.notices();
-    ok(b1 && b1.drain && b1.drain.state === 'failed' && vb.length === 1 && vb[0].status === 'open' && ridsOf(V.sh).slice(400).join() === OCT5.join() && !pausedOf(M3.uh) && ve.length === 1 && ve[0].status === 'done',
+    ok(gateOf(b1) && gateOf(b1.drain) && b1.drain.state === 'failed' && vb.length === 1 && vb[0].status === 'open' && ridsOf(V.sh).slice(400).join() === OCT5.join() && !pausedOf(M3.uh) && ve.length === 1 && ve[0].status === 'done',
       `⑬ at a restart: still full ⇒ the boot's try fails and the month stays paused (${b1 && b1.drain ? b1.drain.state : 'not paused'}, its one notice ${vb[0] && vb[0].status}); room ⇒ the boot drains it in order and the notice closes (ff094d46: no pause after the failure — nothing said)`, { b1, vb: vb.map((i) => i.status), ve: ve.map((i) => [i.status, i.resolvedBy]) });
   }
 
@@ -741,17 +741,17 @@ await leg('⑬', async () => {
     const id0 = W.notices()[0] && W.notices()[0].id;
     await quiet(() => uh.ingestRemoteEvents('host-m', 'Build box', batchOf(9003, 2))); // the machine RENAMED while paused (2 more held)
     const nb = W.notices();
-    ok(nb.length === 1 && nb[0].id === id0 && nb[0].status === 'open' && /^Usage of Build box for 2026-10 is held/.test(nb[0].text) && /5 events of 2026-10 held/.test(nb[0].detail),
+    ok(nb.length === 1 && nb[0].id === id0 && nb[0].status === 'open' && gateOf(/^Usage of Build box for 2026-10 is held/.test(nb[0].text)) && verdictOf(/5 events of 2026-10 held/.test(nb[0].detail)),
       `⑬ the machine RENAMED while paused: the SAME item re-worded in place («${nb[nb.length - 1] ? nb[nb.length - 1].text.slice(0, 40) : ''}…», 5 held) — ${nb.length} item(s) (ff094d46: a second item filed, the first one left open)`, nb.map((i) => [i.id === id0, i.status, i.text]));
     W.todos.readNotices([id0], true, 'user'); // the owner marks it read
     const L2 = W.life(); await quiet(() => L2.wired.reconcile()); // a restart reads the hold back (the boot knows the host id only)
     const nr = W.notices();
-    ok(nr.length === 1 && nr[0].id === id0 && nr[0].status === 'open' && /^Usage of Build box for 2026-10/.test(nr[0].text),
+    ok(nr.length === 1 && nr[0].id === id0 && nr[0].status === 'open' && verdictOf(/^Usage of Build box for 2026-10/.test(nr[0].text)),
       `⑬ marked read, then a restart reads the hold back: the SAME item reopened, still «Build box» — ${nr.length} item(s) (ff094d46: a second one, «Usage of host-m …»)`, nr.map((i) => [i.id === id0, i.status, i.text]));
     L2.uh.shapeMaxBytes = 2 * GiB;
     await quiet(() => L2.uh.ingestRemoteEvents('host-m', 'Build box', batchOf(NOV, 1)));
     const ne = W.notices();
-    ok(ne.length === 1 && ne.every((i) => i.status !== 'open') && ne[0].resolvedBy === 'shape-ok', `⑬ back in shape: 'resumed' closes its one item whatever it says (${ne.map((i) => `${i.status}/${i.resolvedBy}`).join(', ')}) — none left open`, ne.map((i) => [i.status, i.resolvedBy, i.text]));
+    ok(ne.length === 1 && gateOf(ne.every((i) => i.status !== 'open')) && ne[0].resolvedBy === 'shape-ok', `⑬ back in shape: 'resumed' closes its one item whatever it says (${ne.map((i) => `${i.status}/${i.resolvedBy}`).join(', ')}) — none left open`, ne.map((i) => [i.status, i.resolvedBy, i.text]));
   }
 
   // ── A HOLD ERROR IS ITS MONTH'S ──
@@ -765,11 +765,11 @@ await leg('⑬', async () => {
     undo();
     const ps = pausedOf(uh, 'host-m', SEP), po = pausedOf(uh);
     const ns = W.notices().find((i) => /for 2026-09/.test(i.text)), no = W.notices().find((i) => /for 2026-10/.test(i.text));
-    ok(ps && ps.holdError === 'ENOSPC' && po && !po.holdError && po.held === 3 && ns && /could not be held beside the file \(ENOSPC\)/.test(ns.detail) && no && /3 events of 2026-10 held until/.test(no.detail) && !/could not be held/.test(no.detail) && r1 && Array.isArray(r1.holdFailed) && r1.holdFailed.length === 1 && r1.holdFailed[0].month === '2026-09' && r1.ack === false,
+    ok(gateOf(ps) && ps.holdError === 'ENOSPC' && gateOf(po) && !po.holdError && po.held === 3 && gateOf(ns) && gateOf(/could not be held beside the file \(ENOSPC\)/.test(ns.detail)) && gateOf(no) && gateOf(/3 events of 2026-10 held until/.test(no.detail)) && !/could not be held/.test(no.detail) && gateOf(r1) && gateOf(Array.isArray(r1.holdFailed)) && r1.holdFailed.length === 1 && r1.holdFailed[0].month === '2026-09' && r1.ack === false,
       `⑬ a hold write that fails is ITS month's: September «could not be held (ENOSPC)», October held and said so (${po ? po.held : 0} held${po && po.holdError ? `, yet stamped «${po.holdError}»` : ''}) — the answer names the month (holdFailed ${JSON.stringify(r1 && r1.holdFailed)}), not acked (ff094d46: October's notice said «could not be held» while its rows were held)`, { ps: ps && ps.holdError, po: po && [po.held, po.holdError], r1 });
     const [r2] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', sep(3) + batchOf(9000, 3))); // the device sends it again, the disk has room
     const ps2 = pausedOf(uh, 'host-m', SEP), ns2 = W.notices().find((i) => /for 2026-09/.test(i.text));
-    ok(ps2 && !ps2.holdError && ps2.held === 3 && ns2 && !/could not be held/.test(ns2.detail) && r2 && r2.ack === true && !r2.holdFailed && r2.held === 3 && r2.duplicates === 3,
+    ok(gateOf(ps2) && !ps2.holdError && ps2.held === 3 && gateOf(ns2) && !/could not be held/.test(ns2.detail) && gateOf(r2) && r2.ack === true && !r2.holdFailed && r2.held === 3 && r2.duplicates === 3,
       `⑬ …reset per month: the re-sent batch with room ⇒ September held (${ps2 ? ps2.held : 0}), its error gone, October's 3 duplicates of its hold — acked`, { ps2, r2 });
   }
 
@@ -787,7 +787,7 @@ await leg('⑬', async () => {
     const L2 = W.life(); await quiet(() => L2.wired.reconcile()); // the next life reads the hold back
     const c2 = pausedOf(L2.uh, host) || {};
     const nc = W.notices().find((i) => /^Usage of C for 2026-10/.test(i.text));
-    ok(d1 > 0 && c2.dropped === d1 && c2.held + c2.dropped === sent.length && nc && new RegExp(`the ${c2.dropped} oldest held events of 2026-10 were dropped`).test(nc.detail),
+    ok(d1 > 0 && c2.dropped === d1 && c2.held + c2.dropped === sent.length && gateOf(nc) && verdictOf(new RegExp(`the ${c2.dropped} oldest held events of 2026-10 were dropped`).test(nc.detail)),
       `⑬ a crash between a drop's marker and its unlink: the next life counts it ONCE — ${c2.held} held + ${c2.dropped} dropped = ${(c2.held || 0) + (c2.dropped || 0)} for ${sent.length} sent, the notice says ${c2.dropped} (ff094d46: the surviving segment held again beside its count)`, { d1, held: c2.held, dropped: c2.dropped, sent: sent.length });
     await send(L2.uh, 4); // the next drop: the set grows by one segment, never by the one it already holds
     const c3 = pausedOf(L2.uh, host) || {};
@@ -817,15 +817,15 @@ await leg('⑭', async () => {
   const held = a2.list().some((k) => k.by === 'system:usage-harvest'), mid = t2.get(u.id);
   w.clock.t += 61000; fire(); const g = await p;
   const it2 = t2.get(u.id);
-  ok(!held && g && g.code === 'hub_act_denied' && mid && mid.status !== 'open' && it2 && it2.status !== 'open' && it2.resolvedBy === 'denied',
+  ok(!held && gateOf(g) && g.code === 'hub_act_denied' && gateOf(mid) && mid.status !== 'open' && gateOf(it2) && it2.status !== 'open' && it2.resolvedBy === 'denied',
     `⑭ Deny → restart → the subject's act before the boot reconcile: refused AT ONCE by the Deny (${g && (g.code || g.ask)}), its item stays denied (${it2 && `${it2.status}/${it2.resolvedBy}`}) (ff094d46: the item reopened, the act held 60 s, ask_expired)`, { held, g, mid: mid && [mid.status, mid.resolvedBy], it2: it2 && [it2.status, it2.resolvedBy] });
   await quiet(() => a2.reconcile());
   const p2 = a2.check(w.hid, HARVEST); await tick(); w.clock.t += 61000; fire(); const g2 = await p2;
-  ok(g2 && g2.code === 'hub_act_denied' && t2.get(u.id).status !== 'open' && t2._state.items.filter((i) => i.action && i.action.standing).length === 1, `⑭ …and the boot reconcile after it changes nothing: still refused (${g2 && g2.code}), one item, denied`, { g2 });
+  ok(gateOf(g2) && g2.code === 'hub_act_denied' && t2.get(u.id).status !== 'open' && t2._state.items.filter((i) => i.action && i.action.standing).length === 1, `⑭ …and the boot reconcile after it changes nothing: still refused (${g2 && g2.code}), one item, denied`, { g2 });
   // the store's own law: a re-file of a decided item is refused by the decision — returned as it is, never reopened
   const it = t2.get(u.id);
   const again = t2.add('machines', { origin: 'machines', text: it.text, detail: 'asked again', kind: 'action', by: 'agent', sessionName: 'Machines', action: it.action });
-  ok(again && again.decided === true && t2.get(u.id).status !== 'open' && t2.get(u.id).detail !== 'asked again', `⑭ the store: a re-file of the item the owner decided is the Deny's — returned decided (${again && again.decided}), never reopened (ff094d46: reopened with the new words)`, again && [again.status, again.decided]);
+  ok(gateOf(again) && again.decided === true && t2.get(u.id).status !== 'open' && t2.get(u.id).detail !== 'asked again', `⑭ the store: a re-file of the item the owner decided is the Deny's — returned decided (${again && again.decided}), never reopened (ff094d46: reopened with the new words)`, again && [again.status, again.decided]);
   // check() reads the stored decision of a subject it holds no entry for (here: a store that took the item after the asker was built)
   const t3 = new UserTodoManager({ dataDir: dirOf('w14b'), expirySweepMs: 0, now: () => w.clock.t });
   const a3 = mkOn(t3);
@@ -833,12 +833,12 @@ await leg('⑭', async () => {
   const p3 = a3.check(w.hid, HARVEST); await tick();
   const held3 = a3.list().some((k) => k.by === 'system:usage-harvest');
   w.clock.t += 61000; fire(); const g3 = await p3;
-  ok(!held3 && g3 && g3.code === 'hub_act_denied' && t3.get(u.id).status !== 'open', `⑭ check() with no entry for the subject consults its stored decision: refused at once (${g3 && (g3.code || g3.ask)}), the item not reopened (ff094d46: reopened, held, ${g3 && g3.code !== 'hub_act_denied' ? g3.code : 'ask_expired'})`, { held3, g3, st: t3.get(u.id).status });
+  ok(!held3 && gateOf(g3) && g3.code === 'hub_act_denied' && t3.get(u.id).status !== 'open', `⑭ check() with no entry for the subject consults its stored decision: refused at once (${g3 && (g3.code || g3.ask)}), the item not reopened (ff094d46: reopened, held, ${g3 && g3.code !== 'hub_act_denied' ? g3.code : 'ask_expired'})`, { held3, g3, st: t3.get(u.id).status });
   // the owner allowing THAT subject still ends the Deny: its item reopened (by the owner) and allowed once ⇒ its next act goes
   t2.setStatus(u.id, 'open', 'user');
   await a2.answer(u.action.askId, { answer: 'once', ...ANS });
   const go = await a2.check(w.hid, HARVEST);
-  ok(go && go.ok === true && t2.get(u.id).status === 'done' && t2.get(u.id).resolvedBy === 'allowed', '⑭ …and the owner can still lift it: the item reopened by the owner and allowed once ⇒ the next act goes (the decision is final against a RE-FILE, never against the owner)', { go, item: [t2.get(u.id).status, t2.get(u.id).resolvedBy] });
+  ok(gateOf(go) && go.ok === true && t2.get(u.id).status === 'done' && t2.get(u.id).resolvedBy === 'allowed', '⑭ …and the owner can still lift it: the item reopened by the owner and allowed once ⇒ the next act goes (the decision is final against a RE-FILE, never against the owner)', { go, item: [t2.get(u.id).status, t2.get(u.id).resolvedBy] });
 });
 
 console.log('⑮ F4 THE DROPPED SET IS A SET OF ROWS — a re-sent window over the bound counted once; R1: a stale hold never names a new one (round 6)');
@@ -865,7 +865,7 @@ await leg('⑮', async () => {
     const W = world('w15a'), L1 = W.life(), host = 'host-r', ids = Array.from({ length: 30 }, (_, k) => 9700 + k), sums = [];
     for (let k = 0; k < 7; k++) { await quiet(() => L1.uh.ingestRemoteEvents(host, 'R', lines(ids))); sums.push(sum(L1.uh, host)); }
     const nr = W.notices().find((i) => /^Usage of R\b/.test(i.text));
-    ok(sums[0].dropped > 0 && sums.every((x) => x.t === 30) && sums.every((x) => x.dropped === sums[0].dropped) && nr && new RegExp(`the ${sums[6].dropped} oldest held events`).test(nr.detail),
+    ok(sums[0].dropped > 0 && gateOf(sums.every((x) => x.t === 30)) && gateOf(sums.every((x) => x.dropped === sums[0].dropped)) && gateOf(nr) && verdictOf(new RegExp(`the ${sums[6].dropped} oldest held events`).test(nr.detail)),
       `⑮ a window of 30 events over the hold's bound, sent, then RE-SENT six times (an older daemon re-walks its window): held + dropped = ${sums.map((x) => x.t).join(' → ')} for 30 sent, the notice says ${sums[6].dropped} «never recorded» (d2ff4026: 30 → 45 → 61 → 77 → 93 → 109 → 125 — the cut keyed by its PLACE, re-held and still counted)`, sums);
     // the set file compacted (its lines rewritten as the set, by a rename) — then a restart reads the set back
     const h1 = L1.uh._holds.get([...L1.uh._holds.keys()].find((k) => k.includes('~host-r')));
@@ -903,7 +903,7 @@ await leg('⑮', async () => {
     L1.uh.shapeMaxBytes = 2 * GiB;
     await quiet(() => L1.uh.ingestRemoteEvents(host, 'P', batchOf(NOV, 1)));
     const got = ledgerOf(W, host);
-    ok(s1.dropped > 0 && s2.held === 30 && s2.dropped === 0 && r2 && r2.ack === true && got.length === 30 && new Set(got).size === 30,
+    ok(s1.dropped > 0 && s2.held === 30 && s2.dropped === 0 && gateOf(r2) && r2.ack === true && got.length === 30 && new Set(got).size === 30,
       `⑮ room again: the ${s1.dropped} dropped events re-sent are HELD and leave the set (${s2.held} held + ${s2.dropped} dropped — recorded after all), then all 30 recorded, each once (d2ff4026: held AND still counted, 45 for 30)`, { s1, s2, got: got.length });
   }
   // ── R1: a drained hold whose files could not be unlinked never names the NEXT hold's rows ──
@@ -928,7 +928,7 @@ await leg('⑮', async () => {
     L2.uh.shapeMaxBytes = 2 * GiB;
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'S', batchOf(NOV + 1, 1)));
     const got = ledgerOf(W, host), rec = fresh.filter((i) => got.filter((r) => r === hidOf(i, host)).length === 1).length;
-    ok(d0 > 0 && resumed && stale > 0 && p1.held === 8 && !p1.dropped && p2.held === 8 && !p2.dropped && rec === 8 && new Set(got).size === got.length && got.length === oldIn + 8,
+    ok(d0 > 0 && gateOf(resumed) && stale > 0 && p1.held === 8 && !p1.dropped && p2.held === 8 && !p2.dropped && rec === 8 && new Set(got).size === got.length && got.length === oldIn + 8,
       `⑮ R1: a drained hold whose ${stale} file(s) could not be unlinked (EBUSY) never names the NEXT hold's rows — the new hold of 8 read back after a restart: ${p2.held} held + ${p2.dropped || 0} dropped, then ${rec}/8 recorded, each once (d2ff4026: the new segments reused the old ids — the stale set dropped them at the read-back: 12 held + 36 dropped, 0/8 recorded)`, { d0, stale, p1: [p1.held, p1.dropped], p2: [p2.held, p2.dropped], rec, got: got.length, oldIn });
   }
 });
@@ -950,26 +950,26 @@ await leg('⑯', async () => {
   await quiet(() => L1.uh.ingestRemoteEvents(A, 'M', batchOf(9000, 3)));
   await quiet(() => L1.uh.ingestRemoteEvents(B, 'M', batchOf(9010, 2)));
   const n1 = W.notices().filter((i) => i.status === 'open'), ia = n1.find((i) => i.text.includes('1a2b3c4d')), ib = n1.find((i) => i.text.includes('dial-M'));
-  ok(n1.length === 2 && ia && ib && ia.id !== ib.id && /^Usage of M \(1a2b3c4d\) for 2026-10 is held/.test(ia.text) && /3 events of 2026-10 held/.test(ia.detail) && /2 events of 2026-10 held/.test(ib.detail),
+  ok(n1.length === 2 && gateOf(ia) && gateOf(ib) && ia.id !== ib.id && gateOf(/^Usage of M \(1a2b3c4d\) for 2026-10 is held/.test(ia.text)) && gateOf(/3 events of 2026-10 held/.test(ia.detail)) && verdictOf(/2 events of 2026-10 held/.test(ib.detail)),
     `⑯ two machines named «M» paused on one month: TWO items, told apart by the host id's short form — ${n1.map((i) => `«${i.text.slice(0, 32)}…»`).join(', ')} (d2ff4026: ONE item — the second filing matched the first by its words)`, n1.map((i) => [i.id, i.text.slice(0, 40), i.detail.split('\n')[1].slice(0, 60)]));
   // the item's id is its key's: the same (host id, file) in another store is the same id
   const V = world('w16b'), M1 = V.life();
   await quiet(() => M1.uh.ingestRemoteEvents(A, 'M', batchOf(9000, 1)));
   const va = V.notices()[0];
-  ok(ia && va && va.id === ia.id, `⑯ the item's id is derived from (host id, file) — never minted by a text match: the same key in another store is the same id (${va && va.id})`, { a: ia && ia.id, v: va && va.id });
+  ok(gateOf(ia) && gateOf(va) && va.id === ia.id, `⑯ the item's id is derived from (host id, file) — never minted by a text match: the same key in another store is the same id (${va && va.id})`, { a: ia && ia.id, v: va && va.id });
   // a restart: the same two items, the same ids
   const L2 = W.life(); await quiet(() => L2.wired.reconcile());
   const n2 = W.notices().filter((i) => i.status === 'open');
-  ok(n2.length === 2 && ia && ib && n2.some((i) => i.id === ia.id) && n2.some((i) => i.id === ib.id), `⑯ a restart reads both back: ${n2.length} open, the same ids`, n2.map((i) => i.id));
+  ok(n2.length === 2 && gateOf(ia) && gateOf(ib) && gateOf(n2.some((i) => i.id === ia.id)) && verdictOf(n2.some((i) => i.id === ib.id)), `⑯ a restart reads both back: ${n2.length} open, the same ids`, n2.map((i) => i.id));
   // the file back in shape: A's next ingest resumes A — B's month is still held until B's own ingest
   L2.uh.shapeMaxBytes = 2 * GiB;
   await quiet(() => L2.uh.ingestRemoteEvents(A, 'M', batchOf(NOV, 1)));
   const a3 = ia && W.todos.get(ia.id), b3 = ib && W.todos.get(ib.id), stillB = !!pausedOf(L2.uh, B);
-  ok(a3 && a3.status === 'done' && a3.resolvedBy === 'shape-ok' && b3 && b3.status === 'open' && stillB,
+  ok(gateOf(a3) && a3.status === 'done' && a3.resolvedBy === 'shape-ok' && gateOf(b3) && b3.status === 'open' && verdictOf(stillB),
     `⑯ A's month resumed: A's item closed (${a3 && `${a3.status}/${a3.resolvedBy}`}), B's still OPEN while B's month is held (${b3 && b3.status}; B paused: ${stillB}) (d2ff4026: the one shared item closed — B's held month said nowhere)`, { a3: a3 && [a3.status, a3.resolvedBy], b3: b3 && b3.status, stillB });
   await quiet(() => L2.uh.ingestRemoteEvents(B, 'M', batchOf(NOV + 1, 1)));
   const b4 = ib && W.todos.get(ib.id);
-  ok(b4 && b4.status === 'done' && !pausedOf(L2.uh, B) && W.notices().every((i) => i.status !== 'open'), `⑯ …and B's own ingest resumes B and closes B's item (${b4 && `${b4.status}/${b4.resolvedBy}`})`, b4 && [b4.status, b4.resolvedBy]);
+  ok(gateOf(b4) && b4.status === 'done' && !pausedOf(L2.uh, B) && verdictOf(W.notices().every((i) => i.status !== 'open')), `⑯ …and B's own ingest resumes B and closes B's item (${b4 && `${b4.status}/${b4.resolvedBy}`})`, b4 && [b4.status, b4.resolvedBy]);
 });
 
 console.log('⑰ F4 THE HOLD\'S DISK NEVER SAYS «DROPPED» ABOUT A ROW MEMORY HOLDS; A DRAINED ROW LEAVES ITS SEGMENT; A RETIREMENT IS RECORDED (round 7)');
@@ -1010,7 +1010,7 @@ await leg('⑰', async () => {
     L2.uh.shapeMaxBytes = 2 * GiB;
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'B', batchOf(NOV, 1)));
     const got = ledgerOf(W, host).filter((r) => sent.some((i) => hidOf(i, host) === r));
-    ok(s0.held === 12 && s0.dropped === 8 && r6 && !ack(r6) && r6.holdFailed && r6.holdFailed[0].error === 'ENOSPC' && s1.held === 12 && s1.dropped === 8 && s2.held === 12 && s2.dropped === 8 && got.length === 12 && new Set(got).size === 12,
+    ok(s0.held === 12 && s0.dropped === 8 && gateOf(r6) && !ack(r6) && gateOf(r6.holdFailed) && r6.holdFailed[0].error === 'ENOSPC' && s1.held === 12 && s1.dropped === 8 && s2.held === 12 && s2.dropped === 8 && got.length === 12 && new Set(got).size === 12,
       `⑰ ENOSPC on the ROWS (20 acked: ${s0.held} held + ${s0.dropped} dropped; the next batch unacked, ${r6 && r6.holdFailed ? r6.holdFailed[0].error : '—'}): memory ${s1.held} + ${s1.dropped}, after a restart ${s2.held} + ${s2.dropped}, back in shape ${got.length} of the 20 acked recorded, each once (4f42eaa3: 8 + 12 after the restart — the set's line had landed first, the read-back deleted a live, acked segment as «dropped»; 8 recorded)`, { s0, s1, s2, got: got.length, r6: r6 && { ack: r6.ack, holdFailed: r6.holdFailed } });
   }
   // ── 1b. THE P2 SHAPE: a window over the bound (15 + 15), the bound raised, the window re-sent with its rows refused ──
@@ -1024,7 +1024,7 @@ await leg('⑰', async () => {
     const s1 = sum(L1.uh, host);
     const L2 = W.life(); await quiet(() => L2.wired.reconcile());
     const s2 = sum(L2.uh, host);
-    ok(s0.dropped === 15 && s0.held === 15 && r2 && !ack(r2) && s1.t === 30 && s1.dropped === 15 && s2.held === 15 && s2.dropped === 15,
+    ok(s0.dropped === 15 && s0.held === 15 && gateOf(r2) && !ack(r2) && s1.t === 30 && s1.dropped === 15 && s2.held === 15 && s2.dropped === 15,
       `⑰ the re-sent window, its rows refused (ENOSPC, unacked): memory ${s1.held} + ${s1.dropped}, after a restart ${s2.held} held + ${s2.dropped} dropped = ${s2.t} for 30 (4f42eaa3: 15 + 0 — the «back» line had landed, the 15 rows neither held nor counted)`, { s0, s1, s2 });
   }
   // ── 3. A TORN SET APPEND: half its bytes written, then ENOSPC — and the same with the cut refused too ──
@@ -1040,7 +1040,7 @@ await leg('⑰', async () => {
     const s1 = sum(L1.uh, host);
     const L2 = W.life(); await quiet(() => L2.wired.reconcile());
     const s2 = sum(L2.uh, host);
-    ok(s0.held === 12 && s0.dropped === 8 && rt && !ack(rt) && s1.held === 12 && s1.dropped === 16 && s2.held === 12 && s2.dropped === 16,
+    ok(s0.held === 12 && s0.dropped === 8 && gateOf(rt) && !ack(rt) && s1.held === 12 && s1.dropped === 16 && s2.held === 12 && s2.dropped === 16,
       `⑰ a TORN set append${cutToo ? ' whose cut back is refused too (EIO — the set rewritten whole at the next append)' : ' (half its bytes, then ENOSPC — cut back, the rows with it)'}: unacked; two more batches — memory ${s1.held} + ${s1.dropped}, after a restart ${s2.held} + ${s2.dropped} (4f42eaa3: 12 + 12 — the next line glued to the fragment, 4 rows counted nowhere)`, { s0, s1, s2 });
   }
   // ── 3b. A TORN ROWS APPEND: half the rows written, then ENOSPC ──
@@ -1055,7 +1055,7 @@ await leg('⑰', async () => {
     L2.uh.shapeMaxBytes = 2 * GiB;
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'U', batchOf(NOV, 1)));
     const got = ledgerOf(W, host).filter((r) => sent.some((i) => hidOf(i, host) === r));
-    ok(rt && !ack(rt) && segFiles === 3 && s1.held === 12 && s1.dropped === 8 && s2.held === 12 && s2.dropped === 8 && got.length === 12 && new Set(got).size === 12 && sent.slice(8, 20).every((i) => got.includes(hidOf(i, host))),
+    ok(gateOf(rt) && !ack(rt) && segFiles === 3 && s1.held === 12 && s1.dropped === 8 && s2.held === 12 && s2.dropped === 8 && got.length === 12 && new Set(got).size === 12 && verdictOf(sent.slice(8, 20).every((i) => got.includes(hidOf(i, host)))),
       `⑰ a TORN rows append (half, then ENOSPC — cut back; the file it created unlinked: ${segFiles} segment files): unacked; memory ${s1.held} + ${s1.dropped}, after a restart ${s2.held} + ${s2.dropped}, back in shape the 12 held recorded, each once (got ${got.length})`, { s1, s2, segFiles, got: got.length });
     // a hold whose only file holds no whole row (a failed append's leftover, a torn fragment) is no hold: nothing paused, nothing said
     const Y = world('w17d2'); fs.mkdirSync(Y.heldDir, { recursive: true }); fs.writeFileSync(path.join(Y.heldDir, 'events-2026-10~host-y.0.ndjson'), '{"rid":"h:host-y:req_1","ts":');
@@ -1094,7 +1094,7 @@ await leg('⑰', async () => {
     // r10 PINNED → PINS NOW: 'more' pinned 40 missing — the 8 new events pushed out an undrained segment (4 more dropped); since
     // r10 rows that would push out a row not drained yet WAIT for the drain's next step (usage-history _holdAppend): 36, the
     // count from before the drain, in every variant
-    ok(window && s0.held === 12 && s0.dropped === 36 && told === missing && midDropped === missing && okEnd && missing === 36,
+    ok(gateOf(window) && s0.held === 12 && s0.dropped === 36 && told === missing && midDropped === missing && gateOf(okEnd) && missing === 36,
       `⑰ a harvest MID-DRAIN (${v === 'ok' ? 'in shape' : v === 'enospc' ? 'the drain then refused — ENOSPC on the ledger' : '8 new events at once: they wait for the drain\'s next step — none of the undrained rows pushed out'}): ${told} said dropped (its ${v === 'enospc' ? 'open' : 'closed'} notice: «the ${nSaid} oldest held events»), ${missing} missing (${inLedger.length} recorded + ${held} held of ${all.length} sent) (4f42eaa3: ${v === 'more' ? 'the drained rows counted with the drop' : '40 said for 36 missing'} — a drained row stayed in its segment's rids, the bound counted the drained bytes)`, { window, s0, midDropped, told, missing, inLedger: inLedger.length, held, drainSaid, nSaid, p: p && [p.held, p.dropped, p.drain && p.drain.state] });
   }
   // ── 4. A RETIREMENT IS RECORDED: a drain whose every unlink fails (EBUSY), the notice closed, a restart before the next hold ──
@@ -1114,7 +1114,7 @@ await leg('⑰', async () => {
     L2.uh.shapeMaxBytes = 2 * GiB;
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'S', batchOf(NOV + 1, 1)));
     const got = ledgerOf(W, host), rec = fresh.filter((i) => got.filter((r) => r === hidOf(i, host)).length === 1).length;
-    ok(closed && left1 > 0 && !p2 && n2 && n2.status === 'done' && left2 === 0 && s3.held === 8 && !s3.dropped && n3Said === 0 && rec === 8,
+    ok(gateOf(closed) && left1 > 0 && !p2 && gateOf(n2) && n2.status === 'done' && left2 === 0 && s3.held === 8 && !s3.dropped && n3Said === 0 && rec === 8,
       `⑰ a drained generation whose ${left1} file(s) could not be unlinked (EBUSY) — its notice closed — then a restart BEFORE the next hold: nothing paused, the notice stays ${n2 && n2.status} (no «12 held … 36 dropped» reopened), the files unlinked unread (${left2} left); 8 new events: ${s3.held} held + ${s3.dropped || 0} dropped, ${rec}/8 recorded (4f42eaa3: read back as the LIVE hold — the closed notice reopened, then «44 dropped» for 36 missing)`, { closed, left1, p2: p2 && [p2.held, p2.dropped], n2: n2 && n2.status, left2, s3, n3Said, rec });
   }
   // ── 5 (e5). A LISTING THAT FAILS (EIO) IS NO EMPTY DISK ──
@@ -1129,7 +1129,7 @@ await leg('⑰', async () => {
     await sleep(80); await settle(); // r8: the listing's own retry (≥ 20 ms here) reads the hold back
     const [r2] = await quiet(() => L2.uh.ingestRemoteEvents(host, 'L', lines([9240, 9241, 9242])));
     const s2 = sum(L2.uh, host);
-    ok(s0.t === 32 && r1 && !ack(r1) && r1.holdFailed && r1.holdFailed[0].error === 'EIO' && ack(r2) && s2.t === 35 && s2.dropped === s0.dropped,
+    ok(s0.t === 32 && gateOf(r1) && !ack(r1) && gateOf(r1.holdFailed) && r1.holdFailed[0].error === 'EIO' && gateOf(ack(r2)) && s2.t === 35 && s2.dropped === s0.dropped,
       `⑰ (e5) the hold's listing fails (EIO) after a restart: the batch unacked, holdFailed ${r1 && r1.holdFailed ? r1.holdFailed[0].error : '—'} (memory ${m1.t || 0}); the listing back ⇒ the hold read back and the batch held: ${s2.held} + ${s2.dropped} = ${s2.t} for 35 sent (4f42eaa3: acked, a hold minted gen 0 on top of the live files — 3 + 0 against a truth of ${s0.held} + ${s0.dropped} + 3)`, { s0, r1: r1 && { ack: r1.ack, holdFailed: r1.holdFailed, held: r1.held }, m1, s2 });
   }
   // ── 5 (e3, a3, g). The numbers' span refused LOUDLY; a compaction's .tmp swept; the compaction bound is 4× the SET ──
@@ -1142,7 +1142,7 @@ await leg('⑰', async () => {
     const [ra] = await quiet(() => L1.uh.ingestRemoteEvents(host, 'E', lines([9110, 9111, 9112, 9113])));
     const [rb, saidB] = await quiet(() => L1.uh.ingestRemoteEvents(host, 'E', lines([9114, 9115, 9116, 9117])));
     const segs = W.heldFiles(host).filter((f) => f.endsWith('.ndjson')).map((f) => Number(f.split('.')[1]));
-    ok(ack(ra) && rb && !ack(rb) && rb.holdFailed && rb.holdFailed[0].error === 'hold-seq-bound' && saidB.some((l) => /refused \(hold-seq-bound\)/.test(l)) && segs.every((q) => Math.floor(q / span) === gen),
+    ok(gateOf(ack(ra)) && gateOf(rb) && !ack(rb) && gateOf(rb.holdFailed) && rb.holdFailed[0].error === 'hold-seq-bound' && gateOf(saidB.some((l) => /refused \(hold-seq-bound\)/.test(l))) && verdictOf(segs.every((q) => Math.floor(q / span) === gen)),
       `⑰ (e3) a rotation past the generation's ${span} numbers is REFUSED, loudly (${rb && rb.holdFailed ? rb.holdFailed[0].error : 'acked'}; the log names it) — never a segment numbered as the next generation's (${segs.join(', ')})`, { ra: ra && ra.ack, rb: rb && { ack: rb.ack, holdFailed: rb.holdFailed }, segs });
     // a3: a compaction killed between its write and its rename left a .tmp — the next listing sweeps it
     const W2 = world('w17i'), M1 = W2.life(), h2 = 'host-k';
@@ -1156,7 +1156,7 @@ await leg('⑰', async () => {
     const tmpLeft = W2.heldFiles(h2).some((f) => f.endsWith('.tmp'));
     await quiet(() => M2.uh.ingestRemoteEvents(h2, 'K', lines([9020, 9021, 9022, 9023])));
     const after = set ? size(path.join(W2.heldDir, set)) : 0, k2 = sum(M2.uh, h2);
-    ok(set && !tmpLeft && big > 100 * KiB && after > 0 && after < 4 * KiB && k2.dropped === 12,
+    ok(gateOf(set) && !tmpLeft && big > 100 * KiB && after > 0 && after < 4 * KiB && k2.dropped === 12,
       `⑰ (a3) a compaction's .tmp left by a kill is swept at the listing (${tmpLeft ? 'still there' : 'gone'}); (g) a set file ${big} B for a set of 8 rids is compacted at the next append (${after} B; ${k2.dropped} dropped) — the bound is 4× the SET read back (4f42eaa3: 4× the file — kept)`, { set, tmpLeft, big, after, k2 });
   }
 });
@@ -1242,7 +1242,7 @@ await leg('⑲', async () => {
     await quiet(() => L3.uh.ingestRemoteEvents(host, 'S', lines([9400, 9401, 9402, 9403])));
     const s4 = sum(L3.uh, host);
     const good = path2 === 'boot' ? !p3 && n3 && n3.status === 'done' && !f3.length && s4.held === 4 && s4.dropped === 0 : setKept && !f3.length && s4.dropped === 0;
-    ok(n0 && n0.status === 'done' && f0.length === 4 && good,
+    ok(gateOf(n0) && n0.status === 'done' && f0.length === 4 && verdictOf(good),
       `⑲ (1, ${path2}) a retired generation whose segment unlinks keep failing across restart 1 (the set's unlink works): its record kept while a file of it is left (restart 1: ${f1.length} file(s), the set ${setKept ? 'kept' : 'GONE'}); restart 2 ${p3 ? `paused ${p3.held} + ${p3.dropped}` : 'nothing paused'}, the notice ${n3 ? n3.status : '—'}, ${f3.length} drained segment(s) left; 4 new events ⇒ ${s4.held} held + ${s4.dropped} dropped (9a0d429d: the set unlinked at restart 1 — restart 2 read 12 recorded rows back as LIVE, the closed notice reopened)`,
       { f0, f1, p3: p3 && [p3.held, p3.dropped], n3, f3, s4 });
   }
@@ -1265,7 +1265,7 @@ await leg('⑲', async () => {
     await quiet(() => null);
     const got = ledgerOf(W, host), all = [...sent.slice(36), ...nw], rec = all.filter((i) => got.includes(hidOf(i, host))).length;
     const missing = sent.length + nw.length - sent.concat(nw).filter((i) => got.includes(hidOf(i, host))).length, n = said(W, host);
-    ok(window && s0.held === 12 && s0.dropped === 36 && rA && rA.duplicates === 12 && (fresh > 4 || rec === all.length) && n && n.status === 'done' && n.dropped === missing,
+    ok(gateOf(window) && s0.held === 12 && s0.dropped === 36 && gateOf(rA) && rA.duplicates === 12 && (fresh > 4 || rec === all.length) && gateOf(n) && n.status === 'done' && n.dropped === missing,
       `⑲ (2, +${fresh} new) a re-send MID-DRAIN of 12 held rows (4 already drained): ${rA ? rA.duplicates : '—'} duplicates (none held twice); ${rec} of ${all.length} recorded (the last-held + the new); the closed notice says ${n ? n.dropped : '—'} dropped for ${missing} missing (9a0d429d: a drained rid left the duplicate check — 4 held again, an undrained acked segment pushed out: 12 of 16 recorded with 4 new; 48 said for 44 missing with 12 new)`,
       { window, rA: rA && { dup: rA.duplicates, held: rA.held }, rec, missing, n });
   }
@@ -1284,7 +1284,7 @@ await leg('⑲', async () => {
     await quiet(() => L2.wired.reconcile());
     if (v !== 'd2') { L2.uh.shapeMaxBytes = 2 * GiB; await quiet(() => L2.uh.ingestRemoteEvents(host, 'X', batchOf(NOV + 1, 1))); }
     const n = said(W, host), rec = ids.filter((i) => ledgerOf(W, host).includes(hidOf(i, host))).length;
-    ok(s0.held === 15 && s0.dropped === 33 && n && n.dropped === 33 && rec === 15,
+    ok(s0.held === 15 && s0.dropped === 33 && gateOf(n) && n.dropped === 33 && rec === 15,
       `⑲ (3, ${v}) 15 held + 33 dropped, ${v === 'd1' ? 'drained (its unlinks refused), a restart before the store flushed' : v === 'd1c' ? 'the store flushed while open, drained, a restart out of shape' : 'a restart in shape, no notice on disk'}: ${n ? `the notice (${n.status}) says ${n.dropped}` : 'NO notice'} for ${48 - rec} missing (9a0d429d: ${v === 'd1' ? 'retired with 0 notices on disk — never said' : v === 'd1c' ? 're-worded «0 held» without its «Past the bound» line, closed without it' : 'the 33 only in a log line'})`,
       { s0, n, rec });
   }
@@ -1308,7 +1308,7 @@ await leg('⑲', async () => {
     L2.uh.holdListRetryMs = 10; if (L2.uh._listFail && L2.uh._listFail.timer) { clearTimeout(L2.uh._listFail.timer); L2.uh._listHeld().catch(() => { }); }
     await sleep(30); await settle();
     after = W.notices().filter((i) => i.itemKey === 'hold-list');
-    ok(readdirs <= 2 && warn === 1 && listOpen === 'open' && !ack(last) && last.holdFailed && last.holdFailed.length === 1 && last.holdFailed[0].month === '2026-10' && last.retryAfter > 0 && novIn === 100 && after.length === 1 && after[0].status === 'done',
+    ok(readdirs <= 2 && warn === 1 && listOpen === 'open' && !ack(last) && gateOf(last.holdFailed) && last.holdFailed.length === 1 && last.holdFailed[0].month === '2026-10' && last.retryAfter > 0 && novIn === 100 && after.length === 1 && after[0].status === 'done',
       `⑲ (4) 100 ingests under EIO: ${readdirs} readdir(s) of _held, ${warn} warn line(s), ${listNotices.length} notice(s) «${listNotices[0] ? listNotices[0].text.slice(0, 48) : '—'}»; each batch unacked for October only (holdFailed ${(last.holdFailed || []).map((f) => f.month).join(',')}), retryAfter ${last.retryAfter} s; the in-shape November recorded (${novIn} of 100); the listing back ⇒ the notice closed (${after[0] ? after[0].status : '—'}) (9a0d429d: a readdir and a warn line per month per batch — 202 and 201 for these 100 — no notice, no retryAfter, November refused with October)`,
       { readdirs, warn, listNotices: listNotices.length, last: { ack: last.ack, holdFailed: last.holdFailed, retryAfter: last.retryAfter }, novIn, after: after.map((i) => i.status) });
   }
@@ -1323,7 +1323,7 @@ await leg('⑲', async () => {
     const s2 = sum(L2.uh, host);
     L2.uh.shapeMaxBytes = 2 * GiB; await quiet(() => L2.uh.ingestRemoteEvents(host, 'R', batchOf(NOV, 1)));
     const rec = ids.filter((i) => ledgerOf(W, host).includes(hidOf(i, host))).length;
-    ok(s0.held === 12 && s0.dropped === 8 && s2.held === 12 && s2.dropped === 8 && rec === 12 && sl.some((l) => /says «retired» while/.test(l)),
+    ok(s0.held === 12 && s0.dropped === 8 && s2.held === 12 && s2.dropped === 8 && rec === 12 && verdictOf(sl.some((l) => /says «retired» while/.test(l))),
       `⑲ (5) an injected «retired» line in a LIVE generation (12 held + 8 dropped): read back ${s2.held} + ${s2.dropped}, the line named in a log line and ignored; back in shape ⇒ ${rec} of 12 recorded (9a0d429d: honoured — 12 + 8 deleted silently, «0 events held», 0/20 recorded)`, { s2, rec });
   }
 
@@ -1348,7 +1348,7 @@ await leg('⑲', async () => {
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'Q', lines(fresh.slice(4))));
     L2.uh.shapeMaxBytes = 2 * GiB; await quiet(() => L2.uh.ingestRemoteEvents(host, 'Q', batchOf(NOV + 1, 1)));
     const all = [...sent, ...fresh], got = ledgerOf(W, host), missing = all.filter((i) => !got.includes(hidOf(i, host))).length, n = said(W, host);
-    ok(window && n && n.dropped === missing,
+    ok(gateOf(window) && gateOf(n) && n.dropped === missing,
       `⑲ (6, f) a crash after the oldest segment was read into the ledger: restart out of shape + 8 new events ⇒ the notice says ${n ? n.dropped : '—'} dropped for ${missing} missing (9a0d429d: 8 for 4 — the drained segment read back as held, its 4 recorded rows dropped «never recorded»)`, { window, n, missing });
   }
 
@@ -1364,7 +1364,7 @@ await leg('⑲', async () => {
     const sp = sum(L.uh, host), open = said(W, host), maybe = !!W.notices().find((i) => /some of them may already be recorded/.test(i.detail));
     L.uh.shapeMaxBytes = 2 * GiB; await quiet(() => L.uh.ingestRemoteEvents(host, 'G', batchOf(NOV, 1)));
     const rec = win.filter((i) => ledgerOf(W, host).includes(hidOf(i, host))).length, n = said(W, host);
-    ok(rec === 20 && n && n.status === 'done' && n.dropped === 0 && (restart ? maybe && sp.dropped === 8 : sp.dropped === 0),
+    ok(rec === 20 && gateOf(n) && n.status === 'done' && n.dropped === 0 && (restart ? gateOf(maybe) && sp.dropped === 8 : sp.dropped === 0),
       `⑲ (7, g${restart ? ', after a restart' : ''}) 8 recorded rows re-sent + 12 new: paused ${sp.held} + ${sp.dropped}${restart ? ` (the index not in memory: the open notice says «${maybe ? 'some of them may already be recorded' : 'never recorded'}»)` : ' (the index in memory: the 8 are duplicates, never held)'}; 20 of 20 recorded and the closed notice says ${n ? n.dropped : '—'} dropped (9a0d429d: «8 dropped» for 0 missing)`, { sp, open, n, rec });
   }
 
@@ -1404,7 +1404,7 @@ await leg('⑲', async () => {
     } else L.uh.shapeMaxBytes = 2 * GiB;
     for (let k = 0; k < 5; k++) await quiet(() => L.uh.ingestRemoteEvents(host, 'X', lines([9002 + 2 * k, 9003 + 2 * k])));
     const p = pausedOf(L.uh, host), n = W.notices().find((i) => i.i18n && i.i18n.text.params.host === host), rows = ledgerOf(W, host).length;
-    ok(r1 && !ack(r1) && !p && n && n.status === 'done' && rows >= 10,
+    ok(gateOf(r1) && !ack(r1) && !p && gateOf(n) && n.status === 'done' && rows >= 10,
       `⑲ (9, ${v}) a pause that holds nothing (its hold write refused${v === 'boot-eio' ? ', then a boot whose listing failed once' : ', then the bound raised'}), its month in shape and taking rows: ${p ? `still paused (${p.drain ? p.drain.state : p.why})` : 'resumed'}, its notice ${n ? n.status : '—'}, ${rows} rows recorded (9a0d429d: ${v === 'boot-eio' ? 'paused «pending» and its notice open for the rest of the month' : 'paused for its size, the notice open — the base too'})`,
       { p: p && [p.why, p.drain], n: n && n.status, rows });
   }
@@ -1422,7 +1422,7 @@ await leg('⑲', async () => {
     W.todos().flush(); W.reboot();
     const L2 = W.life(); await quiet(() => L2.wired.reconcile());
     const a = W.notices().find((i) => i.i18n && i.i18n.text.params.host === A);
-    ok(/^Usage of M \(dial-M\) for/.test(b1) && a && a.status === 'open' && /^Usage of M \(1a2b3c4d\) for/.test(a.text) && !/\) \(/.test(a.text) && a.i18n.text.params.name === 'M',
+    ok(gateOf(/^Usage of M \(dial-M\) for/.test(b1)) && gateOf(a) && a.status === 'open' && gateOf(/^Usage of M \(1a2b3c4d\) for/.test(a.text)) && !/\) \(/.test(a.text) && a.i18n.text.params.name === 'M',
       `⑲ (10) a label that carries its tag and no name reads as its bare name: the twin filed beside it «${b1.slice(0, 26)}», after the restart's reconcile «${a ? a.text.slice(0, 40) : '—'}» (9a0d429d: the twin filed untagged «M», then «M (1a2b3c4d) (1a2b3c4d)»)`, { b1, a: a && a.text });
   }
 
@@ -1446,7 +1446,7 @@ await leg('⑲', async () => {
     } finally { for (const n of SYNC) fs[n] = real[n]; fs.openSync = ro; fs.readSync = rr; }
     const byFn = seen.reduce((m, n) => ((m[n] = (m[n] || 0) + 1), m), {});
     const onlyListing = Object.keys(byFn).every((n) => n === 'readdirSync') && (byFn.readdirSync || 0) <= 2;
-    ok(onlyListing, `⑲ (11) the loop law: a hold written past its bound, compacted, read back and drained makes ${seen.length} synchronous fs call(s) on _held/ (${JSON.stringify(byFn)}) — only the one listing per process (9a0d429d: every append, the compaction's write, the read-back's reads and the unlinks on the main thread)`, byFn);
+    ok(verdictOf(onlyListing), `⑲ (11) the loop law: a hold written past its bound, compacted, read back and drained makes ${seen.length} synchronous fs call(s) on _held/ (${JSON.stringify(byFn)}) — only the one listing per process (9a0d429d: every append, the compaction's write, the read-back's reads and the unlinks on the main thread)`, byFn);
   }
 
   // ── 12. timedSync ARMS its name BEFORE the call: the sync fs witness's live slot names the store a hung call is made for ──
@@ -1458,7 +1458,7 @@ await leg('⑲', async () => {
     try { if (w) TS.timedSync('usage-shards.write', () => { w.hook.before('appendFileSync', ['/tmp/x'], null); inflight = w.inflight(); w.hook.after('appendFileSync', ['/tmp/x'], 0, Date.now(), undefined, false, null); }); } finally { TS.enable(wasOn); if (TS.reset) TS.reset(); }
     const armedNow = typeof TS.armed === 'function' ? TS.armed() : 'none';
     const words = WIT.callWords ? WIT.callWords({ fn: 'appendFileSync', path: '/d/x', store: 'usage-shards.write', ms: 12000, mount: null }) : '';
-    ok(inflight && inflight.store === 'usage-shards.write' && armedNow === null && /\(usage-shards\.write\)/.test(words),
+    ok(gateOf(inflight) && inflight.store === 'usage-shards.write' && armedNow === null && verdictOf(/\(usage-shards\.write\)/.test(words)),
       `⑲ (12) timedSync arms its name before the call: the witness's live slot names it (${inflight ? inflight.store : '—'}), disarmed after (${armedNow}), its words «${words.slice(0, 60)}» (9a0d429d: recorded only once the call returned — a hung call never named its store)`, { inflight, armedNow });
   }
 
@@ -1518,7 +1518,7 @@ await leg('⑳', async () => {
     const s2 = sum(L2.uh, host), n2 = said(W, host), f2 = W.heldFiles(host);
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'X', lines([9400, 9401])));
     const s3 = sum(L2.uh, host), n3 = said(W, host);
-    ok(s0.held === 15 && s0.dropped === 33 && s1.held === 0 && s1.dropped === 33 && n1 && n1.dropped === 33 && n2 && n2.status === 'open' && n2.dropped === 33 && s2.dropped === 33 && f2.includes('events-2026-10~host-x.0.dropped') && s3.held === 2 && s3.dropped === 33 && n3 && n3.dropped === 33,
+    ok(s0.held === 15 && s0.dropped === 33 && s1.held === 0 && s1.dropped === 33 && gateOf(n1) && n1.dropped === 33 && gateOf(n2) && n2.status === 'open' && n2.dropped === 33 && s2.dropped === 33 && gateOf(f2.includes('events-2026-10~host-x.0.dropped')) && s3.held === 2 && s3.dropped === 33 && gateOf(n3) && n3.dropped === 33,
       `⑳ (1) a drained generation (its set alone on disk, its notice on disk saying 33) read back at a boot still out of shape: paused ${s2.held} + ${s2.dropped}, the notice ${n2 ? `${n2.status} says ${n2.dropped}` : '—'}, the set ${f2.length ? 'kept' : 'GONE'}; + 2 new ⇒ ${s3.held} + ${s3.dropped}, said ${n3 ? n3.dropped : '—'} (3c4fa614: paused 0 + 0, the notice re-worded without its count, the set unlinked — 33 rows said nowhere)`,
       { s0, s1, n1, s2, n2, f2, s3, n3 });
   }
@@ -1540,7 +1540,7 @@ await leg('⑳', async () => {
     const L2 = W.life(true); await quiet(() => L2.wired.reconcile());
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'X', batchOf(NOV + 1, 1)));
     const n = said(W, host), rec = ids.filter((i) => ledgerOf(W.sh, host).includes(hidOf(i, host))).length, f = W.heldFiles(host);
-    ok(refused > 0 && kept.some((x) => x.endsWith('.dropped')) && n && n.dropped === 33 && rec === 15 && !f.length,
+    ok(refused > 0 && gateOf(kept.some((x) => x.endsWith('.dropped'))) && gateOf(n) && n.dropped === 33 && rec === 15 && !f.length,
       `⑳ (2, ${v}) 15 held + 33 dropped, drained with the For-you store refusing its writes (${refused}), the process dead before it could write: the set kept (${kept.join(' ') || 'nothing'}); a restart with the store writable says ${n ? `${n.dropped} (${n.status})` : 'NOTHING'} for ${48 - rec} missing, then ends the hold (${f.length} file(s) left) (3c4fa614: no notice, no file — 33 never said; \`unsaid\` written, never read)`,
       { refused, kept, n, rec, f });
   }
@@ -1570,11 +1570,11 @@ await leg('⑳', async () => {
     // said once. A SEGMENT (acked rows to record — never set aside) keeps r9's state: kept, read again by its timer
     const asides = W.notices().filter((i) => String(i.itemKey || '').startsWith('set-aside\n'));
     if (which === 'segment') {
-      ok(novIn === 6 && nov7 === 7 && answers.every((r) => r && !r.deferred && r.holdFailed && r.holdFailed.length === 1 && r.holdFailed[0].month === '2026-10' && r.holdFailed[0].error === 'EACCES' && r.retryAfter > 0) && lines2 === 1 && reads.length === 1 && readOpen === 'open' && /cannot be read \(EACCES\)/.test(reads[0].text) && reads[0].detail.includes(target) && ack(rB) && after === 'done',
+      ok(novIn === 6 && nov7 === 7 && gateOf(answers.every((r) => r && !r.deferred && r.holdFailed && r.holdFailed.length === 1 && r.holdFailed[0].month === '2026-10' && r.holdFailed[0].error === 'EACCES' && r.retryAfter > 0)) && lines2 === 1 && reads.length === 1 && readOpen === 'open' && gateOf(/cannot be read \(EACCES\)/.test(reads[0].text)) && gateOf(reads[0].detail.includes(target)) && gateOf(ack(rB)) && after === 'done',
         `⑳ (3, the ${which} file EACCES) 6 batches after the restart: November ${novIn} of 6 recorded (${nov7} of 7 once it is read); October answered ${last.holdFailed ? last.holdFailed.map((f) => `${f.month}:${f.error}`).join(',') : last.deferred || '—'}, retryAfter ${last.retryAfter}; ${lines2} «could not be read» line(s); ${reads.length} notice(s) naming ${reads[0] && reads[0].detail.includes(target) ? 'the file' : 'NOT the file'}; the file readable again ⇒ its timer reads it, the next batch ${ack(rB) ? 'acked' : 'NOT acked'}, the notice ${after || '—'} (3c4fa614: every batch «deferred ledger-hold-loading» — November 0 of 6, 2 warn lines a batch, no retryAfter, no notice)`,
         { novIn, answers: answers.map((r) => r && { ack: r.ack, deferred: r.deferred, holdFailed: r.holdFailed, retryAfter: r.retryAfter }), lines2, reads: reads.map((i) => i.text), after, rB: rB && { ack: rB.ack, holdFailed: rB.holdFailed } });
     } else {
-      ok(novIn === 6 && nov7 === 7 && answers.every((r) => r && r.ack && !r.holdFailed && !r.deferred) && lines2 === 1 && !reads.length && asides.length === 1 && /could not be read \(EACCES\) — set aside unread/.test(asides[0].text) && ack(rB) && fs.readdirSync(path.join(W.d, 'usage-history', '_set-aside')).length === 1,
+      ok(novIn === 6 && nov7 === 7 && gateOf(answers.every((r) => r && r.ack && !r.holdFailed && !r.deferred)) && lines2 === 1 && !reads.length && asides.length === 1 && gateOf(/could not be read \(EACCES\) — set aside unread/.test(asides[0].text)) && gateOf(ack(rB)) && fs.readdirSync(path.join(W.d, 'usage-history', '_set-aside')).length === 1,
         `⑳ (3, the set file EACCES — PINS NOW, r14) 6 batches after the restart: November ${novIn} of 6 recorded; October ${answers.filter((r) => r && r.ack && !r.holdFailed).length} of 6 acked at once — the set SET ASIDE unread (${asides.length} notice${asides[0] ? ': «' + asides[0].text + '»' : ''}), ${reads.length} hold-read notice(s), ${lines2} «could not be read» line(s) (a1d92418: retried on its timer — October 0 of 6 acked, while an older set's EACCES was set aside: the rule followed the file's age)`,
         { novIn, answers: answers.map((r) => r && { ack: r.ack, deferred: r.deferred, holdFailed: r.holdFailed }), lines2, reads: reads.map((i) => i.text), asides: asides.map((i) => i.text) });
     }
@@ -1597,7 +1597,7 @@ await leg('⑳', async () => {
     const s1 = sum(L2.uh, host), n1 = said(W, host);
     L2.uh.shapeMaxBytes = 2 * GiB; await quiet(() => L2.uh.ingestRemoteEvents(host, 'X', lines([9404])));
     const n2 = said(W, host), all = [...ids, 9400, 9401, 9402, 9403, 9404], missing = all.filter((i) => !ledgerOf(W.sh, host).includes(hidOf(i, host))).length;
-    ok(n0 && n0.dropped === 33 && s1.held === 4 && s1.dropped === 33 && n1 && n1.dropped === 33 && !n1.earlier && n2 && n2.status === 'done' && n2.dropped === 33 && !n2.earlier && missing === 33,
+    ok(gateOf(n0) && n0.dropped === 33 && s1.held === 4 && s1.dropped === 33 && gateOf(n1) && n1.dropped === 33 && !n1.earlier && gateOf(n2) && n2.status === 'done' && n2.dropped === 33 && !n2.earlier && missing === 33,
       `⑳ (4) one generation read back after a crash (its «dropped» item open, saying ${n0 ? n0.dropped : '—'}) takes 4 new events: paused ${s1.held} + ${s1.dropped}, the notice says ${n1 ? n1.dropped : '—'}${n1 && n1.earlier ? ` + earlier ${n1.earlier}` : ''}; back in shape it closes with ${n2 ? n2.dropped : '—'} for ${missing} missing (3c4fa614: «66» — the item's 33 added again as \`carried\`)`,
       { n0, s1, n1, n2, missing });
   }
@@ -1620,7 +1620,7 @@ await leg('⑳', async () => {
     W.todos().flush(); W.reboot(); die(L1.uh);
     const L2 = W.life(true); await quiet(() => L2.wired.reconcile());
     const n2 = said(W, host), missing = win.filter((i) => !ledgerOf(W.sh, host).includes(hidOf(i, host))).length;
-    ok(s0.held === 12 && s0.dropped === 8 && n1 && n1.status === 'done' && n1.dropped === 0 && n2 && n2.status === 'done' && n2.dropped === 0 && missing === 0,
+    ok(s0.held === 12 && s0.dropped === 8 && gateOf(n1) && n1.status === 'done' && n1.dropped === 0 && gateOf(n2) && n2.status === 'done' && n2.dropped === 0 && missing === 0,
       `⑳ (5, c2f) the end said 0 (the 8 «dropped» were in the ledger), its \`retired\` refused: a restart in shape, the index not in memory, says ${n2 ? `${n2.dropped} (${n2.status})` : '—'} for ${missing} missing (3c4fa614: the closed notice reopened «8 held events were dropped — never recorded» for 0 missing)`,
       { s0, n1, n2, missing });
   }
@@ -1640,7 +1640,7 @@ await leg('⑳', async () => {
     } finally { fs.promises.open = realOpen; }
     const novIn = ledgerOf(W.nov, host).length, waited = saidLines.filter((l) => /read-back of .* has waited/.test(l)).length, inflight = L2.uh._inflight ? L2.uh._inflight.size : -1;
     die(L2.uh); // its read-back never answers: never waited for
-    ok(out.every((b) => !b.timeout && b.r && !ack(b.r) && b.r.holdFailed && b.r.holdFailed[0].error === 'hold-slow') && novIn === 3 && waited >= 1 && hung === 1 && inflight <= 2,
+    ok(gateOf(out.every((b) => !b.timeout && b.r && !ack(b.r) && b.r.holdFailed && b.r.holdFailed[0].error === 'hold-slow')) && novIn === 3 && waited >= 1 && hung === 1 && inflight <= 2,
       `⑳ (6) a read-back that never answers (${hung} open hung): 3 batches answered ${out.map((b) => (b.timeout ? 'NOTHING in 1.5 s' : b.r.holdFailed ? b.r.holdFailed.map((f) => f.error).join(',') : 'acked')).join(' / ')} within the bound (200 ms); November ${novIn} of 3 recorded; ${waited} «has waited» line(s) for the read-back; ${inflight} promise(s) in flight (3c4fa614: no answer at all, 0 November rows, nothing said, a promise per batch piling in flight)`,
       { out: out.map((b) => (b.timeout ? 'timeout' : b.r)), novIn, waited, hung, inflight });
   }
@@ -1663,7 +1663,7 @@ await leg('⑳', async () => {
     if (release) release();
     const [, s2] = await quiet(() => sleep(20)); said7 = said7.concat(s2);
     const waited = said7.filter((l) => /listing of _held has waited/.test(l)).length, back = said7.some((l) => /listed again/.test(l));
-    ok(retries === 1 && st && st.retrying === true && st.retryAfter >= 1 && waited >= 1 && back && !L2.uh.holdListFailed(),
+    ok(retries === 1 && gateOf(st) && st.retrying === true && st.retryAfter >= 1 && waited >= 1 && gateOf(back) && !L2.uh.holdListFailed(),
       `⑳ (7) the listing's retry hangs: «has waited» said ${waited}× while it waits, holdListFailed() says ${st ? `retrying ${st.retrying}, retryAfter ${st.retryAfter} s` : '—'}; released ⇒ ${back ? 'listed again' : 'NOT listed'} (3c4fa614: nothing said until «listed again», holdListFailed() the old state)`,
       { retries, st, waited, back });
   }
@@ -1679,7 +1679,7 @@ await leg('⑳', async () => {
     if (restart) { W.todos().flush(); W.reboot(); L = W.life(); die(L1.uh); await quiet(() => L.wired.reconcile()); } else L.uh.shapeMaxBytes = 64 * KiB;
     await quiet(() => L.uh.ingestRemoteEvents(host, 'S', lines([9400, 9401, 9402, 9403])));
     const s1 = sum(L.uh, host), n1 = said(W, host), items = W.notices().filter((i) => !String(i.itemKey || '').startsWith('hold-read')).length;
-    ok(n0 && n0.status === 'done' && n0.dropped === 36 && s1.held === 4 && s1.dropped === 0 && n1 && n1.status === 'open' && n1.dropped === 0 && n1.earlier === 36 && items === 1,
+    ok(gateOf(n0) && n0.status === 'done' && n0.dropped === 36 && s1.held === 4 && s1.dropped === 0 && gateOf(n1) && n1.status === 'open' && n1.dropped === 0 && n1.earlier === 36 && items === 1,
       `⑳ (8${restart ? ', after a restart' : ''}) a hold closed «36 dropped»; the month's next hold reopens its item: paused ${s1.held} + ${s1.dropped}, the item says ${n1 ? `${n1.dropped} of its own + «Earlier: ${n1.earlier}»` : '—'} (${items} item) (3c4fa614 and 9a0d429d: re-worded without the 36)`,
       { n0, s1, n1, items });
   }
@@ -1772,7 +1772,7 @@ await leg('㉑', async () => {
     const it = W.reads()[0], name = path.basename(seg);
     const inNotice = !!(it && it.detail.includes(`_held/${name} could not be read (EIO)`)), inLine = l2.some((l) => l.includes(`(EIO: ${name})`));
     die(L2.uh);
-    ok(inNotice && inLine,
+    ok(gateOf(inNotice) && verdictOf(inLine),
       `㉑ (2) a read-back whose READ fails (EIO, no path on the error): the notice names ${it ? (/_held\/(\S+) could not be read/.exec(it.detail) || [])[1] : '—'}, the journal «${(l2.find((l) => /could not be read \(EIO/.test(l)) || '—').replace(/^.*\((EIO: [^)]*)\).*$/, '$1')}» — the segment's own name (7f4df6a9: the hold's key, «events-2026-10~host-x» — no such file)`,
       { detail: it && it.detail.split('\n')[0], line: l2.find((l) => /EIO/.test(l)) });
   }
@@ -1789,7 +1789,7 @@ await leg('㉑', async () => {
     await quiet(() => sleep(20));
     const waited = l2.filter((l) => /has waited/.test(l) && l.includes(path.basename(seg)));
     die(L2.uh);
-    ok(waited.length >= 1 && r && !r.timeout && r.r && r.r.holdFailed && r.r.holdFailed[0].error === 'hold-slow',
+    ok(waited.length >= 1 && gateOf(r) && !r.timeout && gateOf(r.r) && gateOf(r.r.holdFailed) && r.r.holdFailed[0].error === 'hold-slow',
       `㉑ (3) a read-back whose close() hangs: «${(waited[0] || '—').slice(8, 90)}…» said ${waited.length}×; the month's batch answered ${r && r.r ? `${r.r.holdFailed ? r.r.holdFailed.map((x) => x.error).join(',') : 'acked'}` : 'NOTHING'} at the bound (7f4df6a9: bounded but never said — the close was the one call outside the road's wrapper)`,
       { waited, r: r && r.r });
   }
@@ -1813,7 +1813,7 @@ await leg('㉑', async () => {
     const slowOk = slow.length === 8 && slow.every((x) => x && x.holdFailed && x.holdFailed[0].error === 'hold-slow' && x.retryAfter >= 1);
     const busyOk = !!(busy && busy.holdFailed && busy.holdFailed[0].error === 'hold-busy' && busy.retryAfter >= 1);
     die(L2.uh);
-    ok(busyOk && slowOk,
+    ok(gateOf(busyOk) && verdictOf(slowOk),
       `㉑ (4) the 9th batch while 8 wait for a read-back: ${busy && busy.holdFailed ? busy.holdFailed[0].error : '—'} with retryAfter ${busy ? busy.retryAfter : '—'} s; the 8 at the bound: ${[...new Set(slow.map((x) => (x && x.holdFailed ? x.holdFailed[0].error : '—')))].join(',')} with retryAfter ${[...new Set(slow.map((x) => (x ? x.retryAfter : '—')))].join(',')} s (7f4df6a9: neither carried one — only a failed read-back's month did)`,
       { busy, slow: slow.slice(0, 2) });
   }
@@ -1835,7 +1835,7 @@ await leg('㉑', async () => {
     await quiet(() => sleep(20));
     const deferred = defs.filter((x) => x && x.deferred === 'ledger-index-loading').length;
     die(L2.uh);
-    ok(deferred === 8 && waiting === 0 && next && !(next.holdFailed && next.holdFailed.some((x) => x.error === 'hold-busy')),
+    ok(deferred === 8 && waiting === 0 && gateOf(next) && !(next.holdFailed && next.holdFailed.some((x) => x.error === 'hold-busy')),
       `㉑ (5) 8 batches deferred whole (a month's index loading) while their October waited: the hold counts ${waiting} waiting after them; the next October batch ${next ? (next.holdFailed ? next.holdFailed.map((x) => x.error).join(',') : next.ack ? 'acked' : 'unacked') : '—'} (7f4df6a9: 8 counted for ever — the next batch refused hold-busy with nobody waiting)`,
       { deferred, waiting, next });
   }
@@ -1860,7 +1860,7 @@ await leg('㉑', async () => {
       const flushLine = all.filter((l) => /not on disk in their notice yet/.test(l));
       // PINNED (r10): the window's end said «(3 more ingest(s) since the last try)» and sent nothing. PINS NOW (r11, a retry is
       // a retry): the window's end TRIES — the count sent again, its line said by that try
-      ok(first === 1 && again === 1 && atEnd === 1 && flushLine.length === 2 && /— tried again now;/.test(flushLine[0] || '') && /\(3 ingest\(s\) since the last try did not try\)/.test(flushLine[1] || ''),
+      ok(first === 1 && again === 1 && atEnd === 1 && flushLine.length === 2 && gateOf(/— tried again now;/.test(flushLine[0] || '')) && verdictOf(/\(3 ingest\(s\) since the last try did not try\)/.test(flushLine[1] || '')),
         `㉑ (6) the store refusing every write: the end's count sent ${first}×, then ${again}× over 4 more ingests (once a window), ${atEnd}× at the window's end; its lines: ${flushLine.length} — «…${(flushLine[1] || '—').slice(-56)}» (7f4df6a9: sent at every ingest — 4 more, a wire line each; 3c8c0501: 0× at the window's end, its line claiming a try)`,
         { first, again, atEnd, evs, flushLine });
     } finally { t.flush = realFlush; t._save = realSave; die(L1.uh); }
@@ -1880,7 +1880,7 @@ await leg('㉑', async () => {
     await quiet(() => sleep(20));
     const slowLines = all.filter((l) => /could not be held \(hold-slow\)/.test(l));
     die(L1.uh);
-    ok(slowLines.length === 2 && /\(6 more batch\(es\) since the last such line\)/.test(slowLines[1] || ''),
+    ok(slowLines.length === 2 && verdictOf(/\(6 more batch\(es\) since the last such line\)/.test(slowLines[1] || '')),
       `㉑ (7) 7 hold-slow batches of one machine, then silence: ${slowLines.length} line(s) — the window's count «${(/\((\d+ more batch\(es\))/.exec(slowLines[1] || '') || [])[1] || 'never said'}» flushed at its end (7f4df6a9: 1 line — the 6 said only with a next batch that never came)`,
       { slowLines });
   }
@@ -1898,10 +1898,10 @@ await leg('㉑', async () => {
     try { await quiet(() => L.wired.reconcile()); await quiet(() => sleep(50)); } finally { t.flush = realFlush; t._save = realSave; }
     const n = said(W, host), left = W.heldFiles(host), items = W.notices().length;
     die(L.uh);
-    if (!refuse) ok(n && n.dropped === 5 && n.earlier === 33 && items === 1 && !left.includes(`events-2026-10~${host}.0.dropped`),
+    if (!refuse) ok(gateOf(n) && n.dropped === 5 && n.earlier === 33 && items === 1 && !left.includes(`events-2026-10~${host}.0.dropped`),
       `㉑ (8) two set files at a boot (generation 0: 33, generation 2: 5): the one item says ${n ? `${n.dropped} + «Earlier: ${n.earlier}»` : '—'}, generation 0's file ${left.includes(`events-2026-10~${host}.0.dropped`) ? 'kept' : 'unlinked once said'} (7f4df6a9: 5, generation 0 deleted unread — its 33 said nowhere)`,
       { n, left, items });
-    else ok(left.includes(`events-2026-10~${host}.0.dropped`),
+    else ok(verdictOf(left.includes(`events-2026-10~${host}.0.dropped`)),
       `㉑ (8, the store refusing writes) generation 0's set ${left.includes(`events-2026-10~${host}.0.dropped`) ? 'stays on disk until its count is said' : 'GONE, its count unsaid'} (7f4df6a9: deleted unread)`, { left });
   }
 
@@ -1937,7 +1937,7 @@ await leg('㉑', async () => {
     const a = run(false), b = run(true);
     let nested = 0; { const ops = []; let clock = 0; const undo = BT.wrapSync({ ops, now: () => (clock += 0.01) }); try { for (let i = 0; i < 1000; i++) fs.readFileSync(f); } finally { undo(); } nested = ops.filter((o) => !o.nested).length; }
     const good = (hs) => hs.every((x) => x.named && x.ms > 0 && x.ms <= x.cap);
-    ok(good(a) && good(b) && nested <= 10,
+    ok(gateOf(good(a)) && gateOf(good(b)) && nested <= 10,
       `㉑ (10) the tracer: two 240 ms holds of short calls — hold 1 ${a[0].ms} ms, hold 2 ${a[1].ms} ms (the loop turning between them: ${b[0].ms} + ${b[1].ms}), each naming its site; 1000 readFileSync at one site fold into ${nested} op(s) (7f4df6a9: ONE op of 600 calls — hold 1 credited 300 ms of its 240, hold 2 «sites: []»; 1000 ops, one per read)`,
       { a, b, nested });
   }
@@ -1992,7 +1992,7 @@ await leg('㉒', async () => {
       });
     } finally { t.flush = realFlush; t._save = realSave; die(L1.uh); }
     const tries = out.filter((l) => /not on disk in their notice yet/.test(l));
-    ok(sends >= 1 && !unsaid && files.length === 0 && ended !== null && ended <= 300 + 250 && tries.length >= 1 && tries.every((l) => /— tried again now;/.test(l)),
+    ok(sends >= 1 && !unsaid && files.length === 0 && ended !== null && ended <= 300 + 250 && tries.length >= 1 && verdictOf(tries.every((l) => /— tried again now;/.test(l))),
       `㉒ (1) the store back while the machine sends every 100 ms (window 300 ms): the count sent ${sends}× during the ingests, the hold ended ${ended} ms after the store came back, its set file ${files.length ? 'KEPT' : 'gone'}; ${tries.length} «tried again» line(s), each said by a try (3c8c0501: sent 0×, the hold unsaid for as long as the machine sends, «tried again at most once a minute (3 more ingest(s) since the last try)» 7× with no try)`,
       { sends, unsaid, files, ended, tries: tries.map((l) => l.slice(-110)) });
   }
@@ -2027,7 +2027,7 @@ await leg('㉒', async () => {
       return { ack: r.ack, err: (r.holdFailed || []).map((x) => x.error).join(','), files, back, said: out.some((l) => /could not be held \(hold-gen-max\)/.test(l)) };
     };
     const a = await life('w22c', 1e9), b = await life('w22c2', 999999998);
-    ok(!a.ack && a.err === 'hold-gen-max' && a.files.length === 0 && a.said && b.ack && b.files.length >= 1 && b.files.every((x) => x.includes('.999999999')) && b.back === 5,
+    ok(!a.ack && a.err === 'hold-gen-max' && a.files.length === 0 && gateOf(a.said) && gateOf(b.ack) && b.files.length >= 1 && gateOf(b.files.every((x) => x.includes('.999999999'))) && b.back === 5,
       `㉒ (3) a stored generation 1e9: the next hold ${a.ack ? 'ACKED' : 'refused'} (${a.err || '—'}${a.said ? ', said' : ''}), ${a.files.length} file(s) written; 999 999 998: acked, ${b.files.join(',')}, ${b.back} read back at a restart (3c8c0501: acked, held 5 in events-2026-10~host-x.1000000001000000.ndjson — the next boot's listing skips it, 0 read back)`,
       { a, b });
   }
@@ -2086,9 +2086,9 @@ await leg('㉒', async () => {
     }
     const g = (k) => got[k] || {};
     const setAside = (x) => !x.kept && x.aside === 1 && x.intact && x.said === 1;
-    ok(setAside(g('binary bytes')) && setAside(g('«gone» no list')) && !g('a torn last line').aside && !g('a hole before a line').aside
-      && !g('a torn last line').kept && g('a torn last line').torn && g('a torn last line').earlier === 10 && g('a hole before a line').earlier === 7 && !g('a hole before a line').kept
-      && Object.values(got).every((x) => x.dropped === 5),
+    ok(gateOf(setAside(g('binary bytes'))) && gateOf(setAside(g('«gone» no list'))) && !g('a torn last line').aside && !g('a hole before a line').aside
+      && !g('a torn last line').kept && gateOf(g('a torn last line').torn) && g('a torn last line').earlier === 10 && g('a hole before a line').earlier === 7 && !g('a hole before a line').kept
+      && verdictOf(Object.values(got).every((x) => x.dropped === 5)),
       `㉒ (5) a set file that is no set file: binary bytes ${setAside(g('binary bytes')) ? 'SET ASIDE (bytes intact) + said once' : g('binary bytes').kept ? 'KEPT in _held/' : 'UNLINKED'}, {"gone":"33"} ${setAside(g('«gone» no list')) ? 'SET ASIDE (bytes intact) + said once' : g('«gone» no list').kept ? 'KEPT in _held/' : 'UNLINKED'}; a torn last line: «Earlier: ${g('a torn last line').earlier}»${g('a torn last line').torn ? ', said torn' : ''}; a hole before a line: «Earlier: ${g('a hole before a line').earlier}» (3c8c0501: the garbage read as 0 and UNLINKED, nothing said; 935a9f0b: KEPT «read again at the next start» — the month's live hold once the newer one ended, ㉓ (2))`,
       got);
   }
@@ -2111,7 +2111,7 @@ await leg('㉒', async () => {
     let fds; try { fds = [readerA(f), readerB(path.join(REPO, 'src/server/boot-trace.js'))]; } finally { undo(); fs.readSync = realRead; }
     const reads = ops2.filter((o) => o.op === 'fs.readSync').map((o) => ({ n: o.n, line: (here.exec(o.site) || [])[1] }));
     const lines2 = Object.keys(by);
-    ok(lines2.length === 2 && Object.values(by).every((ms) => ms >= 30 && ms <= 50) && fds[0] === fds[1] && new Set(reads.map((r) => r.line)).size === 2 && reads.reduce((a, r) => a + r.n, 0) === 40,
+    ok(lines2.length === 2 && gateOf(Object.values(by).every((ms) => ms >= 30 && ms <= 50)) && fds[0] === fds[1] && new Set(reads.map((r) => r.line)).size === 2 && reads.reduce((a, r) => a + r.n, 0) === 40,
       `㉒ (6) the tracer: two sites alternating statSync on one path — ${lines2.length} site(s) named (${Object.entries(by).map(([l, ms]) => `line ${l} ${ms} ms`).join(', ')}); two readers on a reused fd (#${fds[0]}, #${fds[1]}) — ${reads.length} op(s) at ${new Set(reads.map((r) => r.line)).size} site(s) (3c8c0501: one site, credited all 80 ms — the second never named; the second reader's 20 reads folded into the first's op)`,
       { by, reads, fds });
   }
@@ -2126,7 +2126,7 @@ await leg('㉒', async () => {
     let base, inTurn;
     try { gc(); base = mb(); for (let k = 0; k < 40; k++) { const s = JSON.stringify({ k, pad: 'x'.repeat(2 * MiB) }); JSON.parse(s); } gc(); inTurn = mb(); } finally { undo(); }
     const shown = ops.filter((o) => o.op === 'JSON.parse').map((o) => o.site.length);
-    ok(inTurn - base < 32 && shown.every((n) => n < 400),
+    ok(inTurn - base < 32 && verdictOf(shown.every((n) => n < 400)),
       `㉒ (7) the tracer: 40 JSON.parse of 2 MiB in one turn — the heap ${Math.round(base)} → ${Math.round(inTurn)} MiB within the turn, ${shown.length} op(s), the longest site ${Math.max(0, ...shown)} chars (3c8c0501: 4 → 166 MiB — each text kept in its run's key)`,
       { base, inTurn, shown });
   }
@@ -2190,7 +2190,7 @@ await leg('㉓', async () => {
       && /^\[usage\] the hold events-2026-10~host-x: line 2 of events-2026-10~host-x\.\d+\.dropped \(generation \d+\) is no record of a set .* set aside, its bytes intact, as _set-aside\/events-2026-10~host-x\.\d+\.dropped\.\d{8}T\d{6}Z; the set rewritten from its 1 record\(s\) — the hold goes on$/.test(g.line)
       && typeof g.item === 'string' && /^What: line 2 of data\/usage-history\/_held\/events-2026-10~host-x\.\d+\.dropped is no record VibeSpace writes\. VibeSpace kept every other record of the file and set the line aside: the file as it was, bytes intact, is data\/usage-history\/_set-aside\/events-2026-10~host-x\./.test(g.item)
       && g.urgency === 'normal' && !g.permissions && !g.readFailed && !g.life3.said && !g.life3.held && !g.life3.readFailed && g.life3.asides === 1 && g.life3.itemOpen === 1;
-    ok(Object.values(got).every(good),
+    ok(verdictOf(Object.values(got).every(good)),
       `㉓ (1) a LIVE generation's set with a line that is no record — ${Object.entries(got).map(([n, g]) => `${n}: ${g.recorded} of ${g.of} rows recorded, every batch ${g.acked && !g.holdFailed.length ? 'acked' : 'NOT acked (' + g.holdFailed.join(',') + ')'}, _held/ ${g.held.length ? 'holds ' + g.held.join(',') : 'empty'}, ${g.asides} file(s) set aside${g.intact ? ' (its bytes intact)' : ''}, said ${g.said}× in the journal, ${typeof g.item === 'string' ? 'its notice names the file + line 2 + the copy' : (g.item || 0) + ' notice(s)'}${g.permissions ? ', «permissions» said' : ''}; life 3 ${g.life3.said || g.life3.held || g.life3.readFailed ? 'NOT clean' : 'clean'} (the notice kept open: ${g.life3.itemOpen})`).join(' · ')} (935a9f0b: the read-back threw set-garbage for ever — 0 of 21 recorded, the batch unacked, «check the file's permissions»)`,
       got);
   }
@@ -2229,7 +2229,7 @@ await leg('㉓', async () => {
       die(L3.uh);
     }
     const good = (g) => !g.held1.length && g.asides === 1 && g.intact && g.said === 1 && g.dropped === (g.earlier ? `0:${g.earlier},2:5` : '2:5') && g.acks.length === 3 && g.acks.every(Boolean) && !g.failed2 && !g.failed3 && g.recorded3 === 6 && !g.held3.length && /set aside/.test(g.item);
-    ok(Object.values(got).every(good),
+    ok(verdictOf(Object.values(got).every(good)),
       `㉓ (2) an OLDER generation's set that is no set, across three lives — ${Object.entries(got).map(([n, g]) => `${n}: life 1 set it aside (${g.asides} file${g.intact ? ', bytes intact' : ''}; _held/ ${g.held1.length ? 'holds ' + g.held1.join(',') : 'empty'}; counts said ${g.dropped}), said ${g.said}× over 3 lives; life 2 out of shape: ${g.acks.filter(Boolean).length} of 3 batches acked${g.failed2 ? ', a read-back FAILED' : ''}; life 3: ${g.failed3 ? 'a read-back FAILED' : 'clean'}, ${g.recorded3} of 6 rows recorded, _held/ ${g.held3.length ? 'holds ' + g.held3.join(',') : 'empty'}`).join(' · ')} (935a9f0b: the file kept «read again at the next start», life 2 read it as the month's live hold — 0 of 3 acked, set-garbage at every start)`,
       got);
   }
@@ -2273,7 +2273,7 @@ await leg('㉓', async () => {
     [a2, out2] = await quiet(async () => { L2.wired.reconcile(); await sleep(60); await settle(); return L2.uh.ingestRemoteEvents(host, 'X', lines([9700])); });
     const writer = { set, ack: !!(a2 && a2.ack), holdFailed: ((a2 && a2.holdFailed) || []).map((x) => x.error), readFailed: L2.uh._readFail.size, aside: asideSaid(out2).length + blocked(out2).length, gone: (L2.uh._holds.get(`events-2026-10~${host}`) || { gone: new Set() }).gone.size };
     die(L2.uh);
-    ok(Object.values(got).every((x) => x.got === x.want) && writer.set === rec + '{\n{"checked":2}\n' && writer.ack && !writer.holdFailed.length && !writer.readFailed && !writer.aside && writer.gone === 2,
+    ok(gateOf(Object.values(got).every((x) => x.got === x.want)) && writer.set === rec + '{\n{"checked":2}\n' && gateOf(writer.ack) && !writer.holdFailed.length && !writer.readFailed && !writer.aside && writer.gone === 2,
       `㉓ (3) the set's reader by the writer's grammar — ${Object.entries(got).map(([n, x]) => `${n}: ${x.got}${x.got === x.want ? '' : ' (want ' + x.want + ')'}`).join(' · ')}; OUR writer's own one-byte cut (${JSON.stringify(writer.set.slice(rec.length))}): a restart out of shape ${writer.ack ? 'acks' : 'does NOT ack'} the batch${writer.holdFailed.length ? ' (' + writer.holdFailed.join(',') + ')' : ''}, ${writer.gone} dropped read back, ${writer.aside ? 'said garbage' : 'nothing set aside'} (935a9f0b: «{» and «{\\n{…}» threw set-garbage — the live hold failed for ever; a «{"» tail with garbage after its 64th byte read as cut)`,
       { got, writer });
   }
@@ -2307,10 +2307,10 @@ await leg('㉓', async () => {
     const second = { items: items.length, reopened: !!again && again.status === 'open', reworded: !!again && firstDetail !== again.detail, said: asideSaid(out3).length, asides: W.aside().length };
     die(L3.uh);
     const g = (k) => got[k] || {};
-    ok(g('_set-aside full').ack && g('_set-aside full').recorded === g('_set-aside full').of && /not copied \(_set-aside holds \d+ files, its bound\); the set rewritten from its 1 record\(s\) — the hold goes on/.test(g('_set-aside full').line) && /already holds \d+ files, so no copy of it was kept/.test(g('_set-aside full').item)
-      && g('_set-aside unwritable').ack && g('_set-aside unwritable').recorded === g('_set-aside unwritable').of && /it could not be set aside \(E[A-Z]+\); read past those lines \(the file kept as it is; set aside at its next read\) — the hold goes on/.test(g('_set-aside unwritable').line) && /read past the line; it could not set the file aside \(E[A-Z]+\)/.test(g('_set-aside unwritable').item)
-      && Object.values(got).every((x) => x.said === 1 && !x.readFailed)
-      && second.items === 1 && second.reopened && second.reworded && second.said === 1 && second.asides === 2,
+    ok(gateOf(g('_set-aside full').ack) && g('_set-aside full').recorded === g('_set-aside full').of && gateOf(/not copied \(_set-aside holds \d+ files, its bound\); the set rewritten from its 1 record\(s\) — the hold goes on/.test(g('_set-aside full').line)) && gateOf(/already holds \d+ files, so no copy of it was kept/.test(g('_set-aside full').item))
+      && gateOf(g('_set-aside unwritable').ack) && g('_set-aside unwritable').recorded === g('_set-aside unwritable').of && gateOf(/it could not be set aside \(E[A-Z]+\); read past those lines \(the file kept as it is; set aside at its next read\) — the hold goes on/.test(g('_set-aside unwritable').line)) && gateOf(/read past the line; it could not set the file aside \(E[A-Z]+\)/.test(g('_set-aside unwritable').item))
+      && gateOf(Object.values(got).every((x) => x.said === 1 && !x.readFailed))
+      && second.items === 1 && gateOf(second.reopened) && gateOf(second.reworded) && second.said === 1 && second.asides === 2,
       `㉓ (4) the words — the bound: ${g('_set-aside full').recorded} of ${g('_set-aside full').of} recorded, «${(g('_set-aside full').line.split(' — ')[1] || '').slice(0, 120)}»; an unwritable _set-aside: ${g('_set-aside unwritable').recorded} of ${g('_set-aside unwritable').of} recorded, «${(g('_set-aside unwritable').line.split(' — ')[1] || '').slice(0, 140)}»; a second line on one hold: ${second.items} notice (${second.reopened ? 'reopened' : 'NOT reopened'}, ${second.reworded ? 're-worded' : 'NOT re-worded'}), ${second.asides} copies (935a9f0b: every one of these blocked the month — set-garbage)`,
       { got, second });
   }
@@ -2360,7 +2360,7 @@ await leg('㉔', async () => {
   {
     const want = { EMFILE: 'passes', ENFILE: 'passes', ENOMEM: 'passes', ESTALE: 'passes', ETIMEDOUT: 'passes', EAGAIN: 'passes', EBUSY: 'passes', EACCES: 'refused', EISDIR: 'refused', ENOTDIR: 'refused', ENXIO: 'refused', EIO: 'once', EPERM: 'once', 'EWHATEVER': 'once' };
     const got = Object.fromEntries(Object.keys(want).map((c) => [c, typeof RD.setReadClass === 'function' ? RD.setReadClass(c) : 'NO CLASSIFIER']));
-    ok(Object.keys(want).every((c) => got[c] === want[c]),
+    ok(verdictOf(Object.keys(want).every((c) => got[c] === want[c])),
       `㉔ (1) ONE classifier for a set whose read throws — ${['passes', 'refused', 'once'].map((k) => `${k}: ${Object.keys(got).filter((c) => got[c] === k).join(' ') || '—'}`).join(' · ')}${Object.values(got).includes('NO CLASSIFIER') ? ' (a1d92418: NO CLASSIFIER — the file\'s age decided)' : ''}`, got);
   }
 
@@ -2382,7 +2382,7 @@ await leg('㉔', async () => {
       die(L2.uh);
     }
     const good = (c, g) => g.kept1 && g.marked1 === (c === 'EIO') && !g.asides1 && g.said1 === 1 && g.dropped1 === '2:5' && g.dropped2.split(',').includes('0:7') && !g.held2.length && !g.asides2 && g.earlier;
-    ok(Object.entries(got).every(([c, g]) => good(c, g)),
+    ok(verdictOf(Object.entries(got).every(([c, g]) => good(c, g))),
       `㉔ (2) an OLDER generation's set whose read fails with what passes — ${Object.entries(got).map(([c, g]) => `${c}: life 1 ${g.kept1 ? 'KEPT' : 'NOT kept'}${g.marked1 ? ' + marked' : ''}${g.asides1 ? `, ${g.asides1} SET ASIDE` : ''}, said ${g.said1}× over two reads; life 2 said ${g.dropped2 || 'nothing'}${g.earlier ? ' («7» in its notice)' : ''}, _held/ ${g.held2.length ? 'holds ' + g.held2.join(',') : 'empty'}`).join(' · ')} (a1d92418: moved aside unread at life 1 — «its count is not known», the 7 never said)`,
       got);
   }
@@ -2411,7 +2411,7 @@ await leg('㉔', async () => {
         && (c === 'EIO twice' ? a.kept === 1 && a.held.includes(`${base}.0.dropped.unread`) && !a.asides.length && setAt.twice && g.twiceLine && !setAt.held.some((f) => f.endsWith('.unread')) : !g.twiceLine)
         && !z.kept && !z.unread && !z.held.length && z.asides.length === 1 && (c === 'EIO twice' || (!b.kept && !b.unread));
     };
-    ok(Object.entries(got).every(([c, g]) => good(c, g)),
+    ok(verdictOf(Object.entries(got).every(([c, g]) => good(c, g))),
       `㉔ (3) the disk's refusal — ${Object.entries(got).map(([c, g]) => `${c}: ${g.lifeOf.map((l, i) => `life ${i + 1} ${l.unread ? 'SET ASIDE unread' : l.kept ? 'kept' + (l.held.some((f) => f.endsWith('.unread')) ? ' + marked' : '') : l.held.length ? 'holds ' + l.held.join(',') : 'clean'}`).join(', ')}${g.intact ? ' (bytes intact)' : ''}${g.twiceLine ? ', said as the disk\'s answer' : ''}`).join(' · ')} (a1d92418: every one set aside at life 1 — an EIO too)`,
       got);
   }
@@ -2449,7 +2449,7 @@ await leg('㉔', async () => {
     const okE = e.said3 && !e.lives[0].acks.some(Boolean) && e.lives[0].late && !e.lives[0].asides && e.lives[0].gone === 3;
     const okA = a.said3 && a.lives[0].acks.every(Boolean) && a.lives[0].asides === 1 && /could not be read \(EACCES\) — set aside unread/.test(a.lives[0].asideItem) && !a.lives[0].readItems && a.lives[0].earlier3;
     const okI = i.said3 && !i.lives[0].acks.some(Boolean) && i.lives[0].marked && !i.lives[0].asides && i.lives[1].acks.every(Boolean) && i.lives[1].asides === 1 && !i.lives[1].marked && /could not be read \(EIO\) — set aside unread/.test(i.lives[1].asideItem) && i.lives[1].earlier3;
-    ok(okE && okA && okI,
+    ok(gateOf(okE) && gateOf(okA) && verdictOf(okI),
       `㉔ (4) the LIVE road, the same classifier — EMFILE: ${e.lives[0].acks.filter(Boolean).length} of 2 acked while it failed, read again by its timer ⇒ the next batch ${e.lives[0].late ? 'acked' : 'NOT acked'}, ${e.lives[0].asides} set aside, its count ${e.lives[0].gone} kept · EACCES: ${a.lives[0].acks.filter(Boolean).length} of 2 acked at once, ${a.lives[0].asides} set aside unread, ${a.lives[0].readItems} hold-read notice(s), the notice's 3 ${a.lives[0].earlier3 ? 'kept as «Earlier»' : 'NOT kept'} · EIO: start 1 ${i.lives[0].acks.filter(Boolean).length} of 2 acked${i.lives[0].marked ? ', marked' : ''}; start 2 ${i.lives[1].acks.filter(Boolean).length} of 2 acked, ${i.lives[1].asides} set aside unread${i.lives[1].earlier3 ? ', the 3 kept as «Earlier»' : ''} (a1d92418: every live read error retried — EACCES unacked for ever — while an older one's was set aside)`,
       got);
   }
@@ -2486,7 +2486,7 @@ await leg('㉔', async () => {
       got[name] = { copy, still, goneFile, headOk, whatOk, text: it ? it.text.split(' — ')[1] : 'NO NOTICE', what: what.slice(0, 160) };
       die(L.uh);
     }
-    ok(Object.values(got).every((g) => g.headOk && g.whatOk),
+    ok(verdictOf(Object.values(got).every((g) => g.headOk && g.whatOk)),
       `㉔ (5) the words follow the event — ${Object.entries(got).map(([n, g]) => `${n}: «${g.text}»${g.headOk && g.whatOk ? '' : ' ✗ (' + (g.copy ? 'a copy' : 'no copy') + ', ' + (g.goneFile ? 'the file gone' : g.still ? 'the line still in it' : 'the line gone') + ': «' + g.what + '»)'}`).join(' · ')} (a1d92418: «set aside» with no copy, «removed the line» with the line still in, «kept every other record» for a file deleted)`,
       got);
   }
@@ -2557,7 +2557,7 @@ await leg('㉕', async () => {
     const whole = (g) => !g.acks.some(Boolean) && g.under.held.some((f) => f.endsWith('.dropped')) && g.under.intact && !g.under.asides && !g.under.marked && g.under.read === 1 && !g.under.aside;
     const back = (g) => g.late && g.gone === 3 && !g.asides && !g.read && !g.aside && g.maybe;
     const okM = !m.acks.some(Boolean) && m.late && m.asides === 1 && !m.read && m.aside === 1 && m.order[0] >= 0 && m.order[1] > m.order[0];
-    ok(whole(a) && back(a) && whole(e) && back(e) && okM,
+    ok(gateOf(whole(a)) && gateOf(back(a)) && gateOf(whole(e)) && gateOf(back(e)) && verdictOf(okM),
       `㉕ (1) the hold is read whole before anything is decided — ${[['set + segment EACCES', a], ['set EIO + segment EACCES', e]].map(([n, g]) => `${n}: under the fault ${g.acks.filter(Boolean).length} of 2 acked, the set ${g.under.intact ? 'KEPT as it was' : g.under.asides ? 'SET ASIDE' : 'CHANGED'}${g.under.marked ? ' + MARKED' : ''}, ${g.under.read} hold-read + ${g.under.aside} set-aside notice(s) open; fixed ⇒ the next batch ${g.late ? 'acked' : 'NOT acked'}, the hold gone ${g.gone}${g.maybe ? ' (its 3 still «may already be recorded»)' : ''}, ${g.asides} set aside, ${g.read + g.aside} notice(s) open`).join(' · ')} · set EACCES + segment EMFILE once: ${m.asides} set aside ${m.order[0] < 0 ? '— the failed read NOT naming the segment' : m.order[1] > m.order[0] ? 'only at the read that read the hold whole (after the failed one, which named the segment)' : m.order[1] >= 0 ? 'BEFORE its segment was read' : '—'}, the month ${m.late ? 'acked' : 'NOT acked'}, ${m.read + m.aside} notice(s) open (f3027952: the set moved for good while the month waited, «set aside unread; nothing waits» beside «that month waits»)`,
       got);
   }
@@ -2595,7 +2595,7 @@ await leg('㉕', async () => {
     const o = got.older, g = got.garbage;
     const okO = o.under.held.includes(`${base}.0.dropped`) && !o.under.asides && !o.under.marked && o.under.read === 1 && !o.under.aside && o.late && o.said7 && o.oldGone && !o.asides && !o.read && !o.aside;
     const okG = !g.under.asides && g.under.intact && g.under.read === 1 && !g.under.aside && g.late && g.asides === 1 && g.rewritten && !g.read && g.aside === 1;
-    ok(okO && okG,
+    ok(gateOf(okO) && verdictOf(okG),
       `㉕ (2) an older set's judgement and a live set's lines that are no record wait for the hold — the older set refused beside a refused segment: ${o.under.asides ? `${o.under.asides} SET ASIDE` : 'kept'}${o.under.marked ? ' + MARKED' : ''}, ${o.under.read} hold-read + ${o.under.aside} set-aside notice(s); fixed ⇒ its 7 ${o.said7 ? 'said' : 'NOT said'}, the month ${o.late ? 'acked' : 'NOT acked'} · a live set with a line that is no record beside a refused segment: ${g.under.asides ? 'COPIED' : 'not copied'}, ${g.under.intact ? 'not rewritten' : 'REWRITTEN'}, ${g.under.read} + ${g.under.aside} notice(s); fixed ⇒ ${g.asides} copied, ${g.rewritten ? 'rewritten' : 'NOT rewritten'}, ${g.aside} set-aside notice, the month ${g.late ? 'acked' : 'NOT acked'}`,
       got);
   }
@@ -2627,8 +2627,8 @@ await leg('㉕', async () => {
     got.part = (n.detail.split('\n').find((l) => /^Earlier:/.test(l)) || '');
     got.partParams = n.i18n.text.params.maybe || '';
     const NK = /^Earlier: (\d+) held events of 2026-10 had been dropped past the bound — counted; whether they were recorded is not known\.$/;
-    ok(NK.test(got.keepLost.line) && /^Earlier: 3 /.test(got.keepLost.line) && /(^|,)\?:3(,|$)/.test(got.keepLost.maybe) && NK.test(got['older unchecked']) && /^Earlier: 7 /.test(got['older unchecked'])
-      && /^Earlier: 7 held events of 2026-10 had been dropped past the bound — counted, never recorded\.$/.test(got['older checked'])
+    ok(gateOf(NK.test(got.keepLost.line)) && gateOf(/^Earlier: 3 /.test(got.keepLost.line)) && gateOf(/(^|,)\?:3(,|$)/.test(got.keepLost.maybe)) && gateOf(NK.test(got['older unchecked'])) && gateOf(/^Earlier: 7 /.test(got['older unchecked']))
+      && gateOf(/^Earlier: 7 held events of 2026-10 had been dropped past the bound — counted, never recorded\.$/.test(got['older checked']))
       && got.part === 'Earlier: 12 held events of 2026-10 had been dropped past the bound — counted, never recorded; for 7 of them that is not known.' && got.partParams === '0:7',
       `㉕ (3) a count nobody checked is «not known» — the live set refused after its 3 «may already be recorded»: «${got.keepLost.line.replace(/^Earlier: /, '') || 'NO LINE'}» · an older set read at a boot, unchecked: «${got['older unchecked'].replace(/^Earlier: /, '')}», checked: «${got['older checked'].replace(/^Earlier: /, '')}» · a part not known (PURE): «${got.part.replace(/^Earlier: /, '')}» (f3027952: every one «counted, never recorded»)`,
       got);
@@ -2651,7 +2651,7 @@ await leg('㉕', async () => {
       die(L.uh);
     }
     const good = cls === 'passes' && lives[0].kept && lives[1].kept && !lives[0].marked && !lives[1].marked && !lives.some((l) => l.asides) && !lives[0].said7 && !lives[1].said7 && lives[2].said7 && !lives[2].kept;
-    ok(good,
+    ok(verdictOf(good),
       `㉕ (4) a codeless error passes — readClassOf(RangeError «Array buffer allocation failed») = ${cls}; an older set failing so at two starts: ${lives.map((l, i) => `life ${i + 1} ${l.asides ? 'SET ASIDE' : l.kept ? 'kept' + (l.marked ? ' + MARKED' : '') : 'gone'}${l.said7 ? ', its 7 said' : ''}`).join(', ')}`,
       { cls, lives });
   }
@@ -2780,7 +2780,7 @@ await leg('㉖', async () => {
     const okC = c.named.includes(`_held/${c.df} could not be read (EMFILE)`) && c.also.includes(`${c.seg} (EACCES)`) && /\(EMFILE\)/.test(c.text) && c.closed === 'done' && c.blocks.join() === c.seg && acked(c.ack) && c.reads === 1
       && c.journal.length === 2 && c.journal[0].includes(`(EMFILE: ${c.df}, EACCES: ${c.seg})`) && c.journal[1].includes(`now (EACCES: ${c.seg})`);
     const okD = d.named.includes(`_held/${d.s1} could not be read (EACCES)`) && d.also.includes(`${d.s2} (EIO)`) && d.after.same && d.after.status === 'open' && d.after.named.includes(`_held/${d.s2} could not be read (EIO)`) && !d.after.also && acked(d.ack) && d.reads === 1 && !d.readOpen;
-    ok(okA && okB && okC && okD,
+    ok(gateOf(okA) && gateOf(okB) && gateOf(okC) && verdictOf(okD),
       `㉖ (1) what blocks the month is named — set + segment EACCES: the notice names «${a.named.replace(/^What: data\/usage-history\/_held\//, '')}»; the segment fixed ⇒ the month ${acked(a.ack) ? 'acked' : 'NOT acked'}, the set ${a.setKept ? 'kept' : 'set aside'} (${a.asideOpen} set-aside notice), ${a.readOpen} hold-read open · the SET fixed first ⇒ the notice ${segNamed(b.mid) ? 'still names the segment' : `names «${b.mid.named.replace(/^What: data\/usage-history\/_held\//, '')}»`}${b.mid.same ? ' (the same item)' : ''}, the month ${acked(b.mid.ack) ? 'ACKED' : 'waits'}; then the segment ⇒ ${acked(b.ack) ? 'acked' : 'NOT acked'}, gone ${b.gone} · BOTH block (the set's EMFILE, the segment's EACCES): ${c.named.includes(c.df) && c.also.includes(c.seg) ? 'both named' : `«${c.named}» / «${c.also}»`}; closed by the owner, the set's error passing ⇒ the item ${c.closed === 'done' ? 'stays closed' : `REOPENED (${c.closed})`}, the journal «now (EACCES: …ndjson)» ${c.journal.length === 2 ? 'said' : `${c.journal.length} line(s)`} · two segments refused ⇒ ${d.also ? 'both named' : 'ONE named'}; one fixed ⇒ ${d.after.same ? 'the same item' : 'ANOTHER item'} re-worded to «${d.after.named.replace(/^What: data\/usage-history\/_held\//, '')}», ${d.reads} hold-read item(s) (b553b51b: the set named — fixing it left the month waiting, the segment never named; a changed blocker never said)`,
       got);
   }
@@ -2808,7 +2808,7 @@ await leg('㉖', async () => {
     } finally { undo(); }
     die(L.uh);
     const good = under.tries >= 5 && under.said0 === 0 && st.every((x) => x === 'done') && under.kept && !under.marked && !under.asides && after.said0 === 1 && after.late && after.oldGone && after.asides === 1 && /^Earlier: 7 /.test(after.earlier);
-    ok(good,
+    ok(verdictOf(good),
       `㉖ (2) nothing of an older set is said before the hold is read whole — an older set (7, a line that is no record) beside a live segment that keeps failing (EIO, ${under.tries} tries): its count said ${under.said0}×, the month's item after each of 5 owner closes: ${st.join(', ')}; the older set ${under.kept ? 'kept' : 'GONE'}${under.marked ? ' + MARKED' : ''}, ${under.asides} set aside · the segment fixed ⇒ its 7 said ${after.said0}× («${after.earlier.replace(/^Earlier: /, '').slice(0, 60)}…»), the file ${after.asides ? 'set aside' : after.oldGone ? 'gone' : 'KEPT'}, the month ${after.late ? 'acked' : 'NOT acked'} (b553b51b: said at every retry — 5 of 5 closes undone)`,
       { st, under, after });
   }
@@ -2837,7 +2837,7 @@ await leg('㉖', async () => {
     const good = got.items === 1 && got.evs === 1 && got.asides === 2 && at2 >= 0 && at0 > at2 && /^2 held usage files of \S+ for 2026-10 /.test(got.text) && /misses the ones these files named\.$/.test(got.now)
       && pure.sixWhat === 4 && /^And 2 more file\(s\) of this hold/.test(pure.sixMore) && /^6 held usage files/.test(pure.sixHead) && pure.oneSame && /^A held usage file of X for 2026-10 could not be read \(EACCES\) — set aside unread; nothing waits$/.test(pure.oneHead)
       && pure.rdAlso === 'Not the only one: b.ndjson (EIO), c.ndjson (EIO), d.ndjson (EIO), e.ndjson (EIO) (+1) in the same folder could not be read either — the events of 2026-10 wait until every one of them is read.';
-    ok(good,
+    ok(verdictOf(good),
       `㉖ (3) every file set aside in one read is named — the live set and an older one both refused: ${got.items} set-aside item(s), «${got.text.slice(0, 48)}…», the live one ${at2 >= 0 ? `named (line ${at2 + 1})` : 'NOT named'}, the older one ${at0 >= 0 ? `named (line ${at0 + 1})` : 'NOT named'}, ${got.asides} in _set-aside · PURE: six files ⇒ ${pure.sixWhat} named + «${pure.sixMore.slice(0, 30)}…»; one file ⇒ ${pure.oneSame ? 'its words as before' : 'OTHER words for a list of one'}; five blockers ⇒ «${pure.rdAlso.slice(0, 60)}…» (f3027952: only the live one named; b553b51b: only the older one)`,
       { got, pure });
   }
@@ -2931,7 +2931,7 @@ await leg('㉗', async () => {
       && a.s2.failing && a.s2.blocks.join() === a.seg && !a.s2.disk && !a.s2.mem
       && a.s3.failing && a.s3.blocks.join() === a.df && a.s3.setOnDisk && !a.s3.asides && a.s3.disk && a.s3.ack && a.s3.gone === 3 && !a.s3.after && !a.twice && !a.setAside;
     const okB = b.before.failing && !b.before.disk && b.flap.failing && b.flap.blocks.join() === b.df && b.flap.setOnDisk && !b.flap.asides && b.ack && b.gone === 3 && !b.twice && !b.setAside;
-    ok(okA && okB,
+    ok(gateOf(okA) && verdictOf(okB),
       `㉗ (1) a set that reads loses its mark at once — start 1 the set EIO, its segment readable ⇒ ${a.s1.failing ? 'kept' : 'NOT kept'}, ${a.s1.disk ? 'marked' : 'NOT marked'} · start 2 the set reads, the segment EIO ⇒ the hold fails on «${a.s2.blocks.join(', ')}», the set's mark ${!a.s2.disk && !a.s2.mem ? 'GONE' : `KEPT (${a.s2.disk ? 'on disk' : ''}${a.s2.mem ? ' in memory' : ''})`} · start 3 the set EIO again ⇒ ${a.s3.asides ? 'SET ASIDE as «the disk\'s answer»' : a.s3.failing ? 'its first start again: kept' : '—'}${a.s3.disk && !a.s3.asides ? ', marked' : ''}; the mount settles ⇒ ${a.s3.ack ? 'acked' : 'NOT acked'}, gone ${a.s3.gone} · in ONE process (the segment EIO, then the set EIO) ⇒ ${b.flap.asides ? 'SET ASIDE' : 'kept'}, then ${b.ack ? 'acked' : 'NOT acked'}, gone ${b.gone} (14f0647b: the mark kept through the segment's failure — the set set aside unread at its next EIO, gone 0)`,
       got);
   }
@@ -2985,7 +2985,7 @@ await leg('㉗', async () => {
     const okA = a.ack && !a.waits && a.live && !a.older && a.oldKept && !a.reads && a.asideItems === 1 && a.asideNames.join() === `${base}.2.dropped` && /^A held usage file of \S+ for 2026-10 could not be read \(EACCES\) — set aside unread; nothing waits$/.test(a.asideText) && a.bound && a.evs.length === 1;
     const okB = u.tries >= 3 && u.waits && u.blocks.join() === b.df2 && u.read.endsWith(`_held/${b.df2} could not be read (EACCES)`) && !u.said0 && !u.events && u.oldKept && !u.asideItems
       && f.ack && f.said0 === 1 && f.events === 1 && f.files.join() === `${b.df2},${b.old}` && f.live && f.oldGone && b.asideOpen === 1 && /^2 held usage files of \S+ for 2026-10 /.test(b.asideText) && !b.readOpen;
-    ok(okA && okB,
+    ok(gateOf(okA) && verdictOf(okB),
       `㉗ (2) the live generation is decided first — _set-aside one slot short of its bound, the live set and an older one refused: the slot ${a.live ? "is the live set's" : a.older ? "the OLDER set's" : 'nobody\'s'}, the month ${a.ack ? 'acked' : 'WAITS'}, ${a.reads} hold-read open, ${a.asideItems} set-aside notice naming «${a.asideNames.join(', ')}»; the older set ${a.oldKept ? 'kept for the next start' : 'GONE'}${a.bound ? ' (its bound said)' : ''} · _set-aside full, the live set refused beside an older one (7, a bad line): the hold fails on «${u.blocks.join(', ')}» over ${u.tries} tries; the older set ${u.said0 ? `SAID ${u.said0}×` : 'unsaid'}, ${u.oldKept ? 'kept' : 'GONE'}, ${u.events} set-aside event(s) · a slot freed ⇒ ${f.ack ? 'acked' : 'NOT acked'}, its 7 said ${f.said0}×, one notice naming «${f.files.join(', ')}» (14f0647b: the older set took the slot — the month waited beside «nothing waits»)`,
       got);
   }
@@ -2993,4 +2993,4 @@ await leg('㉗', async () => {
 fs.rmSync(tmp, { recursive: true, force: true }); // after the last leg (r8: ⑲ ran after it and left its scratch behind)
 console.log('  · ' + legMs.join(' · '));
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

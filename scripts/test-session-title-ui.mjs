@@ -32,7 +32,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -132,7 +132,7 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
     journal = '';
     srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
     procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-    if (!ok(await until(() => journal.includes('Ready.'), 40000), `the worktree server booted (${tag})`, journal.slice(-800))) return false;
+    if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000)), `the worktree server booted (${tag})`, journal.slice(-800))) return false;
     ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
     await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
     return true;
@@ -154,7 +154,7 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
   const C = await create('c', 'codex', path.join(ROOT, 'codex-room'));
   let chrome = null, cdp = null;
   try {
-  if (!ok(A.sid && A.cli, 'a chat session was created on the fake claude (its CLI id registered)', journal.slice(-600))) return;
+  if (!ok(gateOf(A.sid) && verdictOf(A.cli), 'a chat session was created on the fake claude (its CLI id registered)', journal.slice(-600))) return;
   ok(!!(B.sid && B.cli), 'a second chat session was created on the fake claude (the transcript leg)', journal.slice(-600));
   ok(!!C.sid, 'a chat session was created on the fake codex', journal.slice(-600));
   await sleep(1500);
@@ -191,30 +191,30 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
   /** what the page draws for a session: its sidebar card names, the window title, its taskbar item, any unknown card */
   const view = (sess) => ev(`const w = bySid(${S(sess.sid)}); const tb = w ? [...document.querySelectorAll('.taskbar-item')].find((i) => i.title === w.title) : null; const txt = document.body.innerText;
     return { cards: cardNames(), win: w ? w.title : null, taskbar: tb ? tb.title : null, liveTitle: live(${S(sess.sid)})?.cliTitle ?? null, unknown: /unknown event|session_title_changed/i.test(txt), marker: window.__stMarker || null };`);
-  if (!ok(await boot(), 'the app booted in headless chrome (desktop, 1280×900)')) return;
+  if (!ok(verdictOf(await boot()), 'the app booted in headless chrome (desktop, 1280×900)')) return;
   await sleep(1500);
-  ok(await open(A, 'claude', path.join(ROOT, 'aria')), 'the claude session window opened');
-  ok(await open(C, 'codex', path.join(ROOT, 'codex-room')), 'the codex session window opened');
+  ok(verdictOf(await open(A, 'claude', path.join(ROOT, 'aria'))), 'the claude session window opened');
+  ok(verdictOf(await open(C, 'codex', path.join(ROOT, 'codex-room'))), 'the codex session window opened');
 
   console.log('\na — the CLI\'s title renames the row live');
-  ok(await until(async () => (await view(A)).cards.includes(FIRST('aria')), 20000), `before the record the row carries the first-message name "${FIRST('aria')}" (discovery, the transcript)`, S(await view(A)));
+  ok(verdictOf(await until(async () => (await view(A)).cards.includes(FIRST('aria')), 20000)), `before the record the row carries the first-message name "${FIRST('aria')}" (discovery, the transcript)`, S(await view(A)));
   const preWin = String((await view(A)).win || '').split(' — ')[0];
   await ev(`window.__stMarker = 'no-reload'; return true;`);
   emitTitle(A.cli, TITLE, 1);
   const got = await until(async () => (await view(A)).cards.includes(TITLE), 15000);
   let v = await view(A);
-  ok(got, `the sidebar row renamed live to "${TITLE}"`, S(v));
+  ok(verdictOf(got), `the sidebar row renamed live to "${TITLE}"`, S(v));
   ok(!v.cards.includes(FIRST('aria')), 'the first-message name is gone from the sidebar', S(v.cards));
   ok(preWin !== TITLE && !String(v.win || '').startsWith(preWin + ' — '), `the window left its pre-title name "${preWin}"`, S([preWin, v.win]));
   ok(v.marker === 'no-reload', 'the page never reloaded (the marker survives)', S(v));
   await until(async () => String((await view(A)).win || '').startsWith(TITLE), 8000);
   v = await view(A);
-  ok(String(v.win || '').startsWith(TITLE + ' — '), 'the window title follows', S(v.win));
-  ok(String(v.taskbar || '').startsWith(TITLE), 'the taskbar item follows', S(v.taskbar));
+  ok(verdictOf(String(v.win || '').startsWith(TITLE + ' — ')), 'the window title follows', S(v.win));
+  ok(verdictOf(String(v.taskbar || '').startsWith(TITLE)), 'the taskbar item follows', S(v.taskbar));
   ok(v.liveTitle === TITLE, 'the live row carries cliTitle', S(v.liveTitle));
   ok(!v.unknown, 'no "Unknown event" card (and no raw subtype) anywhere on the page', S(v));
   emitTitle(B.cli, TITLE_B, 4);
-  ok(await until(async () => (await view(B)).liveTitle === TITLE_B, 15000), 'the second session\'s title reaches its live row too', S(await view(B)));
+  ok(verdictOf(await until(async () => (await view(B)).liveTitle === TITLE_B, 15000)), 'the second session\'s title reaches its live row too', S(await view(B)));
 
   console.log('\nd — a codex session never carries the rung');
   const cv = await view(C);
@@ -225,39 +225,39 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
   ok(cv.cards.filter((n) => n === TITLE).length === 1, 'no other sidebar row reads the title (the codex row has none)', S(cv.cards));
 
   console.log('\nc — the title persists');
-  if (!ok(await boot(), 'reload: the app booted again')) return;
+  if (!ok(verdictOf(await boot()), 'reload: the app booted again')) return;
   await open(A, 'claude', path.join(ROOT, 'aria'));
-  ok(await until(async () => (await view(A)).cards.includes(TITLE), 15000), 'reload ⇒ the row still reads the title (the live fact)', S(await view(A)));
+  ok(verdictOf(await until(async () => (await view(A)).cards.includes(TITLE), 15000)), 'reload ⇒ the row still reads the title (the live fact)', S(await view(A)));
   await stopServer();
   const META = path.join(wt, 'data', 'session-meta');
   const metaWith = (title) => (fs.existsSync(META) ? fs.readdirSync(META) : []).filter((f) => f.endsWith('.json')).map((f) => path.join(META, f)).filter((f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).cliTitle === title; } catch { return false; } });
   const metaFiles = metaWith(TITLE);
   ok(metaFiles.length === 1, 'the session-meta carries cliTitle on disk: ' + metaFiles.map((f) => path.relative(ROOT, f)).join(', '));
   if (!(await startServer('restart: meta rung'))) return;
-  if (!ok(await boot(), 'restart: the app booted')) return;
+  if (!ok(verdictOf(await boot()), 'restart: the app booted')) return;
   await open(A, 'claude', path.join(ROOT, 'aria'));
-  ok(await until(async () => (await view(A)).cards.includes(TITLE), 20000), 'restart ⇒ the row still reads the title', S(await view(A)));
+  ok(verdictOf(await until(async () => (await view(A)).cards.includes(TITLE), 20000)), 'restart ⇒ the row still reads the title', S(await view(A)));
   ok((await view(A)).liveTitle === TITLE, 'restart ⇒ the live row carries cliTitle (boot-restore from the meta)', S(await view(A)));
   await stopServer();
   for (const f of metaFiles) { const j = JSON.parse(fs.readFileSync(f, 'utf8')); delete j.cliTitle; fs.writeFileSync(f, JSON.stringify(j)); }
   if (!(await startServer('restart: meta deleted'))) return;
-  if (!ok(await boot(), 'restart with cliTitle deleted from the meta: the app booted')) return;
+  if (!ok(verdictOf(await boot()), 'restart with cliTitle deleted from the meta: the app booted')) return;
   await open(A, 'claude', path.join(ROOT, 'aria'));
-  ok(await until(async () => (await view(A)).cards.includes(TITLE), 20000), 'meta deleted ⇒ the row still reads the title', S(await view(A)));
+  ok(verdictOf(await until(async () => (await view(A)).cards.includes(TITLE), 20000)), 'meta deleted ⇒ the row still reads the title', S(await view(A)));
   v = await view(A);
   ok(v.liveTitle === null, 'meta deleted ⇒ the live row has no cliTitle, so the transcript\'s record drew it (discovery\'s head/tail read)', S(v));
   await until(async () => String((await view(A)).win || '').startsWith(TITLE), 8000);
-  ok(String((await view(A)).win || '').startsWith(TITLE + ' — '), 'meta deleted ⇒ the window title reads the transcript title too', S((await view(A)).win));
+  ok(verdictOf(String((await view(A)).win || '').startsWith(TITLE + ' — ')), 'meta deleted ⇒ the window title reads the transcript title too', S((await view(A)).win));
 
   // the transcript rung alone: the second session killed and its meta deleted ⇒ a discovered row, named by the newest
   // title in its transcript (discovery's head/tail read), never its first message
   ws.send(JSON.stringify({ type: 'kill', sessionId: B.sid }));
-  ok(await until(() => msgs.some((m) => (m.type === 'killed' || m.type === 'exited') && m.sessionId === B.sid), 8000), 'the second session was killed');
+  ok(verdictOf(await until(() => msgs.some((m) => (m.type === 'killed' || m.type === 'exited') && m.sessionId === B.sid), 8000)), 'the second session was killed');
   await sleep(500); // the kill settles its meta writes
   for (const f of metaWith(TITLE_B)) fs.unlinkSync(f);
   ok(metaWith(TITLE_B).length === 0, 'its session-meta is gone');
-  if (!ok(await boot(), 'reload after the kill: the app booted')) return;
-  ok(await until(async () => (await view(A)).cards.includes(TITLE_B), 20000), `the killed session's discovered row reads its transcript title "${TITLE_B}"`, S(await view(A)));
+  if (!ok(verdictOf(await boot()), 'reload after the kill: the app booted')) return;
+  ok(verdictOf(await until(async () => (await view(A)).cards.includes(TITLE_B), 20000)), `the killed session's discovered row reads its transcript title "${TITLE_B}"`, S(await view(A)));
   ok(!(await view(A)).cards.includes(FIRST('bravo')), `…not its first message "${FIRST('bravo')}"`, S((await view(A)).cards));
 
   /** THE .228 MIRROR, made deterministic. A double-click on a row's name ATTACHES its session (an `attach` per click)
@@ -288,50 +288,50 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
   console.log('\nb — the user\'s rename wins');
   const race = await renameRace(A, TITLE);
   if (!ok(!!race.at, 'the titled row\'s name is on screen')) return;
-  if (!ok(race.dlg, 'a double-click on the name opens the rename dialog holding the title', S(race))) return;
-  ok(race.own, 'the dialog focused its own box (the suite never hand-focuses it)', S(race));
+  if (!ok(verdictOf(race.dlg), 'a double-click on the name opens the rename dialog holding the title', S(race))) return;
+  ok(verdictOf(race.own), 'the dialog focused its own box (the suite never hand-focuses it)', S(race));
   ok(race.rel?.attached >= 1 && !race.rel.errors, 'the held inbound stream carried the session\'s attach answer, delivered AFTER the dialog took the keys', S(race.rel));
   ok(race.after?.[0] === 'INPUT' && race.after?.[2] === TITLE, 'THE .228 MIRROR: the late attach answer leaves the keys in the Rename dialog, not the chat composer', S(race.after));
   await send('Input.insertText', { text: RENAME });
   const typed = await ev(`const a = document.activeElement; return a ? [a.tagName, a.value] : null;`);
-  ok(Array.isArray(typed) && typed[0] === 'INPUT' && typed[1] === RENAME, 'the new name is typed into the focused dialog input', S(typed));
+  ok(gateOf(Array.isArray(typed)) && typed[0] === 'INPUT' && typed[1] === RENAME, 'the new name is typed into the focused dialog input', S(typed));
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-  ok(await until(async () => (await view(A)).cards.includes(RENAME), 8000), `the rename "${RENAME}" draws on the row`, S(await view(A)));
-  ok(await until(async () => String((await view(A)).win || '').startsWith(RENAME + ' — '), 8000), 'the window title follows the rename', S((await view(A)).win));
+  ok(verdictOf(await until(async () => (await view(A)).cards.includes(RENAME), 8000)), `the rename "${RENAME}" draws on the row`, S(await view(A)));
+  ok(verdictOf(await until(async () => String((await view(A)).win || '').startsWith(RENAME + ' — '), 8000)), 'the window title follows the rename', S((await view(A)).win));
   emitTitle(A.cli, TITLE2, 2);
-  ok(await until(async () => (await view(A)).liveTitle === TITLE2, 15000), 'a second title record reaches the live row', S(await view(A)));
+  ok(verdictOf(await until(async () => (await view(A)).liveTitle === TITLE2, 15000)), 'a second title record reaches the live row', S(await view(A)));
   await sleep(800);
   v = await view(A);
-  ok(v.cards.includes(RENAME) && !v.cards.includes(TITLE2) && !v.cards.includes(TITLE), 'the rename still wins on the row after the second title', S(v.cards));
-  ok(String(v.win || '').startsWith(RENAME + ' — ') && String(v.taskbar || '').startsWith(RENAME), 'the window title and the taskbar keep the rename', S([v.win, v.taskbar]));
-  if (!ok(await boot(), 'reload after the rename: the app booted')) return;
+  ok(gateOf(v.cards.includes(RENAME)) && !v.cards.includes(TITLE2) && !v.cards.includes(TITLE), 'the rename still wins on the row after the second title', S(v.cards));
+  ok(gateOf(String(v.win || '').startsWith(RENAME + ' — ')) && verdictOf(String(v.taskbar || '').startsWith(RENAME)), 'the window title and the taskbar keep the rename', S([v.win, v.taskbar]));
+  if (!ok(verdictOf(await boot()), 'reload after the rename: the app booted')) return;
   await open(A, 'claude', path.join(ROOT, 'aria'));
-  ok(await until(async () => (await view(A)).cards.includes(RENAME), 15000), 'reload ⇒ the rename stays', S(await view(A)));
+  ok(verdictOf(await until(async () => (await view(A)).cards.includes(RENAME), 15000)), 'reload ⇒ the rename stays', S(await view(A)));
 
   console.log('\ne — NEGATIVE CONTROL: the cliTitle rung removed');
   {
     const src = fs.readFileSync(path.join(repo, 'src/session-name.js'), 'utf8');
     const rung = "return s.cliTitle || '';";
-    if (!ok(src.includes(rung), 'the ladder\'s cliTitle rung is where the control cuts')) return;
+    if (!ok(verdictOf(src.includes(rung)), 'the ladder\'s cliTitle rung is where the control cuts')) return;
     // the page bundle takes an ESM rendering of the copy (a CJS copy carries mutant-copy's createRequire prologue — node only)
     const cjsTail = 'module.exports = { sessionDisplayName, sessionGivenName };';
-    if (!ok(src.includes(cjsTail), 'the module ends in the export line the ESM rendering swaps')) return;
+    if (!ok(verdictOf(src.includes(cjsTail)), 'the module ends in the export line the ESM rendering swaps')) return;
     const mut = MUT.write(path.join(repo, 'src/session-name.js'), editAnchor(editAnchor(editAnchor(src, "'use strict';", '', "src/session-name.js"), rung, "return ''; // NEGATIVE CONTROL: no CLI-title rung", "src/session-name.js"), cjsTail, 'export { sessionDisplayName, sessionGivenName };', "src/session-name.js"), 'no-cli-title', { esm: true });
     await bundle(mut);
     const K = await create('k', 'claude', path.join(ROOT, 'control'));
-    if (!ok(K.sid && K.cli, 'a control session was created on the fake claude')) return;
+    if (!ok(gateOf(K.sid) && verdictOf(K.cli), 'a control session was created on the fake claude')) return;
     pageErrors.length = 0;
-    if (!ok(await boot(), 'control: the app booted on the patched bundle', S(pageErrors))) return;
-    ok(await until(async () => (await view(A)).cards.includes(FIRST('bravo')), 20000), `CONTROL: the killed session's row falls to its first message "${FIRST('bravo')}" (the transcript check is red)`, S((await view(A)).cards));
+    if (!ok(verdictOf(await boot()), 'control: the app booted on the patched bundle', S(pageErrors))) return;
+    ok(verdictOf(await until(async () => (await view(A)).cards.includes(FIRST('bravo')), 20000)), `CONTROL: the killed session's row falls to its first message "${FIRST('bravo')}" (the transcript check is red)`, S((await view(A)).cards));
     ok(!(await view(A)).cards.includes(TITLE_B), 'CONTROL: …its transcript title is drawn nowhere', S((await view(A)).cards));
     await open(K, 'claude', path.join(ROOT, 'control'));
     await until(async () => (await view(K)).cards.includes(FIRST('control')), 20000);
     emitTitle(K.cli, TITLE3, 3);
-    ok(await until(async () => (await view(K)).liveTitle === TITLE3, 15000), 'CONTROL: the title record reaches the live row', S(await view(K)));
+    ok(verdictOf(await until(async () => (await view(K)).liveTitle === TITLE3, 15000)), 'CONTROL: the title record reaches the live row', S(await view(K)));
     await sleep(1500);
     const kv = await view(K);
-    ok(kv.cards.includes(FIRST('control')) && !kv.cards.includes(TITLE3), `CONTROL: the live row keeps its first-message name "${FIRST('control')}" (leg a's check is red)`, S(kv.cards));
+    ok(gateOf(kv.cards.includes(FIRST('control'))) && !kv.cards.includes(TITLE3), `CONTROL: the live row keeps its first-message name "${FIRST('control')}" (leg a's check is red)`, S(kv.cards));
     ok(!String(kv.win || '').startsWith(TITLE3), 'CONTROL: …and the window title never reads the title', S(kv.win));
     await bundle(null);
   }
@@ -342,15 +342,15 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
     // person's act elsewhere since the open began) — the control cuts the WHOLE question: the base's answer, which took the keys whatever held them
     const src = fs.readFileSync(path.join(repo, 'src/lib/late-focus.js'), 'utf8');
     const guard = "export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {\n  try { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) !== 'take') return false; } catch { return false; }"; // lane dialog-yield r2: ONE predicate — an open decision, or a form the person works in
-    if (!ok(src.includes(guard), 'the answer sites\' focus guard is where the control cuts')) return;
+    if (!ok(verdictOf(src.includes(guard)), 'the answer sites\' focus guard is where the control cuts')) return;
     // the copy lives outside the tree: its relative imports name the scratch worktree's modules (the bundle's own sources)
     const cut = editAnchor(src, guard, 'export function mayTakeKeys() { return true; } // NEGATIVE CONTROL: the answer takes the keys whatever holds them\nfunction mayTakeKeysCut({ win = null, since = PAGE_START } = {}) {', "src/lib/late-focus.js")
       .replace(/from '\.\/([^']+)'/g, (m, f) => `from ${S(path.join(wt, 'src/lib', f))}`).replace(/from '\.\.\/([^']+)'/g, (m, f) => `from ${S(path.join(wt, 'src', f))}`);
     await bundle(null, MUT.write(path.join(repo, 'src/lib/late-focus.js'), cut, 'no-late-focus-guard', { esm: true }));
     pageErrors.length = 0;
-    if (!ok(await boot(), 'control: the app booted on the guard-less bundle', S(pageErrors))) return;
+    if (!ok(verdictOf(await boot()), 'control: the app booted on the guard-less bundle', S(pageErrors))) return;
     const cr = await renameRace(A, RENAME); // a fresh boot, as leg b's: the double-click's clicks attach the session
-    ok(cr.dlg && cr.own && cr.rel?.attached >= 1, 'CONTROL: the same race ran (dialog up and focused, the attach answer held past it)', S(cr));
+    ok(gateOf(cr.dlg) && gateOf(cr.own) && cr.rel?.attached >= 1, 'CONTROL: the same race ran (dialog up and focused, the attach answer held past it)', S(cr));
     ok(cr.after?.[0] === 'TEXTAREA', 'CONTROL: the late answer takes the keys to the chat composer — the mirror\'s red (the new leg b check is red)', S(cr.after));
     await bundle(null);
   }
@@ -364,7 +364,7 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
 })();
 
 console.log('\ntree: the patched copy never touches the tree');
-if (MUT.files.length) for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+if (MUT.files.length) for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`}`);
 cleanup();
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

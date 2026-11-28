@@ -35,7 +35,7 @@ const A = require(path.join(REPO, 'src/stream-av1.js'));
 const HV = require(path.join(REPO, 'src/hdr-viewer.js'));
 const SS = require(path.join(REPO, 'src/agentd/stream-screen.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /** number → the nearest IEEE half's bits (what DDA's FP16 surface holds) */
 function toHalf(x) {
@@ -74,28 +74,28 @@ console.log('§1 the viewer gate');
   ok(q.type === 'webrtc' && q.video.contentType === 'video/AV1' && q.video.width === 3840 && q.video.height === 2160 && q.video.framerate === 60 && q.video.bitrate === 20e6 && q.video.colorGamut === 'rec2020' && q.video.transferFunction === 'pq' && q.video.hdrMetadataType === 'smpteSt2086' && HV.DYNAMIC_RANGE_QUERY === '(dynamic-range: high)',
     'the question asked IS the probe\'s measured row (webrtc · video/AV1 · 3840×2160 @ 60 · 20 Mb/s · rec2020 · pq · smpteSt2086) and the screen\'s (dynamic-range: high)', q);
   const M = HV.hdrMachineVerdict;
-  ok(same(M(null), { can: false, why: 'agent_too_old' }) && same(M({ kind: 'screen' }), { can: false, why: 'agent_too_old' }) && same(M({ hdr: { can: true, on: false, why: null } }), { can: true, why: null }) && same(M({ hdr: { can: false, why: 'sdr_display' } }), { can: false, why: 'sdr_display' }),
+  ok(gateOf(same(M(null), { can: false, why: 'agent_too_old' })) && gateOf(same(M({ kind: 'screen' }), { can: false, why: 'agent_too_old' })) && gateOf(same(M({ hdr: { can: true, on: false, why: null } }), { can: true, why: null })) && verdictOf(same(M({ hdr: { can: false, why: 'sdr_display' } }), { can: false, why: 'sdr_display' })),
     'the machine\'s word: an offer without `hdr` (an agent older than this lane, a Mac, one window) ⇒ no switch; `can` ⇒ yes; a refusal keeps its why');
   let mem = null;
   ok(!HV.hdrRemembered(mem, 'h1') && !HV.hdrRemembered('{bad json', 'h1') && !HV.hdrRemembered('{"h1":"yes"}', 'h1'), 'OFF by default (no memory, garbage, a non-true value)');
   mem = HV.rememberHdr(mem, 'h1', true); mem = HV.rememberHdr(mem, 'h2', true);
-  ok(HV.hdrRemembered(mem, 'h1') && HV.hdrRemembered(mem, 'h2') && !HV.hdrRemembered(mem, 'h3'), 'remembered per machine (h1 and h2 on, h3 not)', mem);
+  ok(gateOf(HV.hdrRemembered(mem, 'h1')) && gateOf(HV.hdrRemembered(mem, 'h2')) && !HV.hdrRemembered(mem, 'h3'), 'remembered per machine (h1 and h2 on, h3 not)', mem);
   mem = HV.rememberHdr(mem, 'h1', false);
-  ok(!HV.hdrRemembered(mem, 'h1') && HV.hdrRemembered(mem, 'h2') && !('h1' in JSON.parse(mem)), 'turned off = forgotten (off is the default)', mem);
+  ok(!HV.hdrRemembered(mem, 'h1') && gateOf(HV.hdrRemembered(mem, 'h2')) && !('h1' in JSON.parse(mem)), 'turned off = forgotten (off is the default)', mem);
   let big = null; for (let i = 0; i < 40; i++) big = HV.rememberHdr(big, 'm' + i, true);
-  ok(Object.keys(JSON.parse(big)).length === 32 && !HV.hdrRemembered(big, 'm0') && HV.hdrRemembered(big, 'm39'), 'at most 32 machines, the newest kept');
+  ok(Object.keys(JSON.parse(big)).length === 32 && !HV.hdrRemembered(big, 'm0') && verdictOf(HV.hdrRemembered(big, 'm39')), 'at most 32 machines, the newest kept');
 }
 
 console.log('§2 the fallback rule');
 {
   const run = (readings) => { let st = null; const out = []; for (const r of readings) { const x = HV.hdrStallStep(st, r); st = x.st; out.push(x.failed); } return out; };
   const R = (at, frames, bytes) => ({ at, frames, bytes });
-  ok(same(run([R(0, 0, 4000), R(1000, 0, 90000), R(2000, 0, 180000)]), [false, false, true]), 'bytes arrive, no frame decoded for 2 s ⇒ failed at the third reading (Linux Chrome\'s 10-bit refusal)');
-  ok(same(run([R(0, 0, 4000), R(1000, 30, 90000), R(2000, 60, 180000), R(3000, 90, 260000)]), [false, false, false, false]), 'a decoder that decodes ⇒ never');
-  ok(same(run([R(0, 0, 0), R(1000, 0, 0), R(2000, 0, 0), R(3000, 0, 0)]), [false, false, false, false]), 'no bytes yet (ICE still connecting) ⇒ not a refusal');
-  ok(same(run([R(0, 0, 4000), R(1000, 0, 4000), R(2000, 0, 4000), R(3000, 0, 4000)]), [false, false, true, true]) && same(run([R(0, 0, 0), R(1000, 0, 0), R(2000, 0, 5000), R(3000, 0, 9000), R(4000, 0, 12000)]), [false, false, false, false, true]),
+  ok(verdictOf(same(run([R(0, 0, 4000), R(1000, 0, 90000), R(2000, 0, 180000)]), [false, false, true])), 'bytes arrive, no frame decoded for 2 s ⇒ failed at the third reading (Linux Chrome\'s 10-bit refusal)');
+  ok(verdictOf(same(run([R(0, 0, 4000), R(1000, 30, 90000), R(2000, 60, 180000), R(3000, 90, 260000)]), [false, false, false, false])), 'a decoder that decodes ⇒ never');
+  ok(verdictOf(same(run([R(0, 0, 0), R(1000, 0, 0), R(2000, 0, 0), R(3000, 0, 0)]), [false, false, false, false])), 'no bytes yet (ICE still connecting) ⇒ not a refusal');
+  ok(gateOf(same(run([R(0, 0, 4000), R(1000, 0, 4000), R(2000, 0, 4000), R(3000, 0, 4000)]), [false, false, true, true])) && verdictOf(same(run([R(0, 0, 0), R(1000, 0, 0), R(2000, 0, 5000), R(3000, 0, 9000), R(4000, 0, 12000)]), [false, false, false, false, true])),
     'the watch starts with the first bytes (a quiet second keeps it, never restarts it)');
-  ok(same(run([R(0, 10, 1000), R(1000, 40, 9e4), R(2000, 40, 18e4), R(4000, 40, 3e5), R(6000, 40, 4e5), R(7000, 40, 5e5)]), [false, false, false, false, false, true]) && same(run([R(0, 10, 1000), R(1000, 40, 9e4), R(2000, 40, 18e4), R(4000, 40, 3e5), R(5000, 70, 4e5)]), [false, false, false, false, false]),
+  ok(gateOf(same(run([R(0, 10, 1000), R(1000, 40, 9e4), R(2000, 40, 18e4), R(4000, 40, 3e5), R(6000, 40, 4e5), R(7000, 40, 5e5)]), [false, false, false, false, false, true])) && verdictOf(same(run([R(0, 10, 1000), R(1000, 40, 9e4), R(2000, 40, 18e4), R(4000, 40, 3e5), R(5000, 70, 4e5)]), [false, false, false, false, false])),
     'MID-STREAM: once frames were decoded a stall fails at 5 s (a lost key frame waits ≤ one 2 s GOP + its PLI — the next key frame clears it)');
   ok(HV.HDR_STALL.ms === 2000 && HV.HDR_STALL.midMs === 5000, 'the bounds: 2 s (the brief\'s «0 frames in 2 s while sending»), 5 s mid-stream');
 }
@@ -111,9 +111,9 @@ const T = SP.buildPqTables();
   const out = new Uint16Array(greys.length * 2 * 2 * 3 / 2);
   const bytes = SP.p010FromHalf(src, greys.length * 2, 2, T, out);
   const got = greys.map((v, k) => ({ v, y: out[k * 2] >> 6, cb: out[greys.length * 4 + k * 2] >> 6, cr: out[greys.length * 4 + k * 2 + 1] >> 6, want: Math.round(64 + 876 * pqRef(SP.halfToFloat(toHalf(v)) * 80)) }));
-  ok(got.every((g) => g.y === g.want && g.cb === 512 && g.cr === 512) && bytes === greys.length * 2 * 2 * 3, `scRGB greys → 10-bit PQ luma by ST 2084 (written here): ${got.map((g) => `${g.v} → ${g.y}`).join(', ')} (0 / 14.4 / 80 / 200 / 800 nits); chroma 512 (grey stays grey)`, got);
-  ok(same(got.map((g) => g.y), [64, 352, 490, 571, 701]), 'the same codes pinned (a change of the curve shows here)', got.map((g) => g.y));
-  ok(out.every((s) => (s & 63) === 0), 'P010: every sample\'s 10 bits sit high (value << 6), the low 6 bits zero');
+  ok(gateOf(got.every((g) => g.y === g.want && g.cb === 512 && g.cr === 512)) && bytes === greys.length * 2 * 2 * 3, `scRGB greys → 10-bit PQ luma by ST 2084 (written here): ${got.map((g) => `${g.v} → ${g.y}`).join(', ')} (0 / 14.4 / 80 / 200 / 800 nits); chroma 512 (grey stays grey)`, got);
+  ok(verdictOf(same(got.map((g) => g.y), [64, 352, 490, 571, 701])), 'the same codes pinned (a change of the curve shows here)', got.map((g) => g.y));
+  ok(verdictOf(out.every((s) => (s & 63) === 0)), 'P010: every sample\'s 10 bits sit high (value << 6), the low 6 bits zero');
   let worst = 0, at = null;
   for (let h = 0; h < 0x7c00; h++) { const L = SP.halfToFloat(h) * 80; const e = Math.abs(SP.pqOfHalf(h, h, h, T)[0] - pqRef(L)) * 876; if (e > worst) { worst = e; at = h; } }
   ok(worst < 0.1, `the tables equal the formula on every positive FP16 pattern within ${worst.toFixed(3)} of a 10-bit code (< 0.1)`, { worst, at });
@@ -153,7 +153,7 @@ const T = SP.buildPqTables();
   const big = new Uint16Array(16 * 8 * 4); for (let i = 0; i < big.length; i += 4) { big[i] = toHalf((i % 61) / 7); big[i + 1] = toHalf((i % 37) / 9); big[i + 2] = toHalf((i % 23) / 5); big[i + 3] = 15360; }
   const sub = new Uint16Array(8 * 4 * 4); for (let y = 0; y < 4; y++) for (let x = 0; x < 8; x++) for (let c = 0; c < 4; c++) sub[(y * 8 + x) * 4 + c] = big[((y * 2) * 16 + x * 2) * 4 + c];
   const o2 = new Uint16Array(8 * 4 * 3 / 2), o1 = new Uint16Array(8 * 4 * 3 / 2);
-  ok(SP.p010FromHalf(big, 16, 8, T, o2, 2) === 8 * 4 * 3 && (SP.p010FromHalf(sub, 8, 4, T, o1), same([...o2], [...o1])), '② step 2: a 16×8 frame mapped at every 2nd pixel = the 8×4 frame of those pixels');
+  ok(SP.p010FromHalf(big, 16, 8, T, o2, 2) === 8 * 4 * 3 && verdictOf((SP.p010FromHalf(sub, 8, 4, T, o1), same([...o2], [...o1]))), '② step 2: a 16×8 frame mapped at every 2nd pixel = the 8×4 frame of those pixels');
   ok(SP.p010FromHalf(new Uint16Array(5 * 3 * 4), 5, 3, T, new Uint16Array(4 * 2 * 3 / 2)) === SP.p010Bytes(5, 3) && SP.p010Bytes(5, 3) === 4 * 2 * 3 && SP.p010Bytes(3840, 2160) === 3840 * 2160 * 3, 'odd sizes map their even part (5×3 → 4×2), 3 bytes a pixel (4K: 24.9 MB — twice NV12)');
 }
 
@@ -208,15 +208,15 @@ for (const name of ['fake-desk-av1-10.ivf', 'fake-desk-av1-8.ivf']) {
   const all = A.ivfReader().push(file).filter((e) => e.type === 'tu');
   const r = A.ivfReader(), got = [];
   for (let i = 0; i < file.length; i += 777) got.push(...r.push(file.subarray(i, i + 777)));
-  ok(got.length === all.length && got.every((e, i) => Buffer.compare(Buffer.from(e.tu), Buffer.from(all[i].tu)) === 0 && e.key === all[i].key), 'the IVF reader fed in 777-byte chunks = the whole file\'s units, in order');
-  ok(same(all.map((e, i) => (e.key ? i : -1)).filter((i) => i >= 0), [0, 30]) && all.filter((e) => e.key).every((e) => e.seq) && same(all.slice(0, 3).map((e) => e.ptsMs), [0, 33, 67]), 'keys at 0 and 30 (a key frame a second), each with its sequence header; IVF pts → ms');
+  ok(got.length === all.length && verdictOf(got.every((e, i) => Buffer.compare(Buffer.from(e.tu), Buffer.from(all[i].tu)) === 0 && e.key === all[i].key)), 'the IVF reader fed in 777-byte chunks = the whole file\'s units, in order');
+  ok(gateOf(same(all.map((e, i) => (e.key ? i : -1)).filter((i) => i >= 0), [0, 30])) && gateOf(all.filter((e) => e.key).every((e) => e.seq)) && verdictOf(same(all.slice(0, 3).map((e) => e.ptsMs), [0, 33, 67])), 'keys at 0 and 30 (a key frame a second), each with its sequence header; IVF pts → ms');
   // a key unit WITHOUT its sequence header (an encoder that writes it once) gets the last one in front
   const units = []; for (let o = 32; o < file.length;) { const n = file.readUInt32LE(o); units.push(file.subarray(o, o + 12 + n)); o += 12 + n; }
   const strip = (u) => { const tu = u.subarray(12), keep = Buffer.concat(A.obusOf(tu).filter((o) => o.type !== A.OBU.seq).map((o) => Buffer.concat([Buffer.from([o.head[0] | 2, ...o.head.subarray(1)]), A.leb128(o.body.length), Buffer.from(o.body)]))); const hd = Buffer.from(u.subarray(0, 12)); hd.writeUInt32LE(keep.length, 0); return Buffer.concat([hd, keep]); };
   const lean = Buffer.concat([file.subarray(0, 32), ...units.map((u, i) => (i === 30 ? strip(u) : u))]);
   const k30 = A.ivfReader().push(lean).filter((e) => e.type === 'tu')[30];
-  ok(k30.key && k30.seq && A.obusOf(k30.tu)[0].type === A.OBU.seq && !A.obusOf(units[30].subarray(12)).every((o, i, a) => o.type !== A.OBU.seq) && A.obusOf(strip(units[30]).subarray(12)).every((o) => o.type !== A.OBU.seq), 'a key unit that lacks the sequence header gets the last one in front (a browser that joins at a key frame needs it — flvReader\'s SPS/PPS rule)');
-  ok(same(A.ivfReader().push(Buffer.from('FLV\x01\x01\0\0\0\x09\0\0\0\0' + ' '.repeat(40))), [{ type: 'bad', error: 'the encoder did not write IVF' }]), 'not IVF ⇒ `bad` by name (the session ends encoder_exited)');
+  ok(gateOf(k30.key) && gateOf(k30.seq) && A.obusOf(k30.tu)[0].type === A.OBU.seq && !A.obusOf(units[30].subarray(12)).every((o, i, a) => o.type !== A.OBU.seq) && verdictOf(A.obusOf(strip(units[30]).subarray(12)).every((o) => o.type !== A.OBU.seq)), 'a key unit that lacks the sequence header gets the last one in front (a browser that joins at a key frame needs it — flvReader\'s SPS/PPS rule)');
+  ok(verdictOf(same(A.ivfReader().push(Buffer.from('FLV\x01\x01\0\0\0\x09\0\0\0\0' + ' '.repeat(40))), [{ type: 'bad', error: 'the encoder did not write IVF' }])), 'not IVF ⇒ `bad` by name (the session ends encoder_exited)');
 }
 
 console.log('§5 the plan');
@@ -225,27 +225,27 @@ console.log('§5 the plan');
   const D1 = { id: 'D1', x: 0, y: 0, w: 3840, h: 2160, primary: true, hdr: true, white: 2500, adapter: 0, output: 0 };
   const D2 = { id: 'D2', x: -1920, y: 100, w: 1920, h: 1080, primary: false, hdr: false, white: 1000, adapter: 0, output: 1 };
   const facts = (o = {}) => ({ platform: 'win32', ffmpeg: ff, displays: [D1, D2], ...o });
-  ok(same(SP.parseFfmpegFacts('ffmpeg version 7.1-full_build', '', ' V....D h264_nvenc   NVENC\n V....D av1_nvenc   NVIDIA NVENC av1 encoder (codec av1)\n V....D libsvtav1  SVT\n').encoders, ['h264_nvenc', 'av1_nvenc']), 'the ffmpeg facts keep av1_nvenc (the HDR rung) beside the H.264 ladder');
+  ok(verdictOf(same(SP.parseFfmpegFacts('ffmpeg version 7.1-full_build', '', ' V....D h264_nvenc   NVENC\n V....D av1_nvenc   NVIDIA NVENC av1 encoder (codec av1)\n V....D libsvtav1  SVT\n').encoders, ['h264_nvenc', 'av1_nvenc'])), 'the ffmpeg facts keep av1_nvenc (the HDR rung) beside the H.264 ladder');
   const m = SP.planScreen(facts()), hd = SP.planScreen(facts(), { hdr: true });
-  ok(m.ok && m.mode === 'mapped' && same(m.hdr, { can: true, on: false, why: null }), 'hdr NOT asked on the HDR display: the mapped road as before, the offer\'s word `can` (the page may show the switch)', m.hdr);
-  ok(hd.ok && hd.mode === 'hdr' && hd.encoder.id === 'av1_nvenc' && hd.encoder.codec === 'AV1' && same(hd.hdr, { can: true, on: true, why: null }) && hd.w === 3840 && hd.h === 2160 && hd.fps === 30 && hd.gop === 60 && hd.white === 2500 && hd.tone === null,
+  ok(gateOf(m.ok) && m.mode === 'mapped' && verdictOf(same(m.hdr, { can: true, on: false, why: null })), 'hdr NOT asked on the HDR display: the mapped road as before, the offer\'s word `can` (the page may show the switch)', m.hdr);
+  ok(gateOf(hd.ok) && hd.mode === 'hdr' && hd.encoder.id === 'av1_nvenc' && hd.encoder.codec === 'AV1' && gateOf(same(hd.hdr, { can: true, on: true, why: null })) && hd.w === 3840 && hd.h === 2160 && hd.fps === 30 && hd.gop === 60 && hd.white === 2500 && hd.tone === null,
     'hdr asked on the HDR display with av1_nvenc ⇒ mode hdr: NVENC AV1, the display\'s size and rate, the same capture', hd);
-  ok(same(hd.sdr, m), 'the hdr plan\'s `sdr` IS the mapped plan, field for field (a browser whose answer drops AV1 gets exactly today\'s picture)');
+  ok(verdictOf(same(hd.sdr, m)), 'the hdr plan\'s `sdr` IS the mapped plan, field for field (a browser whose answer drops AV1 gets exactly today\'s picture)');
   const dh = SP.planScreen(facts(), { display: 'D2', hdr: true }), noAv1 = SP.planScreen(facts({ ffmpeg: { ...ff, encoders: ['h264_nvenc'] } }), { hdr: true });
-  ok(dh.mode === 'direct' && same(dh.hdr, { can: false, on: false, why: 'sdr_display' }) && noAv1.mode === 'mapped' && same(noAv1.hdr, { can: false, on: false, why: 'no_av1_encoder' }), 'hdr asked of an SDR display ⇒ the direct road (why sdr_display); of a machine without av1_nvenc ⇒ the mapped road (why no_av1_encoder)');
+  ok(dh.mode === 'direct' && gateOf(same(dh.hdr, { can: false, on: false, why: 'sdr_display' })) && noAv1.mode === 'mapped' && verdictOf(same(noAv1.hdr, { can: false, on: false, why: 'no_av1_encoder' })), 'hdr asked of an SDR display ⇒ the direct road (why sdr_display); of a machine without av1_nvenc ⇒ the mapped road (why no_av1_encoder)');
   const cap = SP.captureArgv(hd), enc = SP.hdrEncodeArgv(hd), j = enc.join(' ');
-  ok(same(cap, SP.captureArgv(m)), 'the HDR road\'s capture IS the mapped road\'s (FP16 DDA, its raw bits)');
-  ok(same(enc.slice(enc.indexOf('-f'), enc.indexOf('-i') + 2), ['-f', 'rawvideo', '-pix_fmt', 'p010le', '-video_size', '3840x2160', '-framerate', '30', '-i', 'pipe:0']) && enc[enc.indexOf('-vf') + 1] === 'setparams=range=tv:color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc'
-    && j.includes('-c:v av1_nvenc -preset p1 -tune ull -rc cbr -zerolatency 1 -delay 0 -rc-lookahead 0 -bf 0 -g 60 -b:v 8000k -maxrate 8000k -bufsize 533k') && !/-profile/.test(j) && same(enc.slice(-6), ['-fps_mode', 'passthrough', '-f', 'ivf', '-flush_packets', '1', 'pipe:1'].slice(-6)) && same(enc.slice(-7), ['-fps_mode', 'passthrough', '-f', 'ivf', '-flush_packets', '1', 'pipe:1']),
+  ok(verdictOf(same(cap, SP.captureArgv(m))), 'the HDR road\'s capture IS the mapped road\'s (FP16 DDA, its raw bits)');
+  ok(gateOf(same(enc.slice(enc.indexOf('-f'), enc.indexOf('-i') + 2), ['-f', 'rawvideo', '-pix_fmt', 'p010le', '-video_size', '3840x2160', '-framerate', '30', '-i', 'pipe:0'])) && enc[enc.indexOf('-vf') + 1] === 'setparams=range=tv:color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc'
+    && gateOf(j.includes('-c:v av1_nvenc -preset p1 -tune ull -rc cbr -zerolatency 1 -delay 0 -rc-lookahead 0 -bf 0 -g 60 -b:v 8000k -maxrate 8000k -bufsize 533k')) && !/-profile/.test(j) && gateOf(same(enc.slice(-6), ['-fps_mode', 'passthrough', '-f', 'ivf', '-flush_packets', '1', 'pipe:1'].slice(-6))) && verdictOf(same(enc.slice(-7), ['-fps_mode', 'passthrough', '-f', 'ivf', '-flush_packets', '1', 'pipe:1'])),
   'the HDR encoder: P010 on stdin, the frames TAGGED bt2020 / PQ / bt2020nc / limited (setparams), av1_nvenc low-latency CBR (zero latency, no output delay — its default is INT_MAX frames — no lookahead, no -profile: the option is not av1_nvenc\'s), no B-frames, a 2 s GOP, IVF out flushed per picture', enc);
   const tagsOnOutput = (argv) => argv.some((a, i) => /^-(color_primaries|color_trc|colorspace|color_range)$/.test(a) && i > argv.indexOf('-i'));
-  ok(!tagsOnOutput(enc) && tagsOnOutput([...enc.slice(0, -7), '-color_primaries', 'bt2020', '-color_trc', 'smpte2084', '-colorspace', 'bt2020nc', ...enc.slice(-7)]), 'no output -color_* option (the probe\'s trap: ffmpeg 8 then inserts a CPU conversion — 97–99 fps instead of 231–277) — RED CONTROL: the trap argv is caught by the same check');
+  ok(!tagsOnOutput(enc) && verdictOf(tagsOnOutput([...enc.slice(0, -7), '-color_primaries', 'bt2020', '-color_trc', 'smpte2084', '-colorspace', 'bt2020nc', ...enc.slice(-7)])), 'no output -color_* option (the probe\'s trap: ffmpeg 8 then inserts a CPU conversion — 97–99 fps instead of 231–277) — RED CONTROL: the trap argv is caught by the same check');
   // THE SDR ROADS UNCHANGED: hdr off, the argvs of 2.369.313 (pinned verbatim)
   const pinMapped = ['-hide_banner', '-loglevel', 'error', '-nostats', '-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', '3840x2160', '-framerate', '30', '-i', 'pipe:0', '-c:v', 'h264_nvenc', '-preset', 'p1', '-tune', 'ull', '-rc', 'cbr', '-zerolatency', '1', '-delay', '0', '-rc-lookahead', '0', '-profile:v', 'baseline', '-bf', '0', '-g', '60', '-b:v', '8000k', '-maxrate', '8000k', '-bufsize', '533k', '-color_primaries', 'bt709', '-color_trc', 'iec61966-2-1', '-colorspace', 'bt709', '-color_range', 'tv', '-fps_mode', 'passthrough', '-f', 'flv', '-flvflags', 'no_duration_filesize', '-flush_packets', '1', 'pipe:1'];
   const pinDirect = ['-hide_banner', '-loglevel', 'error', '-nostats', '-nostdin', '-f', 'lavfi', '-i', 'ddagrab=output_idx=1:draw_mouse=0:framerate=30', '-vf', 'hwdownload,format=bgra,scale=out_color_matrix=bt709:out_range=tv,format=nv12', '-c:v', 'h264_nvenc', '-preset', 'p1', '-tune', 'ull', '-rc', 'cbr', '-zerolatency', '1', '-delay', '0', '-rc-lookahead', '0', '-profile:v', 'baseline', '-bf', '0', '-g', '60', '-b:v', '8000k', '-maxrate', '8000k', '-bufsize', '533k', '-color_primaries', 'bt709', '-color_trc', 'iec61966-2-1', '-colorspace', 'bt709', '-color_range', 'tv', '-fps_mode', 'passthrough', '-f', 'flv', '-flvflags', 'no_duration_filesize', '-flush_packets', '1', 'pipe:1'];
   const pinCapture = ['-hide_banner', '-loglevel', 'error', '-nostats', '-nostdin', '-f', 'lavfi', '-i', 'ddagrab=output_idx=0:draw_mouse=0:output_fmt=16bit:framerate=30', '-vf', 'hwdownload,format=rgbaf16le', '-f', 'rawvideo', '-pix_fmt', 'rgbaf16le', 'pipe:1'];
   const d2 = SP.planScreen(facts(), { display: 'D2' });
-  ok(same(SP.encodeArgv(m), pinMapped) && same(SP.encodeArgv(hd.sdr), pinMapped) && same(SP.directArgv(d2), pinDirect) && same(SP.directArgv(dh), pinDirect) && same(SP.captureArgv(m), pinCapture),
+  ok(gateOf(same(SP.encodeArgv(m), pinMapped)) && gateOf(same(SP.encodeArgv(hd.sdr), pinMapped)) && gateOf(same(SP.directArgv(d2), pinDirect)) && gateOf(same(SP.directArgv(dh), pinDirect)) && verdictOf(same(SP.captureArgv(m), pinCapture)),
     'THE SDR ROADS UNCHANGED: hdr off (and the hdr plan\'s fallback, and an SDR display asked for HDR) — the mapped encoder, the direct road and the capture argvs are byte for byte 2.369.313\'s', { enc: SP.encodeArgv(m).join(' '), dir: SP.directArgv(d2).join(' ') });
   const f30 = SP.kbpsFloor({ w: 3840, h: 2160, fps: 30 }), h30 = SP.kbpsFloor({ w: 3840, h: 2160, fps: 30, hdr: true });
   ok(hd.floor === SP.kbpsFloor({ w: 3840, h: 2160, fps: 30, cap: 8000, hdr: true }) && h30 === Math.round((f30 * SP.KBPS_FLOOR_HDR.factor) / 100) * 100 && SP.KBPS_FLOOR_HDR.factor === 1 && SP.KBPS_FLOOR_HDR.measured.qp90 < 1.01 && SP.KBPS_FLOOR_HDR.measured.qp150 < 1.01 && h30 === f30 && SP.kbpsFloor({ w: 3840, h: 2160, fps: 30, cap: 5000, hdr: true }) === 5000,
@@ -260,7 +260,7 @@ console.log('§5 the plan');
   const input = src.slice().buffer, output = new ArrayBuffer(SP.p010Bytes(w, h));
   const got = await new Promise((res) => { port1.on('message', (m) => res(m)); port1.postMessage({ op: 'pq' }); port1.postMessage({ op: 'map', road: 'p010', input, output, w, h, step: 1 }, [input, output]); setTimeout(() => res(null), 5000); });
   port1.close(); port2.close();
-  ok(got && got.op === 'mapped' && same([...new Uint16Array(got.output)], [...want]), 'the mapper worker\'s p010 road (agentd\'s stream-map worker — its own tables) = p010FromHalf, sample for sample');
+  ok(gateOf(got) && got.op === 'mapped' && verdictOf(same([...new Uint16Array(got.output)], [...want])), 'the mapper worker\'s p010 road (agentd\'s stream-map worker — its own tables) = p010FromHalf, sample for sample');
 }
 
 console.log('§6 two things the real leg found (the owner\'s box, 2026-10-19)');
@@ -268,21 +268,21 @@ console.log('§6 two things the real leg found (the owner\'s box, 2026-10-19)');
   const SM = require(path.join(REPO, 'src/stream-model.js'));
   const mdns = 'candidate:2984 1 udp 2122260223 3f6a1c2e-0d51-4c7e-9a3b-6d2f1e0c9b8a.local 54400 typ host generation 0 ufrag Ab12 network-cost 999';
   const host = 'candidate:1467 1 udp 2122260223 192.168.4.116 54400 typ host generation 0', relay = 'a=candidate:9 1 udp 16777215 100.87.42.107 40653 typ relay raddr 0.0.0.0 rport 0';
-  ok(SM.isMdnsCandidate(mdns) && SM.isMdnsCandidate('a=' + mdns) && !SM.isMdnsCandidate(host) && !SM.isMdnsCandidate(relay) && !SM.isMdnsCandidate('') && !SM.isMdnsCandidate(null) && !SM.isMdnsCandidate('candidate:1 1 udp 1 printer.local.example.com 9 typ host'),
+  ok(gateOf(SM.isMdnsCandidate(mdns)) && gateOf(SM.isMdnsCandidate('a=' + mdns)) && !SM.isMdnsCandidate(host) && !SM.isMdnsCandidate(relay) && !SM.isMdnsCandidate('') && !SM.isMdnsCandidate(null) && !SM.isMdnsCandidate('candidate:1 1 udp 1 printer.local.example.com 9 typ host'),
     'a browser\'s mDNS host candidate (<uuid>.local — Chrome\'s without a STUN server) is told apart from an address, the relay\'s, a name that only CONTAINS .local (werift resolves it by multicast with a 10 s timeout INSIDE setRemoteDescription when it came first: the answer waited 10 s, 2 of 3 HDR switches)');
   const ps = SP.unthrottlePs([12, 'x', -3, 34.5, 56]);
-  ok(/SetProcessInformation\(h, 4, ref s/.test(ps) && /ControlMask = 1, StateMask = 0/.test(ps) && /OpenProcess\(0x0200, false, pid\)/.test(ps) && /foreach \(\$id in @\(12,56\)\)/.test(ps) && !/runas|Elevat/i.test(ps),
+  ok(gateOf(/SetProcessInformation\(h, 4, ref s/.test(ps)) && gateOf(/ControlMask = 1, StateMask = 0/.test(ps)) && gateOf(/OpenProcess\(0x0200, false, pid\)/.test(ps)) && gateOf(/foreach \(\$id in @\(12,56\)\)/.test(ps)) && !/runas|Elevat/i.test(ps),
     'the power-throttling opt-out: ProcessPowerThrottling (4), EXECUTION_SPEED controlled (1) and off (0), PROCESS_SET_INFORMATION only (a process of the same user — no elevation); only whole positive pids reach the script');
-  ok(SP.unthrottlePs(Array.from({ length: 20 }, (_, i) => i + 1)).includes('@(1,2,3,4,5,6,7,8)') && SP.unthrottlePs([]).includes('@(0)'), 'at most 8 pids a run; none ⇒ a script that touches nothing');
+  ok(gateOf(SP.unthrottlePs(Array.from({ length: 20 }, (_, i) => i + 1)).includes('@(1,2,3,4,5,6,7,8)')) && verdictOf(SP.unthrottlePs([]).includes('@(0)')), 'at most 8 pids a run; none ⇒ a script that touches nothing');
   // lane stream-sdr-ecoqos: THE GIVE-BACK is the same helper — the same script with ONE character changed (ControlMask 1 → 0: the
   // system manages the process's throttling again); neither touches a display setting
   const back = SP.unthrottlePs([12, 56], { restore: true }), off = SP.unthrottlePs([12, 56]);
   const diff = [...off].map((c, i) => (c !== back[i] ? [i, c, back[i]] : null)).filter(Boolean);
-  ok(back.length === off.length && diff.length === 1 && diff[0][1] === '1' && diff[0][2] === '0' && /ControlMask = 0, StateMask = 0/.test(back) && SP.unthrottlePs([12, 56], { restore: false }) === off && ![off, back].some((x) => /ChangeDisplaySettings|SetDisplayConfig|DisplayConfigSetDeviceInfo|SetDeviceGammaRamp/.test(x)),
+  ok(back.length === off.length && diff.length === 1 && diff[0][1] === '1' && diff[0][2] === '0' && gateOf(/ControlMask = 0, StateMask = 0/.test(back)) && SP.unthrottlePs([12, 56], { restore: false }) === off && ![off, back].some((x) => /ChangeDisplaySettings|SetDisplayConfig|DisplayConfigSetDeviceInfo|SetDeviceGammaRamp/.test(x)),
     'the give-back (`restore`) is the opt-out script with ONE character changed — ControlMask 1 → 0 (the system manages it again); neither touches a display setting', diff);
-  ok(same(SP.parseUnthrottle('x\r\n{"t":"unthrottle","rows":{"pid":12,"ok":true,"err":0}}\r\n'), [{ pid: 12, ok: true, err: 0 }]) && same(SP.parseUnthrottle('{"t":"unthrottle","rows":[{"pid":1,"ok":true,"err":0},{"pid":2,"ok":false,"err":5}]}'), [{ pid: 1, ok: true, err: 0 }, { pid: 2, ok: false, err: 5 }]) && SP.parseUnthrottle('ready') === null,
+  ok(gateOf(same(SP.parseUnthrottle('x\r\n{"t":"unthrottle","rows":{"pid":12,"ok":true,"err":0}}\r\n'), [{ pid: 12, ok: true, err: 0 }])) && gateOf(same(SP.parseUnthrottle('{"t":"unthrottle","rows":[{"pid":1,"ok":true,"err":0},{"pid":2,"ok":false,"err":5}]}'), [{ pid: 1, ok: true, err: 0 }, { pid: 2, ok: false, err: 5 }])) && SP.parseUnthrottle('ready') === null,
     'its answer: PowerShell 5\'s lone row (an object) and a list read the same; an access-denied row keeps its error; no line ⇒ null');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

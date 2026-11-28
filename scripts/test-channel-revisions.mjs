@@ -26,7 +26,7 @@ const Rev = require(path.join(REPO, 'src/channel-revisions.js'));
 const R = require(path.join(REPO, 'src/channel-record.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -55,10 +55,10 @@ ok(overwrite(rec, [rv(T - 60e3, 'third words')])[0].text !== 'first words', 'RED
 console.log('② the record\'s rv line');
 const big = 'x'.repeat(9000);
 const vb = R.validateSide({ k: 'rv', msg: 'm1', at: T, src: 'recheck', editedAt: T, text: big, blocks: [{ k: 'p', runs: [{ k: 't', text: big }] }] });
-ok(vb.ok && !vb.side.blocks && vb.side.truncated === true && Buffer.byteLength(JSON.stringify(vb.side)) <= R.SIDE_LINE_MAX_BYTES, 'a version past the line bound drops its tree first, then cuts the text (truncated) — the line stays ≤ 8 KiB', J({ ok: vb.ok, bytes: vb.ok && Buffer.byteLength(JSON.stringify(vb.side)) }));
+ok(gateOf(vb.ok) && !vb.side.blocks && vb.side.truncated === true && Buffer.byteLength(JSON.stringify(vb.side)) <= R.SIDE_LINE_MAX_BYTES, 'a version past the line bound drops its tree first, then cuts the text (truncated) — the line stays ≤ 8 KiB', J({ ok: vb.ok, bytes: vb.ok && Buffer.byteLength(JSON.stringify(vb.side)) }));
 ok(!R.validateSide({ k: 'rv', msg: 'm1', at: T, src: 'recheck', text: 'x' }).ok && !R.validateSide({ k: 'rv', msg: 'm1', at: T, src: 'recheck', editedAt: T }).ok, 'a version without its instant or its text is refused by name', J([R.validateSide({ k: 'rv', msg: 'm1', at: T, src: 'recheck', text: 'x' }).code]));
 ok(R.sideKey(rv(T - 60e3, 'a')) === R.sideKey(rv(T - 60e3, 'a')) && R.sideKey(rv(T - 60e3, 'a')) !== R.sideKey(rv(T - 61e3, 'a')), 'one version per instant (a re-learned edit is a no-op by its key)');
-ok(R.SIDE_KINDS.includes('rv') && Rev.compactVersionLines(Array.from({ length: 30 }, (_, i) => rv(T - (30 - i) * 1000, `v${i}`))).length === Rev.VERSIONS_KEPT, `the store's trim keeps the newest ${Rev.VERSIONS_KEPT} versions`);
+ok(gateOf(R.SIDE_KINDS.includes('rv')) && Rev.compactVersionLines(Array.from({ length: 30 }, (_, i) => rv(T - (30 - i) * 1000, `v${i}`))).length === Rev.VERSIONS_KEPT, `the store's trim keeps the newest ${Rev.VERSIONS_KEPT} versions`);
 
 console.log('③ the recheck plan');
 const it = (key, at, o = {}) => ({ key, at, ...o });
@@ -66,7 +66,7 @@ const items = [it('c\na', T - 2 * H), it('c\nb', T - 23 * H), it('c\nold', T - 2
 const p1 = Rev.planRecheck({ now: T, items });
 ok(p1.join() === 'c\nwoke,c\na,c\nb'.replace(/\\n/g, '\n'), 'windows: < 24 h fresh, a woken-for message for 7 d (first), never past them; a recalled message is done', J(p1));
 ok(Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 30 * 60e3]]) }).join() === ['c\nwoke', 'c\nb'].join(), 'cadence: at most one request per message per hour');
-ok(Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 30e3]]), forced: true }).includes('c\na') && !Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 2e3]]), forced: true }).includes('c\na'), `the owner's Refresh re-asks after ${Rev.RECHECK_FORCED_MS / 1000} s (never a flood)`);
+ok(gateOf(Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 30e3]]), forced: true }).includes('c\na')) && !Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 2e3]]), forced: true }).includes('c\na'), `the owner's Refresh re-asks after ${Rev.RECHECK_FORCED_MS / 1000} s (never a flood)`);
 // B-dfa4 cure (the verdict's should): the plan's order is TOTAL — the key decides an exact tie (no woke, never checked,
 // the same instant), so the rows' read order (the engine's kept fresh set since B-dfa4 U3) never changes what is picked
 {
@@ -85,16 +85,16 @@ ok(Rev.planRecheck({ now: T, items: many }).length === Rev.RECHECK_PER_PASS && R
 ok(Rev.planRecheck({ now: T, items: many, spent: Array(Rev.RECHECK_PER_HOUR).fill(T - H - 1) }).length === Rev.RECHECK_PER_PASS, 'spent instants older than the hour free their room');
 // RED control: a plan without the hour gap asks the same message every pass
 const noGap = (o) => Rev.planRecheck({ ...o, last: new Map() });
-ok(noGap({ now: T, items, last: new Map([['c\na', T - 60e3]]) }).includes('c\na'), 'RED CONTROL: a plan that ignores `last` re-asks a message a minute later — the cadence leg is red on it');
+ok(verdictOf(noGap({ now: T, items, last: new Map([['c\na', T - 60e3]]) }).includes('c\na')), 'RED CONTROL: a plan that ignores `last` re-asks a message a minute later — the cadence leg is red on it');
 
 console.log('④ the capability row per adapter');
 const mods = { lark: require(path.join(REPO, 'src/channels/lark.js')), slack: require(path.join(REPO, 'src/channels/slack.js')), gmail: require(path.join(REPO, 'src/channels/gmail.js')), webhook: require(path.join(REPO, 'src/channels/webhook.js')), agents: require(path.join(REPO, 'src/channels/agents.js')) };
 const rowOf = (m) => CH.revisionsOf((m.adapter || m).caps);
 ok(J(rowOf(mods.lark)) === J({ recall: true, edit: true, how: 'byid' }) && J(rowOf(mods.slack)) === J({ recall: true, edit: true, how: 'absent' }), 'Lark answers by id; Slack by absence (a deleted message vanishes)');
-ok(['gmail', 'webhook', 'agents'].every((k) => rowOf(mods[k]).how === 'none' && !rowOf(mods[k]).recall && !rowOf(mods[k]).edit), 'Gmail / webhook / agents: revisions none — nothing is rechecked');
-ok(CH.revisionsOf({}).how === 'none' && !CH.METHOD_GATES.revisionOf({}) && CH.METHOD_GATES.revisionOf({ revisions: { recall: true, edit: false, how: 'absent' } }), 'a missing row fails closed (none); the method is declared by the row');
+ok(verdictOf(['gmail', 'webhook', 'agents'].every((k) => rowOf(mods[k]).how === 'none' && !rowOf(mods[k]).recall && !rowOf(mods[k]).edit)), 'Gmail / webhook / agents: revisions none — nothing is rechecked');
+ok(CH.revisionsOf({}).how === 'none' && !CH.METHOD_GATES.revisionOf({}) && verdictOf(CH.METHOD_GATES.revisionOf({ revisions: { recall: true, edit: false, how: 'absent' } })), 'a missing row fails closed (none); the method is declared by the row');
 const bad = (rv2) => { try { CH.validateCaps('webhook', { ...(mods.webhook.adapter || mods.webhook).caps, revisions: rv2 }); return null; } catch (e) { return e.message; } };
-ok(/how must be/.test(bad({ recall: true, edit: true, how: 'poll' }) || '') && /never be learned/.test(bad({ recall: true, edit: false, how: 'none' }) || '') && /learns nothing/.test(bad({ recall: false, edit: false, how: 'byid' }) || ''), 'a broken row is refused by name at load', J([bad({ how: 'poll', recall: true, edit: true })]));
+ok(gateOf(/how must be/.test(bad({ recall: true, edit: true, how: 'poll' }) || '')) && gateOf(/never be learned/.test(bad({ recall: true, edit: false, how: 'none' }) || '')) && verdictOf(/learns nothing/.test(bad({ recall: false, edit: false, how: 'byid' }) || '')), 'a broken row is refused by name at load', J([bad({ how: 'poll', recall: true, edit: true })]));
 
 console.log('⑤ the registry wrapper normalizes the answer');
 const mkMod = (answer, revisions = { recall: true, edit: true, how: 'byid' }) => {
@@ -112,7 +112,7 @@ console.log('⑥ the agent\'s words');
 const line = Rev.agentRevisionLine({ recalledAt: T, versions: [{}, {}, {}] }, { iso: () => 'T' });
 ok(line === '[recalled at T — the content below is the kept copy] [edited: v3 of 3; --versions shows all]' && Rev.agentRevisionLine({}) === '', 'recalled over the kept content; edited with the --versions hint; nothing learned = no line', line);
 const note = Rev.recallNoteText({ account: 'Lark', conversation: 'Ops', at: T }, { iso: () => 'T' });
-ok(/delivered to you at T \(Lark \/ Ops\) was recalled/.test(note) && !/woken/.test(note) && !/\n/.test(note), 'the ONE next-turn note: our words, the time, the place — one line; "delivered", never "woken for" (every road)', note);
+ok(gateOf(/delivered to you at T \(Lark \/ Ops\) was recalled/.test(note)) && !/woken/.test(note) && !/\n/.test(note), 'the ONE next-turn note: our words, the time, the place — one line; "delivered", never "woken for" (every road)', note);
 
 
 console.log('⑦ the ENGINE leg (B-e8e1): the woken-for recall note over the REAL engine and the fake adapter');
@@ -186,19 +186,19 @@ async function directLeg(ENGM, tag) {
   return { delivered: w.delivered.map((d) => d.cid), rows, first, marked, second, askedAgain, restart, m7, wakeAt: (rows.find((x) => x.vid === m7.vendorId) || {}).at, stashedTo: [...new Set([...w.stashed, ...w2.stashed].map((x) => x.cid))] };
 }
 const d1 = await directLeg(ENG, 'direct');
-ok(J(d1.delivered) === J(['agent-1']) && d1.rows.length === 2 && d1.rows.every((x) => x.cid === 'agent-1' && Number(x.at) > 0) && d1.rows.map((x) => x.vid).join() === [d1.m7.vendorId, 'fake-poll-ops-m8'].join(), 'the wake: ONE delivery to agent-1, the woken-for ledger names both messages it carried, to whom, when', J({ delivered: d1.delivered, rows: d1.rows }));
+ok(J(d1.delivered) === J(['agent-1']) && d1.rows.length === 2 && gateOf(d1.rows.every((x) => x.cid === 'agent-1' && Number(x.at) > 0)) && d1.rows.map((x) => x.vid).join() === [d1.m7.vendorId, 'fake-poll-ops-m8'].join(), 'the wake: ONE delivery to agent-1, the woken-for ledger names both messages it carried, to whom, when', J({ delivered: d1.delivered, rows: d1.rows }));
 const n1 = d1.first[0] || {};
 ok(d1.first.length === 1 && n1.cid === 'agent-1' && n1.source === 'channel' && n1.kind === 'notification', 'the recall of a message the wake carried: exactly ONE note, stashed (the free lane, never a wake) for the conversation it woke', J(d1.first.map((x) => [x.cid, x.fromName, x.kind])));
-ok(/was recalled by its sender/.test(n1.text || '') && (n1.text || '').includes(iso(d1.wakeAt)) && /Ops room/.test(n1.text || '') && !(n1.text || '').includes(String(d1.m7.text || '').slice(0, 24)) && !(n1.text || '').includes(d1.m7.vendorId), 'the note names the revision (recalled), the wake\'s time and the room — never the message\'s text or id', n1.text);
-ok(d1.marked.every(Boolean) && d1.first.length === 1, 'a recall nobody was woken for (the same room\'s other message, a room nobody watches) is marked on its row — and adds NO note', J(d1.marked));
+ok(gateOf(/was recalled by its sender/.test(n1.text || '')) && gateOf((n1.text || '').includes(iso(d1.wakeAt))) && gateOf(/Ops room/.test(n1.text || '')) && !(n1.text || '').includes(String(d1.m7.text || '').slice(0, 24)) && !(n1.text || '').includes(d1.m7.vendorId), 'the note names the revision (recalled), the wake\'s time and the room — never the message\'s text or id', n1.text);
+ok(gateOf(d1.marked.every(Boolean)) && d1.first.length === 1, 'a recall nobody was woken for (the same room\'s other message, a room nobody watches) is marked on its row — and adds NO note', J(d1.marked));
 ok(d1.second === 1 && !d1.askedAgain.includes(d1.m7.vendorId), 'a second pass an hour on: the recalled message is done (never re-asked), still one note', J({ second: d1.second }));
-ok(d1.restart.asked && d1.restart.notes === 0 && d1.restart.noted, 'after a restart the woken-for row re-asks the message, learns the recall AGAIN — and adds nothing (the record already says it; the row is marked noted on disk)', J(d1.restart));
+ok(gateOf(d1.restart.asked) && d1.restart.notes === 0 && verdictOf(d1.restart.noted), 'after a restart the woken-for row re-asks the message, learns the recall AGAIN — and adds nothing (the record already says it; the row is marked noted on disk)', J(d1.restart));
 ok(J(d1.stashedTo) === J(['agent-1']), 'nobody else hears anything (agent-2 was never woken)', J(d1.stashedTo));
 { // RED CONTROL: the recheck without its note call — the legs above go red
   const src = engineSource(REPO);
   const cut = src.replace('        await noteRecall(rec, convId, vid);\n', '');
   const c1 = await directLeg(MUT.load('src/server/channels-engine.js', cut, 'no-note'), 'direct-c');
-  ok(cut !== src && c1.first.length === 0 && c1.marked[0], 'CONTROL: an engine whose recheck never calls the note path marks the recall and stashes NOTHING — the ONE-note leg is red on it', J({ notes: c1.first.length }));
+  ok(cut !== src && c1.first.length === 0 && verdictOf(c1.marked[0]), 'CONTROL: an engine whose recheck never calls the note path marks the recall and stashes NOTHING — the ONE-note leg is red on it', J({ notes: c1.first.length }));
 }
 
 // ⑦b the same message carried to the same conversation twice (a re-delivery five minutes on)
@@ -227,7 +227,7 @@ async function twiceLeg(ENGM, tag) {
   return out;
 }
 const t1 = await twiceLeg(ENG, 'twice');
-ok(t1.handedTwice === 1 && t1.wakes === 1 && t1.rows.length === 2 && t1.notes.length === 1 && t1.notes[0].includes(iso(Math.min(...t1.rows))), 'a SECOND watcher of the same agent hands it nothing more (one wake: the receiver\'s mark); a stored ledger with TWO rows for that message (an older release\'s) still recalls ONE note — the first row\'s time', J(t1));
+ok(t1.handedTwice === 1 && t1.wakes === 1 && t1.rows.length === 2 && t1.notes.length === 1 && verdictOf(t1.notes[0].includes(iso(Math.min(...t1.rows)))), 'a SECOND watcher of the same agent hands it nothing more (one wake: the receiver\'s mark); a stored ledger with TWO rows for that message (an older release\'s) still recalls ONE note — the first row\'s time', J(t1));
 {
   const src = engineSource(REPO);
   const cut = src.replace('if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at });', 'due.push({ cid: w.cid, at: w.at });');
@@ -253,15 +253,15 @@ async function digestLeg(ENGM, tag) {
   return out;
 }
 const g1 = await digestLeg(ENG, 'digest');
-ok(g1.held === 0 && g1.flushed.ok && g1.flushed.conversations === 2 && g1.flushed.cid === 'agent-1' && g1.delivered === 1, 'the digest window held both rooms\' hits, then ONE scope digest carried two conversations to agent-1', J(g1));
+ok(g1.held === 0 && gateOf(g1.flushed.ok) && g1.flushed.conversations === 2 && g1.flushed.cid === 'agent-1' && g1.delivered === 1, 'the digest window held both rooms\' hits, then ONE scope digest carried two conversations to agent-1', J(g1));
 ok(J(g1.rows) === J(g1.want), 'the woken-for ledger of EVERY conversation the digest carried names its message and the conversation it woke (was: none — single-conversation wakes only)', J({ rows: g1.rows, want: g1.want }));
-ok(g1.notes.length === 2 && g1.notes.every(([cid]) => cid === 'agent-1') && g1.notes.some(([, x]) => /Ops room/.test(x)) && g1.notes.some(([, x]) => /Announcements/.test(x)), 'both recalls after the digest: ONE note each, to the conversation the digest woke, naming its room', J(g1.notes));
+ok(g1.notes.length === 2 && gateOf(g1.notes.every(([cid]) => cid === 'agent-1')) && gateOf(g1.notes.some(([, x]) => /Ops room/.test(x))) && verdictOf(g1.notes.some(([, x]) => /Announcements/.test(x))), 'both recalls after the digest: ONE note each, to the conversation the digest woke, naming its room', J(g1.notes));
 {
   const src = engineSource(REPO);
   const line = '          noteDelivered(e2, h.carried.hits, target.cid, t, pk, !!(ok || stashKept));';
   const cut = src.split('\n').filter((l) => !l.startsWith(line)).join('\n');
   const c3 = await digestLeg(MUT.load('src/server/channels-engine.js', cut, 'no-digest-ledger'), 'digest-c');
-  ok(cut !== src && c3.delivered === 1 && c3.rows.every((r) => r === '') && c3.notes.length === 0, 'CONTROL: the digest without its ledger rows (the .262 engine) — delivered, recalled, and NOT ONE note', J({ rows: c3.rows, notes: c3.notes.length }));
+  ok(cut !== src && c3.delivered === 1 && gateOf(c3.rows.every((r) => r === '')) && c3.notes.length === 0, 'CONTROL: the digest without its ledger rows (the .262 engine) — delivered, recalled, and NOT ONE note', J({ rows: c3.rows, notes: c3.notes.length }));
 }
 
 // ⑦d–⑦g (lane channel-recall-ledger, B-70d2): THE LEDGER DOOR ON EVERY ROAD — a message that reached a conversation
@@ -315,14 +315,14 @@ async function nextTurnLeg(ENGM, tag) {
 }
 const e1 = await nextTurnLeg(ENG, 'next-turn');
 ok(e1.billed === 0 && J(e1.blocks) === J(['agent-1']) && J(e1.rows) === J(e1.want), 'the FREE next-turn stash: no billed turn, ONE stashed block — and the ledger names both messages it handed (was: no row)', J(e1));
-ok(e1.first.length === 1 && e1.first[0].cid === 'agent-1' && /was recalled by its sender/.test(e1.first[0].text) && /Ops room/.test(e1.first[0].text) && e1.marked.every(Boolean), 'its recall: exactly ONE note to the conversation the stash reached; the recall nobody was handed is marked and adds nothing', J({ first: e1.first, marked: e1.marked }));
-ok(e1.second === 1 && e1.restart.asked && e1.restart.notes === 0, 'a re-check an hour on and a restart (the 7 d row re-asks it): still ONE note', J({ second: e1.second, restart: e1.restart }));
+ok(e1.first.length === 1 && e1.first[0].cid === 'agent-1' && gateOf(/was recalled by its sender/.test(e1.first[0].text)) && gateOf(/Ops room/.test(e1.first[0].text)) && verdictOf(e1.marked.every(Boolean)), 'its recall: exactly ONE note to the conversation the stash reached; the recall nobody was handed is marked and adds nothing', J({ first: e1.first, marked: e1.marked }));
+ok(e1.second === 1 && gateOf(e1.restart.asked) && e1.restart.notes === 0, 'a re-check an hour on and a restart (the 7 d row re-asks it): still ONE note', J({ second: e1.second, restart: e1.restart }));
 legTable.push(['the free next-turn stash (stashHits)', e1.first.length]);
 { // RED CONTROL: the free stash without its door (= f57d1cbe9) — no row, so the recall tells nobody
   const src = engineSource(REPO);
   const cut = src.replace('if (e2) noteDelivered(e2, fresh, target.cid, now(), pk, !!durableS);', 'if (e2) void e2;');
   const c4 = await nextTurnLeg(MUT.load('src/server/channels-engine.js', cut, 'no-stash-door'), 'next-turn-c');
-  ok(cut !== src && J(c4.blocks) === J(['agent-1']) && c4.rows.length === 0 && c4.first.length === 0 && c4.marked[0], 'CONTROL: the free stash without the ledger door (the base engine) — handed, recalled, marked, and NOT ONE note', J({ rows: c4.rows, notes: c4.first.length }));
+  ok(cut !== src && J(c4.blocks) === J(['agent-1']) && c4.rows.length === 0 && c4.first.length === 0 && verdictOf(c4.marked[0]), 'CONTROL: the free stash without the ledger door (the base engine) — handed, recalled, marked, and NOT ONE note', J({ rows: c4.rows, notes: c4.first.length }));
 }
 
 // ⑦f ONE message reaching TWO conversations by two roads (agent-1's next-turn watch, agent-2's wake) — and one nobody got
@@ -366,7 +366,7 @@ async function capLeg(ENGM, tag) {
   return out;
 }
 const k1 = await capLeg(ENG, 'cap');
-ok(J(k1.blocks) === J(['agent-2']) && k1.n === 40 && k1.per.a1 === 1 && k1.per.a2 === 39 && k1.per.kept, 'a chatty next-turn watch (45 handed) beside one older wake: the ledger holds 40 — the chatty conversation lost its oldest, the wake\'s row stayed', J(k1));
+ok(J(k1.blocks) === J(['agent-2']) && k1.n === 40 && k1.per.a1 === 1 && k1.per.a2 === 39 && verdictOf(k1.per.kept), 'a chatty next-turn watch (45 handed) beside one older wake: the ledger holds 40 — the chatty conversation lost its oldest, the wake\'s row stayed', J(k1));
 ok(J(k1.notes) === J(['agent-1']), 'and the recall of the waking message is still noted to the conversation it woke', J(k1.notes));
 { // RED CONTROL: the newest-40 bound (the base door) pushes the wake's row out — its recall tells nobody
   const src = engineSource(REPO);
@@ -418,7 +418,7 @@ legTable.push(['a parked hit carried by the next hit (stashHits carry)', h1.note
 legTable.unshift(['a billed wake (wakeNow)', d1.first.length], ['a scope digest\'s carried hits (flushScopeNow), per conversation', g1.notes.length / 2]);
 console.log('  the leg table — road → notes for one recalled message it carried:');
 for (const [road, n] of legTable) console.log(`    ${road} → ${n}`);
-ok(legTable.length === 6 && legTable.every(([, n]) => n === 1), 'every road the ledger door serves gives exactly ONE note per (message, conversation)', J(legTable));
+ok(legTable.length === 6 && verdictOf(legTable.every(([, n]) => n === 1)), 'every road the ledger door serves gives exactly ONE note per (message, conversation)', J(legTable));
 
 console.log('⑧ THE LEDGER DOOR CENSUS (B-70d2): every delivery call names the ONE door after its hand-over');
 const acorn = require('acorn');
@@ -475,20 +475,20 @@ function ledgerCensus(files, notARoad = NOT_A_ROAD) {
 }
 const C0 = ledgerCensus(censusFiles());
 console.log(`  census: ${C0.roads.length} delivery calls in ${C0.fns.length} roads (${C0.fns.join(', ')}) name ${DOOR}; ${C0.exempt.length} calls in ${Object.keys(NOT_A_ROAD).length} NOT_A_ROAD functions; ${C0.writers.length} wokeFor writer`);
-ok(!C0.red.length && C0.fns.includes('stashHits') && C0.fns.includes('wakeNow') && C0.fns.includes('flushScopeNow') && C0.writers.length === 1, 'every delivery road (a billed / refused-and-stashed wake, the free stash, a scope digest) calls the ONE ledger door after its hand-over; the door is the only wokeFor writer', J({ red: C0.red, fns: C0.fns, writers: C0.writers }));
+ok(!C0.red.length && gateOf(C0.fns.includes('stashHits')) && gateOf(C0.fns.includes('wakeNow')) && gateOf(C0.fns.includes('flushScopeNow')) && C0.writers.length === 1, 'every delivery road (a billed / refused-and-stashed wake, the free stash, a scope digest) calls the ONE ledger door after its hand-over; the door is the only wokeFor writer', J({ red: C0.red, fns: C0.fns, writers: C0.writers }));
 { // RED CONTROLS: a planted road, the base free stash (no door), a dead NOT_A_ROAD row, a second wokeFor writer
   const src = ENGINE_SRC;
   const planted = src.replace('  async function stashHits(', "  async function plantedRoad(cid, hits) { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: 'Channels · planted', text: String(hits.length) }); }\n  async function stashHits(");
   const p1 = ledgerCensus(censusFiles(planted));
-  ok(planted !== src && p1.red.length === 1 && /plantedRoad hands over by stashFor/.test(p1.red[0]), 'CONTROL: a PLANTED road (a new stashFor with no door) is RED by name', J(p1.red));
+  ok(planted !== src && p1.red.length === 1 && verdictOf(/plantedRoad hands over by stashFor/.test(p1.red[0])), 'CONTROL: a PLANTED road (a new stashFor with no door) is RED by name', J(p1.red));
   const base = src.replace('if (e2) noteDelivered(e2, fresh, target.cid, now(), pk, !!durableS);', 'if (e2) void e2;');
   const p2 = ledgerCensus(censusFiles(base));
-  ok(base !== src && p2.red.length === 1 && /stashHits hands over by stashFor/.test(p2.red[0]), 'CONTROL: the base engine\'s free stash (f57d1cbe9 — no door) is RED', J(p2.red));
+  ok(base !== src && p2.red.length === 1 && verdictOf(/stashHits hands over by stashFor/.test(p2.red[0])), 'CONTROL: the base engine\'s free stash (f57d1cbe9 — no door) is RED', J(p2.red));
   const p3 = ledgerCensus(censusFiles(), { ...NOT_A_ROAD, 'channels-engine.js › goneRoad': 'a road that no longer exists' });
-  ok(p3.red.length === 1 && /goneRoad .*dead row/.test(p3.red[0]), 'CONTROL: a NOT_A_ROAD row naming no call is RED (a dead row)', J(p3.red));
+  ok(p3.red.length === 1 && verdictOf(/goneRoad .*dead row/.test(p3.red[0])), 'CONTROL: a NOT_A_ROAD row naming no call is RED (a dead row)', J(p3.red));
   const second = src.replace('      if (!en || !Array.isArray(en.wokeFor)) return;\n', '      if (!en || !Array.isArray(en.wokeFor)) return;\n      en.wokeFor = en.wokeFor.filter(Boolean);\n');
   const p4 = ledgerCensus(censusFiles(second));
-  ok(second !== src && p4.red.length === 1 && /noteRecall writes wokeFor/.test(p4.red[0]), 'CONTROL: a second wokeFor writer is RED', J(p4.red));
+  ok(second !== src && p4.red.length === 1 && verdictOf(/noteRecall writes wokeFor/.test(p4.red[0])), 'CONTROL: a second wokeFor writer is RED', J(p4.red));
 }
 
 console.log('⑨ the ledger\'s key and its FAIR bound (PURE)');
@@ -500,7 +500,7 @@ ok(Rev.wokeKeyOf('om_1') === 'om_1' && Rev.wokeKeyOf(42) === '42' && Rev.wokeKey
   ok(k.length === 40 && k.filter((x) => x.cid === 'a1').length === 1 && k.filter((x) => x.cid === 'a2').map((x) => x.at)[0] === 16 && k[0].cid === 'a1', 'over the bound the conversation with the most rows loses its OLDEST; the lone wake row stays, the order is kept', J(k.slice(0, 3)));
   const halves = [...Array.from({ length: 30 }, (_, i) => row('a1', i)), ...Array.from({ length: 30 }, (_, i) => row('a2', 100 + i))];
   const h = Rev.capWokeRows(halves, 40);
-  ok(h.filter((x) => x.cid === 'a1').length === 20 && h.filter((x) => x.cid === 'a2').length === 20 && h.every((x) => x.cid === 'a2' ? x.at >= 110 : x.at >= 10), 'two conversations over the bound share it evenly, each keeping its newest', J(h.map((x) => x.at)));
+  ok(h.filter((x) => x.cid === 'a1').length === 20 && h.filter((x) => x.cid === 'a2').length === 20 && verdictOf(h.every((x) => x.cid === 'a2' ? x.at >= 110 : x.at >= 10)), 'two conversations over the bound share it evenly, each keeping its newest', J(h.map((x) => x.at)));
   const small = [row('a1', 1), row('a2', 2)];
   ok(J(Rev.capWokeRows(small, 40)) === J(small) && Rev.capWokeRows(null, 40).length === 0, 'under the bound: unchanged', '');
   // RED control: the newest-N bound (the base door) loses the lone wake row
@@ -565,7 +565,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     return { delivered, reads: st.reads, state: st.state };
   }
   const nl = await noteLeg(ENG, 'unread-note');
-  ok(nl.woke.includes('agent-1') && nl.notes === 1 && nl.reads >= 1 && nl.state === 'read',
+  ok(gateOf(nl.woke.includes('agent-1')) && nl.notes === 1 && nl.reads >= 1 && nl.state === 'read',
     `the RECALL NOTE of a member still being read waits for the read, then is stashed (${nl.notes} note, ${nl.reads} read)`, J(nl));
   const wl = await wakeLeg(ENG, 'unread-wake');
   ok(J(wl.delivered) === J(['agent-1']) && wl.reads >= 1 && wl.state === 'read',
@@ -578,7 +578,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   const noRead = MUT.load('src/server/channels-engine.js', src.replace(NOTE_READ, '').replace(WAKE_READ, ''), 'no-unread-read');
   const nlR = await noteLeg(noRead, 'unread-note-red');
   const wlR = await wakeLeg(noRead, 'unread-wake-red');
-  ok(nlR.woke.includes('agent-1') && nlR.notes === 0 && nlR.reads === 0, `RED CONTROL: without the read the recall note is judged on the unread answer at the moment — no note then (${nlR.notes})`, J(nlR));
+  ok(gateOf(nlR.woke.includes('agent-1')) && nlR.notes === 0 && nlR.reads === 0, `RED CONTROL: without the read the recall note is judged on the unread answer at the moment — no note then (${nlR.notes})`, J(nlR));
   ok(wlR.delivered.length === 0 && wlR.reads === 0, `RED CONTROL: without the read the wake is judged on the unread answer at the moment — the member not reached then (${J(wlR.delivered)})`, J(wlR));
 
   // ── THE CURE (主开发 04:09Z; the third form 09:05Z, laws L1–L5): the read held PAST its bound (the stand-in read never lands).
@@ -647,7 +647,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   ok(kw.then === 0 && kw.said === 1 && kw.after === 1 && kw.twice === 1,
     `a WAKE for a via row whose member is still being read past the bound is KEPT (0 records then), SAID once, and the message reaches it ONCE after the read lands (${kw.after} record, ${kw.twice} in all)`, J(kw));
   const kn = await keptNoteLeg(ENG, 'kept-note');
-  ok(kn.then === 0 && kn.unmarked && kn.said === 1 && kn.after === 1 && kn.twice === 1,
+  ok(kn.then === 0 && gateOf(kn.unmarked) && kn.said === 1 && kn.after === 1 && kn.twice === 1,
     `a RECALL in that window: no note then, its «noted» mark left UNSET, said once — the note arrives ONCE after the read lands (${kn.after})`, J(kn));
   // RED CONTROL: the engine without the holds (the first commit's form) — the wake and the note are DROPPED for good
   const HOLD_WAKE = '    holdUnreadWake(rec, convId, en, eff, aud, fresh0, owedFor);\n';
@@ -837,7 +837,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     return out;
   }
   const fg = await forgetLeg(ENG, 'mark-forget');
-  ok(fg.first === 1 && fg.lines === 2 && fg.last === '3' && fg.routine && fg.warned === 0 && J(fg.handed) === '[1,1,1]',
+  ok(fg.first === 1 && fg.lines === 2 && fg.last === '3' && gateOf(fg.routine) && fg.warned === 0 && J(fg.handed) === '[1,1,1]',
     `the mark's routine forgetting is SAID as what it is — a journal line, never a warning (${fg.warned}); the first at once, the LAST count (${fg.last}) when the window ends (${fg.lines} lines)`, J(fg));
   const SAY_LATER = '    for (const kind of Object.keys(forgot)) { const f = forgot[kind]; if (f.n && now() - f.at >= HANDED_SAY_MS) sayForgotNow(kind); }\n';
   ok(src.split(SAY_LATER).length === 2, 'control setup: the last count\'s line at the next write is present once');
@@ -919,7 +919,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   const ROW_N = '          e2.stats.wakes.push({ ...wk, n: h.carried.hits.length + h.carried.elided });';
   ok(src.split(ROW_N).length === 2, 'control setup: the scope digest\'s history row is present once');
   const srR = await scopeRowLeg(MUT.load('src/server/channels-engine.js', anchored(src, ROW_N, '          e2.stats.wakes.push({ ...wk, n: h.carried.ids.size + h.carried.elided });', 'row-counts-ids'), 'row-counts-ids'), 'scope-row-red');   // stale-pins: kept (the row as it counted before)
-  ok(sr.ok && sr.n === 1 && J(sr.rows) === '[1]' && sr.o1 === 1 && sr.o2 === 1 && sr.pending === 0, `the scope digest carries only o2 (o1 the receiver already had) and its history row on the conversation counts what it HANDED (${J(sr.rows)}); its pending rows cleared`, J(sr));
+  ok(gateOf(sr.ok) && sr.n === 1 && J(sr.rows) === '[1]' && sr.o1 === 1 && sr.o2 === 1 && sr.pending === 0, `the scope digest carries only o2 (o1 the receiver already had) and its history row on the conversation counts what it HANDED (${J(sr.rows)}); its pending rows cleared`, J(sr));
   ok(J(srR.rows) === '[2]', `RED CONTROL: a row counting the carried ids says ${J(srR.rows)} for one record handed`, J(srR));
 
   // the DIGEST's hold and its bound — reactions on what agent-1 SENT here, while its Task Groups are being read
@@ -959,4 +959,4 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

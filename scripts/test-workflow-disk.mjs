@@ -36,7 +36,7 @@ import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out sa
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -122,38 +122,38 @@ console.log('§1 the journal arithmetic moved VERBATIM (done / superseded / prog
   ]).journalLines.join('\n') + '\nnot json\n{"type":"started"}\n';
   const texts = [retry, mkRun(OWNER).journalLines.join('\n'), mkRun(OWNER, { labelled: false, launched: false }).journalLines.join('\n'), ''];
   const same = texts.every((tx) => { const a = preMove(tx), b = journalAttemptsFromText(tx); return ['started', 'done', 'superseded'].every((k) => JSON.stringify([...a[k]]) === JSON.stringify([...b[k]])); });
-  ok('started / done / superseded are identical to the pre-move function over a retry chain, the owner shape, a pre-2.1.267 journal and an empty one', same);
+  ok('started / done / superseded are identical to the pre-move function over a retry chain, the owner shape, a pre-2.1.267 journal and an empty one', verdictOf(same));
   const r = journalAttemptsFromText(retry);
-  ok('ADDITIVE: `failed` records are collected ({type,key,agentId} — never beside a result) and the started line\'s label/phase are kept per agent', r.failed.has(aid(3)) && r.failed.has(aid(5)) && r.failed.size === 2 && r.info.get(aid(2)).label === 'a' && r.info.get(aid(2)).phase === 'p');
+  ok('ADDITIVE: `failed` records are collected ({type,key,agentId} — never beside a result) and the started line\'s label/phase are kept per agent', gateOf(r.failed.has(aid(3))) && gateOf(r.failed.has(aid(5))) && r.failed.size === 2 && r.info.get(aid(2)).label === 'a' && r.info.get(aid(2)).phase === 'p');
   // B-360d part 2: THE FOLD — the same lines folded in pieces (cut at every line end) answer what the whole text answers
   const pieces = (tx, every) => { const ls = tx.split('\n'), out = []; for (let i = 0; i < ls.length; i += every) out.push(ls.slice(i, i + every).join('\n') + (i + every < ls.length ? '\n' : '')); return out; };
   const flatOf = (a) => JSON.stringify(['started', 'done', 'superseded', 'failed'].map((k) => [...a[k]]).concat([[...a.info]]));
   const folded = texts.every((tx) => [1, 2, 3, 7].every((every) => flatOf(WD.journalAttemptsOf(pieces(tx, every).reduce((st, part) => WD.journalFold(st, part), null))) === flatOf(journalAttemptsFromText(tx))));
-  ok('THE FOLD (B-360d part 2): the journal folded a piece at a time (cut at line ends, 1 / 2 / 3 / 7 lines a piece) answers exactly what the whole text answers', folded);
+  ok('THE FOLD (B-360d part 2): the journal folded a piece at a time (cut at line ends, 1 / 2 / 3 / 7 lines a piece) answers exactly what the whole text answers', verdictOf(folded));
   { const st0 = WD.journalFold(null, retry), a0 = WD.journalAttemptsOf(st0); a0.started.clear(); a0.done.add('zz'); a0.failed.clear(); a0.info.clear();
     const a1 = WD.journalAttemptsOf(st0);
-    ok('THE FOLD\'s ANSWER IS A COPY (B-360d part 2, round wvinqg1j4): a caller that clears or adds to it changes nothing the fold keeps (its info entries frozen)', a1.started.size > 0 && !a1.done.has('zz') && a1.failed.size === 2 && a1.info.size > 0 && Object.isFrozen([...a1.info.values()][0]), { started: a1.started.size, failed: a1.failed.size }); }
-  ok('the route no longer defines its own parser (ONE implementation, required from src/workflow-disk.js)', !/function journalAttemptsFromText/.test(read('src/routes/sessions.js')) && /require\('\.\.\/workflow-disk'\)/.test(read('src/routes/sessions.js')));
+    ok('THE FOLD\'s ANSWER IS A COPY (B-360d part 2, round wvinqg1j4): a caller that clears or adds to it changes nothing the fold keeps (its info entries frozen)', a1.started.size > 0 && !a1.done.has('zz') && a1.failed.size === 2 && a1.info.size > 0 && verdictOf(Object.isFrozen([...a1.info.values()][0])), { started: a1.started.size, failed: a1.failed.size }); }
+  ok('the route no longer defines its own parser (ONE implementation, required from src/workflow-disk.js)', !/function journalAttemptsFromText/.test(read('src/routes/sessions.js')) && verdictOf(/require\('\.\.\/workflow-disk'\)/.test(read('src/routes/sessions.js'))));
 }
 
 console.log('§2 the parse table');
 {
   // (a) CLI ≥ 2.1.267: labels + phases in the journal, metas beside
   const a = parseRunDir({ runId: 'wf_x', ...mkRun(OWNER), newestMtime: NOW - 2 * DAY, now: NOW });
-  ok('(a) journal with label/phase: 11 agents, 10 done, every label from the journal', a.agentCount === 11 && a.doneCount === 10 && flat(a).every((g, i) => g.label === OWNER[i].label), flat(a).map((g) => g.label));
-  ok('(a) phases in FIRST-SEEN order (1/7/1/1/1), none untitled, no phase titled with a sentence', JSON.stringify(a.phases.map((p) => [p.title, p.agents.length])) === JSON.stringify(PHASES.map((p, i) => [p, [1, 7, 1, 1, 1][i]])) && a.phases.every((p) => !p.untitled), a.phases.map((p) => p.title));
+  ok('(a) journal with label/phase: 11 agents, 10 done, every label from the journal', a.agentCount === 11 && a.doneCount === 10 && verdictOf(flat(a).every((g, i) => g.label === OWNER[i].label)), flat(a).map((g) => g.label));
+  ok('(a) phases in FIRST-SEEN order (1/7/1/1/1), none untitled, no phase titled with a sentence', JSON.stringify(a.phases.map((p) => [p.title, p.agents.length])) === JSON.stringify(PHASES.map((p, i) => [p, [1, 7, 1, 1, 1][i]])) && verdictOf(a.phases.every((p) => !p.untitled)), a.phases.map((p) => p.title));
   ok('(a) model from meta.json where the meta has one ("" where it has not)', flat(a)[0].model === 'opus' && flat(a)[4].model === '');
-  ok('(a) states: done ×10, the resultless last agent `progress` (the journal arithmetic), transcripts on disk', flat(a).filter((g) => g.state === 'done').length === 10 && flat(a)[10].state === 'progress' && flat(a).every((g) => g.onDisk === true));
+  ok('(a) states: done ×10, the resultless last agent `progress` (the journal arithmetic), transcripts on disk', flat(a).filter((g) => g.state === 'done').length === 10 && flat(a)[10].state === 'progress' && verdictOf(flat(a).every((g) => g.onDisk === true)));
   ok('(a) 11 started / 10 result ⇒ exactly ONE unfinished agent, named', a.status === 'stalled' && JSON.stringify(a.stall.unfinished) === JSON.stringify(['ship:it']), a.stall);
   // (b) the journal WITHOUT label/phase, meta.json only
   const bRun = mkRun(OWNER, { labelled: false });
   for (const [i, g] of OWNER.entries()) bRun.metas[g.id] = { agentType: 'workflow-subagent', description: g.label, workflowPhase: g.phase, spawnDepth: 1, requestShape: 'subagent-x', requestNonInteractive: true };
   const b = parseRunDir({ runId: 'wf_x', ...bRun, newestMtime: NOW - MIN, now: NOW });
-  ok('(b) journal WITHOUT label/phase + meta.json only ⇒ labels from meta.description, phases from meta.workflowPhase', flat(b).every((g, i) => g.label === OWNER[i].label) && b.phases.map((p) => p.title).join('|') === PHASES.join('|'));
+  ok('(b) journal WITHOUT label/phase + meta.json only ⇒ labels from meta.description, phases from meta.workflowPhase', gateOf(flat(b).every((g, i) => g.label === OWNER[i].label)) && b.phases.map((p) => p.title).join('|') === PHASES.join('|'));
   // (c) neither (a CLI before 2.1.267)
   const c = parseRunDir({ runId: 'wf_x', ...mkRun(OWNER, { labelled: false, metas: false, launched: false }), newestMtime: NOW - MIN, now: NOW });
-  ok('(c) neither ⇒ label "" everywhere and ONE untitled phase "Agents" (the window then draws its "(agent)" fallback)', flat(c).every((g) => g.label === '') && c.phases.length === 1 && c.phases[0].title === 'Agents' && c.phases[0].untitled === true);
-  ok('(c) …and the window still renders `ag.label || \'(agent)\'` for such a row', /escHtml\(ag\.label \|\| '\(agent\)'\)/.test(read('src/lib/workflow-detail.js')));
+  ok('(c) neither ⇒ label "" everywhere and ONE untitled phase "Agents" (the window then draws its "(agent)" fallback)', gateOf(flat(c).every((g) => g.label === '')) && c.phases.length === 1 && c.phases[0].title === 'Agents' && c.phases[0].untitled === true);
+  ok('(c) …and the window still renders `ag.label || \'(agent)\'` for such a row', verdictOf(/escHtml\(ag\.label \|\| '\(agent\)'\)/.test(read('src/lib/workflow-detail.js'))));
   // (d) mixed: named phases + an agent with none
   const d = parseRunDir({ runId: 'wf_x', ...mkRun([{ id: aid(1), label: 'x', phase: 'P1', result: true }, { id: aid(2), label: 'y', phase: '', result: true }, { id: aid(3), label: 'z', phase: 'P2' }]), newestMtime: NOW - MIN, now: NOW });
   ok('(d) an agent with no phase goes under ONE final "Other" phase beside the named ones', d.phases.map((p) => p.title + (p.untitled ? '*' : '')).join('|') === 'P1|P2|Other*' && d.phases[2].agents[0].label === 'y');
@@ -439,7 +439,7 @@ if (out) {
   ok('…the run is named from its persisted script; no phase title carries the old sentence', s.workflowName === 'synthetic-run' && !s.phases.some((p) => /live —|appear when the run finishes/.test(p.title)));
   ok('a run written 3 min ago ⇒ running', out.wf_e2e0fresh.body.status === 'running' && out.wf_e2e0fresh.body.stall === null);
   ok('a run written 11 min ago ⇒ stalled', out.wf_e2e0m11.body.status === 'stalled');
-  ok('a pre-2.1.267 run (no labels anywhere) ⇒ label "" rows under one untitled "Agents" phase (the window\'s "(agent)" fallback), stalled after 5 days', flat(out.wf_e2e0old.body).every((g) => g.label === '') && out.wf_e2e0old.body.phases.length === 1 && out.wf_e2e0old.body.phases[0].untitled === true && out.wf_e2e0old.body.status === 'stalled');
+  ok('a pre-2.1.267 run (no labels anywhere) ⇒ label "" rows under one untitled "Agents" phase (the window\'s "(agent)" fallback), stalled after 5 days', gateOf(flat(out.wf_e2e0old.body).every((g) => g.label === '')) && out.wf_e2e0old.body.phases.length === 1 && out.wf_e2e0old.body.phases[0].untitled === true && out.wf_e2e0old.body.status === 'stalled');
   const sn = out.wf_e2e0snap.body;
   ok('a TERMINAL SNAPSHOT present ⇒ the terminal view exactly as before (status/labels/tokens from the snapshot, not live, no stall)', sn.status === 'completed' && !sn.live && sn.totalTokens === 1234 && flat(sn)[0].label === 'snap:agent' && !('stall' in sn), sn);
   const rs = out.wf_e2e0resumed.body;
@@ -449,19 +449,19 @@ if (out) {
   const rm = out.remote.body;
   ok('REMOTE (?host=): the compound probe ships the metas + the host\'s clock; the same stalled view with the labels and phases', out.remote.status === 200 && rm.status === 'stalled' && flat(rm).map((g) => g.label).join('|') === OWNER.map((g) => g.label).join('|') && rm.phases.map((p) => p.title).join('|') === PHASES.join('|') && JSON.stringify(rm.stall.unfinished) === '["ship:it"]', { status: out.remote.status, rm: JSON.stringify(rm).slice(0, 300) });
   ok('REMOTE: a fresh run reads running; a snapshot run the terminal view (unchanged)', out.remoteFresh.body.status === 'running' && out.remoteSnap.body.status === 'completed' && !out.remoteSnap.body.live);
-  ok('REMOTE twin of the meta.json leg (lane Q verify): the probe\'s NMT covers every file ⇒ running like local, never stalled', J.remoteMetaFresh(out.remoteMetaFresh), out.remoteMetaFresh);
-  ok('REMOTE with NO host clock (the NOW line missing) ⇒ liveness `unknown` (running, no stall) — never the hub\'s clock against the host\'s mtimes', J.remoteNoNow(out.remoteNoNow), out.remoteNoNow);
+  ok('REMOTE twin of the meta.json leg (lane Q verify): the probe\'s NMT covers every file ⇒ running like local, never stalled', verdictOf(J.remoteMetaFresh(out.remoteMetaFresh)), out.remoteMetaFresh);
+  ok('REMOTE with NO host clock (the NOW line missing) ⇒ liveness `unknown` (running, no stall) — never the hub\'s clock against the host\'s mtimes', verdictOf(J.remoteNoNow(out.remoteNoNow)), out.remoteNoNow);
   const rp = out.rawProbe;
   ok('the raw probe: every meta.json parsed (11), NOW is the host clock, NMT the newest file, the journal section is the journal (no META marker leaked into it)', Object.keys(rp.metas || {}).length === 11 && Math.abs(rp.now - Date.now() / 1000) < 120 && Math.abs(rp.newestMtime - (T - 2 * DAY) / 1000) < 3 && !/__VSWF_/.test(rp.journalText) && rp.journalText.trim().split('\n').length === mkRun(OWNER).journalLines.length && rp.metas[aid(11)]?.description === 'ship:it', { metas: Object.keys(rp.metas || {}).length, now: rp.now, nmt: rp.newestMtime });
   const M5 = out.modes;
   const wt = M5.tree;
-  ok('a FRESH live tree held by this server (aliveAt 1 min ago) ⇒ running regardless of the 2-day-old files, the tree merged (liveTree, its tokens) and the disk labels/phases fill what the tree lacks', wt && wt.status === 'running' && wt.liveness === 'tree' && wt.liveTree === true && wt.stall === null && wt.totalTokens === 99
-    && flat(wt).length === 11 && flat(wt).every((g) => g.label) && wt.phases.map((p) => p.title).join('|') === 'lanes|survey|merge|qa|ship', { status: wt?.status, phases: wt?.phases?.map((p) => p.title) });
+  ok('a FRESH live tree held by this server (aliveAt 1 min ago) ⇒ running regardless of the 2-day-old files, the tree merged (liveTree, its tokens) and the disk labels/phases fill what the tree lacks', gateOf(wt) && wt.status === 'running' && wt.liveness === 'tree' && wt.liveTree === true && wt.stall === null && wt.totalTokens === 99
+    && flat(wt).length === 11 && gateOf(flat(wt).every((g) => g.label)) && wt.phases.map((p) => p.title).join('|') === 'lanes|survey|merge|qa|ship', { status: wt?.status, phases: wt?.phases?.map((p) => p.title) });
   ok('a STALE tree (its newest record 2 days old) is no proof of life ⇒ stalled by the files, the tree still merged (labels, tokens)', M5.staletree?.status === 'stalled' && M5.staletree.liveTree === true && M5.staletree.totalTokens === 99, { status: M5.staletree?.status, liveness: M5.staletree?.liveness });
   ok('a tree whose task the stream CLOSED (notification) ⇒ judged by its files: stalled, liveTree merged — the window\'s note must still say stalled (liveNoteKind)', M5.closedtree?.status === 'stalled' && M5.closedtree.liveTree === true && M5.closedtree.totalTokens === 4321, { status: M5.closedtree?.status });
-  ok('REAL normalizer, the wire\'s real order + a level set naming ONLY the short task id ⇒ running, liveness `tree` over the 2-day-old dir (the card is named by either key)', J.levelset(M5.levelset), M5.levelset && { status: M5.levelset.status, liveness: M5.levelset.liveness, err: M5.levelset.err });
-  ok('REAL rebuildHistory after a restart, the persisted records 2 days old ⇒ STALLED (the replay stamps the record\'s own arrival, the tree is not proof of life)', J.replayold(M5.replayold), M5.replayold && { status: M5.replayold.status, liveness: M5.replayold.liveness, err: M5.replayold.err });
-  ok('…the same replay with records 1 minute old ⇒ running, liveness `tree` (the arrival time reaches the normalizer)', J.replayfresh(M5.replayfresh), M5.replayfresh && { status: M5.replayfresh.status, liveness: M5.replayfresh.liveness, err: M5.replayfresh.err });
+  ok('REAL normalizer, the wire\'s real order + a level set naming ONLY the short task id ⇒ running, liveness `tree` over the 2-day-old dir (the card is named by either key)', verdictOf(J.levelset(M5.levelset)), M5.levelset && { status: M5.levelset.status, liveness: M5.levelset.liveness, err: M5.levelset.err });
+  ok('REAL rebuildHistory after a restart, the persisted records 2 days old ⇒ STALLED (the replay stamps the record\'s own arrival, the tree is not proof of life)', verdictOf(J.replayold(M5.replayold)), M5.replayold && { status: M5.replayold.status, liveness: M5.replayold.liveness, err: M5.replayold.err });
+  ok('…the same replay with records 1 minute old ⇒ running, liveness `tree` (the arrival time reaches the normalizer)', verdictOf(J.replayfresh(M5.replayfresh)), M5.replayfresh && { status: M5.replayfresh.status, liveness: M5.replayfresh.liveness, err: M5.replayfresh.err });
 }
 
 console.log('§7 negative controls — patched copies of src/workflow-disk.js');
@@ -474,22 +474,22 @@ console.log('§7 negative controls — patched copies of src/workflow-disk.js');
   const bRun = mkRun(OWNER, { labelled: false });
   for (const g of OWNER) bRun.metas[g.id] = { agentType: 'workflow-subagent', description: g.label, workflowPhase: g.phase, spawnDepth: 1 };
   const judgeB = (mod) => { const v = mod.parseRunDir({ runId: 'wf_x', ...bRun, newestMtime: NOW, now: NOW }); return flat(v).every((g, i) => g.label === OWNER[i].label) && v.phases.map((p) => p.title).join('|') === PHASES.join('|'); };
-  ok('the real module passes row (b) (labels + phases from meta.json only)', judgeB(WD));
+  ok('the real module passes row (b) (labels + phases from meta.json only)', verdictOf(judgeB(WD)));
   ok('CONTROL: a copy that IGNORES the metas fails the same row (the table sees the defect)', !judgeB(noMeta));
   // (2) the old "always running"
   const noStall = M.load('src/workflow-disk.js', cut(src, "else { status = 'stalled'; liveness = 'stalled'; }", "else { liveness = 'recent'; }"), 'nostall');
   const judgeStall = (mod) => { const v = mod.parseRunDir({ runId: 'wf_x', ...mkRun(OWNER), newestMtime: NOW - 11 * MIN, now: NOW }); return v.status === 'stalled' && v.stall && v.stall.unfinished.length === 1; };
-  ok('the real module calls an 11-min-silent run stalled', judgeStall(WD));
+  ok('the real module calls an 11-min-silent run stalled', verdictOf(judgeStall(WD)));
   ok('CONTROL: a copy without the liveness verdict (the old skeleton\'s unconditional "running") fails it', !judgeStall(noStall));
   // (3) the window's note: the pre-fix order (tree first) — a stalled view with a merged tree said "live"
   const treeFirst = M.load('src/workflow-disk.js', cut(src, "  if (view.status === 'stalled') return 'stalled';\n  return view.liveTree ? 'tree' : 'files';", "  if (view.liveTree) return 'tree';\n  return view.status === 'stalled' ? 'stalled' : 'files';"), 'treefirst');
   const judgeNote = (mod) => mod.liveNoteKind({ live: true, status: 'stalled', liveTree: true }) === 'stalled';
-  ok('the real module gives a stalled view with a merged tree the STALLED note', judgeNote(WD));
+  ok('the real module gives a stalled view with a merged tree the STALLED note', verdictOf(judgeNote(WD)));
   ok('CONTROL: a copy that asks the tree first (the pre-fix window order) gives it the live-tree note', !judgeNote(treeFirst));
   // (4) treeAlive without the clock (the pre-fix route rule: any open tree is proof of life)
   const noClock = M.load('src/workflow-disk.js', cut(src, 'return open && Number.isFinite(at) && at > 0 && Number.isFinite(now) && now - at < STALL_MS;', 'return open;'), 'noclock');
   const judgeClock = (mod) => mod.treeAlive({ status: 'running', workflow: { agents: [] }, aliveAt: NOW - 2 * DAY }, NOW) === false;
-  ok('the real module refuses a tree whose newest record is 2 days old', judgeClock(WD));
+  ok('the real module refuses a tree whose newest record is 2 days old', verdictOf(judgeClock(WD)));
   ok('CONTROL: a copy that ignores aliveAt calls it alive', !judgeClock(noClock));
 
   // (5)–(7) THE ROUTE LEGS on patched copies, each in its own probe child (one variant per child).
@@ -529,22 +529,22 @@ console.log('§7 negative controls — patched copies of src/workflow-disk.js');
     'const treeLive = treeAlive(ti, Date.now());', "const treeLive = treeAlive(ti && ti.status === 'finished' ? null : ti, Date.now());"), 'nobelt');
   const legOf = (env) => { const r = runProbe({ ...env, LEGS: 'modes', MODES: 'levelset' }); return { v: r.out?.modes?.levelset, err: r.out ? r.out.modes.levelset?.err || '' : r.err }; };
   const beltOnly = legOf({ MM_PATH: preMM }), rootOnly = legOf({ ROUTE_PATH: noBelt }), neither = legOf({ MM_PATH: preMM, ROUTE_PATH: noBelt });
-  ok(`layer 1 alone (the per-KEY normalizer, the real route's belt): ${beltOnly.v?.status}/${beltOnly.v?.liveness} — the belt holds`, J.levelset(beltOnly.v), beltOnly);
-  ok(`layer 2 alone (the per-CARD normalizer, a route without the belt): ${rootOnly.v?.status}/${rootOnly.v?.liveness} — the root fix holds`, J.levelset(rootOnly.v), rootOnly);
+  ok(`layer 1 alone (the per-KEY normalizer, the real route's belt): ${beltOnly.v?.status}/${beltOnly.v?.liveness} — the belt holds`, verdictOf(J.levelset(beltOnly.v)), beltOnly);
+  ok(`layer 2 alone (the per-CARD normalizer, a route without the belt): ${rootOnly.v?.status}/${rootOnly.v?.liveness} — the root fix holds`, verdictOf(J.levelset(rootOnly.v)), rootOnly);
   ok(`CONTROL (the per-KEY level set AND no belt — the build commit's code): the real-order run reads ${neither.v?.status}/${neither.v?.liveness} over the 2-day dir — the levelset leg sees the defect`, !J.levelset(neither.v) && neither.v?.status === 'stalled', neither);
   const ph = runProbe({ HOSTS_PATH: preHosts, LEGS: 'remote' });
   ok(`CONTROL (no NMT): the remote meta.json-fresh run reads ${ph.out?.remoteMetaFresh?.body?.status} — the remote twin leg sees the defect`, !!ph.out && !J.remoteMetaFresh(ph.out.remoteMetaFresh) && ph.out.remoteMetaFresh.body.status === 'stalled', ph.err);
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 console.log('§8 wiring pins (the 2.355.0 lesson: a pure fix with no call site is dead)');
 {
   const win = read('src/lib/workflow-detail.js');
   ok('window: stallWords imported and drawn (chip label + tooltip + meta line), the stalled note, untitled phases in the device\'s words, unfinished rows, the pulse only while RUNNING, a stalled run polled slowly',
-    /import \{ stallWords, liveNoteKind \} from '\.\.\/workflow-disk\.js'/.test(win) && /stalled:\s+\{ label: t\('Stalled'\)/.test(win) && /headChip\.title = chipTip/.test(win)
-    && /if \(stall\) \{ if \(stall\.detail\) bits\.push\(stall\.detail\); \}/.test(win) && /phase\.untitled \? \(phase\.title === 'Other' \? t\('Other'\) : t\('Agents'\)\)/.test(win)
-    && /wf\.status === 'stalled' && ag\.state === 'progress' \? 'unfinished'/.test(win) && /wf\.live && wf\.status === 'running' \? ' workflow-status-live'/.test(win)
-    && /wf\.status === 'killed' \|\| wf\.status === 'failed' \|\| wf\.status === 'stalled'/.test(win));
+    gateOf(/import \{ stallWords, liveNoteKind \} from '\.\.\/workflow-disk\.js'/.test(win)) && gateOf(/stalled:\s+\{ label: t\('Stalled'\)/.test(win)) && gateOf(/headChip\.title = chipTip/.test(win))
+    && gateOf(/if \(stall\) \{ if \(stall\.detail\) bits\.push\(stall\.detail\); \}/.test(win)) && gateOf(/phase\.untitled \? \(phase\.title === 'Other' \? t\('Other'\) : t\('Agents'\)\)/.test(win))
+    && gateOf(/wf\.status === 'stalled' && ag\.state === 'progress' \? 'unfinished'/.test(win)) && gateOf(/wf\.live && wf\.status === 'running' \? ' workflow-status-live'/.test(win))
+    && verdictOf(/wf\.status === 'killed' \|\| wf\.status === 'failed' \|\| wf\.status === 'stalled'/.test(win)));
   const STALE = /Phase names, labels (?:&|and) token|phase names, labels & tokens appear/;
   const hits = [];
   const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.js$/.test(e.name) && STALE.test(read(p))) hits.push(p); } };
@@ -552,43 +552,43 @@ console.log('§8 wiring pins (the 2.355.0 lesson: a pure fix with no call site i
   ok('NO file under src/ (route, window, dictionaries) still says labels appear only when the run finishes', hits.length === 0, hits);
   const cr = read('src/lib/chat-renderers.js');
   ok('card: taskStatusChipHtml draws the stalled verdict through stallWords (warn chip + the sentence as its tooltip); the Workflow card passes the view\'s verdict for its runId',
-    /import \{ stallWords \} from '\.\.\/workflow-disk\.js'/.test(cr) && /verdict && verdict\.status === 'stalled' \? stallWords\(verdict, \{ t, now: Date\.now\(\) \}\)/.test(cr) && /chat-task-status-chip warn/.test(cr)
-    && /this\.renderTaskChip\(tiW, runId \? this\._getWorkflowVerdict\?\.\(runId\) : null\)/.test(cr) && /\.chat-task-status-chip\.warn \{ color: var\(--yellow\); \}/.test(read('public/chat.css')));
+    gateOf(/import \{ stallWords \} from '\.\.\/workflow-disk\.js'/.test(cr)) && gateOf(/verdict && verdict\.status === 'stalled' \? stallWords\(verdict, \{ t, now: Date\.now\(\) \}\)/.test(cr)) && gateOf(/chat-task-status-chip warn/.test(cr))
+    && gateOf(/this\.renderTaskChip\(tiW, runId \? this\._getWorkflowVerdict\?\.\(runId\) : null\)/.test(cr)) && verdictOf(/\.chat-task-status-chip\.warn \{ color: var\(--yellow\); \}/.test(read('public/chat.css'))));
   const sb = read('src/lib/chat-status-bar.js'), cv = read('src/lib/chat-view.js');
   ok('status bar → view: the existing /api/workflow poll reports stalled (and clears on any other answer); ChatView keeps the verdict per run and patches the cards that name it',
-    /this\._onWorkflowVerdict\?\.\(runId, d\.status === 'stalled' \? \{ status: 'stalled', stall: d\.stall \|\| null \} : null\)/.test(sb)
-    && /onWorkflowVerdict: \(runId, verdict\) => this\._setWorkflowVerdict\(runId, verdict\)/.test(cv) && /getWorkflowVerdict: \(runId\) => this\._workflowVerdict\(runId\)/.test(cv)
-    && /this\._renderers\.renderTaskChip\(ti, this\._workflowVerdict\(runId\)\)/.test(cv) && /btn\.dataset\.wfRun === runId\) this\._scheduleWorkflowPatch\(id\)/.test(cv));
+    gateOf(/this\._onWorkflowVerdict\?\.\(runId, d\.status === 'stalled' \? \{ status: 'stalled', stall: d\.stall \|\| null \} : null\)/.test(sb))
+    && gateOf(/onWorkflowVerdict: \(runId, verdict\) => this\._setWorkflowVerdict\(runId, verdict\)/.test(cv)) && gateOf(/getWorkflowVerdict: \(runId\) => this\._workflowVerdict\(runId\)/.test(cv))
+    && gateOf(/this\._renderers\.renderTaskChip\(ti, this\._workflowVerdict\(runId\)\)/.test(cv)) && verdictOf(/btn\.dataset\.wfRun === runId\) this\._scheduleWorkflowPatch\(id\)/.test(cv)));
   const hosts = read('src/hosts.js');
-  ok('remote probe: the host\'s clock (NOW:) and a nonce-delimited META section of `<file>\\t<json>` lines, capped under the 1 MB dial slice', /echo "NOW:\$\(date \+%s\)"/.test(hosts) && /M\('META'\)/.test(hosts) && /head -c 40000/.test(hosts) && /now: Number\(grab\('NOW:'\)\) \|\| 0/.test(hosts));
+  ok('remote probe: the host\'s clock (NOW:) and a nonce-delimited META section of `<file>\\t<json>` lines, capped under the 1 MB dial slice', gateOf(/echo "NOW:\$\(date \+%s\)"/.test(hosts)) && gateOf(/M\('META'\)/.test(hosts)) && gateOf(/head -c 40000/.test(hosts)) && verdictOf(/now: Number\(grab\('NOW:'\)\) \|\| 0/.test(hosts)));
   // lane Q verify (2026-09-26) wiring — each fix at its call site
   ok('lane Q: the window picks its note by liveNoteKind (the stall first) and every agent label / phase title carries its full text as a title',
-    /const noteKind = liveNoteKind\(wf\);/.test(win) && /noteKind === 'stalled' \? ' workflow-live-note-stalled' : ''/.test(win)
-    && /class="workflow-agent-label"\$\{ag\.label \? ` title="\$\{escHtml\(ag\.label\)\}"` : ''\}/.test(win) && /class="workflow-phase-title" title="\$\{escHtml\(phaseTitle\)\}"/.test(win));
+    gateOf(/const noteKind = liveNoteKind\(wf\);/.test(win)) && gateOf(/noteKind === 'stalled' \? ' workflow-live-note-stalled' : ''/.test(win))
+    && gateOf(/class="workflow-agent-label"\$\{ag\.label \? ` title="\$\{escHtml\(ag\.label\)\}"` : ''\}/.test(win)) && verdictOf(/class="workflow-phase-title" title="\$\{escHtml\(phaseTitle\)\}"/.test(win)));
   ok('lane Q: the status bar KEEPS a stalled run tracked (wf.stalled, re-asked every 15 s), draws only the running ones, and lets go only on a terminal answer or a 404',
-    /if \(d && d\.status === 'stalled'\) \{ wf\.stalled = true; continue; \}/.test(sb) && /const WF_STALLED_POLL_MS = 15000;/.test(sb)
-    && /if \(wf\.stalled && now - \(wf\.checkedAt \|\| 0\) < WF_STALLED_POLL_MS - 1000\) continue;/.test(sb) && /_runningWorkflows\(\) \{ return \[\.\.\.\(this\._workflows\?\.values\(\) \|\| \[\]\)\]\.filter\(\(w\) => !w\.stalled\); \}/.test(sb)
-    && /const wfs = this\._runningWorkflows\(\);/.test(sb) && !/this\._workflows\.delete\(runId\); continue; \}\n\s*wf\.agents/.test(sb));
+    gateOf(/if \(d && d\.status === 'stalled'\) \{ wf\.stalled = true; continue; \}/.test(sb)) && gateOf(/const WF_STALLED_POLL_MS = 15000;/.test(sb))
+    && gateOf(/if \(wf\.stalled && now - \(wf\.checkedAt \|\| 0\) < WF_STALLED_POLL_MS - 1000\) continue;/.test(sb)) && gateOf(/_runningWorkflows\(\) \{ return \[\.\.\.\(this\._workflows\?\.values\(\) \|\| \[\]\)\]\.filter\(\(w\) => !w\.stalled\); \}/.test(sb))
+    && gateOf(/const wfs = this\._runningWorkflows\(\);/.test(sb)) && !/this\._workflows\.delete\(runId\); continue; \}\n\s*wf\.agents/.test(sb));
   const route = read('src/routes/sessions.js'), mm = read('src/message-manager.js'), norm = read('src/normalizers.js');
   ok('lane Q: the route asks treeAlive with THIS server\'s clock; a remote answer without NOW judges with no clock (unknown), and its newest mtime includes NMT',
-    /const treeLive = treeAlive\(ti, Date\.now\(\)\);/.test(route) && /const now = st\.now \? st\.now \* 1000 : 0;/.test(route) && /Math\.max\(st\.journalMtime \|\| 0, st\.agentMtime \|\| 0, st\.newestMtime \|\| 0\) \* 1000/.test(route)
-    && /echo "NMT:\$\( \[ -n "\$D" \] && for f in "\$D"\/\*; do/.test(hosts) && /newestMtime: Number\(grab\('NMT:'\)\) \|\| 0/.test(hosts));
+    gateOf(/const treeLive = treeAlive\(ti, Date\.now\(\)\);/.test(route)) && gateOf(/const now = st\.now \? st\.now \* 1000 : 0;/.test(route)) && gateOf(/Math\.max\(st\.journalMtime \|\| 0, st\.agentMtime \|\| 0, st\.newestMtime \|\| 0\) \* 1000/.test(route))
+    && gateOf(/echo "NMT:\$\( \[ -n "\$D" \] && for f in "\$D"\/\*; do/.test(hosts)) && verdictOf(/newestMtime: Number\(grab\('NMT:'\)\) \|\| 0/.test(hosts)));
   ok('lane Q: the normalizer names a CARD by any of its keys, stamps aliveAt on task_started / task_progress (now live, the record\'s arrival on replay, nothing in a history conversion), and the rebuild replays each record WITH its persisted `at`',
-    /for \(const t of set\) \{ const msgId = this\.taskMsgByTaskId\.get\(t\.id\); if \(msgId\) named\.add\(msgId\); \}/.test(mm) && /for \(const msgId of new Set\(this\.taskMsgByTaskId\.values\(\)\)\)/.test(mm)
-    && (mm.match(/const at = this\._taskRecordAt\(emit\); if \(at\)/g) || []).length === 2 && /_taskRecordAt\(emit\) \{ return this\._replayAt != null \? this\._replayAt : \(emit \? Date\.now\(\) : 0\); \}/.test(mm)
-    && /for \(const \{ record, at \} of taskReplayRecords\(replay \|\| session\._taskRecords\)\) \{ try \{ mm\.replay\(record, \{ at \}\); \}/.test(norm));
+    gateOf(/for \(const t of set\) \{ const msgId = this\.taskMsgByTaskId\.get\(t\.id\); if \(msgId\) named\.add\(msgId\); \}/.test(mm)) && gateOf(/for \(const msgId of new Set\(this\.taskMsgByTaskId\.values\(\)\)\)/.test(mm))
+    && (mm.match(/const at = this\._taskRecordAt\(emit\); if \(at\)/g) || []).length === 2 && gateOf(/_taskRecordAt\(emit\) \{ return this\._replayAt != null \? this\._replayAt : \(emit \? Date\.now\(\) : 0\); \}/.test(mm))
+    && verdictOf(/for \(const \{ record, at \} of taskReplayRecords\(replay \|\| session\._taskRecords\)\) \{ try \{ mm\.replay\(record, \{ at \}\); \}/.test(norm)));
   const kbf = read('docs/kb-file-structure.md'), kbb = read('docs/kb-bugfix-invariants.md');
   ok('lane Q docs: the workflow-disk essay names the tree\'s clock (aliveAt / treeAlive), the replayed-ring case it closes and the TRADE-OFF it accepts; the old "Known limit" sentence is gone; kb-bugfix records the six findings; kb-api states the fresh-tree + no-clock rules',
-    /THE TREE HAS A CLOCK/.test(kbf) && /REPLAYED from persisted `taskRecords` after a restart re-proved a run that stalled days ago/.test(kbf) && /TRADE-OFF \(named on purpose\)/.test(kbf)
-    && !/Known limit: the stream tree carries no freshness stamp/.test(kbf) && /the set names a CARD, not a key/.test(kbf)
-    && /\*\*Lane Q verify \(2026-09-26, six findings, each reproduced red first\)\.\*\*/.test(kbb) && /no `NOW` line ⇒ `liveness:'unknown'`/.test(read('docs/kb-api.md')));
+    gateOf(/THE TREE HAS A CLOCK/.test(kbf)) && gateOf(/REPLAYED from persisted `taskRecords` after a restart re-proved a run that stalled days ago/.test(kbf)) && gateOf(/TRADE-OFF \(named on purpose\)/.test(kbf))
+    && !/Known limit: the stream tree carries no freshness stamp/.test(kbf) && gateOf(/the set names a CARD, not a key/.test(kbf))
+    && gateOf(/\*\*Lane Q verify \(2026-09-26, six findings, each reproduced red first\)\.\*\*/.test(kbb)) && verdictOf(/no `NOW` line ⇒ `liveness:'unknown'`/.test(read('docs/kb-api.md'))));
   const ci = read('scripts/ci.mjs');
-  ok('ci: test-workflow-disk is in the FAST tier', /\{ name: 'test-workflow-disk', tier: 'fast'(?:,| \})/.test(ci));
-  ok('architecture: src/workflow-disk.js is classified PURE (it imports nothing)', /'src\/workflow-disk\.js'\]\);/.test(read('scripts/test-architecture.mjs')) && !/require\(|^import /m.test(read('src/workflow-disk.js')));
+  ok('ci: test-workflow-disk is in the FAST tier', verdictOf(/\{ name: 'test-workflow-disk', tier: 'fast'(?:,| \})/.test(ci)));
+  ok('architecture: src/workflow-disk.js is classified PURE (it imports nothing)', gateOf(/'src\/workflow-disk\.js'\]\);/.test(read('scripts/test-architecture.mjs'))) && !/require\(|^import /m.test(read('src/workflow-disk.js')));
   const kb11 = read('docs/kb-design-lessons.md');
   ok('docs: the kb-file-structure INDEX head indexes src/workflow-disk.js; kb §11 no longer calls the journal label-less; kb-bugfix names the invariant',
-    /src\/workflow-disk\.js — PURE/.test(indexHead('docs/kb-file-structure.md')) && !/journal\.jsonl` = the resume cache \(`\{started\|result, key, agentId\}`, live-appended, NO phase\/label\)/.test(kb11) && /started` lines carry `label` \+ `phase`/.test(kb11)
-    && /the run dir is the truth when the stream is gone/.test(read('docs/kb-bugfix-invariants.md')));
+    gateOf(/src\/workflow-disk\.js — PURE/.test(indexHead('docs/kb-file-structure.md'))) && !/journal\.jsonl` = the resume cache \(`\{started\|result, key, agentId\}`, live-appended, NO phase\/label\)/.test(kb11) && gateOf(/started` lines carry `label` \+ `phase`/.test(kb11))
+    && verdictOf(/the run dir is the truth when the stream is gone/.test(read('docs/kb-bugfix-invariants.md'))));
 }
 
 console.log('§9 a found run is not walked for, a fork finds its parent\'s run, the journal is folded as it grows, the hub\'s look is bounded (B-360d part 2, lane chrome-157)');
@@ -670,7 +670,7 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   fs.writeFileSync(jf, [JSON.stringify({ type: 'launched' }), ...[10, 11, 12, 13, 14].map((i) => started(i)), qfill(10)].join('\n') + '\n');   // the same inode
   const p7 = await parsesOf(() => mCure.get(RG));
   const a7 = agentsOf(p7.body);
-  ok('(b) a journal rewritten IN PLACE (the same inode, longer) is read again from its start: its five agents only, g:10 done', a7.length === 5 && a7.every((a) => /^g:1[0-4]$/.test(a.label)) && a7[0].state === 'done', a7.map((a) => a.label + '/' + a.state));
+  ok('(b) a journal rewritten IN PLACE (the same inode, longer) is read again from its start: its five agents only, g:10 done', a7.length === 5 && gateOf(a7.every((a) => /^g:1[0-4]$/.test(a.label))) && a7[0].state === 'done', a7.map((a) => a.label + '/' + a.state));
   // (b) a line LONGER than a slice whose slice edge falls INSIDE a 3-byte character, and a poll's cut inside «字»
   const RM = 'wf_b360dwide', mdirR = path.join(PROJ, 'subagents', 'workflows', RM); fs.mkdirSync(mdirR, { recursive: true });
   const mid = (i) => (0xb360e100 + i).toString(16).padStart(16, '0');
@@ -690,14 +690,14 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   const q2 = await mCure.get(RM);
   const qa = agentsOf(q2.body);
   ok('(b) a line longer than a slice, its slice edge INSIDE a 3-byte character: whole (m:0 done); a poll cut inside «字»: the line waits, then reads whole, its label as written',
-    edgeInside && agentsOf(q1.body).length === 1 && agentsOf(q1.body)[0].state === 'done' && qa.length === 2 && qa[1].label === label1, { edgeInside, q1: agentsOf(q1.body).map((a) => a.state), labels: qa.map((a) => a.label) });
+    gateOf(edgeInside) && agentsOf(q1.body).length === 1 && agentsOf(q1.body)[0].state === 'done' && qa.length === 2 && qa[1].label === label1, { edgeInside, q1: agentsOf(q1.body).map((a) => a.state), labels: qa.map((a) => a.label) });
   // (b) the pollers of one run share ONE read of its journal
   const RS = 'wf_b360dshare', sdirR = path.join(PROJ, 'subagents', 'workflows', RS); fs.mkdirSync(sdirR, { recursive: true });
   fs.writeFileSync(path.join(sdirR, 'journal.jsonl'), [JSON.stringify({ type: 'launched' }), ...Array.from({ length: 30 }, (_, i) => started(100 + i))].join('\n') + '\n');
   let opens = 0; const po = fs.promises.open;
   fs.promises.open = function (f, ...a) { if (String(f).endsWith('journal.jsonl')) opens++; return po.call(this, f, ...a); };
   let pr = []; try { pr = await Promise.all([mCure.get(RS), mCure.get(RS), mCure.get(RS)]); } finally { fs.promises.open = po; }
-  ok(`(b) three pollers of one run at once: ONE read of its journal (${opens} opens), the same 30 agents each`, opens === 1 && pr.every((r) => agentsOf(r.body).length === 30), opens);
+  ok(`(b) three pollers of one run at once: ONE read of its journal (${opens} opens), the same 30 agents each`, opens === 1 && verdictOf(pr.every((r) => agentsOf(r.body).length === 30)), opens);
   // (b) A LINE THAT NEVER ENDS is kept to 1 MiB (rounds w5daqaxxs / w5hvsu2v5): past it the answer SAYS the tail cannot be read yet; once it
   // ends it is folded from its head (its agent done) and the line after it is read whole
   const RL = 'wf_b360dlong', ldir = path.join(PROJ, 'subagents', 'workflows', RL); fs.mkdirSync(ldir, { recursive: true });
@@ -723,7 +723,7 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   const judgeC = (first, at, after) => first.status === 200 && first.body && first.body.locating === true && first.body.status === 'running' && first.listings === 0
     && at && at.status === 200 && agentsOf(at.body).length === 3 && after.listings === 0 && agentsOf(after.body).length === 3;
   ok(`(c) a fork's view of its parent's run: the first poll says «locating» (${c0.status}, ${c0.body && c0.body.status}, no listing), the hub's look places it (${agentsOf(cPlaced && cPlaced.body).length} agents), then twenty polls make ${c20.listings} synchronous listings`,
-    judgeC(c0, cPlaced, c20), { first: [c0.status, c0.body && c0.body.locating, c0.listings], placed: cPlaced && cPlaced.status, after: c20.listings });
+    verdictOf(judgeC(c0, cPlaced, c20)), { first: [c0.status, c0.body && c0.body.locating, c0.listings], placed: cPlaced && cPlaced.status, after: c20.listings });
   const mNoLook = await mount9(noLook), mWalkC = await mount9(release);
   const n0 = await listingsOf(mNoLook, RF), nPlaced = await placed(mNoLook, RF, 300), n20 = await listingsOf(mNoLook, RF, 2);
   const w0 = await listingsOf(mWalkC, RF, 3);
@@ -738,12 +738,12 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   const mS = await mount9(fresh()), mP = await mount9(perPoll);
   await new Promise((r) => setTimeout(r, 300));   // the controls' own looks above (each instance has its own clock) end before this one is counted
   const sh = await both(mS), pp = await both(mP);
-  ok(`(c) two runs a poll cannot place, polled together, ride ONE look of the hub: ${sh.roots} listing of the projects root (asynchronous), both placed`, sh.roots === 1 && sh.r.every((x) => x && x.status === 200 && !(x.body && x.body.locating)), { roots: sh.roots, st: sh.r.map((x) => x && x.status) });
+  ok(`(c) two runs a poll cannot place, polled together, ride ONE look of the hub: ${sh.roots} listing of the projects root (asynchronous), both placed`, sh.roots === 1 && verdictOf(sh.r.every((x) => x && x.status === 200 && !(x.body && x.body.locating))), { roots: sh.roots, st: sh.r.map((x) => x && x.status) });
   ok(`(c) CONTROL — a look started by every poll that cannot place its run: ${pp.roots} root listings for the same two runs`, pp.roots >= 2, pp.roots);
   // a run NOWHERE: «locating» until the look has answered, then the release's 404
   const mN = await mount9(fresh());
   const g0 = await mN.get('wf_b360dnowhere'), gEnd = await placed(mN, 'wf_b360dnowhere');
-  ok(`(c) a run nowhere: «locating» (${g0.status}) until the hub's look answers, then the release's 404 (${gEnd && gEnd.status})`, g0.status === 200 && g0.body && g0.body.locating === true && gEnd && gEnd.status === 404, { first: g0.status, end: gEnd && gEnd.status });
+  ok(`(c) a run nowhere: «locating» (${g0.status}) until the hub's look answers, then the release's 404 (${gEnd && gEnd.status})`, g0.status === 200 && gateOf(g0.body) && g0.body.locating === true && gateOf(gEnd) && gEnd.status === 404, { first: g0.status, end: gEnd && gEnd.status });
   // (d) A SNAPSHOT FILED UNDER ANOTHER CONVERSATION (round w5daqaxxs): the run dir under A2, its snapshot under C — the hub's look
   // finds both; the finished view; then the next polls make no synchronous listing
   const SID_A2 = fixtureSid('fa37'), SID_C = fixtureSid('fa38'), RX = 'wf_b360dfiled';
@@ -755,7 +755,7 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   const mD = await mount9(fresh());
   const d1 = await placed(mD, RX), d20 = await listingsOf(mD, RX, 10);
   ok(`(d) a run's snapshot filed under ANOTHER conversation than its run dir is found by the hub's look (${d1 && d1.status}, ${d1 && d1.body && d1.body.status}); the next ten polls make ${d20.listings} synchronous listings`,
-    d1 && d1.status === 200 && d1.body.status === 'completed' && d20.status === 200 && d20.body.status === 'completed' && d20.listings === 0, { status: [d1 && d1.status, d20.status], view: [d1 && d1.body && d1.body.status, d20.body && d20.body.status], listings: d20.listings });
+    gateOf(d1) && d1.status === 200 && d1.body.status === 'completed' && d20.status === 200 && d20.body.status === 'completed' && d20.listings === 0, { status: [d1 && d1.status, d20.status], view: [d1 && d1.body && d1.body.status, d20.body && d20.body.status], listings: d20.listings });
   for (const m of [mC, mNoLook, mWalkC, mS, mP, mN, mD]) await m.close();
   await mCure.close(); await mWalk.close();
   // THE LOOK's BOUNDS (round w7o3p5msx, 主开发 r2443), driven through the look's own seam: a clock and timers the leg moves, a
@@ -791,7 +791,7 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   };
   const eCure = await boundRun(fresh()), eCut = await boundRun(minuteCut);
   const judgeE = (x) => x.first === 1 && x.s30 === 1 && x.s60 === 1 && x.s61 === 2;
-  ok(`(e) THE MINUTE (an injected clock): a running run's window wants its snapshot at every poll; the projects root is listed once by the first look, still once at +30 s and +60 s, a second time only after the minute (${[eCure.first, eCure.s30, eCure.s60, eCure.s61].join(' → ')})`, judgeE(eCure), eCure);
+  ok(`(e) THE MINUTE (an injected clock): a running run's window wants its snapshot at every poll; the projects root is listed once by the first look, still once at +30 s and +60 s, a second time only after the minute (${[eCure.first, eCure.s30, eCure.s60, eCure.s61].join(' → ')})`, verdictOf(judgeE(eCure)), eCure);
   ok(`(e) CONTROL — the copy without the minute lists the root again at +30 s (${[eCut.first, eCut.s30, eCut.s60, eCut.s61].join(' → ')}): the judge reads it as red`, !judgeE(eCut) && eCut.s30 === 2, eCut);
   const stallDir = path.join(projects, '-b360d-stall');
   for (let i = 0; i < 10; i++) for (const sub of [['subagents', 'workflows'], ['workflows']]) fs.mkdirSync(path.join(stallDir, `stall-${i}`, ...sub), { recursive: true });
@@ -834,8 +834,8 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   const locating = (r) => !!(r && r.status === 200 && r.body && r.body.locating === true);
   const judgeF1 = (x) => x.stuck1 === true && locating(x.during) && !!x.end1 && x.end1.started === true && x.end1.whole === false && locating(x.after);
   const judgeF2 = (x) => !!x.end2 && x.end2.started === false && !!x.end3 && x.end3.started === false && (x.said || []).length === 1 && !x.said[0].includes(path.sep) && !x.said[0].includes(HOME) && x.back === 5 && x.held4 === 8 && x.max === 8;
-  ok(`(f) LAW 1, a read that never returns: the look ends at its deadline with what it found (${JSON.stringify(fCure.end1)}); the run it did not place keeps «locating» before and after (${fCure.during && fCure.during.status}, ${fCure.after && fCure.after.status}) — never a 404 from a look that ran out`, judgeF1(fCure), { end1: fCure.end1, during: fCure.during && fCure.during.status, after: [fCure.after && fCure.after.status, fCure.after && fCure.after.body && fCure.after.body.locating] });
-  ok(`(f) LAW 2: the hub's reads out never pass eight across looks (at most ${fCure.max}); with none back the next two looks start nothing and the journal says so ONCE, with no path (${(fCure.said || []).length}: «${((fCure.said || [])[0] || '').slice(0, 120)}…»); three reads back ⇒ a later look uses those three lanes only (${fCure.back} held, then ${fCure.held4})`, judgeF2(fCure), { max: fCure.max, said: (fCure.said || []).length, end2: fCure.end2, end3: fCure.end3, back: fCure.back, held4: fCure.held4 });
+  ok(`(f) LAW 1, a read that never returns: the look ends at its deadline with what it found (${JSON.stringify(fCure.end1)}); the run it did not place keeps «locating» before and after (${fCure.during && fCure.during.status}, ${fCure.after && fCure.after.status}) — never a 404 from a look that ran out`, verdictOf(judgeF1(fCure)), { end1: fCure.end1, during: fCure.during && fCure.during.status, after: [fCure.after && fCure.after.status, fCure.after && fCure.after.body && fCure.after.body.locating] });
+  ok(`(f) LAW 2: the hub's reads out never pass eight across looks (at most ${fCure.max}); with none back the next two looks start nothing and the journal says so ONCE, with no path (${(fCure.said || []).length}: «${((fCure.said || [])[0] || '').slice(0, 120)}…»); three reads back ⇒ a later look uses those three lanes only (${fCure.back} held, then ${fCure.held4})`, verdictOf(judgeF2(fCure)), { max: fCure.max, said: (fCure.said || []).length, end2: fCure.end2, end3: fCure.end3, back: fCure.back, held4: fCure.held4 });
   ok(`(f) CONTROLS, the legs' red copies: with no deadline the look never ends (${JSON.stringify(fNoDeadline.end1 || null)}); a look that ran out answering «nowhere» gives the 404 (${fNowhere.after && fNowhere.after.status}); lanes not shared across looks put ${fLanes.max} reads out — the judges read all three as red`,
     !judgeF1(fNoDeadline) && !fNoDeadline.end1 && !judgeF1(fNowhere) && !!(fNowhere.after && fNowhere.after.status === 404) && !judgeF2(fLanes) && fLanes.max > 8, { noDeadline: fNoDeadline.end1 || null, nowhere: fNowhere.after && fNowhere.after.status, lanes: fLanes.max });
   // THE ROUND's SMALL (round w6p1kgvv3, 主开发 r2735). (g) LAW 3 BY ITS ORDER, NEVER THE CLOCK: a whole look finds nothing, the
@@ -855,7 +855,7 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   };
   const gCure = await stepRun(fresh()), gClock = await stepRun(byClock);
   const judgeG = (x) => x.first === 200 && x.firstLocating && x.whole && x.b === 200 && x.bLocating;
-  ok(`(g) LAW 3 BY ITS ORDER: after a whole look that found nothing, the clock steps back 5 s and a NEW asker's first poll is «locating» (${gCure.b}) — never that look's 404`, judgeG(gCure), gCure);
+  ok(`(g) LAW 3 BY ITS ORDER: after a whole look that found nothing, the clock steps back 5 s and a NEW asker's first poll is «locating» (${gCure.b}) — never that look's 404`, verdictOf(judgeG(gCure)), gCure);
   ok(`(g) RED — the copy that orders law 3 by the clock answers the new asker ${gClock.b}: the judge reads it red`, !judgeG(gClock) && gClock.b === 404, gClock);
   // (h) LAW 4: once placed, the ask is cleared — a fork placed by the look takes its 'dirs' ask away, so the next look lists no
   // conversation's `subagents/workflows` (its snapshot is still wanted: `workflows` is listed). RED: the copy whose finder keeps it
@@ -876,9 +876,9 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   };
   const hCure = await clearRun(fresh()), hKeep = await clearRun(keepAsk);
   const judgeH = (x) => x.placed && x.sub === 0 && x.snap > 0;
-  ok(`(h) LAW 4: a fork placed by the look clears its ask — the next look lists ${hCure.sub} conversation run folders and ${hCure.snap} snapshot folders (its snapshot is still wanted)`, judgeH(hCure), hCure);
+  ok(`(h) LAW 4: a fork placed by the look clears its ask — the next look lists ${hCure.sub} conversation run folders and ${hCure.snap} snapshot folders (its snapshot is still wanted)`, verdictOf(judgeH(hCure)), hCure);
   ok(`(h) RED — the copy whose finder keeps the ask: the next look lists ${hKeep.sub} run folders again — the judge reads it red`, !judgeH(hKeep) && hKeep.sub > 0, hKeep);
-  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 5, label: '§9 ' })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 5, label: '§9 ' })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 // ── the REAL home is untouched (this process was re-homed before any fixture was written) ──
@@ -891,4 +891,4 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

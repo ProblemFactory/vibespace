@@ -19,7 +19,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const WRAPPER = path.join(REPO, 'data/bin/acp-wrapper.js');
 const MOCK = path.join(REPO, 'scripts/dev/mock-acp-agent.mjs');
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -63,8 +63,8 @@ console.log('— wrapper vs mock ACP agent: new session');
   try {
     const ses = await w.waitFor(() => w.find('session'), 10000, 'session record');
     firstSessionId = ses.sessionId;
-    ok('session/new → `session` record with the agent id, how:new, cwd, agent info + capabilities', /^ses_mock_/.test(ses.sessionId) && ses.how === 'new' && ses.cwd === w.dir && ses.agentInfo?.name === 'mock-acp' && ses.capabilities?.loadSession === true && ses.protocolVersion === 1, ses);
-    ok('…carries the agent\'s offered models + current model/mode (config options flattened)', Array.isArray(ses.models) && ses.models.map((m) => m.id).join(',') === 'mock/fast,mock/smart' && ses.model === 'mock/fast' && ses.mode === 'build' && ses.modeValues.join(',') === 'build,plan', ses.models);
+    ok('session/new → `session` record with the agent id, how:new, cwd, agent info + capabilities', gateOf(/^ses_mock_/.test(ses.sessionId)) && ses.how === 'new' && ses.cwd === w.dir && ses.agentInfo?.name === 'mock-acp' && ses.capabilities?.loadSession === true && ses.protocolVersion === 1, ses);
+    ok('…carries the agent\'s offered models + current model/mode (config options flattened)', gateOf(Array.isArray(ses.models)) && ses.models.map((m) => m.id).join(',') === 'mock/fast,mock/smart' && ses.model === 'mock/fast' && ses.mode === 'build' && ses.modeValues.join(',') === 'build,plan', ses.models);
     const init = w.mockCalls().find((c) => c.method === 'initialize');
     ok('initialize advertises protocolVersion 1 and NO fs/terminal capabilities (we never implement them)', init?.params?.protocolVersion === 1 && init.params.clientCapabilities?.fs?.readTextFile === false && init.params.clientCapabilities?.terminal === false && init.params.clientInfo?.name === 'vibespace', init?.params);
     await w.waitFor(() => w.updates('available_commands_update').length, 3000, 'available_commands_update');
@@ -78,7 +78,7 @@ console.log('— wrapper vs mock ACP agent: new session');
     const user = await w.waitFor(() => w.find('user', (r) => r.msgId === 'u1'), 3000, 'user record');
     ok('chat-input → `user` record (msgId + content blocks) BEFORE the prompt goes out', user.content?.[0]?.text === 'please read the file' && user.peer === null);
     const ps = await w.waitFor(() => w.find('prompt_start'), 3000, 'prompt_start');
-    ok('prompt_start marks the turn (streaming on)', /^p1-/.test(ps.promptId) && ps.blocks === 1);
+    ok('prompt_start marks the turn (streaming on)', gateOf(/^p1-/.test(ps.promptId)) && ps.blocks === 1);
     const perm = await w.waitFor(() => w.find('permission_request'), 5000, 'permission_request');
     ok('agent → session/request_permission journaled with the tool call + ORDERED options (kinds)', perm.toolCall?.toolCallId === perm.toolCall?.toolCallId && perm.options?.map((o) => o.kind).join(',') === 'allow_once,allow_always,reject_once' && perm.options.map((o) => o.optionId).join(',') === 'once,always,no', perm);
     ok('…the tool_call update preceded it (kind read, title, rawInput, locations)', w.updates('tool_call').length === 1 && w.updates('tool_call')[0].update.kind === 'read' && w.updates('tool_call')[0].update.rawInput?.path === '/repo/README.md');
@@ -91,7 +91,7 @@ console.log('— wrapper vs mock ACP agent: new session');
     const res = await w.waitFor(() => w.find('permission_resolved'), 3000, 'permission_resolved');
     ok('permission-response (explicit optionId) → the request is answered with that option', res.outcome === 'selected' && res.optionId === 'once' && res.optionKind === 'allow_once', res);
     const end = await w.waitFor(() => w.find('prompt_end'), 5000, 'prompt_end');
-    ok('the turn completes: tool_call_update completed (content), plan, agent text, usage_update, prompt_end end_turn', end.stopReason === 'end_turn' && end.error === null && w.updates('tool_call_update').some((u) => u.update.status === 'completed') && w.updates('plan').length === 2 && w.updates('usage_update').length === 1 && w.updates('agent_message_chunk').some((u) => /Done \(once\)/.test(u.update.content?.text || '')), end);
+    ok('the turn completes: tool_call_update completed (content), plan, agent text, usage_update, prompt_end end_turn', end.stopReason === 'end_turn' && end.error === null && gateOf(w.updates('tool_call_update').some((u) => u.update.status === 'completed')) && w.updates('plan').length === 2 && w.updates('usage_update').length === 1 && verdictOf(w.updates('agent_message_chunk').some((u) => /Done \(once\)/.test(u.update.content?.text || ''))), end);
     ok('every stdin line got its _stdin_ack (the server\'s broken-pty detector)', w.acks === w.sent, { acks: w.acks, sent: w.sent });
     await sleep(250);
     ok('sidecar meta after the turn: streaming false, todos from the plan, usage recorded', w.metaJson()?.streaming === false && w.metaJson().todos?.length === 2 && w.metaJson().usage?.used === 1234, w.metaJson());
@@ -103,7 +103,7 @@ console.log('— wrapper vs mock ACP agent: new session');
     const end2 = await w.waitFor(() => w.findAll('prompt_end').length === 2 && w.findAll('prompt_end')[1], 5000, 'second prompt_end');
     const res2 = w.findAll('permission_resolved')[1];
     ok('permission-response approved:false (no optionId) picks the reject option by kind', res2?.optionId === 'no' && res2.optionKind === 'reject_once', res2);
-    ok('…the agent sees the rejection: tool_call_update failed + its "not doing that" text, end_turn', end2.stopReason === 'end_turn' && w.updates('tool_call_update').some((u) => u.update.status === 'failed') && w.updates('agent_message_chunk').some((u) => /not doing that/.test(u.update.content?.text || '')));
+    ok('…the agent sees the rejection: tool_call_update failed + its "not doing that" text, end_turn', end2.stopReason === 'end_turn' && gateOf(w.updates('tool_call_update').some((u) => u.update.status === 'failed')) && verdictOf(w.updates('agent_message_chunk').some((u) => /not doing that/.test(u.update.content?.text || ''))));
     ok('an edit tool call arrives with kind edit (renderer maps it to a write-fold card)', w.updates('tool_call')[1]?.update.kind === 'edit');
 
     // ── interrupt: session/cancel + cancelled stop reason ──
@@ -112,21 +112,21 @@ console.log('— wrapper vs mock ACP agent: new session');
     await sleep(100);
     w.send({ type: 'interrupt' });
     const end3 = await w.waitFor(() => w.findAll('prompt_end').length === 3 && w.findAll('prompt_end')[2], 8000, 'third prompt_end');
-    ok('interrupt → session/cancel notification; the prompt resolves with stopReason cancelled', end3.stopReason === 'cancelled' && w.mockCalls().some((c) => c.method === 'session/cancel'), end3);
+    ok('interrupt → session/cancel notification; the prompt resolves with stopReason cancelled', end3.stopReason === 'cancelled' && verdictOf(w.mockCalls().some((c) => c.method === 'session/cancel')), end3);
 
     // ── config verbs ──
     w.send({ type: 'set-model', model: 'mock/smart' });
     const cfg = await w.waitFor(() => w.find('config', (r) => r.source === 'set:model'), 3000, 'config set:model');
-    ok('set-model → session/set_config_option on the model category; `config` record carries the new model', cfg.model === 'mock/smart' && w.find('notice', (r) => /Model → mock\/smart/.test(r.text)), cfg);
+    ok('set-model → session/set_config_option on the model category; `config` record carries the new model', cfg.model === 'mock/smart' && verdictOf(w.find('notice', (r) => /Model → mock\/smart/.test(r.text))), cfg);
     w.send({ type: 'set-model', model: 'bogus/model' });
     const rej = await w.waitFor(() => w.find('notice', (r) => r.noticeKind === 'rejected'), 3000, 'rejected notice');
-    ok('a model the agent rejects → LOUD notice naming the offered models (never a silent no-op)', /rejected by the agent/.test(rej.text) && /mock\/fast/.test(rej.text), rej);
+    ok('a model the agent rejects → LOUD notice naming the offered models (never a silent no-op)', gateOf(/rejected by the agent/.test(rej.text)) && verdictOf(/mock\/fast/.test(rej.text)), rej);
     w.send({ type: 'set-permission-mode', mode: 'plan' });
     const cfg2 = await w.waitFor(() => w.find('config', (r) => r.source === 'set:mode'), 3000, 'config set:mode');
-    ok('set-permission-mode → the mode config option; agent echoes current_mode_update', cfg2.mode === 'plan' && w.updates('current_mode_update').some((u) => u.update.modeId === 'plan'), cfg2);
+    ok('set-permission-mode → the mode config option; agent echoes current_mode_update', cfg2.mode === 'plan' && verdictOf(w.updates('current_mode_update').some((u) => u.update.modeId === 'plan')), cfg2);
     w.send({ type: 'set-effort', effort: 'high' });
     const uns = await w.waitFor(() => w.find('notice', (r) => r.noticeKind === 'unsupported' && /effort/.test(r.text)), 3000, 'unsupported notice');
-    ok('set-effort on an agent without a thought_level option → explicit unsupported notice', /reasoning-effort/.test(uns.text));
+    ok('set-effort on an agent without a thought_level option → explicit unsupported notice', verdictOf(/reasoning-effort/.test(uns.text)));
     w.send({ type: 'bogus-verb' });
     await w.waitFor(() => w.find('notice', (r) => r.noticeKind === 'unknown-verb'), 3000, 'unknown-verb notice');
     ok('an unknown stdin verb is refused loudly', true);
@@ -135,7 +135,7 @@ console.log('— wrapper vs mock ACP agent: new session');
     w.send({ type: 'chat-input', text: 'use fs please', msgId: 'u4' });
     const end4 = await w.waitFor(() => w.findAll('prompt_end').length === 4 && w.findAll('prompt_end')[3], 5000, 'fourth prompt_end');
     const creq = w.find('client_request');
-    ok('agent → fs/read_text_file is answered with a JSON-RPC error (unsupported) and journaled; the turn still completes', creq?.method === 'fs/read_text_file' && creq.replied === 'unsupported' && end4.stopReason === 'end_turn' && w.updates('agent_message_chunk').some((u) => /fs refused/.test(u.update.content?.text || '')), creq);
+    ok('agent → fs/read_text_file is answered with a JSON-RPC error (unsupported) and journaled; the turn still completes', creq?.method === 'fs/read_text_file' && creq.replied === 'unsupported' && end4.stopReason === 'end_turn' && verdictOf(w.updates('agent_message_chunk').some((u) => /fs refused/.test(u.update.content?.text || ''))), creq);
 
     // ── frame file pointer ──
     const fp = path.join(w.dir, 'frame.json');
@@ -151,7 +151,7 @@ console.log('— wrapper vs mock ACP agent: new session');
     fs.writeFileSync(path.join(w.dir, 'bad.json'), '{not json');
     w.send({ type: '_frame_file', path: path.join(w.dir, 'bad.json') });
     const lost = await w.waitFor(() => w.find('notice', (r) => r.noticeKind === 'lost-input'), 3000, 'lost-input notice');
-    ok('a corrupt frame file → lost-input notice (the user is told to resend), file unlinked', /did not reach the agent/.test(lost.text) && !fs.existsSync(path.join(w.dir, 'bad.json')));
+    ok('a corrupt frame file → lost-input notice (the user is told to resend), file unlinked', gateOf(/did not reach the agent/.test(lost.text)) && !fs.existsSync(path.join(w.dir, 'bad.json')));
     w.child.stdin.write('this is not json\n');
     await w.waitFor(() => w.findAll('notice', (r) => r.noticeKind === 'lost-input').length === 2, 3000, 'second lost-input');
     ok('an unparseable stdin line is refused loudly (never silently dropped)', true);
@@ -164,7 +164,7 @@ console.log('— wrapper vs mock ACP agent: new session');
     const pr = await w.waitFor(() => w.find('peer_result'), 8000, 'peer_result');
     await w.waitFor(() => w.findAll('prompt_end').length === 6, 5000, 'sixth prompt_end');
     const pu = w.find('user', (r) => r.peer);
-    ok('peer-message → a `user` record with the peer envelope + a prompt prefixed "Message from B:" + peer_result ok', pr.ok === true && pu?.peer?.name === 'B' && pu.peer.body === 'B says hi' && w.mockCalls().some((c) => c.method === 'session/prompt' && /^Message from B:\nping from B/.test(c.params.prompt[0]?.text || '')), pr);
+    ok('peer-message → a `user` record with the peer envelope + a prompt prefixed "Message from B:" + peer_result ok', pr.ok === true && pu?.peer?.name === 'B' && pu.peer.body === 'B says hi' && verdictOf(w.mockCalls().some((c) => c.method === 'session/prompt' && /^Message from B:\nping from B/.test(c.params.prompt[0]?.text || ''))), pr);
 
     await sleep(1200); // buffer persist debounce
     historyRecords = w.records.filter((r) => r.type === 'acp');
@@ -179,8 +179,8 @@ console.log('— resume (session/load replay)');
   const w = startWrapper({ env: { ACP_WEBUI_RESUME_ID: firstSessionId, ACP_WEBUI_MODEL: 'mock/smart', ACP_WEBUI_MODE: 'plan' } });
   try {
     const ses = await w.waitFor(() => w.find('session'), 10000, 'session record');
-    ok('ACP_WEBUI_RESUME_ID + loadSession capability → session/load, how:load, the SAME session id', ses.how === 'load' && ses.sessionId === firstSessionId && w.mockCalls().some((c) => c.method === 'session/load' && c.params.sessionId === firstSessionId), ses);
-    ok('replayed history updates are tagged replay:true (user + agent chunks + an old tool call)', w.updates('user_message_chunk').some((u) => u.replay === true) && w.updates('agent_message_chunk').some((u) => u.replay === true) && w.updates('tool_call').some((u) => u.replay === true));
+    ok('ACP_WEBUI_RESUME_ID + loadSession capability → session/load, how:load, the SAME session id', ses.how === 'load' && ses.sessionId === firstSessionId && verdictOf(w.mockCalls().some((c) => c.method === 'session/load' && c.params.sessionId === firstSessionId)), ses);
+    ok('replayed history updates are tagged replay:true (user + agent chunks + an old tool call)', gateOf(w.updates('user_message_chunk').some((u) => u.replay === true)) && gateOf(w.updates('agent_message_chunk').some((u) => u.replay === true)) && verdictOf(w.updates('tool_call').some((u) => u.replay === true)));
     await w.waitFor(() => w.find('config', (r) => r.source === 'set:model') && w.find('config', (r) => r.source === 'set:mode'), 5000, 'initial model/mode applied');
     ok('initial model + mode from env are applied right after the session is up', w.find('config', (r) => r.source === 'set:model').model === 'mock/smart' && w.find('config', (r) => r.source === 'set:mode').mode === 'plan');
   } finally { await w.stop(); }
@@ -208,7 +208,7 @@ console.log('— Stop means stop (the cancel race + the local queue)');
     // STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer): the claimed prompt never reached the agent — the
     // drain had already taken it off the strip (its chip cleared = "it ran"), so the record is the only place it lives
     const undispatched = w.findAll('queue_dropped');
-    ok('…and that UNDISPATCHED prompt comes back into the composer: ONE queue_dropped, its row the prompt\'s own text + msgId (no context prefix), a `${pid}-${n}` dropId', undispatched.length === 1 && undispatched[0].items.length === 1 && undispatched[0].items[0].text === 'please read the file' && undispatched[0].items[0].msgId === 'c1' && /^\d+-\d+$/.test(undispatched[0].dropId) && undispatched[0].turnId && undispatched[0].by === 'stop', undispatched);
+    ok('…and that UNDISPATCHED prompt comes back into the composer: ONE queue_dropped, its row the prompt\'s own text + msgId (no context prefix), a `${pid}-${n}` dropId', undispatched.length === 1 && undispatched[0].items.length === 1 && undispatched[0].items[0].text === 'please read the file' && undispatched[0].items[0].msgId === 'c1' && gateOf(/^\d+-\d+$/.test(undispatched[0].dropId)) && gateOf(undispatched[0].turnId) && undispatched[0].by === 'stop', undispatched);
     // POSITIVE CONTROL: the same path with no Stop still prefixes the context
     hits = 0;
     w.send({ type: 'chat-input', text: 'please read the file', msgId: 'c2' });
@@ -216,7 +216,7 @@ console.log('— Stop means stop (the cancel race + the local queue)');
     release();
     const ps = await w.waitFor(() => w.find('prompt_start'), 5000, 'prompt_start');
     const call = w.mockCalls().find((c) => c.method === 'session/prompt');
-    ok('positive control: without a Stop the same prompt goes out WITH the <vibespace-context> prefix', !!call && call.params.prompt.length === 2 && /<vibespace-context>\ntask ctx/.test(call.params.prompt[0].text) && ps.blocks === 2, call?.params?.prompt?.map((b) => b.text?.slice(0, 30)));
+    ok('positive control: without a Stop the same prompt goes out WITH the <vibespace-context> prefix', !!call && call.params.prompt.length === 2 && gateOf(/<vibespace-context>\ntask ctx/.test(call.params.prompt[0].text)) && ps.blocks === 2, call?.params?.prompt?.map((b) => b.text?.slice(0, 30)));
     const perm = await w.waitFor(() => w.find('permission_request'), 5000, 'permission_request');
     w.send({ type: 'permission-response', requestId: perm.requestId, approved: true, optionId: 'once' });
     await w.waitFor(() => w.findAll('prompt_end').length === 2, 5000, 'second prompt_end');
@@ -252,19 +252,19 @@ console.log('— Stop means stop (the cancel race + the local queue)');
     // client toast). B-7638 still holds: the PEER / NOTIFICATION entries dropped alongside are not the person's — they
     // go back to the delivery ladder (below), never into the owner's composer.
     const putBack = w.findAll('queue_dropped');
-    ok('…what the person queued comes back: ONE queue_dropped whose items are [q2\'s text] ONLY (the peer + notification rows are absent), a `${pid}-${n}` dropId', putBack.length === 1 && putBack[0].items.length === 1 && putBack[0].items[0].msgId === 'q2' && putBack[0].items[0].text === 'please read the file' && /^\d+-\d+$/.test(putBack[0].dropId) && putBack[0].omitted === 0, putBack);
+    ok('…what the person queued comes back: ONE queue_dropped whose items are [q2\'s text] ONLY (the peer + notification rows are absent), a `${pid}-${n}` dropId', putBack.length === 1 && putBack[0].items.length === 1 && putBack[0].items[0].msgId === 'q2' && putBack[0].items[0].text === 'please read the file' && gateOf(/^\d+-\d+$/.test(putBack[0].dropId)) && putBack[0].omitted === 0, putBack);
     ok('…and the «send them again» queue-cleared notice is retired (the toast is the ONE notice on every harness)', !w.find('notice', (r) => r.noticeKind === 'queue-cleared'), w.find('notice', (r) => r.noticeKind === 'queue-cleared'));
     const pr = w.findAll('peer_result');
     const dropped = pr.filter((r) => r.ok === false);
-    ok('…a dropped PEER message goes back to the delivery ladder (peer_result ok:false with its text — the consumer re-stashes it)', dropped.some((r) => r.text === 'ping from B' && r.fromName === 'B' && /Stop/.test(r.reason || '')), pr);
-    ok('…and so does the dropped NOTIFICATION (a promised message is a promised message, whoever sent it)', dropped.some((r) => /Background Work/.test(r.fromName || '') && /Stop/.test(r.reason || '')), dropped);
+    ok('…a dropped PEER message goes back to the delivery ladder (peer_result ok:false with its text — the consumer re-stashes it)', verdictOf(dropped.some((r) => r.text === 'ping from B' && r.fromName === 'B' && /Stop/.test(r.reason || ''))), pr);
+    ok('…and so does the dropped NOTIFICATION (a promised message is a promised message, whoever sent it)', verdictOf(dropped.some((r) => /Background Work/.test(r.fromName || '') && /Stop/.test(r.reason || ''))), dropped);
     // THE BUBBLES must say REMOVED, not go blank. The normalizer clears the
     // chip of anything that leaves the queue with no explicit result — that
     // reads as "it ran", the opposite of what Stop did (round-1 review). So
     // each dropped entry gets its own removal result BEFORE the republish.
     {
       const rms = w.findAll('queue_op_result', (r) => r.op === 'remove' && r.ok === true);
-      ok("…each dropped bubble is told it was REMOVED (a cleared chip would claim the message RAN)", rms.length === 3 && rms.some((r) => r.msg_id === 'q2') && rms.every((r) => r.reason === 'stopped'), rms);
+      ok("…each dropped bubble is told it was REMOVED (a cleared chip would claim the message RAN)", rms.length === 3 && gateOf(rms.some((r) => r.msg_id === 'q2')) && verdictOf(rms.every((r) => r.reason === 'stopped')), rms);
       const at = (pred) => w.records.map((r, i) => [r, i]).filter(([r]) => r.type === 'acp' && pred(r)).slice(-1)[0]?.[1] ?? -1;
       const lastRm = at((r) => r.kind === 'queue_op_result');
       const emptyQ = at((r) => r.kind === 'queue_changed' && (r.items || []).length === 0);
@@ -288,7 +288,7 @@ console.log('— the input queue: published, removable, order-preserving (no ste
     const last = () => w.findAll('queue_changed').slice(-1)[0];
     await w.waitFor(() => last()?.items?.length === 2, 4000, 'two queued');
     ok('the ACP wrapper PUBLISHES its promptQueue the way codex publishes the app-server\'s (one client path, a capability row apart)',
-      last().items.map((i) => i.msgId).join(',') === 'qb,qc' && last().items[0].preview === 'first queued' && last().items.every((i) => i.id && i.kind === 'user'), last().items);
+      last().items.map((i) => i.msgId).join(',') === 'qb,qc' && last().items[0].preview === 'first queued' && verdictOf(last().items.every((i) => i.id && i.kind === 'user')), last().items);
     // RE-STATE IT ON DEMAND (`queue-resync`, 2026-09-09). A queue publication is
     // a stdout record and this wrapper's stdout is an 800KB head-dropped RING —
     // the very file a restarted server rebuilds its normalizer from — so after a
@@ -303,7 +303,7 @@ console.log('— the input queue: published, removable, order-preserving (no ste
       ok('`queue-resync` re-states the queue on demand — the answer a rebuilt normalizer cannot produce for itself',
         w.findAll('queue_changed').length === before + 1 && last().items.map((i) => i.msgId).join(',') === 'qb,qc', last().items);
       ok('…and it is an ORDINARY publication: `verbs` rides it like every other, so the client re-learns the controls in the same frame',
-        Array.isArray(last().verbs) && last().verbs.includes('remove'), last().verbs);
+        gateOf(Array.isArray(last().verbs)) && verdictOf(last().verbs.includes('remove')), last().verbs);
       ok('…and it is not an unknown verb here (an ACP wrapper answers one with a VISIBLE error card — which is exactly why the server gates the ask on this wrapper\'s own sidecar advert)',
         w.findAll('notice').length === noticesBefore && !w.find('notice', (r) => r.noticeKind === 'unknown-verb'), w.findAll('notice').slice(-1)[0]);
       ok('…and the wrapper adverts it in the sidecar it writes (the per-PROCESS gate the server reads)', w.metaJson()?.caps?.queueResync === true, JSON.stringify(w.metaJson()?.caps));
@@ -319,7 +319,7 @@ console.log('— the input queue: published, removable, order-preserving (no ste
     // reaches the wrapper anyway must say that, not "unknown op".
     w.send({ type: 'queue-op', op: 'run-now', id: last().items[0].id });
     const notStartable = await w.waitFor(() => w.find('queue_op_result', (r) => r.op === 'run-now'), 3000, 'run-now refusal');
-    ok('run-now on an ACP harness is refused with the structural reason (one prompt at a time — it starts as soon as this one ends)', notStartable.ok === false && notStartable.reason === 'not-startable' && /one prompt at a time/.test(notStartable.detail || ''), notStartable);
+    ok('run-now on an ACP harness is refused with the structural reason (one prompt at a time — it starts as soon as this one ends)', notStartable.ok === false && notStartable.reason === 'not-startable' && verdictOf(/one prompt at a time/.test(notStartable.detail || '')), notStartable);
 
     // REORDER: a local array splice, driven by the SAME relative frame the
     // codex wrapper translates into a full-order array.
@@ -349,10 +349,10 @@ console.log('— the input queue: published, removable, order-preserving (no ste
       const e = await w.waitFor(() => w.find('queue_op_result', (r) => r.op === 'edit'), 3000, 'edit result');
       ok('edit rewrites the queued text and reports ok', e.ok === true && e.msg_id === 'qb', e);
       await w.waitFor(() => (last().items.find((i) => i.msgId === 'qb')?.preview || '').includes('rewritten'), 3000, 'edited preview');
-      ok('…and the republished strip shows the new words', /rewritten/.test(last().items.find((i) => i.msgId === 'qb').preview), last().items);
+      ok('…and the republished strip shows the new words', verdictOf(/rewritten/.test(last().items.find((i) => i.msgId === 'qb').preview)), last().items);
       const emptyEdit = (() => { w.send({ type: 'queue-op', op: 'edit', id: target.id, text: '   ' }); return true; })();
       const refusedEdit = await w.waitFor(() => w.findAll('queue_op_result', (r) => r.op === 'edit').slice(-1)[0]?.ok === false ? w.findAll('queue_op_result', (r) => r.op === 'edit').slice(-1)[0] : null, 3000, 'empty edit refused');
-      ok('an empty edit is refused (blanking a queued message is not an edit)', emptyEdit && refusedEdit.reason === 'empty-text', refusedEdit);
+      ok('an empty edit is refused (blanking a queued message is not an edit)', gateOf(emptyEdit) && refusedEdit.reason === 'empty-text', refusedEdit);
     }
     // remove the FIRST: the second keeps its relative order and is what runs
     const firstId = last().items[0].id;
@@ -370,7 +370,7 @@ console.log('— the input queue: published, removable, order-preserving (no ste
     w.send({ type: 'permission-response', requestId: perm.requestId, approved: true, optionId: 'once' });
     await w.waitFor(() => w.findAll('prompt_start').length === 2, 8000, 'the queued prompt ran');
     const wire = JSON.stringify(w.mockCalls().filter((c) => c.method === 'session/prompt'));
-    ok('drain order: the removed entry NEVER reaches the agent, the survivor does', wire.includes('second queued') && !wire.includes('first queued'), wire.slice(0, 200));
+    ok('drain order: the removed entry NEVER reaches the agent, the survivor does', gateOf(wire.includes('second queued')) && !wire.includes('first queued'), wire.slice(0, 200));
     ok('…and the EDIT really changed what the agent would have received (the rewritten words never ran because that entry was removed, and its original text is nowhere on the wire)', !wire.includes('first queued'), wire.slice(0, 200));
     await w.waitFor(() => last().items.length === 0, 3000, 'queue empty');
     ok('…and the emptied queue is published (the strip clears)', last().items.length === 0);
@@ -384,7 +384,7 @@ console.log('— the ACP wrapper adverts the queue verbs it serves');
     await w.waitFor(() => w.find('session'), 10000, 'session record');
     await w.waitFor(() => w.findAll('queue_changed').length > 0, 5000, 'a baseline queue publication');
     const verbs = ['remove', 'reorder', 'edit'];
-    ok('every queue_changed carries the verb list in-band (the only advert a remote session sees)', w.findAll('queue_changed').every((q) => JSON.stringify(q.verbs) === JSON.stringify(verbs)), w.findAll('queue_changed').slice(-1)[0]?.verbs);
+    ok('every queue_changed carries the verb list in-band (the only advert a remote session sees)', verdictOf(w.findAll('queue_changed').every((q) => JSON.stringify(q.verbs) === JSON.stringify(verbs))), w.findAll('queue_changed').slice(-1)[0]?.verbs);
     const meta = w.metaJson();
     ok('…and the sidecar adverts the same list (what a LOCAL server reads)', JSON.stringify(meta?.caps?.queueVerbs) === JSON.stringify(verbs), meta?.caps);
     const { capsOf } = require(path.join(REPO, 'src/backend-caps.js'));
@@ -409,10 +409,10 @@ console.log('— read-permission-rules: a TYPED refusal, never silence (owner ru
     await w.waitFor(() => w.find('permission_rules'), 5000, 'a permission_rules record');
     const r = w.find('permission_rules');
     ok('the answer is TYPED: ok:false + a machine-readable reason (ACP v1 has no config-read method)',
-      r.ok === false && r.reason === 'unsupported-by-protocol' && /config-read/.test(r.detail || ''), JSON.stringify(r).slice(0, 200));
+      r.ok === false && r.reason === 'unsupported-by-protocol' && verdictOf(/config-read/.test(r.detail || '')), JSON.stringify(r).slice(0, 200));
     ok('…and it carries the requestId back, so a pending read is correlated instead of timing out', r.requestId === 'acp-rq-1');
     ok('…plus the ONE permission fact ACP does carry: the session\'s live mode (the panel is never blank)',
-      typeof r.mode === 'string' && Array.isArray(r.modes) && r.modes.length > 0, JSON.stringify({ mode: r.mode, modes: r.modes }));
+      typeof r.mode === 'string' && gateOf(Array.isArray(r.modes)) && r.modes.length > 0, JSON.stringify({ mode: r.mode, modes: r.modes }));
     ok('the verb produced NO unknown-verb notice (it is served, not fallen through)',
       !w.findAll('notice').some((n) => n.noticeKind === 'unknown-verb'));
     const { capsOf } = require(path.join(REPO, 'src/backend-caps.js'));
@@ -466,7 +466,7 @@ console.log('— the stop-time bookkeeping nudge survives a Stop that drops it f
   const w = startWrapper({ env: ENV });
   try {
     await nudgeIntoQueue(w);
-    ok('a stop-time nudge whose turn is already taken goes into the LOCAL QUEUE (stop-check answered, nothing on the wire yet)', stopChecks === 1 && reminders(w).length === 0 && nudgeInQueue(w), { stopChecks, prompts: w.mockCalls().filter((c) => c.method === 'session/prompt').length });
+    ok('a stop-time nudge whose turn is already taken goes into the LOCAL QUEUE (stop-check answered, nothing on the wire yet)', stopChecks === 1 && reminders(w).length === 0 && verdictOf(nudgeInQueue(w)), { stopChecks, prompts: w.mockCalls().filter((c) => c.method === 'session/prompt').length });
     ok('…and it queues SILENTLY: one `queued_input` for the ONE message the user queued, none for our bookkeeping nudge (it would paint a "Queued" card with no bubble behind it)', queued(w).length === 1 && queued(w)[0].msg_id === 'n2', queued(w));
     w.send({ type: 'interrupt' });                                               // ← Stop drops the QUEUED nudge
     await w.waitFor(() => w.find('prompt_end', (r) => r.stopReason === 'cancelled'), 8000, 'the running turn ends cancelled');
@@ -474,7 +474,7 @@ console.log('— the stop-time bookkeeping nudge survives a Stop that drops it f
     ok('…Stop drops it without sending it, and puts NOTHING into the person\'s composer (the nudge is ours, not theirs — no queue_dropped when nothing of the user\'s was queued)', reminders(w).length === 0 && !w.find('queue_dropped') && !w.find('notice', (r) => r.noticeKind === 'queue-cleared'), { reminders: reminders(w).length, putBack: w.findAll('queue_dropped') });
     w.send({ type: 'chat-input', text: 'fs check', msgId: 'n3' });                // a later turn that ends end_turn
     const again = await settle(() => stopChecks === 2 && reminders(w).length === 1);
-    ok('THE FIX: the dropped queue entry takes its latch with it — the NEXT completed turn asks stop-check again and the reminder goes out (before: nudgeTurnActive stayed true for the rest of the session)', again && /vibespace-reminder>fs/.test(JSON.stringify(reminders(w)[0]?.params?.prompt || '')), { stopChecks, reminders: reminders(w).length, ends: w.findAll('prompt_end').map((e) => e.stopReason) });
+    ok('THE FIX: the dropped queue entry takes its latch with it — the NEXT completed turn asks stop-check again and the reminder goes out (before: nudgeTurnActive stayed true for the rest of the session)', gateOf(again) && verdictOf(/vibespace-reminder>fs/.test(JSON.stringify(reminders(w)[0]?.params?.prompt || ''))), { stopChecks, reminders: reminders(w).length, ends: w.findAll('prompt_end').map((e) => e.stopReason) });
   } finally { await w.stop(); }
 
   // CONTROL — the same setup with NO Stop: the queued nudge runs, and the turn
@@ -489,7 +489,7 @@ console.log('— the stop-time bookkeeping nudge survives a Stop that drops it f
     const permB = await c.waitFor(() => c.findAll('permission_request')[1], 8000, 'permission_request B');
     c.send({ type: 'permission-response', requestId: permB.requestId, approved: true, optionId: 'once' });
     const ran = await settle(() => reminders(c).length === 1 && c.findAll('prompt_end').length === 3, 12000);
-    ok('control: with no Stop the queued nudge RUNS after the turn it waited for, and that turn\'s own end_turn does not queue a second nudge (the latch holds)', ran && stopChecks === 1 && reminders(c).length === 1, { stopChecks, reminders: reminders(c).length, ends: c.findAll('prompt_end').map((e) => e.stopReason) });
+    ok('control: with no Stop the queued nudge RUNS after the turn it waited for, and that turn\'s own end_turn does not queue a second nudge (the latch holds)', gateOf(ran) && stopChecks === 1 && reminders(c).length === 1, { stopChecks, reminders: reminders(c).length, ends: c.findAll('prompt_end').map((e) => e.stopReason) });
     await sleep(600);
     ok('negative control: the nudge turn\'s own end_turn does NOT nudge again — one reminder, one stop-check, no reminder loop', stopChecks === 1 && reminders(c).length === 1 && c.findAll('prompt_end').length === 3, { stopChecks, reminders: reminders(c).length, ends: c.findAll('prompt_end').map((e) => e.stopReason) });
   } finally { await c.stop(); api.close(); }
@@ -526,11 +526,11 @@ console.log('— Stop lands INSIDE the stop-check round trip: no billed nudge tu
     w.send({ type: 'interrupt' });                                               // ← Stop, mid round trip
     await sleep(holdMs + 900);                                                   // let the held answer land
     ok('a Stop inside the stop-check round trip discards its answer — NO nudge turn is dispatched afterwards', reminders(w).length === 0 && w.findAll('prompt_start').length === 1, { reminders: reminders(w).length, starts: w.findAll('prompt_start').length, stopChecks });
-    ok('…and the drop is recorded, not silent (the reason names the race)', /stop nudge dropped: Stop landed while the stop-check was in flight/.test(wlog(w)), wlog(w).split('\n').filter((l) => /stop nudge/.test(l)).join(' | '));
+    ok('…and the drop is recorded, not silent (the reason names the race)', verdictOf(/stop nudge dropped: Stop landed while the stop-check was in flight/.test(wlog(w))), wlog(w).split('\n').filter((l) => /stop nudge/.test(l)).join(' | '));
     ok('…the latch is not stranded either: nothing is queued and nothing is put back (no queue_dropped mid round trip)', !w.find('queue_dropped') && !w.find('notice', (r) => r.noticeKind === 'queue-cleared') && !w.findAll('queue_changed').some((r) => (r.items || []).length), w.findAll('queue_changed').map((r) => r.items?.length));
     // and the session still nudges LATER — the discarded answer is not a latch
     const later = await (async () => { const t0 = Date.now(); w.send({ type: 'chat-input', text: 'fs again', msgId: 's2' }); while (Date.now() - t0 < 9000) { if (reminders(w).length === 1) return true; await sleep(20); } return false; })();
-    ok('…and the NEXT completed turn nudges normally (the discarded answer left no latch behind)', later && stopChecks === 2, { stopChecks, reminders: reminders(w).length });
+    ok('…and the NEXT completed turn nudges normally (the discarded answer left no latch behind)', gateOf(later) && stopChecks === 2, { stopChecks, reminders: reminders(w).length });
   } finally { await w.stop(); }
 
   // CONTROL: the very same held round trip, with NO Stop — the reminder DOES go
@@ -543,7 +543,7 @@ console.log('— Stop lands INSIDE the stop-check round trip: no billed nudge tu
     c.send({ type: 'chat-input', text: 'fs check', msgId: 'c1' });
     await c.waitFor(() => c.find('prompt_end', (r) => r.stopReason === 'end_turn'), 8000, 'turn end_turn');
     const got = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 9000) { if (reminders(c).length === 1) return true; await sleep(20); } return false; })();
-    ok('control: with no Stop the SAME held stop-check produces the reminder (the discard above is the Stop, not the delay)', got && stopChecks === 1, { stopChecks, reminders: reminders(c).length });
+    ok('control: with no Stop the SAME held stop-check produces the reminder (the discard above is the Stop, not the delay)', gateOf(got) && stopChecks === 1, { stopChecks, reminders: reminders(c).length });
   } finally { await c.stop(); api.close(); }
 }
 
@@ -560,8 +560,8 @@ console.log('— a Deny never selects an ALLOW option (fail closed)');
     const res = await w.waitFor(() => w.find('permission_resolved'), 5000, 'permission_resolved');
     const end = await w.waitFor(() => w.find('prompt_end'), 8000, 'prompt_end');
     ok('Deny with no reject option → {outcome:cancelled}, NEVER an allow option', res.outcome === 'cancelled' && res.optionId === null && res.optionKind === null, res);
-    ok('…the tool did not run (tool_call_update failed, no "completed", no "Done (always)" text)', w.updates('tool_call_update').every((u) => u.update.status !== 'completed') && w.updates('tool_call_update').some((u) => u.update.status === 'failed') && !w.updates('agent_message_chunk').some((u) => /Done \(/.test(u.update.content?.text || '')) && end.stopReason === 'cancelled', w.updates('tool_call_update').map((u) => u.update.status));
-    ok('…and the user is TOLD what their Deny became (cancelled ends the turn; the tool was refused)', /^This agent offered no "reject" option/.test(w.find('notice', (r) => r.noticeKind === 'deny-cancelled')?.text || ''), w.find('notice', (r) => r.noticeKind === 'deny-cancelled'));
+    ok('…the tool did not run (tool_call_update failed, no "completed", no "Done (always)" text)', gateOf(w.updates('tool_call_update').every((u) => u.update.status !== 'completed')) && gateOf(w.updates('tool_call_update').some((u) => u.update.status === 'failed')) && !w.updates('agent_message_chunk').some((u) => /Done \(/.test(u.update.content?.text || '')) && end.stopReason === 'cancelled', w.updates('tool_call_update').map((u) => u.update.status));
+    ok('…and the user is TOLD what their Deny became (cancelled ends the turn; the tool was refused)', verdictOf(/^This agent offered no "reject" option/.test(w.find('notice', (r) => r.noticeKind === 'deny-cancelled')?.text || '')), w.find('notice', (r) => r.noticeKind === 'deny-cancelled'));
     // POSITIVE CONTROL: with a reject option offered, Deny still picks it
     w.send({ type: 'chat-input', text: 'please read the file', msgId: 'd2' });
     const perm2 = await w.waitFor(() => w.findAll('permission_request').length === 2 && w.findAll('permission_request')[1], 5000, 'second permission_request');
@@ -583,7 +583,7 @@ console.log('— boot failure honesty');
   const child = spawn(process.execPath, [WRAPPER, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, '-e', 'process.exit(3)'], { env: { ...CLEAN_ENV, ACP_WEBUI_CWD: dir }, stdio: ['pipe', 'pipe', 'pipe'] });
   let out = ''; child.stdout.setEncoding('utf8'); child.stdout.on('data', (d) => { out += d; });
   const code = await new Promise((r) => child.on('exit', (c) => r(c)));
-  ok('an agent that exits before initialize → LOUD boot-failed/agent-exited notice + non-zero wrapper exit (never a silent hang)', code !== 0 && /agent-exited|boot-failed/.test(out) && /exited before the session was ready|could not start/.test(out), { code, out: out.slice(0, 300) });
+  ok('an agent that exits before initialize → LOUD boot-failed/agent-exited notice + non-zero wrapper exit (never a silent hang)', code !== 0 && gateOf(/agent-exited|boot-failed/.test(out)) && verdictOf(/exited before the session was ready|could not start/.test(out)), { code, out: out.slice(0, 300) });
   // …AND when it exits 0 (a CLI that prints usage / an unauthenticated agent
   // that gives up quietly). finalizeExit() exits synchronously, so boot()'s own
   // catch never runs from the child-exit path: gating the notice on code !== 0
@@ -595,8 +595,8 @@ console.log('— boot failure honesty');
   await new Promise((r) => c0.on('exit', () => r()));
   const recs0 = out0.trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   const bufRecs0 = (() => { try { return fs.readFileSync(buf0, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();
-  ok('an agent that exits 0 before answering initialize is STILL reported (exit code 0 is not success when no session exists)', recs0.some((r) => r.kind === 'notice' && r.noticeKind === 'agent-exited' && /exited before the session was ready \(exit code 0\)/.test(r.text)), recs0);
-  ok('…and the notice is in the BUFFER FILE too — the journal IS the history, so the window shows it after a restart (never blank)', bufRecs0.some((r) => r.kind === 'notice' && r.noticeKind === 'agent-exited'), bufRecs0);
+  ok('an agent that exits 0 before answering initialize is STILL reported (exit code 0 is not success when no session exists)', verdictOf(recs0.some((r) => r.kind === 'notice' && r.noticeKind === 'agent-exited' && /exited before the session was ready \(exit code 0\)/.test(r.text))), recs0);
+  ok('…and the notice is in the BUFFER FILE too — the journal IS the history, so the window shows it after a restart (never blank)', verdictOf(bufRecs0.some((r) => r.kind === 'notice' && r.noticeKind === 'agent-exited')), bufRecs0);
 }
 
 console.log('— normalizer (AcpMessageManager) over the journal');
@@ -607,21 +607,21 @@ console.log('— normalizer (AcpMessageManager) over the journal');
   const users = msgs.filter((m) => m.role === 'user');
   ok('user prompts become user messages (msgId-keyed; peer message carries its envelope)', users.length === 6 && users[0].content[0].text === 'please read the file' && users.at(-1).originKind === 'peer-message' && users.at(-1).peerFrom === 'B' && users.at(-1).content[0].text === 'B says hi', users.map((u) => u.content[0]?.text));
   const texts = msgs.filter((m) => m.role === 'assistant' && m.content[0]?.type === 'text');
-  ok('agent_message_chunks with one messageId MERGE into one assistant text ("Looking at your request.")', texts.some((t) => t.content[0].text === 'Looking at your request.') && texts.every((t) => t.status === 'complete'), texts.map((t) => t.content[0].text));
-  ok('agent_thought_chunk → a thinking block', msgs.some((m) => m.role === 'assistant' && m.content[0]?.type === 'thinking' && /check the file first/.test(m.content[0].text)));
+  ok('agent_message_chunks with one messageId MERGE into one assistant text ("Looking at your request.")', gateOf(texts.some((t) => t.content[0].text === 'Looking at your request.')) && verdictOf(texts.every((t) => t.status === 'complete')), texts.map((t) => t.content[0].text));
+  ok('agent_thought_chunk → a thinking block', verdictOf(msgs.some((m) => m.role === 'assistant' && m.content[0]?.type === 'thinking' && /check the file first/.test(m.content[0].text))));
   const tools = msgs.filter((m) => m.role === 'tool');
   const readCard = tools.find((t) => t.toolName === 'Read');
-  ok('tool_call kind read → Read card, collapseKind read, completed with the tool output + permission resolved (allowed, option once)', readCard && readCard.collapseKind === 'read' && readCard.status === 'complete' && readCard.content[0].type === 'tool_result' && /hello/.test(readCard.content[0].output) && readCard.permission?.resolved === 'allowed' && readCard.permission.selectedOptionId === 'once' && readCard.permission.options.length === 3 && readCard.backendMeta.acpKind === 'read', readCard);
+  ok('tool_call kind read → Read card, collapseKind read, completed with the tool output + permission resolved (allowed, option once)', gateOf(readCard) && readCard.collapseKind === 'read' && readCard.status === 'complete' && readCard.content[0].type === 'tool_result' && gateOf(/hello/.test(readCard.content[0].output)) && readCard.permission?.resolved === 'allowed' && readCard.permission.selectedOptionId === 'once' && readCard.permission.options.length === 3 && readCard.backendMeta.acpKind === 'read', readCard);
   const editCard = tools.find((t) => t.toolName === 'Edit');
-  ok('tool_call kind edit → Edit card (write fold) — denied: error status + denied permission', editCard && editCard.collapseKind === 'write' && editCard.status === 'error' && editCard.permission?.resolved === 'denied' && editCard.permission.selectedOptionId === 'no', editCard);
+  ok('tool_call kind edit → Edit card (write fold) — denied: error status + denied permission', gateOf(editCard) && editCard.collapseKind === 'write' && editCard.status === 'error' && editCard.permission?.resolved === 'denied' && editCard.permission.selectedOptionId === 'no', editCard);
   const bashCard = tools.find((t) => t.toolName === 'Bash');
-  ok('tool_call kind execute → Bash card (bash fold) with the command as input; cancelled turn → error status', bashCard && bashCard.collapseKind === 'bash' && bashCard.content[0].input?.command === 'ls -la' && bashCard.status === 'error', bashCard);
-  ok('the cancelled prompt leaves an Interrupted marker; the fs refusal turn has no error card', msgs.some((m) => m.role === 'system' && m.status === 'interrupted') && !msgs.some((m) => m.role === 'system' && m.status === 'error' && /prompt failed/.test(m.content[0]?.text || '')));
-  ok('wrapper notices become system cards (rejected model = error status, unsupported effort, unknown verb)', msgs.filter((m) => m.role === 'system' && m.noticeKind === 'rejected').length === 1 && msgs.some((m) => m.noticeKind === 'unsupported') && msgs.some((m) => m.noticeKind === 'unknown-verb'));
+  ok('tool_call kind execute → Bash card (bash fold) with the command as input; cancelled turn → error status', gateOf(bashCard) && bashCard.collapseKind === 'bash' && bashCard.content[0].input?.command === 'ls -la' && bashCard.status === 'error', bashCard);
+  ok('the cancelled prompt leaves an Interrupted marker; the fs refusal turn has no error card', gateOf(msgs.some((m) => m.role === 'system' && m.status === 'interrupted')) && !msgs.some((m) => m.role === 'system' && m.status === 'error' && /prompt failed/.test(m.content[0]?.text || '')));
+  ok('wrapper notices become system cards (rejected model = error status, unsupported effort, unknown verb)', msgs.filter((m) => m.role === 'system' && m.noticeKind === 'rejected').length === 1 && gateOf(msgs.some((m) => m.noticeKind === 'unsupported')) && verdictOf(msgs.some((m) => m.noticeKind === 'unknown-verb')));
   const st = mm.status();
   ok('status(): model/mode follow the config records, slash commands from available_commands_update, context window from usage_update', st.model === 'mock/smart' && st.permissionMode === 'plan' && st.permissionModes.join(',') === 'build,plan' && st.slashCommands.join(',') === 'review,plan' && st.contextWindow === 200000 && st.lastUsage?.input_tokens === 1234 && st.models.length === 2 && st.agentInfo?.name === 'mock-acp', st);
   ok('taskState() todos come from the last plan', mm.taskState().todos.length === 2 && mm.taskState().todos[0].status === 'completed');
-  ok('turnMap() has one entry per user turn with previews', mm.turnMap().filter((t) => t.role === 'user').length === 6 && mm.turnMap()[0].preview);
+  ok('turnMap() has one entry per user turn with previews', mm.turnMap().filter((t) => t.role === 'user').length === 6 && verdictOf(mm.turnMap()[0].preview));
   ok('search() finds tool output', mm.search('hello').length >= 1);
   ok('history rebuild produces NO init card (a live artefact); ids are content-derived and stable across rebuilds', !msgs.some((m) => m.content[0]?.type === 'system_info' && m.content[0].initData) && new AcpMessageManager('s1').convertHistory(historyRecords).map((m) => m.id).join() === msgs.map((m) => m.id).join());
   // live path: ops + init card + permission card BEFORE resolution
@@ -640,7 +640,7 @@ console.log('— normalizer (AcpMessageManager) over the journal');
   // leg looks the card UP instead of assuming its position — the
   // order-independence PROPERTY itself is pinned deterministically below.
   const initOp = ops.find((o) => o.op === 'create' && o.message?.content?.[0]?.initData);
-  ok('live: the init card is created from the session record; the permission card is PENDING with ordered options', initOp?.message.content[0].initData?.model === 'mock/fast' && pendingCard && pendingCard.permission.options.map((o) => o.optionId).join(',') === 'once,always,no' && pendingCard.permission.kind === 'approval', { ops: ops.map((o) => o.op + (o.subtype ? ':' + o.subtype : '')).join(' | '), initOp });
+  ok('live: the init card is created from the session record; the permission card is PENDING with ordered options', initOp?.message.content[0].initData?.model === 'mock/fast' && gateOf(pendingCard) && pendingCard.permission.options.map((o) => o.optionId).join(',') === 'once,always,no' && pendingCard.permission.kind === 'approval', { ops: ops.map((o) => o.op + (o.subtype ? ':' + o.subtype : '')).join(' | '), initOp });
   // …and the property, with BOTH orders fed deterministically (no process
   // timing involved): the init card and the command-list op are the same in
   // either order. The NEGATIVE CONTROL is the assertion that was here before:
@@ -662,7 +662,7 @@ console.log('— normalizer (AcpMessageManager) over the journal');
   }
   live.processLive({ type: 'permission-response', requestId: pendingCard.permission.requestId, approved: true, optionId: 'once' });
   ok('the ws-handler\'s echoed permission-response frame resolves the pending card (survives a refresh)', pendingCard.permission.resolved === 'allowed' && pendingCard.permission.selectedOptionId === 'once' && ops.at(-1).op === 'edit');
-  ok('collapseKindOf/toolNameOf cover every ACP ToolKind', ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other'].every((k) => toolNameOf(k)) && collapseKindOf('switch_mode') === null && collapseKindOf('fetch') === 'mcp' && collapseKindOf('think') === 'thinking');
+  ok('collapseKindOf/toolNameOf cover every ACP ToolKind', gateOf(['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other'].every((k) => toolNameOf(k))) && collapseKindOf('switch_mode') === null && collapseKindOf('fetch') === 'mcp' && collapseKindOf('think') === 'thinking');
   // store reader over the buffer
   const bdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-acp-buf-'));
   fs.writeFileSync(path.join(bdir, 's1.json'), JSON.stringify({ mode: 'chat', streaming: true, todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }], model: 'mock/smart' }));
@@ -680,7 +680,7 @@ console.log('— normalizer (AcpMessageManager) over the journal');
   const spec = new h.Adapter(h.adapterConfig({ acpWrapper: '/w/acp', ptyWrapper: '/w/pty', acpCommands: { mockacp: '/usr/bin/mock-agent' } })).buildSessionArgs({ cwd: '/tmp/x', mode: 'chat', model: 'm1', permissionMode: 'plan', resumeId: 'ses_1', extraArgs: ['--v'] });
   ok('buildSessionArgs(chat): the resolved executable + acp args + extra args under the shared wrapper; facts ride ACP_WEBUI_* env (never argv)', spec.cmd === '/usr/bin/mock-agent' && spec.args.join(' ') === 'acp --x --v' && spec.wrapper === '/w/acp' && spec.env.ACP_WEBUI_MODEL === 'm1' && spec.env.ACP_WEBUI_MODE === 'plan' && spec.env.ACP_WEBUI_RESUME_ID === 'ses_1' && spec.env.ACP_WEBUI_BACKEND === 'mockacp' && spec.cwd === '/tmp/x', spec);
   let threw = null; try { acpHarness({ id: 'Bad Id', command: 'x' }); } catch (e) { threw = e.message; }
-  ok('acpHarness refuses a non-slug id', /lowercase slug/.test(threw || ''));
+  ok('acpHarness refuses a non-slug id', verdictOf(/lowercase slug/.test(threw || '')));
   const fmt = ad.formatPermissionResponse({ requestId: 7, approved: true, optionId: 'always', permissionUpdates: [{ kind: 'allow_always' }] });
   ok('formatPermissionResponse forwards requestId/approved/optionId/alwaysAllow to the wrapper verb', JSON.parse(fmt).optionId === 'always' && JSON.parse(fmt).alwaysAllow === true && JSON.parse(fmt).type === 'permission-response');
 }
@@ -697,7 +697,7 @@ console.log('— wiring pins');
   const rowHolds = (r) => !!(r && r.pool === false && r.streamProtocol === 'acp-events' && r.frameFile === true);
   const ocRow = opencodeRowIn(capsText, 'backend-caps'), noRowText = capsText.replace(/\n  opencode: \{\n[\s\S]*?\n  \},\n/, '\n'), noRow = opencodeRowIn(noRowText, 'backend-caps-no-opencode');
   fs.rmSync(rowDir, { recursive: true, force: true });
-  ok('backend-caps + harness registry: opencode row (streamProtocol acp-events, pool false, frameFile) registered as a built-in — pinned on the ROW OBJECT, and a copy of backend-caps.js with the row removed is RED', rowHolds(ocRow) && /require\('\.\/opencode'\)/.test(read('src/harnesses/index.js')) && noRowText !== capsText && !noRowText.includes('\n  opencode: {') && !rowHolds(noRow), { row: ocRow && { pool: ocRow.pool, streamProtocol: ocRow.streamProtocol, frameFile: ocRow.frameFile }, removed: noRowText !== capsText, noRow });
+  ok('backend-caps + harness registry: opencode row (streamProtocol acp-events, pool false, frameFile) registered as a built-in — pinned on the ROW OBJECT, and a copy of backend-caps.js with the row removed is RED', gateOf(rowHolds(ocRow)) && gateOf(/require\('\.\/opencode'\)/.test(read('src/harnesses/index.js'))) && noRowText !== capsText && !noRowText.includes('\n  opencode: {') && !rowHolds(noRow), { row: ocRow && { pool: ocRow.pool, streamProtocol: ocRow.streamProtocol, frameFile: ocRow.frameFile }, removed: noRowText !== capsText, noRow });
   // (the descriptor dispatch + the collision resolver pins — MOVED to the fast scripts/test-acp-harness-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // 2.369.123: the OpenCode section is DERIVED from the harness's declared table (src/harness-settings.js) — the rows are
   // pinned on the table, no longer as literals in settings-schema.js (docs/design-harness-settings.zh.md §4)
@@ -705,8 +705,8 @@ console.log('— wiring pins');
   const HSWm = await import(new URL('../src/harness-settings-words.js', import.meta.url)), ocWithWords = HSWm.withWords || HSWm.default.withWords;
   const ocTable = ocWithWords((await import(new URL('../src/harness-settings.js', import.meta.url))).default?.HARNESS_SETTINGS?.opencode || (await import(new URL('../src/harness-settings.js', import.meta.url))).HARNESS_SETTINGS?.opencode);
   const ocKeys = new Set(((ocTable && ocTable.rows) || []).map((r) => r.key));
-  ok('settings schema: opencode.defaultModel/defaultPermissionMode/defaultExtraArgs are declared on the OpenCode harness table (category OpenCode; the schema derives them); zh+ja carry the new strings', !!ocTable && ocTable.prefix === 'opencode' && ocTable.category === 'OpenCode' && ['defaultModel', 'defaultPermissionMode', 'defaultExtraArgs'].every((k) => ocKeys.has(k)) && /import \{[^}]*HARNESS_SETTINGS[^}]*\} from '\.\.\/harness-settings\.js'/.test(read('src/lib/settings-schema.js')) && /"OpenCode":/.test(read('src/lib/i18n-zh.js')) && /"Build":/.test(read('src/lib/i18n-ja.js')), { prefix: ocTable && ocTable.prefix, category: ocTable && ocTable.category, keys: [...ocKeys] });
-  ok('test-architecture places the ACP files in the SHARED tier; ci.mjs runs this suite', /'src\/harnesses\/acp\.js', 'src\/harnesses\/opencode\.js', 'src\/adapters\/acp\.js', 'src\/acp-message-manager\.js'/.test(read('scripts/test-architecture.mjs')) && /'test-acp-harness'/.test(read('scripts/ci.mjs')));
+  ok('settings schema: opencode.defaultModel/defaultPermissionMode/defaultExtraArgs are declared on the OpenCode harness table (category OpenCode; the schema derives them); zh+ja carry the new strings', !!ocTable && ocTable.prefix === 'opencode' && ocTable.category === 'OpenCode' && gateOf(['defaultModel', 'defaultPermissionMode', 'defaultExtraArgs'].every((k) => ocKeys.has(k))) && gateOf(/import \{[^}]*HARNESS_SETTINGS[^}]*\} from '\.\.\/harness-settings\.js'/.test(read('src/lib/settings-schema.js'))) && gateOf(/"OpenCode":/.test(read('src/lib/i18n-zh.js'))) && verdictOf(/"Build":/.test(read('src/lib/i18n-ja.js'))), { prefix: ocTable && ocTable.prefix, category: ocTable && ocTable.category, keys: [...ocKeys] });
+  ok('test-architecture places the ACP files in the SHARED tier; ci.mjs runs this suite', gateOf(/'src\/harnesses\/acp\.js', 'src\/harnesses\/opencode\.js', 'src\/adapters\/acp\.js', 'src\/acp-message-manager\.js'/.test(read('scripts/test-architecture.mjs'))) && verdictOf(/'test-acp-harness'/.test(read('scripts/ci.mjs'))));
   // (the billing-law pin — MOVED to the fast scripts/test-acp-harness-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
@@ -732,4 +732,4 @@ console.log('— THE EXECUTABLE (lane antigravity-spawn-argv — the agy-wrapper
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

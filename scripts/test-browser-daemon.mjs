@@ -34,7 +34,7 @@ const K = require('../src/server/browser-keeper.js'), Ff = require('../src/brows
 const VP = require('../src/server/browser-viewport.js'), BS = require('../src/browser-stuck.js'), O = require('../src/browser-orphans.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const done = () => { console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed, ${skipped} skipped)` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`); process.exit(fail ? 1 : 0); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -138,13 +138,13 @@ async function hungPageLeg(Kmod, tag) {
 }
 {
   const a = await hungPageLeg(K, 'a-fixed');
-  ok(!a.threw && a.ready && a.renderers >= 1 && a.version.ok && a.during.list && a.during.pages >= 1 && a.during.answered === 0, `Ⓐ the incident's shape on the real browser: ${a.renderers} renderer(s) SIGSTOPped ⇒ /json/version answers (${a.version.ms} ms) and the page list too, ${a.during.answered} of ${a.during.pages} page(s) answer Runtime.evaluate (${a.during.reached} reached by Page.getNavigationHistory)`, a);
+  ok(!a.threw && gateOf(a.ready) && a.renderers >= 1 && gateOf(a.version.ok) && gateOf(a.during.list) && a.during.pages >= 1 && a.during.answered === 0, `Ⓐ the incident's shape on the real browser: ${a.renderers} renderer(s) SIGSTOPped ⇒ /json/version answers (${a.version.ms} ms) and the page list too, ${a.during.answered} of ${a.during.pages} page(s) answer Runtime.evaluate (${a.during.reached} reached by Page.getNavigationHistory)`, a);
   ok(!a.threw && a.judged === false, 'Ⓐ the keeper\'s own tick never judges it (its endpoint answers) — no browser_unresponsive verdict to admit a restart', a.judged);
-  ok(!a.threw && a.restarted && a.chrome1 && a.chrome1 !== a.chrome0 && a.after && a.after.list && a.after.answered >= 1 && a.lines.some((l) => /restarted by the conversation "Research" — none of its \d+ page\(s\) answered within 5 s/.test(l)),
+  ok(!a.threw && gateOf(a.restarted) && gateOf(a.chrome1) && a.chrome1 !== a.chrome0 && gateOf(a.after) && gateOf(a.after.list) && a.after.answered >= 1 && verdictOf(a.lines.some((l) => /restarted by the conversation "Research" — none of its \d+ page\(s\) answered within 5 s/.test(l))),
     `Ⓐ the agent's restart is ADMITTED on the pages' answers (${a.restartMs} ms with the 5 s ask): a new Chrome (${a.chrome0} → ${a.chrome1}) whose page answers; the journal says why`, a);
   const Kpre = keeperCopy('endpoint-only', [['        pages = BS.pageAnswerVerdict(await askPages(rec));\n', '']]);
   const ctl = Kpre ? await hungPageLeg(Kpre, 'a-pre') : null;
-  ok(ctl && !ctl.threw && ctl.renderers >= 1 && ctl.during.answered === 0 && ctl.refused && ctl.refused.code === 'browser_answering' && !ctl.restarted, `Ⓐ RED CONTROL: the pre-fix keeper (the endpoint's verdict alone) refuses the same hung page: "${ctl && ctl.refused && ctl.refused.message}" — userW's refusal; the leg above can go red`, ctl);
+  ok(gateOf(ctl) && !ctl.threw && ctl.renderers >= 1 && ctl.during.answered === 0 && gateOf(ctl.refused) && ctl.refused.code === 'browser_answering' && !ctl.restarted, `Ⓐ RED CONTROL: the pre-fix keeper (the endpoint's verdict alone) refuses the same hung page: "${ctl && ctl.refused && ctl.refused.message}" — userW's refusal; the leg above can go red`, ctl);
 }
 
 // ═══ Ⓑ A DAEMON WHOSE CHROME IS GONE ENDS ═══
@@ -178,16 +178,16 @@ async function outlivesLeg(Kmod, tag, BOUND = 3000) {
 }
 {
   const b = await outlivesLeg(K, 'b-fixed');
-  ok(!b.threw && b.launched && b.chromeGone && b.infoActive, 'Ⓑ the measured shape: its Chrome SIGKILLed, the daemon reaps it and lives on — its own `session info` still says active, with no browser', b);
+  ok(!b.threw && gateOf(b.launched) && gateOf(b.chromeGone) && verdictOf(b.infoActive), 'Ⓑ the measured shape: its Chrome SIGKILLed, the daemon reaps it and lives on — its own `session info` still says active, with no browser', b);
   ok(!b.threw && b.inside === true && b.past === false && b.leased >= 1, `Ⓑ KEPT inside the bound, ENDED past it — a lease holding it (${b.leased}) and no live record keeping it`, b);
-  ok(!b.threw && b.lines.length === 1 && /its browser ended \d+ s ago and no live record keeps it/.test(b.lines[0]) && /^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser ended \d+ s ago/.test(b.note || '') && b.cell === b.note, 'Ⓑ never a silent exit: one journal line, the row\'s words, and `status` (its browser cell) all say it', { lines: b.lines, note: b.note, cell: b.cell });
-  ok(!b.threw && b.fresh && b.fresh.list && b.fresh.daemon !== undefined, 'Ⓑ the next start brings a FRESH daemon and browser that answer', b.fresh);
+  ok(!b.threw && b.lines.length === 1 && gateOf(/its browser ended \d+ s ago and no live record keeps it/.test(b.lines[0])) && gateOf(/^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser ended \d+ s ago/.test(b.note || '')) && b.cell === b.note, 'Ⓑ never a silent exit: one journal line, the row\'s words, and `status` (its browser cell) all say it', { lines: b.lines, note: b.note, cell: b.cell });
+  ok(!b.threw && gateOf(b.fresh) && gateOf(b.fresh.list) && b.fresh.daemon !== undefined, 'Ⓑ the next start brings a FRESH daemon and browser that answer', b.fresh);
   ok(O.BROWSER_ENDED_MS === 60000, 'Ⓑ production\'s bound is 60 s (this leg runs it at 3 s, injected)');
   const pre = path.join(ROOT, 'orphans-pre-fix.js');
   fs.writeFileSync(pre, fs.readFileSync(path.join(SRC, 'browser-orphans.js'), 'utf8').replace('  if (d.stoppedIdleAt != null && d.starttime != null && !d.cdp) {\n', '  if (false) {\n'));
   const Kpre = keeperCopy('pre-other-half', [], pre);
   const ctl = Kpre ? await outlivesLeg(Kpre, 'b-pre') : null;
-  ok(ctl && !ctl.threw && ctl.chromeGone && ctl.past === true && ctl.lines.length === 0, 'Ⓑ RED CONTROL: the pre-fix verdict keeps the daemon whose Chrome is gone ("a lease holds it") past the bound — the leg above can go red', ctl && { past: ctl.past, lines: ctl.lines, note: ctl.note });
+  ok(gateOf(ctl) && !ctl.threw && gateOf(ctl.chromeGone) && ctl.past === true && ctl.lines.length === 0, 'Ⓑ RED CONTROL: the pre-fix verdict keeps the daemon whose Chrome is gone ("a lease holds it") past the bound — the leg above can go red', ctl && { past: ctl.past, lines: ctl.lines, note: ctl.note });
 }
 
 // ═══ Ⓒ A SERVER RESTART RE-OWNS OR ENDS ═══
@@ -219,15 +219,15 @@ async function bootLeg(Kmod, tag) {
 }
 {
   const c = await bootLeg(K, 'c-fixed');
-  ok(!c.threw && c.launched, 'Ⓒ three real browsers running when the server stops', c);
-  ok(!c.threw && c.healthy.state === 'ready' && c.healthy.same && c.healthy.alive, 'Ⓒ the healthy one: RE-OWNED (the same daemon, ready — its page answered)', c.healthy);
-  ok(!c.threw && c.unowned.state === 'ready' && c.unowned.same && c.unowned.alive, 'Ⓒ the one a pre-fix boot left stopped while it ran: RE-OWNED by the boot\'s census (its record ready again on that daemon)', c.unowned);
-  ok(!c.threw && c.wedged.state === 'stopped' && !c.wedged.daemonAlive && !c.wedged.chromeAlive && /its browser does not answer CDP/.test(c.wedged.lastError || '') && /^stopped — its browser daemon was ended at/.test(c.wedged.note || ''), 'Ⓒ the wedged one (its `session info` answering, its endpoint silent): ENDED at the boot WITH its Chrome — the row says why', c.wedged);
-  ok(!c.threw && c.fresh && c.fresh.state === 'ready' && c.fresh.list && c.fresh.newDaemon, 'Ⓒ …and its profile\'s next start is a fresh daemon whose browser answers', c.fresh);
+  ok(!c.threw && verdictOf(c.launched), 'Ⓒ three real browsers running when the server stops', c);
+  ok(!c.threw && c.healthy.state === 'ready' && gateOf(c.healthy.same) && verdictOf(c.healthy.alive), 'Ⓒ the healthy one: RE-OWNED (the same daemon, ready — its page answered)', c.healthy);
+  ok(!c.threw && c.unowned.state === 'ready' && gateOf(c.unowned.same) && verdictOf(c.unowned.alive), 'Ⓒ the one a pre-fix boot left stopped while it ran: RE-OWNED by the boot\'s census (its record ready again on that daemon)', c.unowned);
+  ok(!c.threw && c.wedged.state === 'stopped' && !c.wedged.daemonAlive && !c.wedged.chromeAlive && gateOf(/its browser does not answer CDP/.test(c.wedged.lastError || '')) && verdictOf(/^stopped — its browser daemon was ended at/.test(c.wedged.note || '')), 'Ⓒ the wedged one (its `session info` answering, its endpoint silent): ENDED at the boot WITH its Chrome — the row says why', c.wedged);
+  ok(!c.threw && gateOf(c.fresh) && c.fresh.state === 'ready' && gateOf(c.fresh.list) && verdictOf(c.fresh.newDaemon), 'Ⓒ …and its profile\'s next start is a fresh daemon whose browser answers', c.fresh);
   ok(!c.threw && c.lines.filter((l) => /RE-OWNED/.test(l)).length === 2 && c.lines.filter((l) => /ENDED/.test(l)).length === 1, `Ⓒ the journal: one line per daemon the boot judged (${c.bootMs} ms boot)`, c.lines);
   const Kpre = keeperCopy('pre-boot', [['        if (cliAsked(i)) {\n', '        if (false) {\n'], ["        if (seenBy === 'boot' && unkept && browserAlive && p) {\n", '        if (false) {\n']]);
   const ctl = Kpre ? await bootLeg(Kpre, 'c-pre') : null;
-  ok(ctl && !ctl.threw && ctl.wedged.state === 'ready' && ctl.wedged.daemonAlive && ctl.unowned.state === 'stopped' && ctl.unowned.alive, 'Ⓒ RED CONTROL: the pre-fix boot ADOPTS the wedged browser ready on `session info` alone and leaves the running one under its stopped record unowned — the legs above can go red', ctl && { wedged: ctl.wedged, unowned: ctl.unowned });
+  ok(gateOf(ctl) && !ctl.threw && ctl.wedged.state === 'ready' && gateOf(ctl.wedged.daemonAlive) && ctl.unowned.state === 'stopped' && verdictOf(ctl.unowned.alive), 'Ⓒ RED CONTROL: the pre-fix boot ADOPTS the wedged browser ready on `session info` alone and leaves the running one under its stopped record unowned — the legs above can go red', ctl && { wedged: ctl.wedged, unowned: ctl.unowned });
 }
 
 // ═══ Ⓓ lane browser-shared-profile-freeze (fleet fb-8727ee62fb): A SERVER RESTART ON THE SCOPE ROAD ═══
@@ -261,13 +261,13 @@ console.log('— Ⓓ a server restart on the scope road: the daemon outlives the
     r.t2 = await ab(['get', 'title'], a2.env);
     r.after = { daemon: (k2._reg().browsers[p.id] || {}).pid, chrome: ((k2._reg().browsers[p.id] || {}).browser || {}).pid };
   } catch (e) { r.threw = String(e && e.stack); }
-  ok(!r.threw && r.open && r.open.ok && /\/m\//.test(r.u1 || '') && /BD \/scoped/.test((r.t1 || {}).out || ''), 'Ⓓ an agent lease of a shared profile browses through a url the server serves (the scope road)', r);
-  ok(!r.threw && r.stale && !/BD \/scoped/.test(r.stale.out), 'Ⓓ RED CONTROL: after the server stopped, the old url reaches nothing (a driver kept on it would fail)', r.stale);
-  ok(!r.threw && r.reowned && r.reowned.state === 'ready' && r.reowned.same && r.reowned.alive && r.reowned.chromeAlive, 'Ⓓ the next server\'s boot RE-OWNS the same daemon and its Chrome (never an orphan)', r.reowned);
-  ok(!r.threw && r.u2 && /\/m\//.test(r.u2) && r.u2 !== r.u1 && r.t2 && r.t2.ok && /BD \/scoped/.test(r.t2.out) && r.after && r.after.daemon === r.daemon && r.after.chrome === r.chrome, 'Ⓓ the agent\'s next command (its new url from the keeper) answers on the SAME daemon, browser and tab — the page it had before the Update', { u1: r.u1 && r.u1.replace(/\/m\/[^/]+/, '/m/…'), u2: r.u2 && r.u2.replace(/\/m\/[^/]+/, '/m/…'), t2: r.t2, after: r.after, daemon: r.daemon, chrome: r.chrome });
+  ok(!r.threw && gateOf(r.open) && gateOf(r.open.ok) && gateOf(/\/m\//.test(r.u1 || '')) && verdictOf(/BD \/scoped/.test((r.t1 || {}).out || '')), 'Ⓓ an agent lease of a shared profile browses through a url the server serves (the scope road)', r);
+  ok(!r.threw && gateOf(r.stale) && !/BD \/scoped/.test(r.stale.out), 'Ⓓ RED CONTROL: after the server stopped, the old url reaches nothing (a driver kept on it would fail)', r.stale);
+  ok(!r.threw && gateOf(r.reowned) && r.reowned.state === 'ready' && gateOf(r.reowned.same) && gateOf(r.reowned.alive) && verdictOf(r.reowned.chromeAlive), 'Ⓓ the next server\'s boot RE-OWNS the same daemon and its Chrome (never an orphan)', r.reowned);
+  ok(!r.threw && gateOf(r.u2) && gateOf(/\/m\//.test(r.u2)) && r.u2 !== r.u1 && gateOf(r.t2) && gateOf(r.t2.ok) && gateOf(/BD \/scoped/.test(r.t2.out)) && gateOf(r.after) && r.after.daemon === r.daemon && r.after.chrome === r.chrome, 'Ⓓ the agent\'s next command (its new url from the keeper) answers on the SAME daemon, browser and tab — the page it had before the Update', { u1: r.u1 && r.u1.replace(/\/m\/[^/]+/, '/m/…'), u2: r.u2 && r.u2.replace(/\/m\/[^/]+/, '/m/…'), t2: r.t2, after: r.after, daemon: r.daemon, chrome: r.chrome });
   if (k2) { for (const id of Object.keys(k2._reg().browsers || {})) await k2.stop(id).catch(() => { }); k2.shutdown(); }
   try { m2 && m2.shutdown(); } catch { /* */ }
 }
 
 pages.close();
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

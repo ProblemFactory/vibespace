@@ -41,7 +41,7 @@ const S = require(path.join(repo, 'src/server/integration-store.js'));
 const { PluginManager } = require(path.join(repo, 'src/plugins.js'));
 const DP = require(path.join(repo, 'src/plugins/llm.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -131,34 +131,34 @@ console.log('C one call per dialect — the body, the accounting, the journal');
 {
   const r = await eng.judge('rule', recordParts(1), { questions: RULE_Q, memo: { id: 'c1', rule: 'r1' } });
   const q = got[got.length - 1];
-  ok(r.ok && got.length === 1 && q.path === '/v1/decisions' && q.auth === `Bearer ${SECRET}` && q.body.model === 'gpt-6-luna' && typeof q.body.input === 'string' && Array.isArray(q.body.questions), 'openai: ONE request to /v1/decisions, the key only in the Authorization header, input + questions[]', { path: q.path, model: q.body && q.body.model });
+  ok(gateOf(r.ok) && got.length === 1 && q.path === '/v1/decisions' && q.auth === `Bearer ${SECRET}` && q.body.model === 'gpt-6-luna' && typeof q.body.input === 'string' && verdictOf(Array.isArray(q.body.questions)), 'openai: ONE request to /v1/decisions, the key only in the Authorization header, input + questions[]', { path: q.path, model: q.body && q.body.model });
   ok(r.answers[0].probability === 0.8 && r.answers[0].dialect === 'openai', 'the answer in the ONE shape', r.answers);
-  ok(!q.raw.includes(SECRET) && !/<system-reminder/.test(q.raw) && !q.raw.includes('bob@') && q.raw.includes('[system-reminder]'), 'the body carries no key, no live frame, no mail address (the belt + the address rule ran)');
+  ok(!q.raw.includes(SECRET) && !/<system-reminder/.test(q.raw) && !q.raw.includes('bob@') && verdictOf(q.raw.includes('[system-reminder]')), 'the body carries no key, no live frame, no mail address (the belt + the address rule ran)');
   const u1 = eng.status().today.byUse.rule;
   const j1 = journal().find((x) => x.outcome === 'ok' && x.dialect === 'openai');   // lane decision-verify-fixes: no usage.cost ⇒ settled = max(the reservation, input × price)
-  ok(u1 && u1.calls === 1 && u1.inputTokens === Math.ceil(q.raw.length / 4) && j1 && j1.reserved > 0 && Math.abs(u1.usd - Math.max(j1.reserved, u1.inputTokens * 0.1 / 1e6)) < 1e-8 && j1.usd === u1.usd, `per-use accounting: rule 1 call · ${u1 && u1.inputTokens} tokens · $${u1 && u1.usd} (= max(reserved ${j1 && j1.reserved}, input × 0.10/M))`, { u1, j1 });
+  ok(gateOf(u1) && u1.calls === 1 && u1.inputTokens === Math.ceil(q.raw.length / 4) && gateOf(j1) && j1.reserved > 0 && Math.abs(u1.usd - Math.max(j1.reserved, u1.inputTokens * 0.1 / 1e6)) < 1e-8 && j1.usd === u1.usd, `per-use accounting: rule 1 call · ${u1 && u1.inputTokens} tokens · $${u1 && u1.usd} (= max(reserved ${j1 && j1.reserved}, input × 0.10/M))`, { u1, j1 });
   store.setIntegration('llm', { provider: 'openrouter' });
   let over = null; try { await eng.judge('attention', { rubric: M.rubricText(), records: [{ body: 'a' }, { body: 'b' }] }, { questions: M.rubricQuestions() }); } catch (e) { over = e.message; }
-  ok(/at most 1 record/.test(String(over)) && got.length === 1, 'r2: a two-record attention ask is refused by name before any request (one record per call)', over);
+  ok(gateOf(/at most 1 record/.test(String(over))) && got.length === 1, 'r2: a two-record attention ask is refused by name before any request (one record per call)', over);
   const recs = [{ title: 'Conv 0', sender: 'Ann', body: 'Please approve invoice 0.' }];
   const r2 = await eng.judge('attention', { rubric: M.rubricText({ hasBlock: true }), userBlock: 'invoices', records: recs }, { questions: M.rubricQuestions({ hasBlock: true }), memo: { id: 'att-1', lastAt: 1 } });   // a block ⇒ `matters` too (rubric v2)
   const q2 = got[got.length - 1];
-  ok(r2.ok && got.length === 2 && q2.path === '/api/alpha/decisions' && q2.body.model === 'openai/gpt-6-luna-decisions' && typeof q2.body.state === 'string' && Object.keys(q2.body.questions).length === 8 && q2.body.questions.needs_now.type === 'noul', 'openrouter: ONE request for ONE record (the 8 rubric questions, noul) on the PINNED model, state = the text', Object.keys((q2.body && q2.body.questions) || {}).slice(0, 4));
+  ok(gateOf(r2.ok) && got.length === 2 && q2.path === '/api/alpha/decisions' && q2.body.model === 'openai/gpt-6-luna-decisions' && typeof q2.body.state === 'string' && Object.keys(q2.body.questions).length === 8 && q2.body.questions.needs_now.type === 'noul', 'openrouter: ONE request for ONE record (the 8 rubric questions, noul) on the PINNED model, state = the text', Object.keys((q2.body && q2.body.questions) || {}).slice(0, 4));
   ok(r2.answers.length === 8 && r2.answers[0].name === 'needs_now' && r2.answers[0].probability === 0.3, 'the answers in the one shape, per question');
   const st = eng.status().today;
   ok(st.byUse.attention.calls === 1 && st.byUse.attention.usd === 0.000123 && st.byUse.attention.outputTokens === 2 && st.byUse.rule.calls === 1 && st.total.calls === 2, 'OpenRouter is counted at ITS cost (0.000123), per use apart from rule; output tokens kept', st);
   const j = journal().filter((x) => x.outcome === 'ok');
-  ok(j.length === 2 && j.every((x) => x.keyFp && x.keyFp.length === 6 && x.memo && x.inputTokens > 0) && !JSON.stringify(journal()).includes(SECRET) && !JSON.stringify(journal()).includes('invoice'), 'the journal: one line per call (use, memo, tokens, USD, dialect, model) — no key, no text', j);
+  ok(j.length === 2 && gateOf(j.every((x) => x.keyFp && x.keyFp.length === 6 && x.memo && x.inputTokens > 0)) && !JSON.stringify(journal()).includes(SECRET) && !JSON.stringify(journal()).includes('invoice'), 'the journal: one line per call (use, memo, tokens, USD, dialect, model) — no key, no text', j);
 }
 
 console.log('D a memo hit makes NO call');
 {
   const n = got.length;
   const r = await eng.judge('rule', recordParts(1), { questions: RULE_Q, memo: { id: 'c1', rule: 'r1' } });
-  ok(r.ok && r.memo === true && got.length === n && r.answers[0].probability === 0.8, 'the same record + rule ⇒ the memo answers, 0 requests');
+  ok(gateOf(r.ok) && r.memo === true && got.length === n && r.answers[0].probability === 0.8, 'the same record + rule ⇒ the memo answers, 0 requests');
   eng = mkEngine(); pm = mkPlugins(eng);
   const r2 = await eng.judge('rule', recordParts(1), { questions: RULE_Q, memo: { id: 'c1', rule: 'r1' } });
-  ok(r2.ok && r2.memo === true && got.length === n, 'after a restart (a new engine over the same data/) the memo still answers, 0 requests');
+  ok(gateOf(r2.ok) && r2.memo === true && got.length === n, 'after a restart (a new engine over the same data/) the memo still answers, 0 requests');
 }
 
 console.log('E a wall ⇒ backoff, never a retry into it');
@@ -175,7 +175,7 @@ console.log('E a wall ⇒ backoff, never a retry into it');
   ok(!r3.ok && got.length === n + 2 && r3.retryAt === T + 300000, 'after it: one request; a second wall ⇒ 5 min (the ladder 1 → 5 → 15 min)', r3);
   T += 300001;
   const r4 = await eng.judge('rule', recordParts(3), { questions: RULE_Q, memo: { id: 'e2', rule: 'r1' } });
-  ok(r4.ok && got.length === n + 3 && journal().filter((x) => x.outcome === 'wall').length === 2, 'the 5 min over: the call goes through; two walls journalled');
+  ok(gateOf(r4.ok) && got.length === n + 3 && journal().filter((x) => x.outcome === 'wall').length === 2, 'the 5 min over: the call goes through; two walls journalled');
 }
 
 console.log('F the day\'s budget stops, with ONE notice; the next local day resumes');
@@ -189,7 +189,7 @@ console.log('F the day\'s budget stops, with ONE notice; the next local day resu
   pm.setConfig('llm', { dailyBudgetCents: 100 });
   T = Date.UTC(2026, 9, 13, 0, 0, 1);
   const r3 = await eng.judge('rule', recordParts(6), { questions: RULE_Q, memo: { id: 'f3', rule: 'r1' } });
-  ok(r3.ok && eng.status().today.day === '2026-10-13' && eng.status().today.total.calls === 1, 'the next local day: a fresh counter, the call goes through');
+  ok(gateOf(r3.ok) && eng.status().today.day === '2026-10-13' && eng.status().today.total.calls === 1, 'the next local day: a fresh counter, the call goes through');
 }
 
 console.log('G the counter survives a restart');
@@ -219,7 +219,7 @@ console.log('H the ONE scrub: a record\'s secret-shaped text never reaches the v
   const bodies = got.slice(n0).map((g) => g.raw);
   for (const g of got.slice(n0)) console.log(`    the fake vendor received (${g.path}): ${JSON.stringify(g.body && (g.body.input || g.body.state))}`);
   const leaked = bodies.flatMap(leaks);
-  ok(rr.ok && ra.ok && bodies.length === 2 && leaked.length === 0 && bodies.every((b) => b.includes('«redacted»')) && bodies[0].includes('…@example.com'), 'the six shapes (sk-ant, xoxb, a PEM body, a URL token query, a GitHub token, + the address cut to its domain) reach the fake vendor through NEITHER use ① attention nor ② rule — redacted, the names kept', { leaked, rr: rr.ok, ra: ra.ok });
+  ok(gateOf(rr.ok) && gateOf(ra.ok) && bodies.length === 2 && leaked.length === 0 && gateOf(bodies.every((b) => b.includes('«redacted»'))) && verdictOf(bodies[0].includes('…@example.com')), 'the six shapes (sk-ant, xoxb, a PEM body, a URL token query, a GitHub token, + the address cut to its domain) reach the fake vendor through NEITHER use ① attention nor ② rule — redacted, the names kept', { leaked, rr: rr.ok, ra: ra.ok });
 }
 
 console.log('I a 402 (the plan) / a 400 (the request shape) stops the ROW like a 401 — not one call a record (lane decision-vendor-hygiene, B-2979)');
@@ -246,39 +246,39 @@ let eng3 = null;
   ok(before[402].calls === 5 && before[400].calls === 5 && before[402].why === 'vendor-error' && eng3.status().stop === null, 'RED REFERENCE (the old classification): a 402 / a 400 = one call a record — 5 records, 5 calls each, every one a vendor-error', before);
   refuseWith = 402;
   const a = await pass5();
-  ok(a.calls === 1 && a.rs[0].why === 'plan' && a.rs[0].status === 402 && a.rs.slice(1).every((r) => !r.ok && r.why === 'plan' && r.status === undefined), `402: a pass of 5 records = ${a.calls} call (before: ${before[402].calls}) — the first answer stops the row (why plan), the next four are quiet refusals`, a.rs);
+  ok(a.calls === 1 && a.rs[0].why === 'plan' && a.rs[0].status === 402 && verdictOf(a.rs.slice(1).every((r) => !r.ok && r.why === 'plan' && r.status === undefined)), `402: a pass of 5 records = ${a.calls} call (before: ${before[402].calls}) — the first answer stops the row (why plan), the next four are quiet refusals`, a.rs);
   const n1 = said('plan');
-  ok(n1.length === 1 && /the plan does not allow this model \(HTTP 402\)\. Change the judging model in the plugin’s settings, or the key on its Integrations card\./.test(n1[0].text) && n1[0].o && n1[0].o.i18n && n1[0].o.i18n.key === n1[0].text, 'ONE server notice, in the person\'s words (the client words it from its i18n key)', notes3);
+  ok(n1.length === 1 && gateOf(/the plan does not allow this model \(HTTP 402\)\. Change the judging model in the plugin’s settings, or the key on its Integrations card\./.test(n1[0].text)) && gateOf(n1[0].o) && gateOf(n1[0].o.i18n) && n1[0].o.i18n.key === n1[0].text, 'ONE server notice, in the person\'s words (the client words it from its i18n key)', notes3);
   const st = eng3.status(), row = pm3.list()[0];
-  ok(st.stop && st.stop.why === 'plan' && st.stop.status === 402 && st.reconnect === null && row.why === 'plan' && row.decision.stop.why === 'plan', 'the status says it: stop {why plan, status 402}; the plugin row\'s why = plan (the chip reads it); reconnect stays null', { stop: st.stop, why: row.why });
+  ok(gateOf(st.stop) && st.stop.why === 'plan' && st.stop.status === 402 && st.reconnect === null && row.why === 'plan' && row.decision.stop.why === 'plan', 'the status says it: stop {why plan, status 402}; the plugin row\'s why = plan (the chip reads it); reconnect stays null', { stop: st.stop, why: row.why });
   ok(j3().filter((x) => x.outcome === 'plan').length === 1 && j3().filter((x) => x.outcome === 'refused' && x.why === 'plan').length === 1 && !JSON.stringify(j3()).includes(SECRET), 'the journal: ONE row with outcome plan (the call) + ONE quiet refusal (per 5 min, not per record) — no key');
   refuseWith = 0;   // the vendor would answer now — the same key + model stays stopped, and says nothing again
   const still = await pass5();
-  ok(still.calls === 0 && still.rs.every((r) => r.why === 'plan') && said('plan').length === 1, 'the same key + model: 0 calls for 5 more records, no second notice', still.rs.map((r) => r.why));
+  ok(still.calls === 0 && gateOf(still.rs.every((r) => r.why === 'plan')) && said('plan').length === 1, 'the same key + model: 0 calls for 5 more records, no second notice', still.rs.map((r) => r.why));
   const tr = await eng3.testRunner();   // the owner's Test always calls (it is how a raised plan is seen): its 200 lifts the stop
   const up = await pass5();
-  ok(tr.ok && eng3.status().stop === null && pm3.list()[0].why === null && up.calls === 5 && up.rs.every((r) => r.ok), 'the owner\'s Test calls through the stop; its 200 lifts it — the next 5 records are 5 calls again', { tr, calls: up.calls });
+  ok(gateOf(tr.ok) && eng3.status().stop === null && pm3.list()[0].why === null && up.calls === 5 && verdictOf(up.rs.every((r) => r.ok)), 'the owner\'s Test calls through the stop; its 200 lifts it — the next 5 records are 5 calls again', { tr, calls: up.calls });
   refuseWith = 400;
   const sh = await pass5();
-  ok(sh.calls === 1 && sh.rs.every((r) => r.why === 'shape') && sh.rs[0].status === 400 && said('shape').length === 1 && eng3.status().stop.why === 'shape' && pm3.list()[0].why === 'shape' && j3().filter((x) => x.outcome === 'shape').length === 1,
+  ok(sh.calls === 1 && gateOf(sh.rs.every((r) => r.why === 'shape')) && sh.rs[0].status === 400 && said('shape').length === 1 && eng3.status().stop.why === 'shape' && pm3.list()[0].why === 'shape' && j3().filter((x) => x.outcome === 'shape').length === 1,
     `400: a pass of 5 records = ${sh.calls} call (before: ${before[400].calls}) — why shape, ONE notice, the row's why = shape, ONE journal row`, sh.rs);
   refuseWith = 0;
   pm3.setConfig('llm', { judgeModel: 'gpt-6-luna-mini' });   // the clearing triggers: a new MODEL (the LLM plugin's judgeModel row — lane llm-plugin-rename) …
   const m1 = await pass5();
-  ok(m1.calls === 5 && m1.rs.every((r) => r.ok) && eng3.status().stop === null && got[got.length - 1].body.model === 'gpt-6-luna-mini', 'a NEW MODEL lifts the stop: the next 5 records are 5 calls (on the new model)', m1.rs.map((r) => r.why));
+  ok(m1.calls === 5 && gateOf(m1.rs.every((r) => r.ok)) && eng3.status().stop === null && got[got.length - 1].body.model === 'gpt-6-luna-mini', 'a NEW MODEL lifts the stop: the next 5 records are 5 calls (on the new model)', m1.rs.map((r) => r.why));
   refuseWith = 402;
   const k0 = await pass5();
   refuseWith = 0;
   store3.setIntegration('llm', { apiKey: SECRET + '-2' });   // … and a new KEY
   const k1 = await pass5();
-  ok(k0.calls === 1 && k1.calls === 5 && k1.rs.every((r) => r.ok) && said('plan').length === 2, 'a NEW KEY lifts it too — and a new stop says its own ONE notice (2 plan notices for 2 stops)', { k0: k0.calls, k1: k1.calls, plan: said('plan').length });
+  ok(k0.calls === 1 && k1.calls === 5 && gateOf(k1.rs.every((r) => r.ok)) && said('plan').length === 2, 'a NEW KEY lifts it too — and a new stop says its own ONE notice (2 plan notices for 2 stops)', { k0: k0.calls, k1: k1.calls, plan: said('plan').length });
   refuseWith = 401;
   const r1 = await pass5();
-  ok(r1.calls === 1 && r1.rs.every((r) => r.why === 'reconnect') && eng3.status().reconnect && eng3.status().reconnect.status === 401 && eng3.status().stop.why === 'reconnect' && notes3.length === 3, 'a 401 is the same row stop (why reconnect, status().reconnect kept for the card) — no notice of its own (the card says Reconnect)', { calls: r1.calls, notes: notes3.length });
+  ok(r1.calls === 1 && gateOf(r1.rs.every((r) => r.why === 'reconnect')) && gateOf(eng3.status().reconnect) && eng3.status().reconnect.status === 401 && eng3.status().stop.why === 'reconnect' && notes3.length === 3, 'a 401 is the same row stop (why reconnect, status().reconnect kept for the card) — no notice of its own (the card says Reconnect)', { calls: r1.calls, notes: notes3.length });
   refuseWith = 422;
   store3.setIntegration('llm', { apiKey: SECRET + '-3' });
   const e1 = await pass5();
-  ok(e1.calls === 5 && e1.rs.every((r) => r.why === 'vendor-error') && eng3.status().stop === null, 'NEGATIVE: a 422 stays a per-call error (5 records = 5 calls) — only 400 / 401 / 402 / 403 stop the row', e1.rs.map((r) => r.why));
+  ok(e1.calls === 5 && gateOf(e1.rs.every((r) => r.why === 'vendor-error')) && eng3.status().stop === null, 'NEGATIVE: a 422 stays a per-call error (5 records = 5 calls) — only 400 / 401 / 402 / 403 stop the row', e1.rs.map((r) => r.why));
   refuseWith = 0;
   console.log(`    calls for a pass of 5 records — 402: before ${before[402].calls} → after ${a.calls}; 400: before ${before[400].calls} → after ${sh.calls}`);
 }
@@ -295,12 +295,12 @@ console.log('J the owner\'s words in the QUESTIONS reach the vendor scrubbed (la
   const r = await ask('scrubq-1');
   const sent = got.slice(n).map((g) => g.raw).join('\n');
   console.log(`    the fake vendor received: ${JSON.stringify(((got[n] || {}).body || {}).questions || null).slice(0, 300)}`);
-  ok(r.ok && got.length === n + 1 && !sent.includes(TOK) && !sent.includes(TOK.slice(0, 20)) && (sent.match(/«redacted»/g) || []).length >= 2, 'a rule\'s condition + a routing option\'s description reach the fake vendor redacted (ONE call)', sent.slice(0, 300));
+  ok(gateOf(r.ok) && got.length === n + 1 && !sent.includes(TOK) && !sent.includes(TOK.slice(0, 20)) && (sent.match(/«redacted»/g) || []).length >= 2, 'a rule\'s condition + a routing option\'s description reach the fake vendor redacted (ONE call)', sent.slice(0, 300));
   const realSQ = M.scrubQuestions;
   M.scrubQuestions = (q) => q;   // RED control: scrubQuestions stubbed to identity on the shared model
   const n2 = got.length;
   try { await ask('scrubq-2'); } finally { M.scrubQuestions = realSQ; }
-  ok(got.length === n2 + 1 && got[n2].raw.includes(TOK), 'RED CONTROL: with scrubQuestions stubbed to identity the same leg sends the token (the leg is RED without the scrub)');
+  ok(got.length === n2 + 1 && verdictOf(got[n2].raw.includes(TOK)), 'RED CONTROL: with scrubQuestions stubbed to identity the same leg sends the token (the leg is RED without the scrub)');
 }
 
 console.log('K the text-model client (lane rule-learning) — the request literal, the money, no-zdr, the use cap');
@@ -324,21 +324,21 @@ console.log('K the text-model client (lane rule-learning) — the request litera
   const OR_KEY = ['sk-or-v1-', 'e'.repeat(48)].join('');
   kStore.setIntegration('llm', { provider: 'openrouter', apiKey: OR_KEY });
   const av = eK.textModel.available();
-  ok(av.exists && av.tier === 'flash' && av.model === 'google/gemini-3.8-flash' && av.label === 'Gemini 3.8 Flash', 'an OpenRouter row with a key ⇒ it exists, Flash by default', av);
+  ok(gateOf(av.exists) && av.tier === 'flash' && av.model === 'google/gemini-3.8-flash' && av.label === 'Gemini 3.8 Flash', 'an OpenRouter row with a key ⇒ it exists, Flash by default', av);
   n = chatReqs().length;
   const r = await press();
   const q = chatReqs()[n];
-  ok(r.ok && chatReqs().length === n + 1 && q && q.auth === `Bearer ${OR_KEY}` && !q.raw.includes(OR_KEY), 'ONE request to /api/v1/chat/completions; the key only in the Authorization header', { ok: r.ok, n: chatReqs().length - n });
-  ok(q && JSON.stringify(q.body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' }) && q.body.model === 'google/gemini-3.8-flash' && q.body.temperature === 0 && q.body.response_format.type === 'json_schema' && q.body.response_format.json_schema.strict === true && JSON.stringify(q.body.response_format.json_schema.schema) === JSON.stringify(RL.LEARN_SCHEMA) && q.body.messages[0].content === RL.TASK, 'THE REQUEST LITERAL: provider {zdr: true, data_collection: deny}, the strict json_schema, temperature 0, the tier id, the task first', q && { provider: q.body.provider, model: q.body.model, t: q.body.temperature });
-  ok(r.ok && JSON.parse(r.answer).lines[0].text === 'Invoices matter' && r.usd === 0.0041 && r.model === 'google/gemini-3.8-flash', 'the answer is the first choice\'s content; it cost the vendor\'s usage.cost', r);
+  ok(gateOf(r.ok) && chatReqs().length === n + 1 && gateOf(q) && q.auth === `Bearer ${OR_KEY}` && !q.raw.includes(OR_KEY), 'ONE request to /api/v1/chat/completions; the key only in the Authorization header', { ok: r.ok, n: chatReqs().length - n });
+  ok(gateOf(q) && JSON.stringify(q.body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' }) && q.body.model === 'google/gemini-3.8-flash' && q.body.temperature === 0 && q.body.response_format.type === 'json_schema' && q.body.response_format.json_schema.strict === true && JSON.stringify(q.body.response_format.json_schema.schema) === JSON.stringify(RL.LEARN_SCHEMA) && q.body.messages[0].content === RL.TASK, 'THE REQUEST LITERAL: provider {zdr: true, data_collection: deny}, the strict json_schema, temperature 0, the tier id, the task first', q && { provider: q.body.provider, model: q.body.model, t: q.body.temperature });
+  ok(gateOf(r.ok) && JSON.parse(r.answer).lines[0].text === 'Invoices matter' && r.usd === 0.0041 && r.model === 'google/gemini-3.8-flash', 'the answer is the first choice\'s content; it cost the vendor\'s usage.cost', r);
   const st = eK.status().today;
   const jl = kJournal().filter((j) => j.use === 'learn' && j.outcome !== 'reserved');   // B-0248's next part: the RESULT lines (each call's reservation is its own line before it)
-  ok(st.byUse.learn && st.byUse.learn.calls === 1 && st.byUse.learn.usd === 0.0041 && st.byUse.learn.outputTokens === 40 && st.total.usd === 0.0041 && st.reserved === 0, 'the day\'s counter: use learn, 1 call at $0.0041 (the vendor\'s cost), the reservation released', st.byUse.learn);
+  ok(gateOf(st.byUse.learn) && st.byUse.learn.calls === 1 && st.byUse.learn.usd === 0.0041 && st.byUse.learn.outputTokens === 40 && st.total.usd === 0.0041 && st.reserved === 0, 'the day\'s counter: use learn, 1 call at $0.0041 (the vendor\'s cost), the reservation released', st.byUse.learn);
   ok(jl.length === 1 && jl[0].outcome === 'ok' && jl[0].usd === 0.0041 && jl[0].zdr === true && jl[0].model === 'google/gemini-3.8-flash' && typeof jl[0].keyFp === 'string' && jl[0].keyFp.length === 6 && !JSON.stringify(jl).includes(OR_KEY) && !JSON.stringify(jl).includes('Invoice'), 'the journal line: use learn · ok · usd 0.0041 (usage.cost) · zdr true · the model — no key, no text', jl);
   kCfg.learnModel = 'sonnet';
   n = chatReqs().length;
   await press();
-  ok(chatReqs()[n] && chatReqs()[n].body.model === 'anthropic/claude-sonnet-5.5' && JSON.stringify(chatReqs()[n].body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' }), 'the quality tier (learnModel = sonnet) rides the same routing: anthropic/claude-sonnet-5.5 through OpenRouter');
+  ok(gateOf(chatReqs()[n]) && chatReqs()[n].body.model === 'anthropic/claude-sonnet-5.5' && JSON.stringify(chatReqs()[n].body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' }), 'the quality tier (learnModel = sonnet) rides the same routing: anthropic/claude-sonnet-5.5 through OpenRouter');
   kCfg.learnModel = 'flash';
   for (const [status, message, want] of [[404, 'No endpoints found that support the requested routing', 'no-zdr'], [400, 'No endpoints found matching your data policy (Zero Data Retention)', 'no-zdr'], [400, 'response_format is not supported', 'shape'], [402, 'Insufficient credits', 'plan'], [401, 'bad key', 'reconnect'], [421, 'Misdirected Request', 'shape'], [503, 'busy', 'vendor-busy']]) {
     chat.status = status; chat.message = message;
@@ -348,7 +348,7 @@ console.log('K the text-model client (lane rule-learning) — the request litera
     ok(!x.ok && x.why === want && chatReqs().length === n + 1 && last.outcome === want && !last.usd, `HTTP ${status}${status === 400 ? ` («${message.slice(0, 28)}…»)` : ''} ⇒ the named refusal ${want}, exactly ONE request (never a retry — never one without zdr), costs 0`, { x, reqs: chatReqs().length - n, last });
   }
   chat.status = 200; chat.message = '';
-  ok(chatReqs().every((g) => JSON.stringify(g.body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' })), `every one of the ${chatReqs().length} chat requests carried the zero-data-retention routing`);
+  ok(verdictOf(chatReqs().every((g) => JSON.stringify(g.body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' }))), `every one of the ${chatReqs().length} chat requests carried the zero-data-retention routing`);
   // lane judge-one-shot-body: THE JUDGE on a 421 (Misdirected Request) — Node's fetch re-sends a body that has a source
   // over a new connection, empty but with the key; the judge sends the one-shot body too: ONE request, the whole body
   refuseWith = 421;
@@ -358,7 +358,7 @@ console.log('K the text-model client (lane rule-learning) — the request litera
   await sleep(60);   // a re-send would land after the answer
   refuseWith = 0;
   const dq = decReqs().slice(n);
-  ok(!jd.ok && jd.why === 'vendor-error' && jd.status === 421 && dq.length === 1 && dq[0].body && dq[0].body.questions.pay && Buffer.byteLength(dq[0].raw) === Number(dq[0].cl) && dq[0].auth === `Bearer ${OR_KEY}` && !dq[0].raw.includes(OR_KEY),
+  ok(!jd.ok && jd.why === 'vendor-error' && jd.status === 421 && dq.length === 1 && gateOf(dq[0].body) && gateOf(dq[0].body.questions.pay) && Buffer.byteLength(dq[0].raw) === Number(dq[0].cl) && dq[0].auth === `Bearer ${OR_KEY}` && !dq[0].raw.includes(OR_KEY),
     'THE JUDGE on a 421 ⇒ ONE request to /api/alpha/decisions carrying the whole body (its bytes = its content-length), the key in the header — never a second, empty one with the key (vendor-error, costs 0)', { jd, reqs: dq.map((g) => ({ len: Buffer.byteLength(g.raw), cl: g.cl, key: !!g.auth })) });
   // the use's OWN cap (10 ¢ a day) — inside the daily budget (100 ¢): two $0.05 calls, then use-budget with the day half spent
   T += 86400e3;
@@ -366,7 +366,7 @@ console.log('K the text-model client (lane rule-learning) — the request litera
   n = chatReqs().length;
   const c1 = await press(), c2 = await press(), c3 = await press();
   const day = eK.status().today;
-  ok(c1.ok && c2.ok && !c3.ok && c3.why === 'use-budget' && chatReqs().length === n + 2 && day.byUse.learn.usd === 0.1 && day.total.usd < 1, 'the use learn stops at ITS cap: two $0.05 drafts, the third refused use-budget with 0 requests — the day\'s $1 budget still has room', { c3, learn: day.byUse.learn, total: day.total });
+  ok(gateOf(c1.ok) && gateOf(c2.ok) && !c3.ok && c3.why === 'use-budget' && chatReqs().length === n + 2 && day.byUse.learn.usd === 0.1 && day.total.usd < 1, 'the use learn stops at ITS cap: two $0.05 drafts, the third refused use-budget with 0 requests — the day\'s $1 budget still has room', { c3, learn: day.byUse.learn, total: day.total });
   await require(path.join(repo, 'src/store-writer.js')).storeWriter().durable(eK.files.journal);   // B-0248's next part (r2581 (1)): the refusal's line rides the writer — the leg waits for its landing, the refusal never does
   ok(kJournal().filter((j) => j.why === 'use-budget').length === 1, 'the refusal is journalled (use-budget)');
   // 3 presses in flight with room for ONE (the hold sits in the verdict's synchronous step)
@@ -397,24 +397,24 @@ console.log('L THE JUDGED ROAD\'S FACTS + THE OWNER IS TOLD ONCE A DAY (lane jud
   eL.attachInbox(todos, { tickMs: 0 });
   const n0 = got.length;
   const road = (use) => M.judgedRoadState(eL.roadFacts(use));
-  ok(road('rule').live && road('reply-infer').live && road('routing').why === 'routing-off' && eL.roadFacts('rule').estUsd > 0 && eL.roadFacts('rule').budgetUsd === 1,
+  ok(gateOf(road('rule').live) && gateOf(road('reply-infer').live) && road('routing').why === 'routing-off' && eL.roadFacts('rule').estUsd > 0 && eL.roadFacts('rule').budgetUsd === 1,
     'roadFacts → the verdict: rules on ⇒ a rule and a plain-reply judgment are live; routing off ⇒ a route rule is routing-off; one judgment\'s price > 0, the ceiling 1 USD', eL.roadFacts('rule'));
   pL.setConfig('llm', { dailyBudgetCents: 0 });
   ok(road('rule').why === 'budget-spent' && M.budgetVerdict({ pluginOn: true, featureOn: true, keyPresent: true, spentUsd: 0, estUsd: eL.roadFacts('rule').estUsd, ceilingCents: 0 }).why === 'daily-budget', 'a 0 budget ⇒ the road says budget-spent — the same verdict the paid call\'s gate answers daily-budget with');
   const id1 = eL.notePaused(['Ledger']);
   const it1 = todos.get(id1);
   const row = it1 && AM.rowOf(it1, T);
-  ok(it1 && it1.status === 'open' && it1.origin === 'plugin' && it1.plugin === 'llm' && it1.urgency === 'low' && row && row.band === 5 && it1.open && it1.open.kind === 'plugin-settings' && it1.open.plugin === 'llm' && /2026-10-1\d/.test(it1.text) && /Paused today: Ledger\./.test(it1.detail) && it1.i18n && it1.i18n.text.params.day,
+  ok(gateOf(it1) && it1.status === 'open' && it1.origin === 'plugin' && it1.plugin === 'llm' && it1.urgency === 'low' && gateOf(row) && row.band === 5 && gateOf(it1.open) && it1.open.kind === 'plugin-settings' && it1.open.plugin === 'llm' && gateOf(/2026-10-1\d/.test(it1.text)) && gateOf(/Paused today: Ledger\./.test(it1.detail)) && gateOf(it1.i18n) && verdictOf(it1.i18n.text.params.day),
     'ONE For-you item: the LLM plugin\'s row filed LOW (band 5 — no badge, no toast), its door the plugin\'s settings, the day in its words, the agent named', it1 && { text: it1.text, detail: it1.detail, band: row && row.band });
   const id2 = eL.notePaused(['Ledger']), id3 = eL.notePaused(['Tech desk', 'Ledger']);
   const open1 = todos.openItems().filter((i) => i.plugin === 'llm');
-  ok(id2 === id1 && id3 === id1 && open1.length === 1 && /Paused today: Ledger, Tech desk\./.test(todos.get(id1).detail), 'the same day: the same names file nothing new; a new name RE-WORDS the one item (still one)', open1.map((i) => i.detail));
+  ok(id2 === id1 && id3 === id1 && open1.length === 1 && verdictOf(/Paused today: Ledger, Tech desk\./.test(todos.get(id1).detail)), 'the same day: the same names file nothing new; a new name RE-WORDS the one item (still one)', open1.map((i) => i.detail));
   todos.setStatus(id1, 'dismissed', 'user');
   const id4 = eL.notePaused(['Another agent']);
   ok(id4 === id1 && todos.get(id1).status === 'dismissed' && !todos.openItems().some((i) => i.plugin === 'llm'), 'dismissed by the owner ⇒ never repeated that day (a later name files nothing, reopens nothing)');
   T = T0 + 86400e3;
   const id5 = eL.notePaused(['Ledger']);
-  ok(id5 && id5 !== id1 && todos.get(id5).status === 'open' && todos.openItems().filter((i) => i.plugin === 'llm').length === 1, 'the next local day: the budget pausing rules again files ONE new item');
+  ok(gateOf(id5) && id5 !== id1 && todos.get(id5).status === 'open' && todos.openItems().filter((i) => i.plugin === 'llm').length === 1, 'the next local day: the budget pausing rules again files ONE new item');
   ok(got.length === n0, `no vendor call anywhere in L (${got.length - n0}) — the notice is a For-you row: no turn, no wake, no spend reason`);
   // RED CONTROL: a copy without the "dismissed ⇒ never again that day" guard re-opens the owner's dismissed item
   const { mutantCopies } = await import('./mutant-copy.mjs');
@@ -500,11 +500,11 @@ const ROW = `(() => {
   pm.setEnabled('llm', false);
   const pg = await page(1100, 900, 'en');
   const D0 = await pg.ev(ROW);
-  ok(D0 && D0.sw === false && D0.chip === 'turned off' && D0.inputs === 1 && D0.gear, 'desk: the LLM plugin row is drawn — chip "turned off", ONE control (its switch) + ⚙', D0);
-  ok(await pg.press('.plugin-row[data-plugin="llm"] .plugin-sw') && await pg.until(`document.querySelector('.plugin-row[data-plugin="llm"] input[role=switch]')?.checked === true`) && pm.list()[0].enabled === true, 'desk: a press on the switch turns the plugin on (the server record)');
+  ok(gateOf(D0) && D0.sw === false && D0.chip === 'turned off' && D0.inputs === 1 && verdictOf(D0.gear), 'desk: the LLM plugin row is drawn — chip "turned off", ONE control (its switch) + ⚙', D0);
+  ok(gateOf(await pg.press('.plugin-row[data-plugin="llm"] .plugin-sw')) && gateOf(await pg.until(`document.querySelector('.plugin-row[data-plugin="llm"] input[role=switch]')?.checked === true`)) && pm.list()[0].enabled === true, 'desk: a press on the switch turns the plugin on (the server record)');
   await pg.until(`/OpenRouter/.test(document.querySelector('.plugin-row[data-plugin="llm"] .plugin-chip')?.textContent || '')`);
   const D = await pg.ev(ROW);
-  ok(/OpenRouter/.test(D.chip) && / · Today: judged 1 · 0 needed you · /.test(D.title) && /limit \$1\.00/.test(D.title), `desk: the chip names the provider; its title is today's count + spend ("${D.title}")`);
+  ok(gateOf(/OpenRouter/.test(D.chip)) && gateOf(/ · Today: judged 1 · 0 needed you · /.test(D.title)) && verdictOf(/limit \$1\.00/.test(D.title)), `desk: the chip names the provider; its title is today's count + spend ("${D.title}")`);
   ok(D.inputs === 1, 'desk: no key box, no feature checkbox, no budget on the row (configuration lives in All Settings)', D);
   settingsStore.patch({ 'plugin.llm.dailyBudgetUsd': 0.5 });
   ok(pm.list()[0].decision.dailyBudgetCents === 50, 'the budget SETTING (0.50 USD) reaches the engine as 50 cents', pm.list()[0].decision.dailyBudgetCents);
@@ -513,7 +513,7 @@ const ROW = `(() => {
   pg.close();
   const ph = await page(390, 844, 'zh');
   const P = await ph.ev(ROW);
-  ok(P && P.sw2 <= P.vw + 1 && / · 今天：判断了 1 条 · 命中 0 条 · /.test(P.title) && P.inputs === 1, `phone 390 (zh): the row fits (scrollWidth ${P && P.sw2} ≤ ${P && P.vw}), the chip title counts in Chinese`, P);
+  ok(gateOf(P) && P.sw2 <= P.vw + 1 && gateOf(/ · 今天：判断了 1 条 · 命中 0 条 · /.test(P.title)) && P.inputs === 1, `phone 390 (zh): the row fits (scrollWidth ${P && P.sw2} ≤ ${P && P.vw}), the chip title counts in Chinese`, P);
   await ph.shot('phone.png');
   ph.close();
 }
@@ -525,13 +525,13 @@ const ROW = `(() => {
   const pg = await page(1100, 900, 'en');
   await pg.until(`/stopped/.test(document.querySelector('.plugin-row[data-plugin="llm"] .plugin-chip')?.textContent || '')`);
   const S1 = await pg.ev(ROW), cls = await pg.ev(`document.querySelector('.plugin-row[data-plugin="llm"] .plugin-chip')?.className`);
-  ok(r.why === 'plan' && S1 && S1.chip === 'stopped — plan refused' && /the plan does not allow this model \(HTTP 402\)\. Change the judging model in the plugin’s settings, or the key on its Integrations card\./.test(S1.title) && /plugin-chip-warn/.test(cls || ''), `desk: the row stop is ON the chip ("${S1 && S1.chip}", warn), its title says what to do`, { S1, cls });
+  ok(r.why === 'plan' && gateOf(S1) && S1.chip === 'stopped — plan refused' && gateOf(/the plan does not allow this model \(HTTP 402\)\. Change the judging model in the plugin’s settings, or the key on its Integrations card\./.test(S1.title)) && verdictOf(/plugin-chip-warn/.test(cls || '')), `desk: the row stop is ON the chip ("${S1 && S1.chip}", warn), its title says what to do`, { S1, cls });
   await pg.shot('card-stop.png');
   pg.close();
   const ph = await page(390, 844, 'zh');
   await ph.until(`/已停/.test(document.querySelector('.plugin-row[data-plugin="llm"] .plugin-chip')?.textContent || '')`);
   const Z = await ph.ev(ROW);
-  ok(Z && Z.chip === '已停 — 套餐不支持' && /集成卡片/.test(Z.title) && Z.sw2 <= Z.vw + 1, `phone 390 (zh): the stop chip in Chinese ("${Z && Z.chip}"), the row still fits`, Z);
+  ok(gateOf(Z) && Z.chip === '已停 — 套餐不支持' && gateOf(/集成卡片/.test(Z.title)) && Z.sw2 <= Z.vw + 1, `phone 390 (zh): the stop chip in Chinese ("${Z && Z.chip}"), the row still fits`, Z);
   await ph.shot('phone-stop.png');
   ph.close();
 }
@@ -539,4 +539,4 @@ finish();
 function finish() {
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
   process.exit(fail ? 1 : 0);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

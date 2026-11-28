@@ -29,7 +29,7 @@ const require = createRequire(import.meta.url);
 const { agentEnv } = require('../src/ws-handler.js');
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) console.log(`  ✓ ${name}`);
   else { failed++; console.error(`  ✗ ${name}${extra ? ' — ' + extra : ''}`); }
 };
@@ -76,7 +76,7 @@ const secrets = ['VIBESPACE_PASSWORD', 'VIBESPACE_S3_SECRET_KEY', 'VIBESPACE_FRP
   'VIBESPACE_TELEMETRY_FORWARD_TOKEN', 'VIBESPACE_GDRIVE_CLIENT_SECRET', 'VIBESPACE_RELAY_CLUSTER_TOKEN', 'VIBESPACE_RELAY_TOKEN'];
 check('ALL instance secrets stripped', !secrets.some((k) => k in out), secrets.filter((k) => k in out).join(','));
 check('server-only VIBESPACE config stripped', !('VIBESPACE_OPSLOG_DIR' in out) && !('VIBESPACE_METRICS_PORT' in out));
-check('agent-needed allowlist survives', out.VIBESPACE_API && out.VIBESPACE_SESSION_TOKEN && out.VIBESPACE_INSTANCE_NAME === 'him188');
+check('agent-needed allowlist survives', gateOf(out.VIBESPACE_API) && gateOf(out.VIBESPACE_SESSION_TOKEN) && out.VIBESPACE_INSTANCE_NAME === 'him188');
 // lane app-system-env: the chart's app-system switch is a fact about the SERVER process (src/app-system-serve.js reads
 // it from its own env) — an agent child never sees it; widening the keep set is not the fix for the 2.369.210 fleet bug
 const { daemonEnv } = require('../src/agent-env.js');
@@ -98,12 +98,12 @@ check('explicitly-set per-session value wins over the strip', layered.NODE_ENV =
   const base = { PATH: '/bin', HOME: '/home/u', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus', SOME_FUTURE_TOOL_TOKEN: 'ft', ...Object.fromEntries(KEYS.map((k) => [k, 'ambient-' + k])) };
   const c = H.get('antigravity').creds;
   check('antigravity: the descriptor declares its three key names (creds.keyEnvVars) and no homeEnvVar / spawnEnvVar',
-    KEYS.every((k) => c.keyEnvVars.includes(k)) && c.homeEnvVar === undefined && c.spawnEnvVar === undefined && typeof c.spawnEnv === 'function');
+    gateOf(KEYS.every((k) => c.keyEnvVars.includes(k))) && c.homeEnvVar === undefined && c.spawnEnvVar === undefined && typeof c.spawnEnv === 'function');
   const a = agentEnv(base);
-  check('antigravity: the agent door strips GEMINI_API_KEY / AGY_ADC_AUTH / GOOGLE_GEMINI_BASE_URL', KEYS.every((k) => !(k in a)), KEYS.filter((k) => k in a).join(','));
+  check('antigravity: the agent door strips GEMINI_API_KEY / AGY_ADC_AUTH / GOOGLE_GEMINI_BASE_URL', verdictOf(KEYS.every((k) => !(k in a))), KEYS.filter((k) => k in a).join(','));
   check('antigravity: …and keeps HOME, the session bus and bystanders (the machine-login spawn rides them)', a.HOME === '/home/u' && a.DBUS_SESSION_BUS_ADDRESS === base.DBUS_SESSION_BUS_ADDRESS && a.SOME_FUTURE_TOOL_TOKEN === 'ft');
   const j = jobEnv({}, base);
-  check('antigravity: the job door strips the three names and keeps HOME', KEYS.every((k) => !(k in j)) && j.HOME === '/home/u' && j.SOME_FUTURE_TOOL_TOKEN === 'ft', Object.keys(j).join(','));
+  check('antigravity: the job door strips the three names and keeps HOME', gateOf(KEYS.every((k) => !(k in j))) && j.HOME === '/home/u' && j.SOME_FUTURE_TOOL_TOKEN === 'ft', Object.keys(j).join(','));
   // spawnEnv SEEDS the root (its farm of the machine's HOME): a scratch root, and a scratch machine HOME for the farm
   const fs = require('fs'), os = require('os'), path = require('path');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-agyenv-')), root = path.join(tmp, 'agy-1'), prevHome = process.env.HOME;
@@ -144,11 +144,11 @@ const judgeService = (fn) => {
 };
 const realS = judgeService(serviceEnv);
 check(`serviceEnv passes the table (${realS.length ? realS.join(' | ') : 'all rows'})`, realS.length === 0);
-check('SERVICE_ENV_KEEP is pinned', JSON.stringify(SERVICE_ENV_KEEP) === JSON.stringify(['PATH', 'HOME', 'LANG', 'TMPDIR', 'XDG_RUNTIME_DIR', 'TERM']) && Object.isFrozen(SERVICE_ENV_KEEP));
+check('SERVICE_ENV_KEEP is pinned', JSON.stringify(SERVICE_ENV_KEEP) === JSON.stringify(['PATH', 'HOME', 'LANG', 'TMPDIR', 'XDG_RUNTIME_DIR', 'TERM']) && verdictOf(Object.isFrozen(SERVICE_ENV_KEEP)));
 const throwsFor = (k) => { try { serviceEnv(hub, { keep: [k] }); return false; } catch (e) { return e instanceof TypeError && e.message.includes(k); } };
-check('a `keep` naming a secret\'s shape throws (VIBESPACE_FRPS_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, AWS_SECRET_ACCESS_KEY, ANTHROPIC_API_KEY, HTTPS_PROXY, MY_PASSWORD)', ['VIBESPACE_FRPS_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'ANTHROPIC_API_KEY', 'HTTPS_PROXY', 'MY_PASSWORD'].every(throwsFor) && !throwsFor('SSH_AUTH_SOCK'));
+check('a `keep` naming a secret\'s shape throws (VIBESPACE_FRPS_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, AWS_SECRET_ACCESS_KEY, ANTHROPIC_API_KEY, HTTPS_PROXY, MY_PASSWORD)', gateOf(['VIBESPACE_FRPS_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'ANTHROPIC_API_KEY', 'HTTPS_PROXY', 'MY_PASSWORD'].every(throwsFor)) && !throwsFor('SSH_AUTH_SOCK'));
 const asAgent = judgeService((b, o = {}) => ({ ...agentEnv(b), ...(o.add || {}) }));
-check(`MUTANT agentEnv (the denylist) in serviceEnv's place ⇒ RED (${asAgent.length} rows fail)`, asAgent.includes('no secret, no config, no proxy, no loader hook'));
+check(`MUTANT agentEnv (the denylist) in serviceEnv's place ⇒ RED (${asAgent.length} rows fail)`, verdictOf(asAgent.includes('no secret, no config, no proxy, no loader hook')));
 const spread = judgeService((b, o) => ({ ...b, ...serviceEnv(b, o) }));
 check(`MUTANT a spread of the hub's env under the built names ⇒ RED (${spread.length} rows fail)`, spread.length > 0);
 
@@ -163,9 +163,9 @@ const { SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP } = require('../src/agent-env.
   check('the rclone env (keep RCLONE_ENV_KEEP + egress): + SSH_AUTH_SOCK + XDG_CACHE_HOME (the names rclone reads)', sorted(serviceEnv(hubE, { keep: RCLONE_ENV_KEEP, egress: true })) === sorted({ ...eg, SSH_AUTH_SOCK: 1, XDG_CACHE_HOME: 1 }));
   check('EGRESS_ENV / RCLONE_ENV_KEEP / SSH_ENV_KEEP are pinned (frozen)', JSON.stringify(EGRESS_ENV) === JSON.stringify(['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH'])
     && JSON.stringify(RCLONE_ENV_KEEP) === JSON.stringify(['SSH_AUTH_SOCK', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME']) && JSON.stringify(SSH_ENV_KEEP) === JSON.stringify(['SSH_AUTH_SOCK'])
-    && [EGRESS_ENV, RCLONE_ENV_KEEP, SSH_ENV_KEEP].every(Object.isFrozen));
+    && verdictOf([EGRESS_ENV, RCLONE_ENV_KEEP, SSH_ENV_KEEP].every(Object.isFrozen)));
   const always = judgeService((b, o = {}) => serviceEnv(b, { ...o, egress: true }));
-  check(`MUTANT a serviceEnv that always opens the egress door ⇒ RED (${always.length} rows fail)`, always.includes('no secret, no config, no proxy, no loader hook'));
+  check(`MUTANT a serviceEnv that always opens the egress door ⇒ RED (${always.length} rows fail)`, verdictOf(always.includes('no secret, no config, no proxy, no loader hook')));
 }
 
 // 5. EVERY SSH ROAD ON hosts.sshEnv() (lane spawn-env-debts): a fake `ssh` / `rsync` first on PATH records the env it was
@@ -215,8 +215,8 @@ const { SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP } = require('../src/agent-env.
     const { syncGroupCtxOverRsync } = require('../src/ctx-sync.js');
     fs.mkdirSync(path.join(D, 'ctx'), { recursive: true });
     await syncGroupCtxOverRsync({ hosts: hm, host, group: { contextDir: path.join(D, 'ctx') }, remoteDir: '/tmp/ctx' }).catch(() => { }); rows.push(["ctx-sync's rsync (-e hosts.sshCmd) + its mkdir", envs()]);
-    check('the planted names reached the hub (the legs are not vacuous)', Object.entries(PLANT).every(([k, v]) => process.env[k] === v));
-    for (const [n, got] of rows) check(`ssh road: ${n} — ${got.length} child(ren), the service list + SSH_AUTH_SOCK, no planted name or value`, judgeRoad(got), JSON.stringify(got.map(({ n: f, e }) => [f, Object.keys(e).sort().join(' ')])));
+    check('the planted names reached the hub (the legs are not vacuous)', verdictOf(Object.entries(PLANT).every(([k, v]) => process.env[k] === v)));
+    for (const [n, got] of rows) check(`ssh road: ${n} — ${got.length} child(ren), the service list + SSH_AUTH_SOCK, no planted name or value`, verdictOf(judgeRoad(got)), JSON.stringify(got.map(({ n: f, e }) => [f, Object.keys(e).sort().join(' ')])));
     check('ctx-sync: both rsync children ran on the built env', rows[5][1].filter(({ n }) => n.startsWith('env.rsync.')).length === 2);
     // CONTROL: the pre-fix _ssh (no env) — a patched copy outside the tree
     const M = mutantCopies('agent-env', REPO);
@@ -225,7 +225,7 @@ const { SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP } = require('../src/agent-env.
     const hmM = mkHm(M.load('src/hosts.js', editAnchor(hsrc, anchor, '{ timeout: timeoutMs, maxBuffer,', "src/hosts.js"), 'no-ssh-env').HostManager);
     await hmM._ssh(host, 'echo x'); const gotM = envs();
     check('CONTROL: the _ssh anchor applies once', hsrc.split(anchor).length === 2);
-    check('CONTROL: a copy of hosts.js whose _ssh hands no env ⇒ every planted name reaches ssh ⇒ RED', gotM.length === 1 && Object.entries(PLANT).every(([k, v]) => gotM[0].e[k] === v));
+    check('CONTROL: a copy of hosts.js whose _ssh hands no env ⇒ every planted name reaches ssh ⇒ RED', gotM.length === 1 && verdictOf(Object.entries(PLANT).every(([k, v]) => gotM[0].e[k] === v)));
   } finally { for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k]; Object.assign(process.env, saved); }
 
   // 6. A REAL ControlMaster (lane spawn-env-debts — measured, kept as a leg): a private sshd as THIS user on loopback (scratch
@@ -264,7 +264,7 @@ const { SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP } = require('../src/agent-env.
         const ms = masters();
         const names = born.length === 1 ? Object.keys(born[0]) : [];
         check(`real ControlMaster, ${leg}: both calls answered over ONE login (the 2nd rode the master) — the ControlPath under this run's TMPDIR`, o1 === 'one' && o2 === 'two' && logins() - l0 === 1 && ms.length === 1, JSON.stringify({ o1, o2, err, logins: logins() - l0, ms }));
-        check(`real ControlMaster, ${leg}: the master's birth env (its ProxyCommand) = the service list${agent ? ' + SSH_AUTH_SOCK' : ''} — no planted name or value`, born.length === 1 && names.every((k) => allowed.has(k) || SHELL_SET.has(k) || /^LC_[A-Z]+$/.test(k)) && !Object.values(PLANT).some((v) => Object.values(born[0]).includes(sha(v))) && names.includes('SSH_AUTH_SOCK') === !!agent, names.sort().join(' '));
+        check(`real ControlMaster, ${leg}: the master's birth env (its ProxyCommand) = the service list${agent ? ' + SSH_AUTH_SOCK' : ''} — no planted name or value`, born.length === 1 && gateOf(names.every((k) => allowed.has(k) || SHELL_SET.has(k) || /^LC_[A-Z]+$/.test(k))) && !Object.values(PLANT).some((v) => Object.values(born[0]).includes(sha(v))) && names.includes('SSH_AUTH_SOCK') === !!agent, names.sort().join(' '));
       }
     } finally {
       masters();
@@ -277,4 +277,4 @@ const { SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP } = require('../src/agent-env.
 }
 
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

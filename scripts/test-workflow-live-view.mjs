@@ -13,7 +13,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // lane claude-md-diet (B-23e7): the per-file / per-incident index lines moved out of CLAUDE.md into the kb INDEX heads
 const indexHead = (f) => ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f));
@@ -62,7 +62,7 @@ console.log('§2 the normalizer exposes the live task by its run id');
   mm.processLive({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_wf_lv', content: 'Workflow "audit" started in the background.\nRun ID: wf_lv1\nUse /workflows to watch.' }] } });
   mm.processLive({ type: 'system', subtype: 'task_progress', task_id: 'wu93ghxi2', tool_use_id: 'toolu_wf_lv', description: 'audit', usage: { total_tokens: 10, tool_uses: 2, duration_ms: 3000 }, workflow_progress: [{ type: 'workflow_phase', index: 0, title: 'Scan' }, { type: 'workflow_agent', index: 0, label: 'scan:a', phaseIndex: 0, agentId: 'aaa111', state: 'running' }] });
   const ti = mm.taskInfoById('wf_lv1');
-  ok('taskInfoById(RUN id) resolves even though task_started (short task_id) landed before the ack — the run id is registered from the ack and remembered as taskInfo.runId', ti && ti.workflow && ti.workflow.agents.length === 1 && ti.usage.totalTokens === 10 && ti.id === 'wu93ghxi2' && ti.runId === 'wf_lv1', ti);
+  ok('taskInfoById(RUN id) resolves even though task_started (short task_id) landed before the ack — the run id is registered from the ack and remembered as taskInfo.runId', gateOf(ti) && gateOf(ti.workflow) && ti.workflow.agents.length === 1 && ti.usage.totalTokens === 10 && ti.id === 'wu93ghxi2' && ti.runId === 'wf_lv1', ti);
   ok('the short task id still resolves (the CLI\'s own key for task_progress/notification)', mm.taskInfoById('wu93ghxi2') === ti);
   ok('an unknown run id answers null', mm.taskInfoById('wf_nope') === null && mm.taskInfoById(undefined) === null);
 }
@@ -114,7 +114,7 @@ console.log('§2 the normalizer exposes the live task by its run id');
   const pre = M.load('src/message-manager.js', src.slice(0, from) + PRE + src.slice(to), 'perkey');
   const ctl = judge(pre.MessageManager);
   ok(`CONTROL: the pre-fix per-KEY loops close the card through its run-id key (status ${ctl.named.status}, closedBy ${ctl.named.closedBy}) — the leg sees the defect`, ctl.named.status === 'finished' && ctl.named.closedBy === 'level', ctl.named);
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 console.log('§3 wiring pins (the 2.355.0 lesson)');
@@ -127,13 +127,13 @@ console.log('§3 wiring pins (the 2.355.0 lesson)');
   const liveReturns = (body.match(/return res\.json\(liveView\(/g) || []).length;
   const seam = route.slice(route.indexOf('function liveView('), route.indexOf('function readRunDirParts('));
   ok(`every live-view return of /api/workflow goes through liveView (${liveReturns} sites: local no-snapshot + resumed, remote no-snapshot + resumed); parseRunDir is called ONLY inside it and the tree is merged there`,
-    liveReturns === 4 && (route.match(/parseRunDir\(/g) || []).length === 1 && /parseRunDir\(/.test(seam) && /mergeLiveWorkflow\(view, ti\.workflow/.test(seam)
-    && !/liveWorkflowFromParts|readLiveWorkflow|withLiveTree/.test(route) && /require\('\.\.\/workflow-live'\)/.test(route) && /n\.taskInfoById\(runId\)/.test(route), { liveReturns });
+    liveReturns === 4 && (route.match(/parseRunDir\(/g) || []).length === 1 && gateOf(/parseRunDir\(/.test(seam)) && gateOf(/mergeLiveWorkflow\(view, ti\.workflow/.test(seam))
+    && !/liveWorkflowFromParts|readLiveWorkflow|withLiveTree/.test(route) && gateOf(/require\('\.\.\/workflow-live'\)/.test(route)) && verdictOf(/n\.taskInfoById\(runId\)/.test(route)), { liveReturns });
   const win = read('src/lib/workflow-detail.js');
-  ok('the window renders the tree: liveTree note (the PURE liveNoteKind picks it, the stall first — lane Q verify), live tokens/tool calls, the last-tool chip, View Log disabled for a transcript not on disk yet', /noteKind === 'tree'\s*\?/.test(win) && /const noteKind = liveNoteKind\(wf\)/.test(win) && /wf\.liveTree && wf\.totalTokens/.test(win) && /workflow-agent-tool/.test(win) && /ag\.onDisk === false/.test(win) && /escHtml\(ag\.lastToolName\)/.test(win));
-  ok('the chip is styled with theme vars', /\.workflow-agent-tool \{[^}]*var\(--text-dim\)/.test(read('public/style.css')));
+  ok('the window renders the tree: liveTree note (the PURE liveNoteKind picks it, the stall first — lane Q verify), live tokens/tool calls, the last-tool chip, View Log disabled for a transcript not on disk yet', gateOf(/noteKind === 'tree'\s*\?/.test(win)) && gateOf(/const noteKind = liveNoteKind\(wf\)/.test(win)) && gateOf(/wf\.liveTree && wf\.totalTokens/.test(win)) && gateOf(/workflow-agent-tool/.test(win)) && gateOf(/ag\.onDisk === false/.test(win)) && verdictOf(/escHtml\(ag\.lastToolName\)/.test(win)));
+  ok('the chip is styled with theme vars', verdictOf(/\.workflow-agent-tool \{[^}]*var\(--text-dim\)/.test(read('public/style.css'))));
   ok('neither CLAUDE.md nor the kb INDEX heads call live progress unreadable', !/live progress is TUI-only, unreadable/.test(read('CLAUDE.md') + indexHead('docs/kb-file-structure.md') + indexHead('docs/kb-bugfix-invariants.md')));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

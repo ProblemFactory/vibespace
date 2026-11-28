@@ -39,7 +39,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -196,7 +196,7 @@ for (const { S, M } of SIZES) {
   // RED CONTROL (follow-up 3): the classifier itself — a sign-in file stat'ed AFTER its open is named «the signature did not ride»
   // and is no «two kinds»; stat-then-open is the one pair allowed; another file's pair is neither
   const planted = (p, ks) => ({ p, m: new Map(ks.map((x) => [x, 1])) }), CR = '/w/subs/m1/.credentials.json';
-  ok(ridesNot(planted(CR, ['openSync', 'statSync'])) && !twoKinds(planted(CR, ['openSync', 'statSync'])) && twoKinds(planted(CR, ['statSync', 'openSync'])) && !ridesNot(planted(CR, ['statSync', 'openSync'])) && !twoKinds(planted('/w/usage-cache/m1.json', ['statSync', 'openSync'])), 'RED CONTROL: a sign-in file asked open-then-stat is NAMED (the signature did not ride the content ask), never counted as the two kinds; stat-then-open is the one allowed pair, and only for a sign-in file');
+  ok(gateOf(ridesNot(planted(CR, ['openSync', 'statSync']))) && !twoKinds(planted(CR, ['openSync', 'statSync'])) && gateOf(twoKinds(planted(CR, ['statSync', 'openSync']))) && !ridesNot(planted(CR, ['statSync', 'openSync'])) && !twoKinds(planted('/w/usage-cache/m1.json', ['statSync', 'openSync'])), 'RED CONTROL: a sign-in file asked open-then-stat is NAMED (the signature did not ride the content ask), never counted as the two kinds; stat-then-open is the one allowed pair, and only for a sign-in file');
   const steadyRates = memo.steady.rows.filter(ONCE).reduce((x, r) => x + r.n, 0);
   const sTwo = memo.steady.rows.filter((r) => r.m.size > 1).length;
   const STEADY = { '3x2': 13, '12x6': 38 };   // measured alone on the test machine, both zones (b3de847b3): every file once, no sign-in file twice
@@ -258,7 +258,7 @@ console.log('③ AN ERROR IS AN ANSWER FOR THE RUN');
   const codes = [];
   await turn();
   const r = countRun(w.root, () => { for (let i = 0; i < 3; i++) { try { RR.readText(p); codes.push('read'); } catch (e) { codes.push(e.code); } } });
-  ok(r.asks === 1 && codes.every((c) => c === 'ENOENT'), `a missing file asked three times in one run is ONE ask, and every asker sees «no such file» (${r.asks}; ${codes.join(',')})`);
+  ok(r.asks === 1 && verdictOf(codes.every((c) => c === 'ENOENT')), `a missing file asked three times in one run is ONE ask, and every asker sees «no such file» (${r.asks}; ${codes.join(',')})`);
 }
 
 console.log('④ A READ AFTER A WRITE OF THIS PROCESS IN THE SAME RUN SEES THE WRITE — BY CONSTRUCTION');
@@ -286,9 +286,9 @@ const afterWrites = (rr) => {
 };
 {
   const r = afterWrites(RR);
-  ok(r.sawWrite, 'a bare fs.writeFileSync under a watched folder (a writer nobody listed) is seen by the next read in the SAME run', r);
-  ok(r.linkMoved, 'a link the link writer re-points is seen by the next read of it in the SAME run', r);
-  ok(r.sawLogin, 'a sign-in file written between two asks in the SAME run is seen by the second', r);
+  ok(verdictOf(r.sawWrite), 'a bare fs.writeFileSync under a watched folder (a writer nobody listed) is seen by the next read in the SAME run', r);
+  ok(verdictOf(r.linkMoved), 'a link the link writer re-points is seen by the next read of it in the SAME run', r);
+  ok(verdictOf(r.sawLogin), 'a sign-in file written between two asks in the SAME run is seen by the second', r);
   const f = copyOf('src/run-reads.js', RR_SRC, 'clear: () => { if (run) run.clear(); } };', 'clear: () => { } };', 'blind');
   ok(!!f, 'RED CONTROL: the drop\'s needle hits once in a copy of the helper');
   if (f) {
@@ -356,7 +356,7 @@ console.log('⑥ EVERY PATH WRITE AND EVERY DESCRIPTOR WRITE between two asks in
   await turn();
   const kept = countRun(w.root, () => { RR.readdir(d2); fs.writeSync(fdo, 'x'); RR.readdir(d2); });
   fs.closeSync(fdo);
-  ok(!fdUnseen.length && RR.FD_WRITES.every((n) => FDARGS[n]) && kept.kinds(path.relative(w.root, d2), 'readdirSync') === 1, `every descriptor write (${RR.FD_WRITES.join(', ')}, and writeFileSync / appendFileSync handed a descriptor) through a descriptor opened for writing under a watched folder makes the next ask new; one opened elsewhere keeps the memo`, { fdUnseen, kept: kept.asks });
+  ok(!fdUnseen.length && gateOf(RR.FD_WRITES.every((n) => FDARGS[n])) && kept.kinds(path.relative(w.root, d2), 'readdirSync') === 1, `every descriptor write (${RR.FD_WRITES.join(', ')}, and writeFileSync / appendFileSync handed a descriptor) through a descriptor opened for writing under a watched folder makes the next ask new; one opened elsewhere keeps the memo`, { fdUnseen, kept: kept.asks });
 }
 
 console.log('⑦ ONE WRAPPER PER PROCESS — a second copy of the module, one write, both memos gone');
@@ -372,7 +372,7 @@ console.log('⑦ ONE WRAPPER PER PROCESS — a second copy of the module, one wr
     fs.writeFileSync(p, JSON.stringify({ fetchedAt: 2 }));           // ONE write …
     RR.readText(p); B.readText(p);                                   // … drops BOTH: two more asks
   });
-  ok(r.asks === 4 && G && G.copies.size >= 2 && G.installed.get('writeFileSync') && fs.writeFileSync === G.installed.get('writeFileSync'), `two copies in one process: one wrapper (found by the process-wide key, not a mark on a function), and one write drops every copy's memo (${r.asks} asks; ${G ? G.copies.size : 0} copies)`, { asks: r.asks });
+  ok(r.asks === 4 && gateOf(G) && G.copies.size >= 2 && gateOf(G.installed.get('writeFileSync')) && fs.writeFileSync === G.installed.get('writeFileSync'), `two copies in one process: one wrapper (found by the process-wide key, not a mark on a function), and one write drops every copy's memo (${r.asks} asks; ${G ? G.copies.size : 0} copies)`, { asks: r.asks });
 }
 
 console.log('⑧ A TICK CALLBACK AND AN ALREADY-QUEUED CONTINUATION SHARE THE RUN\'S ANSWERS (nothing outside the process can have been heard)');
@@ -422,7 +422,7 @@ console.log('⑩ THE LOOP WITNESS INSTALLED AFTER THIS MODULE KEEPS ITS WRAPPER 
   LB.install({ fsMod: fs });
   await turn();
   const r = countRun(w.root, () => { RR.readText(p); fs.writeFileSync(p, JSON.stringify({ fetchedAt: 3 })); RR.readText(p); });
-  ok(LB.isWrapped(fs.writeFileSync) && r.asks === 2, `with the witness wrapped around it, a write still drops the memo (${r.asks} asks)`);
+  ok(gateOf(LB.isWrapped(fs.writeFileSync)) && r.asks === 2, `with the witness wrapped around it, a write still drops the memo (${r.asks} asks)`);
 }
 
 console.log('⑪ WHAT IS SAID MEMOIZED IS WHAT IS WATCHED — every path the routed readers ask in a pass, a record and a broadcast is under a watched folder');
@@ -438,12 +438,12 @@ async function routedPaths(mods) {
 }
 {
   const real = await routedPaths({ AccountManager, engMod });
-  ok(real.n > 10 && ['data/pool-links', 'data/subs', 'data/usage-cache'].every((f) => real.folders.includes(f)) && !real.unwatched.length, `the routed readers asked ${real.n} paths in ${real.folders.join(', ')} — every one under a folder its owner watches`, real.unwatched.slice(0, 6));
+  ok(real.n > 10 && gateOf(['data/pool-links', 'data/subs', 'data/usage-cache'].every((f) => real.folders.includes(f))) && !real.unwatched.length, `the routed readers asked ${real.n} paths in ${real.folders.join(', ')} — every one under a folder its owner watches`, real.unwatched.slice(0, 6));
   const f = copyOf('src/server/usage-pool-engine.js', ENG_SRC, '  RR.watch(USAGE_CACHE_DIR);', '  void USAGE_CACHE_DIR;', 'unwatched');
   ok(!!f, 'RED CONTROL: the engine\'s watch line hits once in a copy of it');
   if (f) {
     const red = await routedPaths({ AccountManager, engMod: require(f) });
-    ok(red.unwatched.some((p) => p.startsWith('data/usage-cache' + path.sep)), `RED CONTROL: an engine that does not watch its readings (a5bab1744) routes ${red.unwatched.length} reading path(s) nobody watches — red by name`, red.unwatched.slice(0, 3));
+    ok(verdictOf(red.unwatched.some((p) => p.startsWith('data/usage-cache' + path.sep))), `RED CONTROL: an engine that does not watch its readings (a5bab1744) routes ${red.unwatched.length} reading path(s) nobody watches — red by name`, red.unwatched.slice(0, 3));
   }
 }
 
@@ -540,14 +540,14 @@ else out({ pass: false, err: 'unknown probe ' + probe });
     const m = child(f, probe);
     (m.pass ? missed : caught).push(`${what}${m.pass ? '' : ''}`);
   }
-  ok(real.load && real.load.pass, 'NOTHING AT LOAD: in a fresh process, requiring the helper — and the claude harness descriptor the device agent\'s bundle loads — leaves every fs function the runtime\'s own; the first watch() wraps the writes', real.load);
-  ok(MUTANTS.every(([p]) => real[p] && real[p].pass), 'the real helper passes every probe (an open for writing, a sibling folder, a failed open\'s stat, a non-link entry, a listing\'s copy)', real);
+  ok(gateOf(real.load) && verdictOf(real.load.pass), 'NOTHING AT LOAD: in a fresh process, requiring the helper — and the claude harness descriptor the device agent\'s bundle loads — leaves every fs function the runtime\'s own; the first watch() wraps the writes', real.load);
+  ok(verdictOf(MUTANTS.every(([p]) => real[p] && real[p].pass)), 'the real helper passes every probe (an open for writing, a sibling folder, a failed open\'s stat, a non-link entry, a listing\'s copy)', real);
   ok(!missed.length && caught.length === MUTANTS.length, `RED CONTROLS: every mutant of the helper is caught by its probe — ${caught.join(' · ')}`, missed);
   // THE BOOT TRACE'S WINDOW (VIBESPACE_BOOT_TRACE=1): it wraps fs's writes BEFORE the first watch and takes its wrappers off
   // ~90 s later — its undo must leave the helper's wrappers (installed around it) in place
   const BT = path.join(REPO, 'src/server/boot-trace.js'), BT_SRC = fs.readFileSync(BT, 'utf8');
   const tr = child(RRpath, 'tracer', BT);
-  ok(tr.pass, 'a tracer installed before the first watch and taken off after it leaves the helper\'s four wrappers outermost — a write still drops the memo', tr);
+  ok(verdictOf(tr.pass), 'a tracer installed before the first watch and taken off after it leaves the helper\'s four wrappers outermost — a write still drops the memo', tr);
   const btf = copyOf('src/server/boot-trace.js', BT_SRC, 'undo.push(() => { if (obj[name] === w) obj[name] = orig; });', 'undo.push(() => { obj[name] = orig; });', 'bt-restore');
   const trRed = btf ? child(RRpath, 'tracer', btf) : null;
   ok(!!trRed && !trRed.pass, 'RED CONTROL: the release\'s undo (the original put back whatever wraps it) strips the helper\'s wrappers — the write goes unseen', trRed);
@@ -606,7 +606,7 @@ console.log('⑭ A LOOK-AGAIN READ ASKS THE MOUNT ITSELF — another process cha
   const ACC_SRC = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
   const N1 = '  _lookAgain(id) { RR.forget(this.subDir(id)); return this.readSubCreds(id); }', N2 = '} if (d) RR.forget(d); }';
   const hits = ACC_SRC.split(N1).length === 2 && ACC_SRC.split(N2).length === 2;
-  ok(hits, 'RED CONTROL: both forget needles hit once in a copy of src/accounts.js');
+  ok(verdictOf(hits), 'RED CONTROL: both forget needles hit once in a copy of src/accounts.js');
   if (hits) {
     const blindAM = require(MU.write('src/accounts.js', editAnchor(editAnchor(ACC_SRC, N1, '  _lookAgain(id) { return this.readSubCreds(id); }', "src/accounts.js"), N2, '} void d; }', "src/accounts.js"), 'no-forget')).AccountManager;
     const stale = [];
@@ -771,8 +771,8 @@ console.log('⑯ EVERY SITE THAT PUTS A FUNCTION ON fs IS ROWED WITH ITS UNDO �
   ];
   const PER = [null, 1, 1, 1, 2, 1, 1, 1, 1, 0];
   const each = PL.map((l, i) => (i === 0 ? null : (fsSites(PL[0] + '\n' + l) || []).length));
-  ok(PL.length === PER.length && each.every((n, i) => n === PER[i]), `CONTROL: each planted form alone — ${each.slice(1).join(', ')} (want ${PER.slice(1).join(', ')})`, each);
-  ok(Array.isArray(planted) && planted.length === 9, `CONTROL: a planted assignment to the binding, to a member chain of it, through a parameter handed fs, through one defaulted to fs, a defineProperty on a member of it — and (B-403e follow-up 2) through an alias, onto require('fs') itself, by Reflect.set, and through a bare declaration assigned later — are all found, and none elsewhere (${planted && planted.length})`, planted);
+  ok(PL.length === PER.length && verdictOf(each.every((n, i) => n === PER[i])), `CONTROL: each planted form alone — ${each.slice(1).join(', ')} (want ${PER.slice(1).join(', ')})`, each);
+  ok(gateOf(Array.isArray(planted)) && planted.length === 9, `CONTROL: a planted assignment to the binding, to a member chain of it, through a parameter handed fs, through one defaulted to fs, a defineProperty on a member of it — and (B-403e follow-up 2) through an alias, onto require('fs') itself, by Reflect.set, and through a bare declaration assigned later — are all found, and none elsewhere (${planted && planted.length})`, planted);
   // EACH ROW'S UNDO, run in a fresh process: after it, a write under a watched folder still drops the memo
   const LB = path.join(REPO, 'src/server/loop-blame.js');
   const undoProbe = path.join(tmpdir('vs-pool-reads-undo-'), 'undo.cjs');
@@ -794,8 +794,8 @@ process.stdout.write(JSON.stringify({ pass: a === 'one' && b === 'two' && c === 
   const undoRun = (which) => { try { return JSON.parse(execFileSync(process.execPath, [undoProbe, RRpath, which, fs.mkdtempSync(path.join(path.dirname(undoProbe), 'w-')), LB, path.join(REPO, 'src/server/boot-trace.js')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); } catch (e) { return { pass: false, err: String(e.stderr || e.message).slice(0, 200) }; } };
   const UNDOS = [['loop-blame-first', 'src/server/loop-blame.js'], ['loop-blame-after', 'src/server/loop-blame.js'], ['boot-trace', 'src/server/boot-trace.js']];
   const undone = UNDOS.map(([w, f]) => [w, f, undoRun(w)]);
-  ok(undone.every(([, , r]) => r.pass) && Object.keys(ROWS).filter((f) => f !== 'src/run-reads.js').every((f) => UNDOS.some(([, uf]) => uf === f)), `after each rowed site's install and undo (the loop witness before and after the first watch, the boot trace's window), a path write, a descriptor write and a rename under a watched folder still drop the memo`, undone.map(([w, , r]) => `${w}: ${JSON.stringify(r)}`));
+  ok(gateOf(undone.every(([, , r]) => r.pass)) && verdictOf(Object.keys(ROWS).filter((f) => f !== 'src/run-reads.js').every((f) => UNDOS.some(([, uf]) => uf === f))), `after each rowed site's install and undo (the loop witness before and after the first watch, the boot trace's window), a path write, a descriptor write and a rename under a watched folder still drop the memo`, undone.map(([w, , r]) => `${w}: ${JSON.stringify(r)}`));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

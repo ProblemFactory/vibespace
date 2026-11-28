@@ -17,7 +17,7 @@ const SRC = fs.readFileSync(path.join(REPO, REL), 'utf8');
 const PM = await import(pathToFileURL(path.join(REPO, REL)).href);
 const MUT = mutantCopies('peer-card-fold', REPO);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 const peer = (text, extra = {}) => ({ id: 'm-' + Math.random().toString(36).slice(2), role: 'user', originKind: 'peer-message', peerFrom: 'VibeSpace 车道工作者 5', content: [{ type: 'text', text }], ...extra });
@@ -87,11 +87,11 @@ for (const [inp, want] of PREV) ok(PM.previewOf(inp) === want, `previewOf(${JSON
 {
   const emo = '😀'.repeat(170);
   const p = PM.previewOf(emo);
-  ok(Array.from(p).length === 160 && p.endsWith('…') && !/[\ud800-\udbff](?![\udc00-\udfff])/.test(p), 'a 170-emoji line is cut to 160 code points, never through a surrogate pair', Array.from(p).length);
+  ok(Array.from(p).length === 160 && gateOf(p.endsWith('…')) && !/[\ud800-\udbff](?![\udc00-\udfff])/.test(p), 'a 170-emoji line is cut to 160 code points, never through a surrogate pair', Array.from(p).length);
   const huge = 'x'.repeat(60000);
   const ph = PM.previewOf(huge);
-  ok(Array.from(ph).length === 160 && ph.endsWith('…'), 'a 60 000-character line: the preview reads a bounded prefix, ends in …');
-  ok(/const LINE_SCAN_MAX = 4096;/.test(SRC) && /long \? i \+ LINE_SCAN_MAX : j/.test(SRC), 'the scan of one line is bounded by LINE_SCAN_MAX (the preview never walks a 50 KB line)');
+  ok(Array.from(ph).length === 160 && verdictOf(ph.endsWith('…')), 'a 60 000-character line: the preview reads a bounded prefix, ends in …');
+  ok(gateOf(/const LINE_SCAN_MAX = 4096;/.test(SRC)) && verdictOf(/long \? i \+ LINE_SCAN_MAX : j/.test(SRC)), 'the scan of one line is bounded by LINE_SCAN_MAX (the preview never walks a 50 KB line)');
   ok(PM.previewOf('<script>alert(1)</script>') === '<script>alert(1)</script>', 'the preview is plain text — the markup is the renderer\'s to escape, never parsed here');
 }
 {
@@ -103,7 +103,7 @@ console.log('③ the setting');
 {
   const sch = read('src/lib/settings-schema.js');
   const m = /'chat\.foldPeerMessages': \{([\s\S]*?)\n  \},/.exec(sch);
-  ok(!!m && /type: 'boolean', default: true,/.test(m[1]) && /category: t\('Chat'\), liveApply: true/.test(m[1]), 'chat.foldPeerMessages is declared: boolean, default ON, Chat, applied live', m && m[1]);
+  ok(!!m && gateOf(/type: 'boolean', default: true,/.test(m[1])) && verdictOf(/category: t\('Chat'\), liveApply: true/.test(m[1])), 'chat.foldPeerMessages is declared: boolean, default ON, Chat, applied live', m && m[1]);
   ok(PM.PEER_FOLD_SETTING === 'chat.foldPeerMessages', 'the model names the same key');
 }
 
@@ -122,7 +122,7 @@ console.log('⑤ wiring: the card, the view state, the phone target');
     ['the open set is bounded (500)', /if \(this\._peerOpen\.size > 500\) this\._peerOpen\.delete/.test(V)],
     ['a 44 px target on the phone (the head row, the switch); the preview never wraps', /@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ \.chat-peer-fold-head \{ min-height: 44px; \} \}/.test(C) && /\.chat-peer-preview \{[^}]*white-space: nowrap/.test(C)],
   ];
-  for (const [n, c] of pins) ok(c, n);
+  for (const [n, c] of pins) ok(verdictOf(c), n);
 }
 
 console.log('⑥ the fold pass: a folded peer card keeps its kind, stays one visible line, Show opens its run');
@@ -131,13 +131,13 @@ console.log('⑥ the fold pass: a folded peer card keeps its kind, stays one vis
   const k = (m) => RS.messageKind(m, { toolCard: false });
   ok(k(peer(REPORT)) === 'peer' && k(peer(REPORT, { peerFrom: 'Background Work · nightly' })) === 'peer' && k(peer(ZH, { peerGroup: { id: 'g', name: 'x' } })) === 'group'
     && k({ role: 'user', content: [{ type: 'text', text: REPORT }] }) === null, 'messageKind: a peer card is \'peer\' (a job notification too), a group message stays \'group\', the user\'s own is null');
-  ok(RS.RUN_KINDS.includes('peer') && RS.runSummaryLabel && /\{n\} agent messages/.test(read('src/lib/chat-run-summary.js')), 'the kind is a RUN_KINDS member with its summary line ("{n} agent messages")');
+  ok(gateOf(RS.RUN_KINDS.includes('peer')) && gateOf(RS.runSummaryLabel) && verdictOf(/\{n\} agent messages/.test(read('src/lib/chat-run-summary.js'))), 'the kind is a RUN_KINDS member with its summary line ("{n} agent messages")');
   const sch = read('src/lib/settings-schema.js');
   const def = /'chat\.collapseKinds': \{[\s\S]*?default: (\[[^\]]*\])/.exec(sch);
-  ok(def && !/'peer'/.test(def[1]) && !/'group'/.test(def[1]) && /\{ value: 'peer', label: t\('Messages from other agents and jobs \(outside a group\)'\) \}/.test(sch), 'chat.collapseKinds offers \'peer\' UNCHECKED (like \'group\') — by default a peer card breaks a run as before', def && def[1]);
+  ok(gateOf(def) && !/'peer'/.test(def[1]) && !/'group'/.test(def[1]) && verdictOf(/\{ value: 'peer', label: t\('Messages from other agents and jobs \(outside a group\)'\) \}/.test(sch)), 'chat.collapseKinds offers \'peer\' UNCHECKED (like \'group\') — by default a peer card breaks a run as before', def && def[1]);
   const V = read('src/lib/chat-view.js');
-  ok(/for \(const el of members\) if \(el\.classList\.contains\('chat-peer-folded'\)\) inline\.add\(el\);/.test(V), 'the fold pass keeps a FOLDED peer card on screen (an inline member: counted, never hidden)');
-  ok(/const run = el && this\._runs\?\.find\(\(r\) => !r\.open && r\.members\?\.includes\(el\)\);\n    if \(run\) this\._setRunOpen\(run, true\);/.test(V), 'Show on a card inside a folded run opens the run, then the card');
+  ok(verdictOf(/for \(const el of members\) if \(el\.classList\.contains\('chat-peer-folded'\)\) inline\.add\(el\);/.test(V)), 'the fold pass keeps a FOLDED peer card on screen (an inline member: counted, never hidden)');
+  ok(verdictOf(/const run = el && this\._runs\?\.find\(\(r\) => !r\.open && r\.members\?\.includes\(el\)\);\n    if \(run\) this\._setRunOpen\(run, true\);/.test(V)), 'Show on a card inside a folded run opens the run, then the card');
 }
 
 console.log('④ controls (mutant copies of the model)');
@@ -154,4 +154,4 @@ await control('no-strip', "return raw.replace(/`+/g, '').replace(/\\*\\*|__/g, '
 await control('ignore-setting', 'setting !== false && !!kind', '!!kind', 'the setting is ignored');
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

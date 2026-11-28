@@ -101,7 +101,7 @@ const VARIANTS = [
   { name: 'ctl-newest', revert: 'newest', rows: ['hang-return'] },
 ];
 let passed = 0, failed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms, step = 200) => { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch { } await sleep(step); } return false; };
 
@@ -276,7 +276,7 @@ async function runVariant(v) {
     const r = v._messageList.getBoundingClientRect();
     return { ok: true, n: v._messages.length, ws: v._windowStart, we: v._windowEnd, total: v._total, pin: v._pinned ? 1 : 0, ro: v._readOnly ? 1 : 0, ch: v._messageList.clientHeight, rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
   })()`);
-  check(`${v.name}: the live chat opened with a composer at the live tail (${opened?.n} messages, window ${opened?.ws}..${opened?.we} of ${opened?.total}, fixture ${fx.lines} lines)`, opened?.ok && !opened.ro && opened.pin === 1 && opened.we === opened.total, JSON.stringify(opened) + '\n' + journal.slice(-600));
+  check(`${v.name}: the live chat opened with a composer at the live tail (${opened?.n} messages, window ${opened?.ws}..${opened?.we} of ${opened?.total}, fixture ${fx.lines} lines)`, gateOf(opened?.ok) && !opened.ro && opened.pin === 1 && opened.we === opened.total, JSON.stringify(opened) + '\n' + journal.slice(-600));
   if (!opened?.ok) { chrome.kill('SIGKILL'); srv.kill('SIGKILL'); return {}; }
   const cx = Math.round(opened.rect.x + opened.rect.w / 2), cy = Math.round(opened.rect.y + opened.rect.h / 2);
   const wheelUp = async (notches, deltaY = 300, gap = 100) => { for (let i = 0; i < notches; i++) { await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: cx, y: cy, deltaX: 0, deltaY: -deltaY }); await sleep(gap); } };
@@ -425,4 +425,4 @@ const added = after.filter((d) => !realBefore.has(d));
 const lit = fixtureLitter(added.map((d) => path.join(REAL_PROJECTS, d)), { sids: [SID] });
 check(`the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`, lit.offenders.length === 0, lit.offenders.slice(0, 3));
 console.log(failed ? `\n${failed} FAILED, ${passed} passed` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { gateOf } from './lib/check.mjs';

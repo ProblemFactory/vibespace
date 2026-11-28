@@ -37,7 +37,7 @@ const DF = require(path.join(REPO, 'src/dial-facts.js'));
 const src0 = fs.readFileSync(path.join(REPO, 'src/dial-facts.js'), 'utf8');
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -96,7 +96,7 @@ const IF = {
   eq(rows.map((r) => r.kind), ['origin', 'relay', 'tailscale', 'lan', 'lan', 'public', 'hostname', 'ipv6'], 'origin first, the relay second, then tailscale / lan / public / hostname / ipv6');
   eq(rows.map((r) => r.base), ['https://ws.example.com', 'https://relay.example.net', 'http://100.101.7.9:3456', 'http://10.1.2.3:3456', 'http://192.168.1.20:3456', 'http://203.0.113.7:3456', 'http://box-lan01:3456', 'http://[2001:db8::5]:3456'], 'every base, interfaces http, IPv6 bracketed');
   ok(!rows.some((r) => /127\.|::1|fe80|169\.254/.test(r.base)), 'loopback, link-local and internal interfaces are never rows (127.0.0.5 on a non-internal interface included)');
-  ok(rows.every((r) => r.dialUrl === r.base.replace(/^http/, 'ws') + '/api/device-dial?device=Macbook'), 'every row carries its dial URL (ws/wss + the dial path + the device)');
+  ok(verdictOf(rows.every((r) => r.dialUrl === r.base.replace(/^http/, 'ws') + '/api/device-dial?device=Macbook')), 'every row carries its dial URL (ws/wss + the dial path + the device)');
   ok(rows.find((r) => r.kind === 'origin').plain === false && rows.find((r) => r.kind === 'lan').plain === true, 'https rows are not plain; http rows carry the plain-http note');
   eq(rows.map((r) => r.note), rows.map((r) => r.kind), 'the note is the closed key the client words');
   const dup = DF.dialAddressCandidates({ origin: 'http://10.1.2.3:3456', relay: 'http://10.1.2.3:3456/', interfaces: IF, port: 3456, deviceId: 'x' });
@@ -104,18 +104,18 @@ const IF = {
   const tsName = DF.dialAddressCandidates({ interfaces: { utun3: [{ address: '100.100.1.1', family: 'IPv4', internal: false }] }, port: 1 });
   eq(tsName.map((r) => r.kind), ['tailscale'], '100.64.0.0/10 on utun (macOS Tailscale) is the tailnet');
   const noHttps = DF.dialAddressCandidates({ hostname: 'box', interfaces: {}, port: 3456 });
-  ok(noHttps.every((r) => r.base.startsWith('http://')), 'a base is http unless it came from the origin / the relay');
+  ok(verdictOf(noHttps.every((r) => r.base.startsWith('http://'))), 'a base is http unless it came from the origin / the relay');
   eq(DF.dialAddressCandidates({ hostname: 'bad host;rm', interfaces: {}, port: 3456 }), [], 'a hostname that is not a hostname is no row');
 }
 console.log('naive-user N-loop: a loopback address is the LAST row and never the default');
 {
   const rows = DF.dialAddressCandidates({ origin: 'http://127.0.0.1:3456', hostname: 'localhost', interfaces: IF, port: 3456, deviceId: 'Macbook' });
   eq(rows.slice(-2).map((r) => [r.kind, r.note, !!r.loopback]), [['origin', 'loopback-origin', true], ['hostname', 'loopback', true]], 'the browser\'s 127.0.0.1 origin and a host named `localhost` are the LAST rows, noted loopback (the origin keeps "the address you are using now")');
-  ok(rows.slice(0, -2).every((r) => !r.loopback) && rows[0].kind === 'tailscale', 'every other row comes first (the tailnet first when there is no reachable origin)', rows.map((r) => r.kind));
+  ok(gateOf(rows.slice(0, -2).every((r) => !r.loopback)) && rows[0].kind === 'tailscale', 'every other row comes first (the tailnet first when there is no reachable origin)', rows.map((r) => r.kind));
   eq(DF.dialDefaultChoice({ candidates: rows }), { kind: 'row', base: 'http://100.101.7.9:3456', why: 'first-reachable' }, 'THE DEFAULT is the first row a device elsewhere can reach — never the browser\'s 127.0.0.1 (the owner\'s ssh-tunnel case: first + checked, unreachable from any other machine)');
   const pub = DF.dialAddressCandidates({ origin: 'https://ws.example.com', interfaces: IF, port: 3456 });
   eq(DF.dialDefaultChoice({ candidates: pub }), { kind: 'row', base: 'https://ws.example.com', why: 'first-reachable' }, 'a reachable origin stays first and the default');
-  for (const b of ['http://127.0.0.1:3456', 'http://127.1.2.3:1', 'http://localhost:3456', 'http://a.localhost:1', 'http://[::1]:3456', 'http://0.0.0.0:3456']) ok(DF.isLoopbackBase(b), `isLoopbackBase(${b}) — only this machine`);
+  for (const b of ['http://127.0.0.1:3456', 'http://127.1.2.3:1', 'http://localhost:3456', 'http://a.localhost:1', 'http://[::1]:3456', 'http://0.0.0.0:3456']) ok(verdictOf(DF.isLoopbackBase(b)), `isLoopbackBase(${b}) — only this machine`);
   for (const b of ['http://10.0.0.1:1', 'http://workstation-1:3456', 'https://relay.example.net', 'http://[2001:db8::5]:1', 'http://128.0.0.1:1', 'garbage', null]) ok(!DF.isLoopbackBase(b), `isLoopbackBase(${b}) — not loopback (never throws)`);
   // verify-r4 F3: nothing another device can reach ⇒ never a loopback row checked (was: "that row — a device on this very machine")
   eq(DF.dialDefaultChoice({ candidates: [{ base: 'http://127.0.0.1:1', loopback: true }] }), { kind: 'custom', value: '', why: 'only-loopback' }, 'F3: only loopback rows ⇒ Custom… EMPTY (the loopback row stays pickable, never checked for a device elsewhere)');
@@ -145,8 +145,8 @@ console.log('verify-r4 F3: a row only for an address the server\'s SOCKET accept
   const wSrc3 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   const pk3 = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
   const sm3 = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-  ok(/const a = server && typeof server\.address === 'function' \? server\.address\(\) : null;/.test(wSrc3) && /deviceId: deviceId \|\| 'DEVICE', bind \}\);/.test(wSrc3) && /listen: \{ address: bind, loopbackOnly: DF\.bindAdmits\(bind\)\.loopbackOnly \}/.test(wSrc3), 'F3 wiring: the address route reads the socket\'s bound address and hands it to the candidates; answers `listen`');
-  ok(/const first = dialDefaultChoice\(\{ candidates, dial, relayPublishable \}\);/.test(pk3) && /if \(listen && listen\.loopbackOnly\)/.test(pk3) && (sm3.match(/listen: a\.listen \|\| null/g) || []).length === 2, 'F3 wiring: the picker says a loopback-only server in words (both dialogs pass `listen`) and asks the default with relayPublishable');
+  ok(gateOf(/const a = server && typeof server\.address === 'function' \? server\.address\(\) : null;/.test(wSrc3)) && gateOf(/deviceId: deviceId \|\| 'DEVICE', bind \}\);/.test(wSrc3)) && verdictOf(/listen: \{ address: bind, loopbackOnly: DF\.bindAdmits\(bind\)\.loopbackOnly \}/.test(wSrc3)), 'F3 wiring: the address route reads the socket\'s bound address and hands it to the candidates; answers `listen`');
+  ok(gateOf(/const first = dialDefaultChoice\(\{ candidates, dial, relayPublishable \}\);/.test(pk3)) && gateOf(/if \(listen && listen\.loopbackOnly\)/.test(pk3)) && (sm3.match(/listen: a\.listen \|\| null/g) || []).length === 2, 'F3 wiring: the picker says a loopback-only server in words (both dialogs pass `listen`) and asks the default with relayPublishable');
 }
 console.log('naive-user N-sheet: a paired device\'s sheet checks the device\'s OWN address');
 {
@@ -206,19 +206,19 @@ console.log('naive-user N-sheet: a paired device\'s sheet checks the device\'s O
   const wSrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   const smSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
   const pkSrc = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
-  ok(/if \(vb && vb\.ok\) d\.mintedBase = vb\.base\.slice\(0, 200\); else delete d\.mintedBase;/.test(hostsSrc), 'wiring: noteDial(minted) stamps mintedBase (judged by dialBaseVerdict) and drops a stale one');
-  ok(/hosts\.noteDial\(deviceId, 'minted', \{ host, base \}\)/.test(dpSrc), 'wiring: the ONE minter hands the base to noteDial');
-  ok(/agentdMintDialPair\(deviceId, \{ host: DF\.hostOf\(dialUrl\), base, keepLink: pushV\.push, by: actBy, from: [^}]*\}\)/.test(wSrc) && /agentdMintDialPair\(gradDevice, \{ host: require\('\.\.\/dial-facts\.js'\)\.hostOf\(dialUrl\), base, by, from \}\)/.test(wSrc), 'wiring: both mint sites (the dial-pair route, graduate-dial) pass the base');
-  ok(/dial: existing \? \(h\.dial \|\| \{\}\) : null/.test(smSrc) && /dial: h\.dial \|\| null/.test(smSrc), 'wiring: the pairing sheet and the graduate dialog hand the device\'s dial facts to the picker (verify-r5 C3: a paired device with none yet hands `{}` — a paired device, never read as a new one)');
-  ok(/const first = dialDefaultChoice\(\{ candidates, dial, relayPublishable \}\);/.test(pkSrc), 'wiring: the picker checks PURE dialDefaultChoice({candidates, dial, relayPublishable})');
+  ok(verdictOf(/if \(vb && vb\.ok\) d\.mintedBase = vb\.base\.slice\(0, 200\); else delete d\.mintedBase;/.test(hostsSrc)), 'wiring: noteDial(minted) stamps mintedBase (judged by dialBaseVerdict) and drops a stale one');
+  ok(verdictOf(/hosts\.noteDial\(deviceId, 'minted', \{ host, base \}\)/.test(dpSrc)), 'wiring: the ONE minter hands the base to noteDial');
+  ok(gateOf(/agentdMintDialPair\(deviceId, \{ host: DF\.hostOf\(dialUrl\), base, keepLink: pushV\.push, by: actBy, from: [^}]*\}\)/.test(wSrc)) && verdictOf(/agentdMintDialPair\(gradDevice, \{ host: require\('\.\.\/dial-facts\.js'\)\.hostOf\(dialUrl\), base, by, from \}\)/.test(wSrc)), 'wiring: both mint sites (the dial-pair route, graduate-dial) pass the base');
+  ok(gateOf(/dial: existing \? \(h\.dial \|\| \{\}\) : null/.test(smSrc)) && verdictOf(/dial: h\.dial \|\| null/.test(smSrc)), 'wiring: the pairing sheet and the graduate dialog hand the device\'s dial facts to the picker (verify-r5 C3: a paired device with none yet hands `{}` — a paired device, never read as a new one)');
+  ok(verdictOf(/const first = dialDefaultChoice\(\{ candidates, dial, relayPublishable \}\);/.test(pkSrc)), 'wiring: the picker checks PURE dialDefaultChoice({candidates, dial, relayPublishable})');
   // verify-r4 F1: the DEVICE states the address it dials on every attempt; the gate keeps it apart from the Host header
   const adSrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  ok(/DF\.dialHeadersOf\(\{ streak: status\.streak \|\| 0, lastFail: status\.lastFail, version: VERSION, boot: BOOT_ID, dialUrl: cfg\.url[, }]/.test(adSrc), 'F1 wiring: the daemon\'s every dial attempt states its dial URL\'s base (x-vibespace-dial-base)');
-  ok(/boot: hints\.boot, dialed: hints\.dialed, (platform: hints\.platform, )?host: String\(req\.headers\.host/.test(dpSrc), 'F1 wiring: the gate records the device\'s stated address (`dialed`) apart from the Host header (`host`)');
-  ok(/dialed: \(\(\) => \{ const v = own && facts\.dialed \? DF\.dialBaseVerdict\(facts\.dialed\)/.test(hostsSrc), 'F1 wiring: noteDial keeps `dialed` only through the ONE base verdict');
-  ok(/d\.lastRefusal = \{ code: [^\n]*\.\.\.hint\(false\) \}/.test(hostsSrc) && /d\.lastAccept = \{ at, \.\.\.hint\(\) \}/.test(hostsSrc), 'C2 wiring: a refusal (no token) keeps none of the dial\'s statements (`hint(false)`); only an accepted dial\'s are the device\'s');
+  ok(verdictOf(/DF\.dialHeadersOf\(\{ streak: status\.streak \|\| 0, lastFail: status\.lastFail, version: VERSION, boot: BOOT_ID, dialUrl: cfg\.url[, }]/.test(adSrc)), 'F1 wiring: the daemon\'s every dial attempt states its dial URL\'s base (x-vibespace-dial-base)');
+  ok(verdictOf(/boot: hints\.boot, dialed: hints\.dialed, (platform: hints\.platform, )?host: String\(req\.headers\.host/.test(dpSrc)), 'F1 wiring: the gate records the device\'s stated address (`dialed`) apart from the Host header (`host`)');
+  ok(verdictOf(/dialed: \(\(\) => \{ const v = own && facts\.dialed \? DF\.dialBaseVerdict\(facts\.dialed\)/.test(hostsSrc)), 'F1 wiring: noteDial keeps `dialed` only through the ONE base verdict');
+  ok(gateOf(/d\.lastRefusal = \{ code: [^\n]*\.\.\.hint\(false\) \}/.test(hostsSrc)) && verdictOf(/d\.lastAccept = \{ at, \.\.\.hint\(\) \}/.test(hostsSrc)), 'C2 wiring: a refusal (no token) keeps none of the dial\'s statements (`hint(false)`); only an accepted dial\'s are the device\'s');
   ok(!/la\.host|lastAccept\.host|lastAccept && d\.lastAccept\.host|lastRefusal\.host|lastRefusal && d\.lastRefusal\.host/.test(src0.slice(src0.indexOf('function dialDefaultChoice'), src0.indexOf('module.exports'))), 'F1 CENSUS: neither the default nor the row state reads a stored Host header (`.host` of lastAccept / lastRefusal) — grep over dialDefaultChoice … dialRowState');
-  ok(/online: !!\(existing && \(h\.online \|\| h\.dialLive\)\)/.test(smSrc) && /online: !!h\.dialLive/.test(smSrc) && /online \? t\('the address this device connects through'\) : t\('the address this device last connected through'\)/.test(pkSrc), 'F1 words: "connects through" only while the device is dialed in, else "last connected through" (a relay that moved, a laptop elsewhere)');
+  ok(gateOf(/online: !!\(existing && \(h\.online \|\| h\.dialLive\)\)/.test(smSrc)) && gateOf(/online: !!h\.dialLive/.test(smSrc)) && verdictOf(/online \? t\('the address this device connects through'\) : t\('the address this device last connected through'\)/.test(pkSrc)), 'F1 words: "connects through" only while the device is dialed in, else "last connected through" (a relay that moved, a laptop elsewhere)');
 }
 console.log('verify-r4 F6: a NEW pairing under the name of an existing device is a replacement — said before Create');
 {
@@ -238,8 +238,8 @@ console.log('verify-r4 F6: a NEW pairing under the name of an existing device is
   eq(DF.pairNameVerdict('Macbook'.padEnd(32, 'x') + 'tail', H2).exists, true, 'F6: …a 36-char name the route cuts to an existing 32-char id IS a replacement (the client used to judge the uncut name)');
   const wSrc6 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   const sm6 = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-  ok(/const deviceId = DF\.deviceIdOf\(req\.body\?\.deviceId \|\| /.test(wSrc6) && !/replace\(\/\[\^\\w-\]\/g, ''\)\.slice\(0, 32\)/.test(wSrc6), 'F6 wiring: the dial-pair route mints under DF.deviceIdOf (no second spelling of the rule)');
-  ok(/const v0? = pairNameVerdict\(inp\.value, this\._hostsData\?\.hosts \|\| \[\]\);/.test(sm6) && /inp\.addEventListener\('input', syncName\)/.test(sm6) && /deviceIdOf\(inp\.value\) \|\| undefined/.test(sm6), 'F6 wiring: the dialog judges the typed name as the route will (pairNameVerdict on every keystroke) and sends deviceIdOf of it');
+  ok(gateOf(/const deviceId = DF\.deviceIdOf\(req\.body\?\.deviceId \|\| /.test(wSrc6)) && !/replace\(\/\[\^\\w-\]\/g, ''\)\.slice\(0, 32\)/.test(wSrc6), 'F6 wiring: the dial-pair route mints under DF.deviceIdOf (no second spelling of the rule)');
+  ok(gateOf(/const v0? = pairNameVerdict\(inp\.value, this\._hostsData\?\.hosts \|\| \[\]\);/.test(sm6)) && gateOf(/inp\.addEventListener\('input', syncName\)/.test(sm6)) && verdictOf(/deviceIdOf\(inp\.value\) \|\| undefined/.test(sm6)), 'F6 wiring: the dialog judges the typed name as the route will (pairNameVerdict on every keystroke) and sends deviceIdOf of it');
 }
 console.log('verify-r5 A1: the ROUTE judges the name too — a "new" pairing under a paired name is refused, never a silent replacement');
 {
@@ -261,22 +261,22 @@ console.log('verify-r5 A1: the ROUTE judges the name too — a "new" pairing und
   // verify-r5 A2: what the typed name BECOMES, said before Create
   eq(['办公室Mac', 'café', 'cafe\u0301', '我的电脑', 'my-mac', '  Mac book  ', '💻', ''].map((n) => DF.pairNameShown(n)), [{ id: 'Mac', reduced: true, empty: false }, { id: 'caf', reduced: true, empty: false }, { id: 'cafe', reduced: true, empty: false }, { id: '', reduced: true, empty: true }, { id: 'my-mac', reduced: false, empty: false }, { id: 'Macbook', reduced: true, empty: false }, { id: '', reduced: true, empty: true }, { id: '', reduced: false, empty: false }], 'A2 pairNameShown: 办公室Mac ⇒ "Mac", NFC café ⇒ "caf" / NFD ⇒ "cafe", an all-CJK or emoji name ⇒ nothing left (dev-<hex>), a clean name ⇒ not reduced');
   const sm2 = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-  ok(/const shown = pairNameShown\(inp\.value\);/.test(sm2) && /body\.append\(label, inp, willBe, nameNote\);/.test(sm2), 'A2 wiring: the dialog says what the typed name becomes, on every judgement, under the field');
+  ok(gateOf(/const shown = pairNameShown\(inp\.value\);/.test(sm2)) && verdictOf(/body\.append\(label, inp, willBe, nameNote\);/.test(sm2)), 'A2 wiring: the dialog says what the typed name becomes, on every judgement, under the field');
   eq([DF.pairNameVerdict('macbook', H), DF.pairNameVerdict('Macbook', H).caseTwin], [{ exists: false, online: false, name: '', deviceId: 'macbook', caseTwin: 'Macbook' }, undefined], 'A3: the dialog\'s verdict names the case twin before Create (the exact name is a replacement, never a twin)');
   const w5 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   const route = w5.slice(w5.indexOf("app.post(['/api/device/dial-pair'"), w5.indexOf('// ③ the DEVICE'));
   const i1 = route.indexOf('const nv = DF.pairRequestVerdict('), iRelay = route.indexOf('await instanceUrl.ensurePublished()'), i2 = route.indexOf('const nv2 = DF.pairRequestVerdict('), iMint = route.indexOf('agentdMintDialPair(deviceId');
   // verify-r6 G4: each verdict is ACTED ON — the r6 revert table dropped either `if (!nv*.ok) return …409` and nothing
   // noticed (the other one covered it, and the order pin above reads only where the verdicts are computed)
-  ok(/const nv = DF\.pairRequestVerdict\([^\n]*\n\s*if \(!nv\.ok\) return res\.status\(409\)\.json\(\{ error: nv\.error, code: nv\.code/.test(route) && /const nv2 = DF\.pairRequestVerdict\([^\n]*\n\s*if \(!nv2\.ok\) return res\.status\(409\)\.json\(\{ error: nv2\.error, code: nv2\.code/.test(route), 'A1 wiring (verify-r6 G4): BOTH name verdicts are acted on — a refusal answers 409 by its code before the relay publish, and again right before the mint');
+  ok(gateOf(/const nv = DF\.pairRequestVerdict\([^\n]*\n\s*if \(!nv\.ok\) return res\.status\(409\)\.json\(\{ error: nv\.error, code: nv\.code/.test(route)) && verdictOf(/const nv2 = DF\.pairRequestVerdict\([^\n]*\n\s*if \(!nv2\.ok\) return res\.status\(409\)\.json\(\{ error: nv2\.error, code: nv2\.code/.test(route)), 'A1 wiring (verify-r6 G4): BOTH name verdicts are acted on — a refusal answers 409 by its code before the relay publish, and again right before the mint');
   ok(i1 > 0 && i1 < iRelay && iRelay < i2 && i2 < route.indexOf('const existed = !!hosts.findByDeviceId(deviceId);') && i2 < iMint && !route.slice(i2, iMint).includes('await '), 'A1 wiring: the route judges the name BEFORE the relay publish and AGAIN with no await before the mint (a second window\'s Create can land during the publish)');
   const sm5 = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-  ok(/if \(source !== 'tick'\) seenReplace = go\.textContent === tr\('Replace its pairing'\);/.test(sm5) && /syncName\('route'\);/.test(sm5) && /const syncName = \(source = 'input'\) => \{/.test(sm5), 'P3 wiring: what the user was SHOWN (their own typing, or the route\'s answer) decides `expect` — the 1 s tick re-labels the button but never turns a press into a replace');
-  ok(/e && e\.code === 'not_paired' \? tr\(/.test(sm5) && /if \(e && e\.code === 'not_paired'\) raced = null;/.test(sm5), 'P2 wiring: the sheet words not_paired (the device was removed while it was open)');
-  ok(/try \{ await api\(`\/api\/hosts\/\$\{h\.id\}`, \{ method: 'DELETE' \}\);[^\n]*\}\s*catch \(e\) \{ showToast\(tr\('Could not remove "\{name\}" — \{why\}'/.test(sm5), 'U1 wiring (verify-r6): Unpair / Remove says a refused or failed removal (the unguarded await did nothing, silently)');
+  ok(gateOf(/if \(source !== 'tick'\) seenReplace = go\.textContent === tr\('Replace its pairing'\);/.test(sm5)) && gateOf(/syncName\('route'\);/.test(sm5)) && verdictOf(/const syncName = \(source = 'input'\) => \{/.test(sm5)), 'P3 wiring: what the user was SHOWN (their own typing, or the route\'s answer) decides `expect` — the 1 s tick re-labels the button but never turns a press into a replace');
+  ok(gateOf(/e && e\.code === 'not_paired' \? tr\(/.test(sm5)) && verdictOf(/if \(e && e\.code === 'not_paired'\) raced = null;/.test(sm5)), 'P2 wiring: the sheet words not_paired (the device was removed while it was open)');
+  ok(verdictOf(/try \{ await api\(`\/api\/hosts\/\$\{h\.id\}`, \{ method: 'DELETE' \}\);[^\n]*\}\s*catch \(e\) \{ showToast\(tr\('Could not remove "\{name\}" — \{why\}'/.test(sm5)), 'U1 wiring (verify-r6): Unpair / Remove says a refused or failed removal (the unguarded await did nothing, silently)');
   const pairFn = sm5.slice(sm5.indexOf('const pair = async () => {'), sm5.indexOf('const pair = async () => {') + 3000);
-  ok(pairFn.indexOf("const expect = existing || seenReplace ? 'existing' : 'new';") > 0 && pairFn.indexOf('const expect') < pairFn.indexOf("go.textContent = v.viaRelay ?") && /updateInPlace: keep, \.\.\.\(keep \? \{ keepLinkSince: keepSince \} : \{\}\), expect \}/.test(pairFn) && /if \(e && e\.code === 'already_paired'\) raced = /.test(pairFn), 'A1 wiring: the dialog sends what it expects (read BEFORE the button turns "Pairing…"), and a 409 already_paired re-judges the note with the route\'s facts');
-  ok(/const nameTick = inp \? setInterval\(\(\) => \{ if \(!live\(\) \|\| !body\.contains\(inp\)\) \{ clearInterval\(nameTick\); return; \} syncName\('tick'\); \}, 1000\) : null;/.test(sm5) && /if \(d2 && Number\(d2\.generation\) > gen\) \{/.test(sm5), 'A1 wiring: the note follows the machine list while the dialog is open (its liveness the shell\'s live() — lane dialog-yield r4: a queued sheet\'s body is detached, not closed), and a command sheet watches its own generation (replaced ⇒ said)');
+  ok(pairFn.indexOf("const expect = existing || seenReplace ? 'existing' : 'new';") > 0 && pairFn.indexOf('const expect') < pairFn.indexOf("go.textContent = v.viaRelay ?") && gateOf(/updateInPlace: keep, \.\.\.\(keep \? \{ keepLinkSince: keepSince \} : \{\}\), expect \}/.test(pairFn)) && verdictOf(/if \(e && e\.code === 'already_paired'\) raced = /.test(pairFn)), 'A1 wiring: the dialog sends what it expects (read BEFORE the button turns "Pairing…"), and a 409 already_paired re-judges the note with the route\'s facts');
+  ok(gateOf(/const nameTick = inp \? setInterval\(\(\) => \{ if \(!live\(\) \|\| !body\.contains\(inp\)\) \{ clearInterval\(nameTick\); return; \} syncName\('tick'\); \}, 1000\) : null;/.test(sm5)) && verdictOf(/if \(d2 && Number\(d2\.generation\) > gen\) \{/.test(sm5)), 'A1 wiring: the note follows the machine list while the dialog is open (its liveness the shell\'s live() — lane dialog-yield r4: a queued sheet\'s body is detached, not closed), and a command sheet watches its own generation (replaced ⇒ said)');
 }
 console.log('① dialBaseVerdict');
 {
@@ -301,7 +301,7 @@ console.log('① dialBaseVerdict');
     ['http://bad_host', { ok: false, code: 'host' }],
   ];
   for (const [inp, want] of T) eq(DF.dialBaseVerdict(inp), want, `dialBaseVerdict(${JSON.stringify(inp)})`);
-  ok(DF.BASE_REFUSALS.length === 6 && T.every(([, w]) => w.ok || DF.BASE_REFUSALS.includes(w.code)), 'every refusal is a member of the closed set');
+  ok(DF.BASE_REFUSALS.length === 6 && verdictOf(T.every(([, w]) => w.ok || DF.BASE_REFUSALS.includes(w.code))), 'every refusal is a member of the closed set');
 }
 
 // ── ③ the classifier ──
@@ -322,7 +322,7 @@ console.log('③ dialFailureOf');
   const R = (status, refusal, body) => Object.assign(new Error('upgrade refused'), { code: 'UPGRADE_REFUSED', status, refusal, body });
   const tm = DF.dialFailureOf(R(401, 'token-mismatch', JSON.stringify({ code: 'token-mismatch', error: 'the dial token does not match the pairing on record for "Mac"' })));
   eq([tm.code, tm.status], ['refused-token-mismatch', 401], '401 + X-VibeSpace-Dial-Refusal token-mismatch ⇒ refused-token-mismatch');
-  ok(/does not match the pairing/.test(tm.detail), 'the server\'s sentence rides the detail', tm.detail);
+  ok(verdictOf(/does not match the pairing/.test(tm.detail)), 'the server\'s sentence rides the detail', tm.detail);
   eq(DF.dialFailureOf(R(401, 'no-pairing', '{}')).code, 'refused-no-pairing', '401 no-pairing ⇒ refused-no-pairing');
   eq(DF.dialFailureOf(R(401, 'no-device-id', '')).code, 'refused-no-device-id', '401 no-device-id ⇒ refused-no-device-id');
   eq(DF.dialFailureOf(R(401, null, '')).code, 'refused-unknown', '401 without the header (a server older than this lane) ⇒ refused-unknown');
@@ -332,9 +332,9 @@ console.log('③ dialFailureOf');
   // the B-f276 remainder's cure (主开发 23:20Z): the hub's HOLD (503 `hosts-unread` — it cannot read its paired machines) is a WAIT by name
   const held = DF.dialFailureOf(R(503, null, JSON.stringify({ code: 'hosts-unread', error: 'this VibeSpace cannot read its paired machines right now and reads them again within minutes' })));
   eq([held.code, held.status], ['held', 503], '503 + body code hosts-unread ⇒ held (a wait, not http-503)');
-  ok(/cannot read its paired machines/.test(held.detail), 'the hub\'s words ride the held detail', held.detail);
+  ok(verdictOf(/cannot read its paired machines/.test(held.detail)), 'the hub\'s words ride the held detail', held.detail);
   eq(DF.dialFailureOf(R(503, null, '')).code, 'http-503', 'a 503 WITHOUT the hold\'s mark (a relay, a proxy) stays http-503');
-  ok(/^dial-out waits — the hub cannot read its paired machines right now: /.test(DF.dialLogLine({ outcome: 'failed', code: 'held', detail: held.detail, attempt: 3, delay: 15000 })), 'the device\'s log line words the hold as a wait');
+  ok(verdictOf(/^dial-out waits — the hub cannot read its paired machines right now: /.test(DF.dialLogLine({ outcome: 'failed', code: 'held', detail: held.detail, attempt: 3, delay: 15000 }))), 'the device\'s log line words the hold as a wait');
   eq(DF.dialFailureOf(E('ECONNRESET'), { up: true, upMs: 800 }).code, 'closed-before-hello', 'an upgrade that closed within 2 s ⇒ closed-before-hello');
   eq(DF.dialFailureOf(null, { up: true, upMs: 3 * 3600e3 }).code, 'lost', 'an upgrade that lived ≥ 2 s then closed ⇒ lost (the link\'s end)');
   const long = DF.dialFailureOf(E('EWHATEVER', 'x'.repeat(5000) + '\u0000\u0007'));
@@ -342,13 +342,13 @@ console.log('③ dialFailureOf');
   ok(!/vsdt_[a-f0-9]{8}/.test(DF.dialFailureOf(E('EWHATEVER', 'token vsdt_0123456789abcdef leaked')).detail), 'a token never rides a detail');
   const hostile = DF.dialFailureOf(R(401, 'token-mismatch', 'x'.repeat(10 * 1024)));
   ok(hostile.detail.length <= 200, 'a 10 KiB hostile body reduces to ≤ 200 chars (attack 20)');
-  ok(DF.DIAL_FAIL_CODES.includes('refused-token-mismatch') && DF.DIAL_FAIL_CODES.includes('refused-retired') && DF.DIAL_FAIL_CODES.includes('held') && DF.DIAL_FAIL_CODES.length === 17, 'the closed code set (16 since B-4d71: refused-retired; 17 since the B-f276 remainder: held)');
+  ok(gateOf(DF.DIAL_FAIL_CODES.includes('refused-token-mismatch')) && gateOf(DF.DIAL_FAIL_CODES.includes('refused-retired')) && gateOf(DF.DIAL_FAIL_CODES.includes('held')) && DF.DIAL_FAIL_CODES.length === 17, 'the closed code set (16 since B-4d71: refused-retired; 17 since the B-f276 remainder: held)');
 }
 console.log('③ headers');
 {
   const h = DF.dialHeadersOf({ streak: 12, lastFail: { code: 'dns', at: 1790000000000 }, version: '2.369.196' });
   eq(h, { 'x-vibespace-dial-attempt': '12', 'x-vibespace-dial-last': 'dns@1790000000000', 'x-vibespace-daemon': '2.369.196' }, 'the daemon\'s per-attempt headers');
-  ok(Object.values(h).every((v) => v.length <= 80 && /^[\x20-\x7e]+$/.test(v)), 'plain ASCII, each ≤ 80 bytes');
+  ok(verdictOf(Object.values(h).every((v) => v.length <= 80 && /^[\x20-\x7e]+$/.test(v))), 'plain ASCII, each ≤ 80 bytes');
   eq(DF.parseDialHeaders(h), { attempt: 12, last: { code: 'dns', at: 1790000000000 }, daemon: '2.369.196', probe: false, boot: null, dialed: null, platform: null }, 'the server reads them back (boot null: no boot header; dialed / platform null: not stated)');
   // verify-r4 F1: the device's own dial address rides x-vibespace-dial-base — the base only (no path, no query, never the token)
   const hd = DF.dialHeadersOf({ dialUrl: 'wss://Relay.Example.net/api/device-dial?device=mac' });
@@ -367,8 +367,8 @@ console.log('③ headers');
   eq(['darwin', 'win32', 'linux', 'freebsd', null, 'x'].map(DF.commandOsOf), ['mac', 'win', 'linux', null, null, null], 'F7 commandOsOf: darwin ⇒ the macOS form, win32 ⇒ PowerShell, linux ⇒ Linux; an OS the installers do not serve ⇒ null (the sheet guesses)');
   {
     const adF7 = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8'), dpF7 = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8'), hsF7 = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8'), smF7 = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-    ok(/dialUrl: cfg\.url, platform: process\.platform \}\)/.test(adF7) && /dialed: hints\.dialed, platform: hints\.platform,/.test(dpF7) && /platform: own && DF\.DAEMON_PLATFORMS\.includes\(facts\.platform\) \? facts\.platform : null/.test(hsF7), 'F7 wiring: the daemon states its OS, the gate records it, noteDial keeps it through the closed set');
-    ok(/deviceOs: existing \? commandOsOf\(h\.dial && h\.dial\.lastAccept && h\.dial\.lastAccept\.platform\) : null/.test(smF7) && /const guessOs = deviceOs \|\| \(/.test(smF7), 'F7 wiring: a paired device\'s sheet preselects ITS OS\'s command; the browser\'s OS only for a device nobody has heard from');
+    ok(gateOf(/dialUrl: cfg\.url, platform: process\.platform \}\)/.test(adF7)) && gateOf(/dialed: hints\.dialed, platform: hints\.platform,/.test(dpF7)) && verdictOf(/platform: own && DF\.DAEMON_PLATFORMS\.includes\(facts\.platform\) \? facts\.platform : null/.test(hsF7)), 'F7 wiring: the daemon states its OS, the gate records it, noteDial keeps it through the closed set');
+    ok(gateOf(/deviceOs: existing \? commandOsOf\(h\.dial && h\.dial\.lastAccept && h\.dial\.lastAccept\.platform\) : null/.test(smF7)) && verdictOf(/const guessOs = deviceOs \|\| \(/.test(smF7)), 'F7 wiring: a paired device\'s sheet preselects ITS OS\'s command; the browser\'s OS only for a device nobody has heard from');
   }
   eq(DF.parseDialHeaders({ 'x-vibespace-dial-last': 'haxx@1790000000000' }).last.code, 'other', 'an unknown code ⇒ other (closed set)');
   eq(DF.parseDialHeaders({ 'x-vibespace-dial-attempt': '1'.repeat(200) }).attempt, 0, 'a header over 80 bytes is ignored');
@@ -391,7 +391,7 @@ console.log('③ nextDialStatus + dialLogLine');
   ok(st.history.length === 20 && st.streak === 30, 'history ≤ 20 entries, the streak counts on');
   ok(!JSON.stringify(st).includes('vsdt_'), 'the status never carries a token');
   eq(DF.dialLogLine({ outcome: 'failed', code: 'dns', detail: 'getaddrinfo ENOTFOUND box-lnx01', attempt: 12, delay: 30000 }), 'dial-out failed — dns: getaddrinfo ENOTFOUND box-lnx01 (attempt 12, retry in 30000ms)', 'the failed line names the class');
-  ok(/^dial-out refused — token-mismatch: the dial token/.test(DF.dialLogLine({ outcome: 'failed', code: 'refused-token-mismatch', detail: 'the dial token does not match', attempt: 3, delay: 5000 })), 'the refused line names the server\'s reason');
+  ok(verdictOf(/^dial-out refused — token-mismatch: the dial token/.test(DF.dialLogLine({ outcome: 'failed', code: 'refused-token-mismatch', detail: 'the dial token does not match', attempt: 3, delay: 5000 }))), 'the refused line names the server\'s reason');
   eq(DF.dialLogLine({ outcome: 'connected', url: 'ws://h:1/api/device-dial?device=Mac', failedBefore: 12 }), 'dial-out connected: ws://h:1/api/device-dial?device=Mac (after 12 failed attempts)', 'the connected line counts the failures before it');
   eq(DF.dialLogLine({ outcome: 'lost', upMs: (3 * 60 + 12) * 60e3, delay: 1000 }), 'dial-out lost after 3h12m — retry in 1000ms', 'the lost line');
 }
@@ -411,7 +411,7 @@ console.log('⑤ dialCheckLines');
     [{ code: 'other', detail: 'weird', host: 'h:1' }, 15, /other: weird/],
     [{ code: 'held', status: 503, detail: 'cannot read its paired machines', host: 'h:1' }, 16, /^dial-check waits — held: [^]*h:1 is a VibeSpace that cannot read its paired machines right now[^]*run this same command again in a few minutes/],
   ];
-  for (const [inp, exit, re] of T) { const o = DF.dialCheckLines(inp); ok(o.exit === exit && re.test(o.lines.join('\n')), `${inp.ok ? 'ok' : inp.code} ⇒ exit ${exit}`, o); }
+  for (const [inp, exit, re] of T) { const o = DF.dialCheckLines(inp); ok(o.exit === exit && verdictOf(re.test(o.lines.join('\n'))), `${inp.ok ? 'ok' : inp.code} ⇒ exit ${exit}`, o); }
   ok(!/not as a VibeSpace|pairing dialog/.test(DF.dialCheckLines({ code: 'held', status: 503, host: 'h:1' }).lines.join('\n')), 'the held check never says «not a VibeSpace» nor sends the person to the pairing dialog');
 }
 
@@ -463,7 +463,7 @@ console.log('③ dialRowState (fake clock, the eight states + the mint guard)');
     // 主开发 00:36Z small (6): an anchored control for «the newest of greeting and key is the state»
     const DFg = MK.load('src/dial-facts.js', anchored(DSRC, '    if (gr && gr >= ka) return', '    if (gr) return', 'greeting-always'), 'greeting-always');
     eq(DFg.dialRowState({ transport: 'dial', deviceId: 'Mac', online: true, deviceKeyRefused: { code: 'device-key-mismatch', at: T0 + 80, road: 'dial' }, dial: { lastConnectAt: T0 + 50, lastGreetingRefused: { at: T0 + 70 } } }, { now: T0 + 999999 }).state, 'greeting-refused', 'RED CONTROL: a greeting judged first whatever its time hides the seat\'s NEWER key refusal behind a copy\'s greeting (the mirror leg refuses that)');
-    for (const r of copiesCensus(MK.files, MK.dir, REPO, { minCopies: 1, label: 'mutant-copy (key-refused): ' })) ok(r.pass, r.name, r.detail);
+    for (const r of copiesCensus(MK.files, MK.dir, REPO, { minCopies: 1, label: 'mutant-copy (key-refused): ' })) ok(verdictOf(r.pass), r.name, r.detail);
     const SMx = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8'), MAx = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8'), DPx = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
     eq([SMx.includes("rs.state === 'key-refused' ? (/-mismatch$/.test(rs.code || '') ? tr('KEY MISMATCH') : tr('KEY REFUSED'))"), /rs\.state === 'greeting-refused' \|\| rs\.state === 'key-refused' \|\| rs\.state === 'refused'\) \? 'err'/.test(SMx), MAx.includes("drs.state === 'key-refused') ? ' err'"), DPx.includes("case 'key-refused': return keyRefusedText(rs);")].join(), 'true,true,true,true', 'the row says it: a red dot and its badge in the sidebar (KEY MISMATCH for a key that differs, KEY REFUSED for any other refusal), a red Machines dot, and its sentence (below, driven)');
     // the read's shoulds: a refusal from before roads were recorded (no `road`) is the dial row's; the state carries what its words need
@@ -496,17 +496,17 @@ console.log('② inPlacePushVerdict (verify-r1 B8: the rotated token reaches the
   eq(DF.inPlacePushVerdict({ existed: true, live: true, requested: true }), { push: true, why: 'requested' }, 'the user asked ⇒ pushed over the link');
   // WIRING: the route judges through the verdict with the body's flag; the dialog sends the checkbox (unchecked by default)
   const route = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/DF\.inPlacePushVerdict\(\{ existed, live: holderConnected, requested: req\.body\?\.updateInPlace === true, shownSince: req\.body\?\.keepLinkSince === undefined \? undefined : req\.body\.keepLinkSince, liveSince: liveRec && liveRec\.dial \? liveRec\.dial\.lastConnectAt : null \}\)/.test(route) && /if \(pushV\.push\) \{/.test(route), 'WIRING: POST /api/device/dial-pair pushes in place only through inPlacePushVerdict({requested: body.updateInPlace === true, shownSince: body.keepLinkSince, liveSince: the record\'s lastConnectAt})');
+  ok(gateOf(/DF\.inPlacePushVerdict\(\{ existed, live: holderConnected, requested: req\.body\?\.updateInPlace === true, shownSince: req\.body\?\.keepLinkSince === undefined \? undefined : req\.body\.keepLinkSince, liveSince: liveRec && liveRec\.dial \? liveRec\.dial\.lastConnectAt : null \}\)/.test(route)) && verdictOf(/if \(pushV\.push\) \{/.test(route)), 'WIRING: POST /api/device/dial-pair pushes in place only through inPlacePushVerdict({requested: body.updateInPlace === true, shownSince: body.keepLinkSince, liveSince: the record\'s lastConnectAt})');
   const iRef = route.indexOf('if (pushV.refuse) return res.status(409)'), iMint = route.indexOf('pair = agentdMintDialPair(deviceId,');
   ok(iRef > 0 && iMint > iRef, 'P1 WIRING: a refused push answers 409 by name BEFORE the mint (nothing rotated, nobody cut)');
   const dlg = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-  ok(/keepBox\.checked = false;/.test(dlg) && /const keep = !!\(keepBox && keepBox\.checked\);/.test(dlg) && /updateInPlace: keep, \.\.\.\(keep \? \{ keepLinkSince: keepSince \} : \{\}\)/.test(dlg) && /const keepSince = existing && h\.dial \? \(h\.dial\.lastConnectAt \?\? null\) : null;/.test(dlg) && /if \(existing && \(h\.online \|\| h\.dialLive\) && !dialLinkRefused\(h\)\) \{/.test(dlg), 'WIRING: the pairing sheet offers the choice only while a device is connected and its link is not refused (lane lg-remote-hardening, 主开发 00:36Z small 5), unchecked by default, and sends it as updateInPlace + the link it showed (verify-r6 P1: keepLinkSince)');
-  ok(/e && e\.code === 'link_gone' \? tr\(/.test(dlg) && /e && e\.code === 'link_changed' \? tr\(/.test(dlg) && /if \(e && e\.code === 'link_gone' && keepLbl\) \{ keepBox\.checked = false; keepLbl\.style\.display = 'none';/.test(dlg), 'P1 WIRING: the sheet words link_gone / link_changed and, the device being gone, drops the keep-its-link choice (the next press is the plain rotation it just described)');
+  ok(gateOf(/keepBox\.checked = false;/.test(dlg)) && gateOf(/const keep = !!\(keepBox && keepBox\.checked\);/.test(dlg)) && gateOf(/updateInPlace: keep, \.\.\.\(keep \? \{ keepLinkSince: keepSince \} : \{\}\)/.test(dlg)) && gateOf(/const keepSince = existing && h\.dial \? \(h\.dial\.lastConnectAt \?\? null\) : null;/.test(dlg)) && verdictOf(/if \(existing && \(h\.online \|\| h\.dialLive\) && !dialLinkRefused\(h\)\) \{/.test(dlg)), 'WIRING: the pairing sheet offers the choice only while a device is connected and its link is not refused (lane lg-remote-hardening, 主开发 00:36Z small 5), unchecked by default, and sends it as updateInPlace + the link it showed (verify-r6 P1: keepLinkSince)');
+  ok(gateOf(/e && e\.code === 'link_gone' \? tr\(/.test(dlg)) && gateOf(/e && e\.code === 'link_changed' \? tr\(/.test(dlg)) && verdictOf(/if \(e && e\.code === 'link_gone' && keepLbl\) \{ keepBox\.checked = false; keepLbl\.style\.display = 'none';/.test(dlg)), 'P1 WIRING: the sheet words link_gone / link_changed and, the device being gone, drops the keep-its-link choice (the next press is the plain rotation it just described)');
   // verify-r2 B8-r2: the mint ENDS the holder's link unless the push keeps it, and a push that did not land ends it too
   const dp = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
-  ok(/agentdMintDialPair\(deviceId, \{ host: DF\.hostOf\(dialUrl\), base, keepLink: pushV\.push, by: actBy, from: [^}]*\}\)/.test(route) && /if \(!updatedInPlace\) lockedOut = lockOutDialHolder\(deviceId\) \|\| lockedOut;/.test(route), 'WIRING (B8-r2): the route mints with keepLink = the push verdict, and a push that did not land locks the holder out');
-  ok(/const lockedOut = keepLink === true \? false : lockOutDialHolder\(deviceId\);/.test(dp) && /function lockOutDialHolder\(deviceId\) \{/.test(dp), 'WIRING (B8-r2): the minter itself ends the holder\'s link unless keepLink');
-  ok(/the device that was connected has been disconnected; it holds the previous command, which no longer works/.test(dlg) && !/is refused at its next dial/.test(dlg), 'WORDS (B8-r2): the sheet says the holder was disconnected now — never "refused at its next dial"');
+  ok(gateOf(/agentdMintDialPair\(deviceId, \{ host: DF\.hostOf\(dialUrl\), base, keepLink: pushV\.push, by: actBy, from: [^}]*\}\)/.test(route)) && verdictOf(/if \(!updatedInPlace\) lockedOut = lockOutDialHolder\(deviceId\) \|\| lockedOut;/.test(route)), 'WIRING (B8-r2): the route mints with keepLink = the push verdict, and a push that did not land locks the holder out');
+  ok(gateOf(/const lockedOut = keepLink === true \? false : lockOutDialHolder\(deviceId\);/.test(dp)) && verdictOf(/function lockOutDialHolder\(deviceId\) \{/.test(dp)), 'WIRING (B8-r2): the minter itself ends the holder\'s link unless keepLink');
+  ok(gateOf(/the device that was connected has been disconnected; it holds the previous command, which no longer works/.test(dlg)) && !/is refused at its next dial/.test(dlg), 'WORDS (B8-r2): the sheet says the holder was disconnected now — never "refused at its next dial"');
 }
 
 console.log('B9 duplicateDialVerdict (verify-r1: two daemons on one pairing) + the boot header + the row\'s dup note');
@@ -532,13 +532,13 @@ console.log('B9 duplicateDialVerdict (verify-r1: two daemons on one pairing) + t
   eq(DF.parseDialHeaders({ 'x-vibespace-daemon-boot': '0123456789abcdef' }).boot, '0123456789abcdef', '…and is read back');
   eq(DF.parseDialHeaders({ 'x-vibespace-daemon-boot': 'not hex' }).boot, null, '…junk reads null (judged as an older daemon)');
   eq(DF.parseDialHeaders({}).boot, null, '…absent reads null');
-  ok(DF.DIAL_REFUSAL_CODES.includes('duplicate-device') && DF.DIAL_FAIL_CODES.includes('refused-duplicate-device') && DF.DIAL_REASONS.includes('duplicate-device'), 'duplicate-device is a named refusal, a named failure and a row reason');
+  ok(gateOf(DF.DIAL_REFUSAL_CODES.includes('duplicate-device')) && gateOf(DF.DIAL_FAIL_CODES.includes('refused-duplicate-device')) && verdictOf(DF.DIAL_REASONS.includes('duplicate-device')), 'duplicate-device is a named refusal, a named failure and a row reason');
   const R = Object.assign(new Error('x'), { code: 'UPGRADE_REFUSED', status: 401, refusal: 'duplicate-device', body: JSON.stringify({ error: DF.refusalSentence('duplicate-device', 'mac') }) });
   const f = DF.dialFailureOf(R);
-  ok(f.code === 'refused-duplicate-device' && /pair this machine under its own name/.test(f.detail) && f.status === 401, 'the daemon classifies the 401 as refused-duplicate-device with the sentence', f);
+  ok(f.code === 'refused-duplicate-device' && gateOf(/pair this machine under its own name/.test(f.detail)) && f.status === 401, 'the daemon classifies the 401 as refused-duplicate-device with the sentence', f);
   eq(DF.dialReasonOf('refused-duplicate-device'), 'duplicate-device', 'the row reason is duplicate-device');
   eq([DF.dialReasonOf('held'), DF.DIAL_REASONS.includes('held')], ['held', true], 'the B-f276 remainder (its read N5): a dial met while the hub held its machines is the row reason «held», never «unknown»');
-  ok(/^dial-out refused — duplicate-device: pair this machine/.test(DF.dialLogLine({ outcome: 'failed', code: f.code, detail: f.detail, attempt: 3, delay: 5000 })), 'the daemon log line names it');
+  ok(verdictOf(/^dial-out refused — duplicate-device: pair this machine/.test(DF.dialLogLine({ outcome: 'failed', code: f.code, detail: f.detail, attempt: 3, delay: 5000 }))), 'the daemon log line names it');
   ok(DF.refusalSentence('duplicate-device', 'mac').length <= DF.DETAIL_MAX, 'the sentence for a short id fits the 200-char detail (the way out comes first so a cut never loses it)');
   const now = 1_000_000_000;
   const row = (dupAt) => DF.dialRowState({ transport: 'dial', online: true, dial: { lastConnectAt: 5, lastAccept: { at: 5, attempt: 0 }, lastDuplicate: { at: dupAt, from: '10.0.0.9', boot: '11223344' } } }, { now });
@@ -552,8 +552,8 @@ console.log('verify-r2 the dial endpoint: ONE answer for an unknown name and a w
 {
   // the sentence a stranger hears names no difference between "not paired here" and "another command"
   const s = DF.refusalSentence('token-mismatch', 'mac');
-  ok(/generate a new command in the pairing dialog/.test(s) && /or pair again if it is no longer listed/.test(s), 'the token-mismatch sentence covers a removed pairing too (the gate answers it for an unknown name)');
-  ok(DF.refusalSentence('token-mismatch', 'Macbook-Pro-13').length <= DF.DETAIL_MAX && /^the dial token does not match the pairing on record for "mac"/.test(s), '…and fits the 200-char detail whole for an id up to 14 characters (the daemon cuts its detail at 200)');
+  ok(gateOf(/generate a new command in the pairing dialog/.test(s)) && verdictOf(/or pair again if it is no longer listed/.test(s)), 'the token-mismatch sentence covers a removed pairing too (the gate answers it for an unknown name)');
+  ok(DF.refusalSentence('token-mismatch', 'Macbook-Pro-13').length <= DF.DETAIL_MAX && verdictOf(/^the dial token does not match the pairing on record for "mac"/.test(s)), '…and fits the 200-char detail whole for an id up to 14 characters (the daemon cuts its detail at 200)');
   // the key: IPv4 as is (mapped too), IPv6 by its /64, junk verbatim
   const K = DF.refusalAddressKey;
   eq(['10.0.0.9', '::ffff:10.0.0.9', '2001:db8:1:2:3:4:5:6', '2001:DB8:0001:0002::9', '2001:db8:1:2::ffff', 'fe80::1%eth0', '::1', 'garbage', null, ''].map(K),
@@ -571,14 +571,14 @@ console.log('verify-r2 the dial endpoint: ONE answer for an unknown name and a w
   // a stale device retrying every 30 s never meets the budget (20 per window)
   {
     const b = DF.refusalBudget();
-    ok(Array.from({ length: 60 }, (_, i) => b.hit('203.0.113.7', 'mac', t + i * 30000)).every((x) => x.log), 'a stale device retrying every 30 s (20 per window) is logged every time for 30 min');
+    ok(verdictOf(Array.from({ length: 60 }, (_, i) => b.hit('203.0.113.7', 'mac', t + i * 30000)).every((x) => x.log)), 'a stale device retrying every 30 s (20 per window) is logged every time for 30 min');
   }
   // two paired devices behind ONE address (the relay's loopback, a home NAT) never mute each other
   {
     const b = DF.refusalBudget();
     const r = [];
     for (let i = 0; i < 25; i++) { r.push(b.hit('127.0.0.1', 'mac', t + i)); r.push(b.hit('127.0.0.1', 'pi', t + i)); }
-    ok(r.every((x) => x.log), 'two paired devices behind one address: each keyed by its own name — 25 + 25 all logged');
+    ok(verdictOf(r.every((x) => x.log)), 'two paired devices behind one address: each keyed by its own name — 25 + 25 all logged');
     const g = Array.from({ length: 40 }, (_, i) => b.hit('127.0.0.1', '', t + 100 + i));
     ok(g.filter((x) => x.log).length === 30 && b.hit('127.0.0.1', 'mac', t + 200).log === true, '…guessed names from that address share ONE key (30), and the paired device is still logged');
   }
@@ -590,7 +590,7 @@ console.log('verify-r2 the dial endpoint: ONE answer for an unknown name and a w
     ok(lines <= B.globalMax + 1, `50 000 refusals rotating over 782 /64s write ${lines} lines (≤ ${B.globalMax + 1}: the window's ceiling holds whatever the keys)`);
     ok(b.size() <= 256, `…the map holds ≤ its cap (${b.size()} of 256)`);
     const hitsL = linear((n) => Array.from({ length: n }, (_, i) => `2001:db8:${(i >> 6).toString(16)}::${i.toString(16)}`), (ips) => { const bb = DF.refusalBudget({ keys: 256 }); for (let i = 0; i < ips.length; i++) bb.hit(ips[i], '', t + i); }, 25000, ['src/dial-facts.js']);
-    ok(hitsL.ok, `…O(1) per hit: 25 000 hits ${hitsL.w1} ops, 50 000 hits ${hitsL.w2} ops, ×${hitsL.r.toFixed(2)} ≤ ${LINEAR_BOUND} — counted in work, never the clock (the WIP's whole-map sweep past 4 096 keys was quadratic: 3.3 s for 40 000)`);
+    ok(verdictOf(hitsL.ok), `…O(1) per hit: 25 000 hits ${hitsL.w1} ops, 50 000 hits ${hitsL.w2} ops, ×${hitsL.r.toFixed(2)} ≤ ${LINEAR_BOUND} — counted in work, never the clock (the WIP's whole-map sweep past 4 096 keys was quadratic: 3.3 s for 40 000)`);
   }
   // the ceiling counts LINES, not knocks: one noisy address spends its own 30, never the others' share
   {
@@ -606,9 +606,9 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
   console.log('verify-r3 B-grad');
   const inv = DF.sshInstallInvocation({ args: GRAD_ARGS, installer: '#!/usr/bin/env bash\nset -euo pipefail\n' });
   ok(inv.remote === 'bash -s' && !/vs[dh]t_/.test(inv.remote), 'verify-r3 B-grad: the remote command (the local ssh\'s argv, the remote shell\'s command line) is the bare `bash -s` — no token', inv.remote);
-  ok(inv.stdin.startsWith('set -- ' + GRAD_ARGS + '\n#!/usr/bin/env bash\n'), 'verify-r3 B-grad: the arguments ride stdin as ONE `set -- …` line before the installer\'s text');
+  ok(verdictOf(inv.stdin.startsWith('set -- ' + GRAD_ARGS + '\n#!/usr/bin/env bash\n')), 'verify-r3 B-grad: the arguments ride stdin as ONE `set -- …` line before the installer\'s text');
   const wsrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/const inv = require\('\.\.\/dial-facts\.js'\)\.sshInstallInvocation\(\{ args, installer \}\);/.test(wsrc) && /execFile\('ssh', \[\.\.\.hosts\.sshArgs\(h, \{ multiplex: true \}\), '--', inv\.remote\]/.test(wsrc) && /child\.stdin\.end\(inv\.stdin\);/.test(wsrc) && !/bash -s -- \$\{args\}/.test(wsrc), 'WIRING (B-grad): graduateHostToDial runs ssh with inv.remote and writes inv.stdin (no `bash -s -- ${args}` left)');
+  ok(gateOf(/const inv = require\('\.\.\/dial-facts\.js'\)\.sshInstallInvocation\(\{ args, installer \}\);/.test(wsrc)) && gateOf(/execFile\('ssh', \[\.\.\.hosts\.sshArgs\(h, \{ multiplex: true \}\), '--', inv\.remote\]/.test(wsrc)) && gateOf(/child\.stdin\.end\(inv\.stdin\);/.test(wsrc)) && !/bash -s -- \$\{args\}/.test(wsrc), 'WIRING (B-grad): graduateHostToDial runs ssh with inv.remote and writes inv.stdin (no `bash -s -- ${args}` left)');
 }
 
 // ── verify-r3 B-inst: no token in any argv on the DEVICE — the pasted command, the installers' children, the daemon ──
@@ -617,14 +617,14 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
   const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const sm = rd('src/lib/sidebar-mounts.js'), sh = rd('scripts/vibespace-agentd-install.sh'), ps = rd('scripts/vibespace-agentd-install.ps1'), ad = rd('src/agentd/agentd.js'), mp = rd('src/server/mounts-plugins-wiring.js');
   const macCmd = (sm.match(/\n\s+mac: `curl[^\n]*`,/) || [''])[0], linCmd = (sm.match(/\n\s+linux: `curl[^\n]*`,/) || [''])[0];
-  ok([macCmd, linCmd].every((c) => /VIBESPACE_DIAL_TOKEN=\$\{r\.dialToken\}/.test(c) && /VIBESPACE_HOST_TOKEN=\$\{r\.hostToken\}/.test(c) && /\bbash -s -- /.test(c) && c.indexOf('VIBESPACE_DIAL_TOKEN=') < c.indexOf('bash -s') && !/--dial-token|--host-token/.test(c)), 'the pasted macOS / Linux command hands both tokens as ENVIRONMENT assignments before `bash` — no flag (bash\'s argv is readable by every user of the device)', [macCmd.slice(0, 200), linCmd.slice(0, 200)]);
-  ok(/DIAL_TOKEN="\$\{VIBESPACE_DIAL_TOKEN:-\}"; HOST_TOKEN="\$\{VIBESPACE_HOST_TOKEN:-\}"\nunset VIBESPACE_DIAL_TOKEN VIBESPACE_HOST_TOKEN\n/.test(sh) && /--dial-token\) DIAL_TOKEN="\$2"/.test(sh), 'install.sh reads the tokens from its environment (the flags still accepted) and UNSETS them before anything starts');
+  ok(verdictOf([macCmd, linCmd].every((c) => /VIBESPACE_DIAL_TOKEN=\$\{r\.dialToken\}/.test(c) && /VIBESPACE_HOST_TOKEN=\$\{r\.hostToken\}/.test(c) && /\bbash -s -- /.test(c) && c.indexOf('VIBESPACE_DIAL_TOKEN=') < c.indexOf('bash -s') && !/--dial-token|--host-token/.test(c))), 'the pasted macOS / Linux command hands both tokens as ENVIRONMENT assignments before `bash` — no flag (bash\'s argv is readable by every user of the device)', [macCmd.slice(0, 200), linCmd.slice(0, 200)]);
+  ok(gateOf(/DIAL_TOKEN="\$\{VIBESPACE_DIAL_TOKEN:-\}"; HOST_TOKEN="\$\{VIBESPACE_HOST_TOKEN:-\}"\nunset VIBESPACE_DIAL_TOKEN VIBESPACE_HOST_TOKEN\n/.test(sh)) && verdictOf(/--dial-token\) DIAL_TOKEN="\$2"/.test(sh)), 'install.sh reads the tokens from its environment (the flags still accepted) and UNSETS them before anything starts');
   const shChildren = sh.split('\n').filter((l) => /"\$NODE_BIN"/.test(l) && /DIAL_TOKEN|HOST_TOKEN/.test(l));
-  ok(shChildren.length === 2 && shChildren.every((l) => /^\s*(CHECK_OUT=\$\()?VIBESPACE_DIAL_TOKEN="\$DIAL_TOKEN" /.test(l) && !/"\$(DIAL|HOST)_TOKEN"\s*(2>&1\)|\\?$)/.test(l.replace(/^\s*(CHECK_OUT=\$\()?VIBESPACE_DIAL_TOKEN="\$DIAL_TOKEN" /, ''))), 'install.sh: the two node children that need the dial token (the check, the dial.json writer) get it in THEIR environment, never an argument', shChildren);
+  ok(shChildren.length === 2 && verdictOf(shChildren.every((l) => /^\s*(CHECK_OUT=\$\()?VIBESPACE_DIAL_TOKEN="\$DIAL_TOKEN" /.test(l) && !/"\$(DIAL|HOST)_TOKEN"\s*(2>&1\)|\\?$)/.test(l.replace(/^\s*(CHECK_OUT=\$\()?VIBESPACE_DIAL_TOKEN="\$DIAL_TOKEN" /, '')))), 'install.sh: the two node children that need the dial token (the check, the dial.json writer) get it in THEIR environment, never an argument', shChildren);
   ok(!/"\$DIAL_URL" "\$DIAL_TOKEN"/.test(sh) && !/--dial-check "\$DIAL_URL" --dial-token/.test(sh), 'install.sh: no child argument list carries $DIAL_TOKEN');
-  ok(/\$env:VIBESPACE_DIAL_TOKEN = \$DialToken\n\s*try \{ \$checkOut = & \$nodeExe "\$current\\vibespace-device\.js" --dial-check \$Dial 2>&1; \$checkRc = \$LASTEXITCODE \}\n\s*finally \{ Remove-Item Env:VIBESPACE_DIAL_TOKEN/.test(ps) && /-ArgumentList @\("`"\$current\\vibespace-device\.js`""\) `/.test(ps) && !/'--dial-token', \$DialToken/.test(ps) && !/--dial-check \$Dial --dial-token/.test(ps), 'install.ps1: the check gets the token in its environment (removed at once), the daemon starts ARGLESS (a self-upgrade re-exec carried every original flag for the daemon\'s whole life)');
-  ok(/const ENV_DIAL_TOKEN = String\(process\.env\.VIBESPACE_DIAL_TOKEN \|\| ''\);\ndelete process\.env\.VIBESPACE_DIAL_TOKEN; delete process\.env\.VIBESPACE_HOST_TOKEN;/.test(ad) && /const token = String\(argOf\('--dial-token'\) \|\| ENV_DIAL_TOKEN \|\| ''\);/.test(ad) && /token: \(ti >= 0 \? process\.argv\[ti \+ 1\] : ''\) \|\| ENV_DIAL_TOKEN \|\| ''/.test(ad) && /if \(cfg\.token\) \{ try \{ DFILE\.writeDurable\(\{ fs, file: DIAL_FILE/.test(ad), 'agentd.js: the token read ONCE from the environment and removed (no session / worker inherits it); --dial-check and --dial take it; an absent flag is no token (r2 read argv[0]); a `--dial` with no token never writes dial.json (B-inst r2: the re-exec)');
-  ok(/command: `VIBESPACE_DIAL_TOKEN=\$\{pair\.dialToken\} node vibespace-device\.js --dial \$\{dialUrl\}`/.test(mp), 'the pair route\'s `command` field names the environment form');
+  ok(gateOf(/\$env:VIBESPACE_DIAL_TOKEN = \$DialToken\n\s*try \{ \$checkOut = & \$nodeExe "\$current\\vibespace-device\.js" --dial-check \$Dial 2>&1; \$checkRc = \$LASTEXITCODE \}\n\s*finally \{ Remove-Item Env:VIBESPACE_DIAL_TOKEN/.test(ps)) && gateOf(/-ArgumentList @\("`"\$current\\vibespace-device\.js`""\) `/.test(ps)) && !/'--dial-token', \$DialToken/.test(ps) && !/--dial-check \$Dial --dial-token/.test(ps), 'install.ps1: the check gets the token in its environment (removed at once), the daemon starts ARGLESS (a self-upgrade re-exec carried every original flag for the daemon\'s whole life)');
+  ok(gateOf(/const ENV_DIAL_TOKEN = String\(process\.env\.VIBESPACE_DIAL_TOKEN \|\| ''\);\ndelete process\.env\.VIBESPACE_DIAL_TOKEN; delete process\.env\.VIBESPACE_HOST_TOKEN;/.test(ad)) && gateOf(/const token = String\(argOf\('--dial-token'\) \|\| ENV_DIAL_TOKEN \|\| ''\);/.test(ad)) && gateOf(/token: \(ti >= 0 \? process\.argv\[ti \+ 1\] : ''\) \|\| ENV_DIAL_TOKEN \|\| ''/.test(ad)) && verdictOf(/if \(cfg\.token\) \{ try \{ DFILE\.writeDurable\(\{ fs, file: DIAL_FILE/.test(ad)), 'agentd.js: the token read ONCE from the environment and removed (no session / worker inherits it); --dial-check and --dial take it; an absent flag is no token (r2 read argv[0]); a `--dial` with no token never writes dial.json (B-inst r2: the re-exec)');
+  ok(verdictOf(/command: `VIBESPACE_DIAL_TOKEN=\$\{pair\.dialToken\} node vibespace-device\.js --dial \$\{dialUrl\}`/.test(mp)), 'the pair route\'s `command` field names the environment form');
 }
 
 // ── verify-r3 THE DIAL-TOKEN DOOR CENSUS (grep-derived): every mint, hash, compare, log and device write of a pairing
@@ -688,13 +688,13 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
   const FILES = Object.fromEntries(tracked.map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]).concat([[DOOR, fs.readFileSync(path.join(REPO, DOOR), 'utf8')]]));
   const v = doorCensus(FILES);
   ok(v.length === 0, `every mint / hash / compare / log / device write of a pairing token goes through THE ONE door (${Object.keys(FILES).filter((f) => TOKENISH.test(FILES[f])).length} token-handling files of ${Object.keys(FILES).length} scanned)`, v);
-  ok(EXEMPT.every((x) => FILES[x.file] && FILES[x.file].split('\n').some((l) => x.re.test(l))), `the census's ${EXEMPT.length} exemptions each still name a real line (a stale exemption is a hole)`);
+  ok(verdictOf(EXEMPT.every((x) => FILES[x.file] && FILES[x.file].split('\n').some((l) => x.re.test(l)))), `the census's ${EXEMPT.length} exemptions each still name a real line (a stale exemption is a hole)`);
   // the door itself: the three verbs, the constant-time compare, the shapes
   const PT = require(path.join(REPO, DOOR));
   const d = PT.mintToken('dial'), h = PT.mintToken('host');
-  ok(/^vsdt_[0-9a-f]{36}$/.test(d) && /^vsht_[0-9a-f]{48}$/.test(h) && PT.mintToken('dial') !== d, 'mintToken: vsdt_ + 36 hex, vsht_ + 48 hex, fresh each time');
-  ok(PT.tokenMatches(d, PT.tokenHash(d)) && !PT.tokenMatches(d + 'x', PT.tokenHash(d)) && !PT.tokenMatches('', PT.tokenHash('')) && !PT.tokenMatches(d, 'nothex') && !PT.tokenMatches(null, PT.tokenHash(d)) && !PT.tokenMatches(d, PT.tokenHash(d).toUpperCase()), 'tokenMatches: the right token only; an empty / missing / malformed side is false');
-  ok(/crypto\.timingSafeEqual\(Buffer\.from\(tokenHash\(token\), 'hex'\), Buffer\.from\(hash, 'hex'\)\)/.test(FILES[DOOR]), 'the compare is crypto.timingSafeEqual over the two 32-byte digests');
+  ok(gateOf(/^vsdt_[0-9a-f]{36}$/.test(d)) && gateOf(/^vsht_[0-9a-f]{48}$/.test(h)) && PT.mintToken('dial') !== d, 'mintToken: vsdt_ + 36 hex, vsht_ + 48 hex, fresh each time');
+  ok(gateOf(PT.tokenMatches(d, PT.tokenHash(d))) && !PT.tokenMatches(d + 'x', PT.tokenHash(d)) && !PT.tokenMatches('', PT.tokenHash('')) && !PT.tokenMatches(d, 'nothex') && !PT.tokenMatches(null, PT.tokenHash(d)) && !PT.tokenMatches(d, PT.tokenHash(d).toUpperCase()), 'tokenMatches: the right token only; an empty / missing / malformed side is false');
+  ok(verdictOf(/crypto\.timingSafeEqual\(Buffer\.from\(tokenHash\(token\), 'hex'\), Buffer\.from\(hash, 'hex'\)\)/.test(FILES[DOOR])), 'the compare is crypto.timingSafeEqual over the two 32-byte digests');
   // the wiring: every token path names the door (lane vault-e2e-password-fix-r2: the host-token store is src/server/host-tokens.js — the vault's entries)
   const uses = { 'src/server/dial-pairing.js': [/PT\.mintToken\('dial'\)/, /PT\.tokenHash\(tok\)/, /PT\.tokenMatches\(tok, want\)/], 'src/server/host-tokens.js': [/pairing-token\.js'\)\.mintToken\('host'\)/], 'src/agentd/agentd.js': [/pairing-token\.js'\)\.tokenHash\(raw\)/, /pairing-token\.js'\)\.tokenMatches\(msg\.hostToken, want\)/], 'src/agentd/client.js': [/PT\.mintToken\('host'\)/, /PT\.tokenHash\(raw\)/], 'src/dial-session-bridge.js': [/PT\.tokenMatches\(msg\.hostToken, PT\.tokenHash\(want\)\)/], 'src/server/mounts-plugins-wiring.js': [/await dm\.placeSecret\(root \+ '\/state\/dial\.json', body, \{ by: actBy \}\)/] };
   const miss = Object.entries(uses).flatMap(([f, res]) => res.filter((re) => !re.test(FILES[f])).map((re) => `${f}: ${re}`));
@@ -711,7 +711,7 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
     // (the call is spelled in two pieces: the tier rule's binary detector reads a literal ssh launch as this suite running ssh)
     ['R6', 'src/server/mounts-plugins-wiring.js', `      const child = ${SSH_CALL}, [...hosts.sshArgs(h, { multiplex: true }), '--', inv.remote],`, `      const child = ${SSH_CALL}, [...hosts.sshArgs(h, { multiplex: true }), '--', \`bash -s -- --dial-token \${pair.dialToken}\`],`],
   ];
-  for (const [rule, f, from, to] of cases) { const c = plant(f, from, to); ok(c.some((x) => x.startsWith(rule + ' ')), `CONTROL (${rule}): a planted ${rule} site in ${f} is caught`, c); }
+  for (const [rule, f, from, to] of cases) { const c = plant(f, from, to); ok(verdictOf(c.some((x) => x.startsWith(rule + ' '))), `CONTROL (${rule}): a planted ${rule} site in ${f} is caught`, c); }
 }
 
 console.log('naive-user N-refused: the refused row names the CURRENT command and says to run it (zh, the owner\'s language)');
@@ -728,7 +728,7 @@ console.log('naive-user N-refused: the refused row names the CURRENT command and
     const words = PK.dialStateText({ state: 'refused', at: now, n: 4, reason: 'token-mismatch', host: 'x:1', mintedAt: now - 60000, dup: null });
     const hm = (ms) => new Date(ms).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); // L-time: the DEVICE's locale (deviceLocale), never the browser's
     ok(words === `最近一次拨号：被拒绝（令牌不匹配），${hm(now)} — 设备上仍是比 ${hm(now - 60000)} 生成的那条更旧的命令：请在设备上运行那一条（已经找不到了再重新生成）`, 'N-refused (zh): "…设备上仍是比 <the mint> 生成的那条更旧的命令：请在设备上运行那一条（已经找不到了再重新生成）" — never a bare "请重新生成" (the rotation loop)', words);
-    ok(PK.dialStateText({ state: 'refused', at: now, n: 1, reason: 'token-mismatch', host: '' }).endsWith('请重新生成'), 'a record with no mint instant (from before the lane) keeps the old sentence');
+    ok(verdictOf(PK.dialStateText({ state: 'refused', at: now, n: 1, reason: 'token-mismatch', host: '' }).endsWith('请重新生成')), 'a record with no mint instant (from before the lane) keeps the old sentence');
     // CONTROL (l): the pre-fix words — the refused state always says "generate a new one"
     const M = mutantCopies('dialwords', REPO);
     const psrc = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
@@ -736,15 +736,15 @@ console.log('naive-user N-refused: the refused row names the CURRENT command and
     ok(lsrc !== psrc, '(l) the patch applies');
     const PL = await import(pathToFileURL(M.write('src/lib/dial-address-picker.js', lsrc, 'oldwords')).href);
     const lw = PL.dialStateText({ state: 'refused', at: now, n: 4, reason: 'token-mismatch', host: 'x:1', mintedAt: now - 60000, dup: null });
-    ok(lw.endsWith('设备上的命令已过期，请重新生成') && lw !== words, 'CONTROL (l): the pre-fix words send the user to "请重新生成" right after a Generate — the N-refused cell goes red', lw);
-    ok(/^\d\d:\d\d$/.test(hm(now)) && !/[AP]M/.test(words), 'L-time: the zh words print the time the zh way ("17:09"), never the browser\'s "05:09 PM"', words);
+    ok(gateOf(lw.endsWith('设备上的命令已过期，请重新生成')) && lw !== words, 'CONTROL (l): the pre-fix words send the user to "请重新生成" right after a Generate — the N-refused cell goes red', lw);
+    ok(gateOf(/^\d\d:\d\d$/.test(hm(now))) && !/[AP]M/.test(words), 'L-time: the zh words print the time the zh way ("17:09"), never the browser\'s "05:09 PM"', words);
     // CONTROL (m): the pre-fix clock — the browser's own locale ([]) — prints "PM" inside the zh sentence under an en-US node
     // (lane ui-language: the clock is page-time's now — the mutant swaps the one line that hands it over for an en-US clock)
     const msrc = editAnchor(psrc, 'const hhmm = (ms) => when(ms, { words: true });', "const hhmm = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });", "src/lib/dial-address-picker.js");
     ok(msrc !== psrc, '(m) the patch applies');
     const PM = await import(pathToFileURL(M.write('src/lib/dial-address-picker.js', msrc, 'browserclock')).href);
     const mw = PM.dialStateText({ state: 'refused', at: new Date().setHours(17, 9, 0, 0), n: 1, reason: 'token-mismatch', host: '', mintedAt: new Date().setHours(17, 8, 0, 0) });
-    ok(/PM/.test(mw), 'CONTROL (m): the browser\'s own clock (an en-US browser) prints "05:09 PM" inside the zh sentence — the L-time cell goes red', mw);
+    ok(verdictOf(/PM/.test(mw)), 'CONTROL (m): the browser\'s own clock (an en-US browser) prints "05:09 PM" inside the zh sentence — the L-time cell goes red', mw);
     // verify-r4 F8: what Generate does to a device NOT dialed in — said before the button (zh)
     // B-8e47: the F8 fixture is read at ONE PINNED instant (a local noon) — «two minutes ago» from a real 00:01 is yesterday,
     // and the product then prints a date (the fast tier flaked at midnight, 524/525). The product's clock is Date.now (page-time).
@@ -758,11 +758,11 @@ console.log('naive-user N-refused: the refused row names the CURRENT command and
       'CONTROL (B-8e47): the same fixture read at 00:01 crosses midnight — the sentence carries a date, the bare-time words do not match; the legs below pin the clock');
     ok(cons({ online: false, dial: { tokenMintedAt: T8, firstConnectAt: T8 + 5, lastConnectAt: T8 + 5, lastDisconnectAt: T8 + 9 } }) === '这台设备现在离线。生成新命令会替换它手上的那条：它回来时会被拒绝，直到你在它上面运行新命令。', 'F8 (zh): an OFFLINE device that worked (silent) hears it will be refused when it comes back until the new command runs on it — BEFORE the button');
     ok(cons({ online: false, dial: { tokenMintedAt: T8 } }) === NEVER(T8), 'F8 (zh): a never-connected device hears the command made at <time> stops working (naive L-generate-before)');
-    ok(/^生成新命令会替换 .* 生成的那条/.test(cons({ online: false, dial: { tokenMintedAt: T8, lastConnectAt: T8 - 5000, lastRefusal: { code: 'token-mismatch', at: T8 + 60 } } })), 'F8 (zh): a refused device (it holds an older one already) hears the NEWEST command stops working');
+    ok(verdictOf(/^生成新命令会替换 .* 生成的那条/.test(cons({ online: false, dial: { tokenMintedAt: T8, lastConnectAt: T8 - 5000, lastRefusal: { code: 'token-mismatch', at: T8 + 60 } } }))), 'F8 (zh): a refused device (it holds an older one already) hears the NEWEST command stops working');
     ok(cons({ online: true, dial: { tokenMintedAt: T8, lastConnectAt: T8 + 5 } }) === '' && PK.generateConsequenceText({ transport: 'ssh', graduated: true, dialLive: true, dial: { lastConnectAt: 5 } }) === '', 'F8: a device dialed in NOW gets no sentence here — the "send it over its link" choice and its note speak');
     const smF8 = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-    ok(/\} else if \(existing\) \{\n\s+\/\/ verify-r4 F8[^\n]*\n\s+const cons = generateConsequenceText\(h\);/.test(smF8), 'F8 wiring: the sheet of a device not dialed in shows the sentence before the button');
-    for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutant-copy (words): ' })) ok(r.pass, r.name, r.detail);
+    ok(verdictOf(/\} else if \(existing\) \{\n\s+\/\/ verify-r4 F8[^\n]*\n\s+const cons = generateConsequenceText\(h\);/.test(smF8)), 'F8 wiring: the sheet of a device not dialed in shows the sentence before the button');
+    for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutant-copy (words): ' })) ok(verdictOf(r.pass), r.name, r.detail);
   } catch (e) { ok(false, 'N-refused: the words module runs in node', e.stack); }
   finally { if (hadLS === undefined) delete globalThis.localStorage; else globalThis.localStorage = hadLS; }
 }
@@ -789,7 +789,7 @@ console.log('verify-r5 G1: the address picker, built on a mini DOM — what it c
     const LISTEN = { address: '127.0.0.1', loopbackOnly: true };
     const loopRows = DF.dialAddressCandidates({ origin: 'http://127.0.0.1:3456', hostname: 'box', interfaces: { eth0: [{ address: '192.168.4.116', family: 'IPv4', internal: false }] }, port: 3456, bind: '127.0.0.1' });
     const g1 = view(PK.dialAddressPicker({ candidates: loopRows, listen: LISTEN }));
-    ok(loopRows.length === 1 && loopRows[0].loopback === true && g1.checked.join() === 'custom' && g1.custom === '' && !!g1.value.error && g1.listen, 'G1: a server bound to 127.0.0.1 ⇒ Custom… checked and EMPTY under the listen note — the loopback row stays pickable, never checked, and Generate asks for an address', g1);
+    ok(loopRows.length === 1 && loopRows[0].loopback === true && g1.checked.join() === 'custom' && g1.custom === '' && !!g1.value.error && verdictOf(g1.listen), 'G1: a server bound to 127.0.0.1 ⇒ Custom… checked and EMPTY under the listen note — the loopback row stays pickable, never checked, and Generate asks for an address', g1);
     const g2 = view(PK.dialAddressPicker({ candidates: loopRows, relayPublishable: true, listen: LISTEN }));
     ok(g2.checked.join() === 'relay' && g2.value.viaRelay === true, 'G1: …with a relay that can be published ⇒ "Publish through the relay" checked (Generate publishes)', g2);
     const rows = DF.dialAddressCandidates({ origin: 'http://127.0.0.1:3456', relay: 'https://relay.example.net', hostname: 'workstation-1', interfaces: { eth0: [{ address: '192.168.4.116', family: 'IPv4', internal: false }] }, port: 3456 });
@@ -810,9 +810,9 @@ console.log('verify-r5 G1: the address picker, built on a mini DOM — what it c
     const claimView = (P) => { const cr = P.el.querySelectorAll('input').filter((i) => i.type === 'radio').find((r) => r.dataset.base === 'https://evil.example'); const tags = P.el.querySelectorAll('.dap-claim'); return { ...view(P), claimRow: cr ? { checked: cr.checked, kind: cr.parentElement.dataset.kind } : null, claimWords: tags.map((x) => x.textContent) }; };
     const c5 = claimView(PK.dialAddressPicker({ candidates: rows, dial: claim, online: true }));
     const c6 = claimView(PK.dialAddressPicker({ candidates: rows, dial: claim, online: false }));
-    ok(c5.checked.join() === 'base:http://192.168.4.116:3456' && c5.value.base === 'http://192.168.4.116:3456' && c5.own === '这台设备当前命令用的地址' && c5.claimRow && c5.claimRow.checked === false && c5.claimRow.kind === 'claim' && c5.claimWords.join() === '这台设备自称正在通过它连接 — 这不是 VibeSpace 提供的地址，所以没有勾选：只有确认它是你的地址才选它' && c6.claimWords.join() === '这台设备自称上次通过它连接 — 这不是 VibeSpace 提供的地址，所以没有勾选：只有确认它是你的地址才选它', 'C1 / L1 (zh): a device stating an address VibeSpace did not offer ⇒ its command\'s base CHECKED ("这台设备当前命令用的地址"), the claim a row of its own, UNCHECKED, "只有确认它是你的地址才选它" (r5: the claim checked — one Generate minted it)', { c5, c6 });
+    ok(c5.checked.join() === 'base:http://192.168.4.116:3456' && c5.value.base === 'http://192.168.4.116:3456' && c5.own === '这台设备当前命令用的地址' && gateOf(c5.claimRow) && c5.claimRow.checked === false && c5.claimRow.kind === 'claim' && c5.claimWords.join() === '这台设备自称正在通过它连接 — 这不是 VibeSpace 提供的地址，所以没有勾选：只有确认它是你的地址才选它' && c6.claimWords.join() === '这台设备自称上次通过它连接 — 这不是 VibeSpace 提供的地址，所以没有勾选：只有确认它是你的地址才选它', 'C1 / L1 (zh): a device stating an address VibeSpace did not offer ⇒ its command\'s base CHECKED ("这台设备当前命令用的地址"), the claim a row of its own, UNCHECKED, "只有确认它是你的地址才选它" (r5: the claim checked — one Generate minted it)', { c5, c6 });
     const c7 = claimView(PK.dialAddressPicker({ candidates: rows, dial: { tokenMintedAt: 10, lastConnectAt: 20, lastAccept: { dialed: 'https://evil.example' } }, online: true }));
-    ok(c7.checked.join() === 'base:https://relay.example.net' && c7.ownCls === 'dap-own dap-claim' && c7.own === '这是猜测 — 这台设备拨号用的地址不是 VibeSpace 提供的（见下方，未勾选）：请选它能连到的那个' && c7.claimRow && c7.claimRow.checked === false, 'L1 (zh): no mint facts, only a claim ⇒ the first reachable row checked and SAID to be a guess, the claim unchecked below', c7);
+    ok(c7.checked.join() === 'base:https://relay.example.net' && c7.ownCls === 'dap-own dap-claim' && c7.own === '这是猜测 — 这台设备拨号用的地址不是 VibeSpace 提供的（见下方，未勾选）：请选它能连到的那个' && gateOf(c7.claimRow) && c7.claimRow.checked === false, 'L1 (zh): no mint facts, only a claim ⇒ the first reachable row checked and SAID to be a guess, the claim unchecked below', c7);
     // CONTROL (s): r4 F3's picker line reverted — the loopback row is checked again on the 127.0.0.1 server
     const M = mutantCopies('dialpicker', REPO);
     const psrc = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
@@ -821,7 +821,7 @@ console.log('verify-r5 G1: the address picker, built on a mini DOM — what it c
     const PS = await import(pathToFileURL(M.write('src/lib/dial-address-picker.js', ssrc, 'loopcheck')).href);
     const s1 = view(PS.dialAddressPicker({ candidates: loopRows, listen: LISTEN }));
     ok(s1.checked.join() === 'base:http://127.0.0.1:3456' && s1.value.base === 'http://127.0.0.1:3456', 'CONTROL (s): the pre-F3 picker checks the LOOPBACK row on a 127.0.0.1-bound server and Generate would hand a device elsewhere http://127.0.0.1 — the G1 cell goes red', s1);
-    for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy (picker): ' })) ok(r.pass, r.name, r.detail);
+    for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy (picker): ' })) ok(verdictOf(r.pass), r.name, r.detail);
   } catch (e) { ok(false, 'G1: the picker builds on the mini DOM', e.stack); }
   finally {
     if (hadDoc === undefined) delete globalThis.document; else globalThis.document = hadDoc;
@@ -939,7 +939,7 @@ console.log('controls (patched copies)');
   const c = editAnchor(editAnchor(src, "if (p[0] === 127 || p[0] === 0) return null;", "if (p[0] === 0) return null;", "src/dial-facts.js"), 'if (!a || a.internal) continue;', 'if (!a) continue;', "src/dial-facts.js");
   ok(c !== src, '(c) the patch applies');
   const C = M.load('src/dial-facts.js', c, 'loopback');
-  ok(C.dialAddressCandidates({ interfaces: IF, port: 1 }).some((r) => r.base.includes('127.0.0.1')) && !DF.dialAddressCandidates({ interfaces: IF, port: 1 }).some((r) => r.base.includes('127.')), 'CONTROL (c): candidates including loopback are caught');
+  ok(gateOf(C.dialAddressCandidates({ interfaces: IF, port: 1 }).some((r) => r.base.includes('127.0.0.1'))) && !DF.dialAddressCandidates({ interfaces: IF, port: 1 }).some((r) => r.base.includes('127.')), 'CONTROL (c): candidates including loopback are caught');
   // (d) the pre-verify push: whoever holds the old command gets the new token whenever a device is dialed in
   const d = editAnchor(src, "  if (!live) return { push: false, why: 'not-dialed-in' };\n  return { push: false, why: 'not-requested' };", "  if (!live) return { push: false, why: 'not-dialed-in' };\n  return { push: true, why: 'requested' };", "src/dial-facts.js");
   ok(d !== src, '(d) the patch applies');
@@ -958,7 +958,7 @@ console.log('controls (patched copies)');
   const HH = M.load('src/dial-facts.js', hh, 'noheld');
   const R503 = Object.assign(new Error('x'), { code: 'UPGRADE_REFUSED', status: 503, refusal: null, body: JSON.stringify({ code: 'hosts-unread', error: 'cannot read its paired machines' }) });
   const hf = HH.dialFailureOf(R503);
-  ok(hf.code === 'http-503' && /not as a VibeSpace dial endpoint/.test(HH.dialCheckLines({ ...hf, host: 'h:1' }).lines.join('\n')) && DF.dialFailureOf(R503).code === 'held', 'CONTROL (h): without the held class the hub\'s hold reads «not a VibeSpace dial endpoint» at the install check');
+  ok(hf.code === 'http-503' && gateOf(/not as a VibeSpace dial endpoint/.test(HH.dialCheckLines({ ...hf, host: 'h:1' }).lines.join('\n'))) && DF.dialFailureOf(R503).code === 'held', 'CONTROL (h): without the held class the hub\'s hold reads «not a VibeSpace dial endpoint» at the install check');
   // (e) B9: a verdict that never refuses (the pre-B9 rule: a newcomer always replaces)
   const e = editAnchor(src, "if (current.alive === true) return { action: 'refuse', why: 'duplicate' };", '', "src/dial-facts.js");
   ok(e !== src, '(e) the patch applies');
@@ -991,7 +991,7 @@ console.log('controls (patched copies)');
   const i2 = editAnchor(src, "return { remote: 'bash -s', stdin: `set -- ${String(args)}\\n${String(installer)}` };", "return { remote: `bash -s -- ${String(args)}`, stdin: String(installer) };", "src/dial-facts.js");
   ok(i2 !== src, '(i) the patch applies');
   const I2 = M.load('src/dial-facts.js', i2, 'argvinstall');
-  ok(/vsdt_/.test(I2.sshInstallInvocation({ args: GRAD_ARGS, installer: '#!/usr/bin/env bash' }).remote), 'CONTROL (i): r2\'s composition puts the dial token in the ssh remote command (the argv) — the B-grad leg goes red');
+  ok(verdictOf(/vsdt_/.test(I2.sshInstallInvocation({ args: GRAD_ARGS, installer: '#!/usr/bin/env bash' }).remote)), 'CONTROL (i): r2\'s composition puts the dial token in the ssh remote command (the argv) — the B-grad leg goes red');
   // (j) naive-user N-loop: the pre-fix list — the loopback origin first (rank by kind only) and the first row the default
   const j2 = editAnchor(editAnchor(src, 'rank: loop ? CANDIDATE_KINDS.length : CANDIDATE_KINDS.indexOf(kind)', 'rank: CANDIDATE_KINDS.indexOf(kind)', "src/dial-facts.js"), 'const reach = rows.find((c) => !c.loopback && !isLoopbackBase(c.base));', 'const reach = rows[0];', "src/dial-facts.js");
   ok(j2 !== src && j2.split('rows[0];').length === 2, '(j) the patch applies (both halves)');
@@ -1087,9 +1087,9 @@ console.log('controls (patched copies)');
     const fPk = M.write(pkRel, pkMut, 'census-origin'), fDp = M.write(dpRel, dpMut, 'census-host');
     const readWith = (rel, file) => (f) => fs.readFileSync(f === rel ? file : path.join(REPO, f), 'utf8');
     const c1 = receiverFactCensus(readWith(pkRel, fPk)), c2 = receiverFactCensus(readWith(dpRel, fDp));
-    ok(c1.unclaimed.some((x) => /location\.origin/.test(x)) && c2.unclaimed.some((x) => /^src\/server\/dial-pairing\.js: req\.headers\.host,req\.headers\.host/.test(x)), 'CONTROL (q): the browser\'s origin as the Custom… default, and the device\'s address read off the Host header, each turn THE CENSUS red', { c1, c2 });
+    ok(gateOf(c1.unclaimed.some((x) => /location\.origin/.test(x))) && verdictOf(c2.unclaimed.some((x) => /^src\/server\/dial-pairing\.js: req\.headers\.host,req\.headers\.host/.test(x))), 'CONTROL (q): the browser\'s origin as the Custom… default, and the device\'s address read off the Host header, each turn THE CENSUS red', { c1, c2 });
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 16, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 16, label: 'mutant-copy: ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 // ── macOS bash 3.2 (the owner's Mac, 2026-10-02 "bash: line 253: DHOST?: unbound variable") ──
@@ -1109,12 +1109,12 @@ console.log('controls (patched copies)');
     const hits = offenders(fs.readFileSync(path.join(REPO, rel), 'utf8'));
     ok(hits.length === 0, `${rel}: every expansion followed by a non-ASCII byte is braced`, hits);
   }
-  ok(seen.has('scripts/vibespace-agentd-install.sh') && seen.size >= 2, `the census covered ${seen.size} shell scripts incl. the device installer`, [...seen]);
+  ok(gateOf(seen.has('scripts/vibespace-agentd-install.sh')) && seen.size >= 2, `the census covered ${seen.size} shell scripts incl. the device installer`, [...seen]);
   const fixed = fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.sh'), 'utf8');
-  ok(/echo "→ checking that this device can dial \$\{DHOST\}…"/.test(fixed), 'the dial-check line itself is the braced form');
+  ok(verdictOf(/echo "→ checking that this device can dial \$\{DHOST\}…"/.test(fixed)), 'the dial-check line itself is the braced form');
   // CONTROL: the pre-fix line (b924041f) is caught by the same rule
   const preFix = fixed.replace('can dial ${DHOST}…', 'can dial $DHOST…');
-  ok(preFix !== fixed && offenders(preFix).length === 1 && /DHOST…/.test(offenders(preFix)[0]), 'CONTROL: the 2.369.197–.199 line `$DHOST…` is the one offender the rule names');
+  ok(preFix !== fixed && offenders(preFix).length === 1 && verdictOf(/DHOST…/.test(offenders(preFix)[0])), 'CONTROL: the 2.369.197–.199 line `$DHOST…` is the one offender the rule names');
 }
 
 console.log('③k a refused key\'s sentence names a door ITS row has (lane lg-remote-hardening B-7f0b — the read\'s must 2)');
@@ -1166,11 +1166,11 @@ console.log('③k a refused key\'s sentence names a door ITS row has (lane lg-re
   else {
     const MKw = mutantCopies('dialkey-words', REPO);
     const PKm = await import(pathToFileURL(MKw.write('src/lib/dial-address-picker.js', anchored(DPsrc, doorAnchor, "    if (true) return t(", 'side-only'), 'side-only', { esm: true })).href);
-    ok(PKm.dialStateText({ state: 'key-refused', side: 'hub', code: 'hub-key-mismatch', door: 'dial-out', at: T0 + 60, n: 0, reason: null, host: '' }).startsWith(I18.t(W8.hubPairing)), 'RED CONTROL: words chosen by the side alone tell a machine upgraded from ssh to use «Pairing command…», a door its row does not draw (the leg above refuses that)');
-    for (const r of copiesCensus(MKw.files, MKw.dir, REPO, { minCopies: 1, label: 'mutant-copy (key-refused words): ' })) ok(r.pass, r.name, r.detail);
+    ok(verdictOf(PKm.dialStateText({ state: 'key-refused', side: 'hub', code: 'hub-key-mismatch', door: 'dial-out', at: T0 + 60, n: 0, reason: null, host: '' }).startsWith(I18.t(W8.hubPairing))), 'RED CONTROL: words chosen by the side alone tell a machine upgraded from ssh to use «Pairing command…», a door its row does not draw (the leg above refuses that)');
+    for (const r of copiesCensus(MKw.files, MKw.dir, REPO, { minCopies: 1, label: 'mutant-copy (key-refused words): ' })) ok(verdictOf(r.pass), r.name, r.detail);
   }
   } finally { if (hadLSk === undefined) delete globalThis.localStorage; else globalThis.localStorage = hadLSk; }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

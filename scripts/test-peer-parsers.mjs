@@ -25,7 +25,7 @@ import { judgeInChild } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 700) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -287,7 +287,7 @@ for (const row of ROWS) {
   const mod = MODS[row.mod];
   const over = row.cap.n + 4096;
   if (row.cap.byCaller) ok(true, `${row.mod}.${row.fn}: cap = the caller's (${row.cap.byCaller})`);
-  else { const out = row.run(mod, row.capInput ? row.capInput(over) : 'x'.repeat(over)); ok(row.cap.holds(out, row.cap.n), `${row.mod}.${row.fn}: an input over its cap (${row.cap.n}) is refused or bounded`, J(out).slice(0, 200)); }
+  else { const out = row.run(mod, row.capInput ? row.capInput(over) : 'x'.repeat(over)); ok(verdictOf(row.cap.holds(out, row.cap.n)), `${row.mod}.${row.fn}: an input over its cap (${row.cap.n}) is refused or bounded`, J(out).slice(0, 200)); }
 }
 {
   const verdicts = new Array(ROWS.length);
@@ -327,7 +327,7 @@ for (const row of ROWS) {
 ok(TEXT_CAP === 64 * K && R.MAX_TEXT === 64 * K, 'the block readers\' bound IS the record\'s MAX_TEXT (64 KiB)');
 const gmailSrc = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
 const gmailCode = gmailSrc.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-ok(/const STRIP_HTML_MAX = 512 \* 1024;/.test(gmailCode) && /const ADDRESS_MAX = 2048;/.test(gmailSrc) && /\.slice\(0, STRIP_HTML_MAX\)/.test(gmailCode) && /\.slice\(0, ADDRESS_MAX\)/.test(gmailCode) && !/<\[\^>\]\+>/.test(gmailCode) && !/\^\(\.\*\?\)\\s\*<\(\[\^>\]\+\)>/.test(gmailCode), 'WIRING: gmail.js cuts stripHtml at 512 KiB and parseAddress at 2 KiB, and the two regexes that re-scanned to the end are gone');
+ok(gateOf(/const STRIP_HTML_MAX = 512 \* 1024;/.test(gmailCode)) && gateOf(/const ADDRESS_MAX = 2048;/.test(gmailSrc)) && gateOf(/\.slice\(0, STRIP_HTML_MAX\)/.test(gmailCode)) && gateOf(/\.slice\(0, ADDRESS_MAX\)/.test(gmailCode)) && !/<\[\^>\]\+>/.test(gmailCode) && !/\^\(\.\*\?\)\\s\*<\(\[\^>\]\+\)>/.test(gmailCode), 'WIRING: gmail.js cuts stripHtml at 512 KiB and parseAddress at 2 KiB, and the two regexes that re-scanned to the end are gone');
 ok(G.stripHtml('<html><head><title>T</title><style>p{}</style></head><body><p>Hello <b>team</b>,<br>line two</p><div>d</div><script>x()</script>&amp; &lt;3 <!-- c --> tail &nbsp;x</body></html>') === 'Hello team ,\nline two\nd\n& <3 tail x' && G.stripHtml('unfinished <a href=x words after') === 'unfinished <a href=x words after', 'stripHtml still reads a mail: raw-text elements dropped whole, block closers a newline, entities decoded, an unfinished tag is words');
 ok(J(G.parseAddress('"Ada, B" <ada@example.com>')) === J({ id: 'ada@example.com', name: 'Ada, B' }) && J(G.parseAddress('x < y <a@b.c>')) === J({ id: 'a@b.c', name: 'x < y' }) && J(G.parseAddress('ada@example.com')) === J({ id: 'ada@example.com', name: 'ada@example.com' }), 'parseAddress still reads every From shape (the LAST <…> pair is the address)');
 
@@ -358,7 +358,7 @@ const deadlineInChild = (file, fn, src) => new Promise((res) => {
   const row1 = ROWS.find((r) => r.mod === 'mail-frame' && r.fn === 'sanitizeCss');
   const css = { run: '(M, x) => M.sanitizeCss(x)', mk: `(n) => (${row1.shapes['quote pairs, no newline']})(n || 64)`, n: 8 * K, kind: 'linear' };
   const v1 = judgeInChild({ ...css, module: M.write('src/mail-frame.js', oldScan, 'per-quote-newline-scan') }), w1 = judgeInChild({ ...css, module: path.join(REPO, 'src/mail-frame.js') });
-  ok(oldScan !== mfSrc && !v1.ok && v1.r > 3 && w1.ok, `CONTROL: the mail sanitizer with round 1's per-quote newline scan is NOT linear in WORK (×${(v1.r || 0).toFixed(2)}; the real one ×${(w1.r || 0).toFixed(2)})`, J({ v1, w1 }));
+  ok(oldScan !== mfSrc && !v1.ok && v1.r > 3 && verdictOf(w1.ok), `CONTROL: the mail sanitizer with round 1's per-quote newline scan is NOT linear in WORK (×${(v1.r || 0).toFixed(2)}; the real one ×${(w1.r || 0).toFixed(2)})`, J({ v1, w1 }));
   const oldStrip = editAnchor(gmailSrc, /function stripHtml\(html\) \{[\s\S]*?\n\}\n/, `function stripHtml(html) { /* stale-pins: kept — the old gmail stripHtml as a control; a coincidence with subagent-card.js, not a pin */
   return String(html || '')
     .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')
@@ -370,7 +370,7 @@ const deadlineInChild = (file, fn, src) => new Promise((res) => {
 `, "src/channels/gmail.js");
   const realGmail = path.join(REPO, 'src/channels/gmail.js'), LT64 = `() => '<'.repeat(${64 * K})`;
   const [v2, r2, r3] = await Promise.all([deadlineInChild(M.write('src/channels/gmail.js', oldStrip, 'regex-chain-strip'), 'stripHtml', LT64), deadlineInChild(realGmail, 'stripHtml', LT64), deadlineInChild(realGmail, 'parseAddress', LT64)]);
-  ok(oldStrip !== gmailSrc && v2.over && !r2.over, `CONTROL: gmail's round-2 regex-chain stripHtml is past the ${REGEX_DEADLINE_MS} ms deadline on 64 KB of "<" (${v2.killed ? 'killed' : v2.ms + ' ms'}; the real one ${r2.ms} ms)`, J({ v2, r2 }));
+  ok(oldStrip !== gmailSrc && gateOf(v2.over) && !r2.over, `CONTROL: gmail's round-2 regex-chain stripHtml is past the ${REGEX_DEADLINE_MS} ms deadline on 64 KB of "<" (${v2.killed ? 'killed' : v2.ms + ' ms'}; the real one ${r2.ms} ms)`, J({ v2, r2 }));
   const oldAddr = editAnchor(gmailSrc, /function parseAddress\(s\) \{[\s\S]*?\n\}\n/, `function parseAddress(s) {
   const raw = String(s || '').trim();
   const m = /^(.*?)\\s*<([^>]+)>\\s*$/.exec(raw);
@@ -379,9 +379,9 @@ const deadlineInChild = (file, fn, src) => new Promise((res) => {
 }
 `, "src/channels/gmail.js");
   const v3 = await deadlineInChild(M.write('src/channels/gmail.js', oldAddr, 'lazy-address-regex'), 'parseAddress', LT64);
-  ok(oldAddr !== gmailSrc && v3.over && !r3.over, `CONTROL: gmail's round-2 lazy parseAddress regex is past the ${REGEX_DEADLINE_MS} ms deadline on 64 KB of "<" (${v3.killed ? 'killed' : v3.ms + ' ms'}; the real one ${r3.ms} ms)`, J({ v3, r3 }));
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(c.pass, c.name, c.detail);
+  ok(oldAddr !== gmailSrc && gateOf(v3.over) && !r3.over, `CONTROL: gmail's round-2 lazy parseAddress regex is past the ${REGEX_DEADLINE_MS} ms deadline on 64 KB of "<" (${v3.killed ? 'killed' : v3.ms + ' ms'}; the real one ${r3.ms} ms)`, J({ v3, r3 }));
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

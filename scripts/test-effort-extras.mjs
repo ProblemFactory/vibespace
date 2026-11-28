@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let passed = 0, failed = 0;
-const ok = (c, n, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e) : ''}`); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e) : ''}`); } };
 const am = await import(path.join(REPO, 'src/lib/agent-meta.js'));
 const { effortExtrasFor } = require(path.join(REPO, 'src/server/cli-env.js')); // re-exported from the PURE src/harness-efforts.js
 const HARNESS = require(path.join(REPO, 'src/harnesses/claude.js'));
@@ -40,10 +40,10 @@ const AUTO = { value: '', label: 'Auto (model default)' };
 const rows = am.effortOptions('claude', LEVELS, DECLARED, { head: AUTO });
 ok(vals(rows) === ',low,medium,high,xhigh,max,ultracode', 'order: Auto, the parsed levels, then the declared extras', vals(rows));
 ok(rows.find((r) => r.value === 'ultracode')?.label === 'Ultracode — xhigh effort + standing dynamic-workflow orchestration', 'the capitalized label carries the hint the way codex\'s ultra does', rows.at(-1));
-ok(am.effortOptions('claude', LEVELS, DECLARED, { capitalize: false }).find((r) => r.value === 'ultracode')?.label.startsWith('ultracode — '), 'the status-bar (lowercase) row carries it too');
+ok(verdictOf(am.effortOptions('claude', LEVELS, DECLARED, { capitalize: false }).find((r) => r.value === 'ultracode')?.label.startsWith('ultracode — ')), 'the status-bar (lowercase) row carries it too');
 ok(vals(am.effortOptions('claude', [...LEVELS, 'ultracode'], DECLARED)) === 'low,medium,high,xhigh,max,ultracode', 'a CLI that one day parses ultracode itself does not double the row');
 ok(vals(am.effortOptions('claude', LEVELS, [])) === LEVELS.join(','), 'no extras ⇒ just the levels');
-ok(vals(am.effortOptions('codex', ['high', 'ultra'], undefined)) === 'high,ultra' && am.effortLabel('codex', 'ultra', { capitalize: true }).startsWith('Ultra — delegates'), 'codex unchanged (no extras, its ultra hint intact)');
+ok(vals(am.effortOptions('codex', ['high', 'ultra'], undefined)) === 'high,ultra' && verdictOf(am.effortLabel('codex', 'ultra', { capitalize: true }).startsWith('Ultra — delegates')), 'codex unchanged (no extras, its ultra hint intact)');
 
 console.log('② the pure server gate');
 ok(vals(effortExtrasFor(DECLARED, LEVELS)) === 'ultracode', 'the CLI parsed xhigh ⇒ ultracode is answered');
@@ -82,4 +82,4 @@ const red = await runBlock(patched, answered);
 ok(red.dialog === ',low,medium,high,xhigh,max' && red.dialog !== want, 'the old replace drops ultracode the moment the fetch lands (③ would be red)', red);
 
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

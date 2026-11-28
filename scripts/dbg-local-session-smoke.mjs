@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const wt = process.argv[2] || '/tmp/vs-fixtest';
 const PORT = 3991;
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
@@ -44,10 +44,10 @@ try {
   await sleep(1500);
   // the dtach socket + wrapper must exist and be live
   const socks = fs.existsSync(path.join(wt, 'data', 'sockets')) ? fs.readdirSync(path.join(wt, 'data', 'sockets')) : [];
-  check('dtach socket created for the session', socks.some((s) => s.startsWith('cw-')), socks.join(','));
+  check('dtach socket created for the session', verdictOf(socks.some((s) => s.startsWith('cw-'))), socks.join(','));
   let procs = '';
   try { procs = execSync(`pgrep -af 'sockets/cw-${createdId}' || true`, { encoding: 'utf8' }); } catch {}
-  check('wrapper process is running (dtach spawned it)', procs.includes(createdId), procs.slice(0, 120));
+  check('wrapper process is running (dtach spawned it)', verdictOf(procs.includes(createdId)), procs.slice(0, 120));
   check('session did NOT immediately exit', !exited);
   // kill it cleanly
   ws.send(JSON.stringify({ type: 'kill', sessionId: createdId }));
@@ -57,4 +57,4 @@ try {
 } finally { try { ws.close(); } catch {} }
 
 console.log(failed ? `\n${failed} FAILED` : '\nlocal session spawn intact');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

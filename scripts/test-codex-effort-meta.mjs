@@ -30,7 +30,7 @@ import { stopWrapper } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // THE FIXTURE HOME (主开发 r788: a suite's fixtures live in the run's scratch, never the checkout's data folder). ONE home,
 // minted BEFORE any product module loads: src/adapters/codex.js fixes its sessions folder from os.homedir() at load, so ⑪b's
@@ -177,14 +177,14 @@ const sendLine = (o) => w.stdin.write(JSON.stringify(o) + '\n');
 // the reply's session_meta and the restated turn_context have both arrived.
 const sawProvisional = await waitFor(() => turnContexts().length >= 1);
 fs.writeFileSync(goFile, '');
-ok(await waitFor(() => readMeta()?.threadId === 'th-eff'), 'wrapper resumed the thread against the stub');
+ok(verdictOf(await waitFor(() => readMeta()?.threadId === 'th-eff')), 'wrapper resumed the thread against the stub');
 const settled = await waitFor(() => turnContexts().length >= 2 && events().some((r) => r.type === 'session_meta'));
 const tcs = turnContexts();
 const evs = events();
 const iFirstTc = evs.findIndex((r) => r.type === 'turn_context');
 const iSessionMeta = evs.findIndex((r) => r.type === 'session_meta');
 const premise = sawProvisional && iFirstTc >= 0 && iSessionMeta > iFirstTc;
-ok(premise,
+ok(verdictOf(premise),
   'PREMISE (the stand-in\'s placed order — not the product): the wrapper\'s synthesized turn_context was seen BEFORE the stand-in let its thread/resume reply go, and the reply\'s session_meta follows it',
   `seen before the reply: ${sawProvisional} · tc@${iFirstTc} session_meta@${iSessionMeta}`);
 // Through the REAL normalizer: the popup value is _status.effort at token_count.
@@ -195,12 +195,12 @@ const assistantTurnRecords = (turnId) => ([
 ]);
 if (!premise) console.log('  ~ ② NOT JUDGED: the race legs below hold only on their premise, which did not hold in this run (the line above names it — a premise, never the product\'s red)');
 if (premise) {
-ok(settled, 'the resumed turn produced TWO turn_context records', JSON.stringify(turnContexts().map((r) => r.payload.effort)));
+ok(verdictOf(settled), 'the resumed turn produced TWO turn_context records', JSON.stringify(turnContexts().map((r) => r.payload.effort)));
 ok(tcs[0]?.payload?.turn_id === 'turn-resumed' && tcs[0]?.payload?.effort === 'xhigh',
   'the FIRST (provisional) copy quotes the spawn env — the master bug, reproduced verbatim', JSON.stringify(tcs[0]?.payload));
 ok(tcs[1]?.payload?.turn_id === 'turn-resumed' && tcs[1]?.payload?.effort === 'ultra',
   'a SECOND copy for the SAME turn id restates it as the thread\'s real effort', JSON.stringify(tcs[1]?.payload));
-ok(rpc().every((m) => m.method !== 'turn/start'),
+ok(verdictOf(rpc().every((m) => m.method !== 'turn/start')),
   'we never started that turn — so the value we quoted first had never reached codex at all');
 
 {
@@ -237,16 +237,16 @@ console.log('— ③ set-effort reaches the APP-SERVER and the live status, not 
 {
   const before = events().length;
   sendLine({ type: 'set-effort', effort: 'high' });
-  ok(await waitFor(() => rpc().some((m) => m.method === 'thread/settings/update' && m.params?.effort === 'high')),
+  ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'thread/settings/update' && m.params?.effort === 'high'))),
     'set-effort sends thread/settings/update {effort} — the verb whose own doc is "Override the reasoning effort for subsequent turns"',
     JSON.stringify(rpc().filter((m) => m.method === 'thread/settings/update').map((m) => m.params)));
-  ok(await waitFor(() => events().slice(before).some((r) => r.type === 'event_msg' && r.payload?.type === 'thread_settings_applied' && r.payload?.thread_settings?.reasoning_effort === 'high')),
+  ok(verdictOf(await waitFor(() => events().slice(before).some((r) => r.type === 'event_msg' && r.payload?.type === 'thread_settings_applied' && r.payload?.thread_settings?.reasoning_effort === 'high'))),
     '…and records it in codex\'s OWN rollout shape (event_msg thread_settings_applied, snake_case reasoning_effort)',
     JSON.stringify(events().slice(before).filter((r) => r.payload?.type === 'thread_settings_applied').map((r) => r.payload.thread_settings)));
   // r2 review: a record in CODEX's spelling that CODEX did not write must say
   // so — the synthesized turn_context has carried `wrapper: true` since this
   // release and its settings twin was the one honesty gap left.
-  ok(events().slice(before).filter((r) => r.payload?.type === 'thread_settings_applied').every((r) => r.payload.wrapper === true),
+  ok(verdictOf(events().slice(before).filter((r) => r.payload?.type === 'thread_settings_applied').every((r) => r.payload.wrapper === true)),
     '…MARKED `wrapper: true` (codex\'s own rollout copy is the unmarked one — 9 thread_settings keys to our 5, so they can never dedup)',
     JSON.stringify(events().slice(before).filter((r) => r.payload?.type === 'thread_settings_applied').map((r) => r.payload.wrapper)));
   const wm = events().slice(before).filter((r) => r.type === 'wrapper_meta').pop();
@@ -266,11 +266,11 @@ console.log('— ③b the NEXT turn really runs at the new effort, and says so')
   // sidecar: scheduleMeta debounces 200ms, so the file is a LAGGING view and a
   // chat-input sent on its word gets queued into the turn we just stopped.
   sendLine({ type: 'interrupt' });
-  ok(await waitFor(() => events().some((r) => r.payload?.type === 'turn_aborted')),
+  ok(verdictOf(await waitFor(() => events().some((r) => r.payload?.type === 'turn_aborted'))),
     'the resumed turn was interrupted (the bench needs an idle thread)');
   const before = turnContexts().length;
   sendLine({ type: 'chat-input', text: 'go', msgId: 'm-1' });
-  ok(await waitFor(() => turnContexts().length > before), 'a new turn started', JSON.stringify(turnContexts().map((r) => r.payload.turn_id)));
+  ok(verdictOf(await waitFor(() => turnContexts().length > before)), 'a new turn started', JSON.stringify(turnContexts().map((r) => r.payload.turn_id)));
   const tc = turnContexts().pop();
   const start = rpc().filter((m) => m.method === 'turn/start').pop();
   ok(start?.params?.effort === 'high', 'turn/start carries the commanded effort', JSON.stringify(start?.params?.effort));
@@ -308,12 +308,12 @@ console.log('— ③c a REFUSED thread/settings/update records nothing about the
   const rpcOf3 = () => { try { return fs.readFileSync(rpc3, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const meta3Read = () => { try { return JSON.parse(fs.readFileSync(meta3, 'utf8')); } catch { return null; } };
   const wait3 = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(60); } return pred(); };
-  ok(await wait3(() => meta3Read()?.threadId === 'th-eff'), 'the refusing bench resumed');
+  ok(verdictOf(await wait3(() => meta3Read()?.threadId === 'th-eff')), 'the refusing bench resumed');
   const mark = ev3().length;
   w3.stdin.write(JSON.stringify({ type: 'set-effort', effort: 'max' }) + '\n');
-  ok(await wait3(() => rpcOf3().some((m) => m.method === 'thread/settings/update' && m.params?.effort === 'max')),
+  ok(verdictOf(await wait3(() => rpcOf3().some((m) => m.method === 'thread/settings/update' && m.params?.effort === 'max'))),
     'we still ASK the app-server (the verb is tried, not assumed)');
-  ok(await wait3(() => ev3().slice(mark).some((r) => r.type === 'wrapper_meta' && r.payload?.effortNext === 'max')),
+  ok(verdictOf(await wait3(() => ev3().slice(mark).some((r) => r.type === 'wrapper_meta' && r.payload?.effortNext === 'max'))),
     'the pending pick still reaches every client through the wrapper\'s OWN status record (a statement about us, which a refusal leaves true)',
     JSON.stringify(ev3().slice(mark).filter((r) => r.type === 'wrapper_meta').map((r) => r.payload.effortNext)));
   ok(!ev3().slice(mark).some((r) => r.type === 'event_msg' && r.payload?.type === 'thread_settings_applied'),
@@ -321,9 +321,9 @@ console.log('— ③c a REFUSED thread/settings/update records nothing about the
     JSON.stringify(ev3().slice(mark).filter((r) => r.payload?.type === 'thread_settings_applied').map((r) => r.payload)));
   // …and the per-turn fallback the refusal falls back to still works
   w3.stdin.write(JSON.stringify({ type: 'interrupt' }) + '\n');
-  ok(await wait3(() => ev3().some((r) => r.payload?.type === 'turn_aborted')), 'the auto-continued turn was interrupted');
+  ok(verdictOf(await wait3(() => ev3().some((r) => r.payload?.type === 'turn_aborted'))), 'the auto-continued turn was interrupted');
   w3.stdin.write(JSON.stringify({ type: 'chat-input', text: 'go', msgId: 'm-r1' }) + '\n');
-  ok(await wait3(() => rpcOf3().some((m) => m.method === 'turn/start')), 'a new turn started');
+  ok(verdictOf(await wait3(() => rpcOf3().some((m) => m.method === 'turn/start'))), 'a new turn started');
   const st3 = rpcOf3().filter((m) => m.method === 'turn/start').pop();
   ok(st3?.params?.effort === 'max', 'the per-turn param still carries the pick (the fallback a refusal leaves in place)', JSON.stringify(st3?.params?.effort));
   const tc3 = ev3().filter((r) => r.type === 'turn_context').pop();
@@ -381,7 +381,7 @@ console.log('— ⑤ the wrapper_meta fallback: a mid-turn attach is honest with
   mm.processLive({ type: 'wrapper_meta', payload: { threadId: 'th-x', model: 'gpt-6-astra', permissionMode: 'yolo', activeTurnId: 'tA', effort: 'ultra', effortNext: 'high' } });
   ok(mm.status().effort === 'ultra' && mm.status().effortNext === 'high',
     'a bare wrapper_meta carries both facts (no rollout re-read, no waiting for the next turn)', JSON.stringify({ e: mm.status().effort, n: mm.status().effortNext }));
-  ok(ops.some((o) => o.op === 'meta' && o.subtype === 'effort' && o.data?.effort === 'ultra' && o.data?.effortNext === 'high'),
+  ok(verdictOf(ops.some((o) => o.op === 'meta' && o.subtype === 'effort' && o.data?.effort === 'ultra' && o.data?.effortNext === 'high')),
     'and it EMITS the live meta op an open window listens to', JSON.stringify(ops.filter((o) => o.subtype === 'effort')));
   // a turn_context still wins for the turn it names
   mm.processLive({ type: 'turn_context', payload: { turn_id: 'tB', effort: 'high' } });
@@ -604,7 +604,7 @@ console.log('— ⑦ the WRITER: the wrapper\'s effort reaches session-meta, so 
       JSON.stringify({ o: s2._effortOrigin, changed: JSON.stringify(disk2()) !== before2 }));
     // …and boot-restore really is the reader that makes this matter.
     const bootSrc = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-    ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(bootSrc, /_effortOrigin: meta\.effortOrigin \|\| null/),
+    ok(verdictOf(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(bootSrc, /_effortOrigin: meta\.effortOrigin \|\| null/)),
       'r3 ①: …and boot-restore is what reads that key back (all three restore paths)');
   }
   const ev = require(path.join(REPO, 'src/server/stdout/codex-events.js'));
@@ -676,7 +676,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     'src/lib/chat-status-bar.js', 'src/lib/chat-view.js', 'src/ws-handler.js', 'src/session-schema.js',
     'src/harnesses/codex-models.js', 'docs/kb-file-structure.md', 'docs/kb-features.md', 'docs/kb-bugfix-invariants.md'];
   const readSite = (f) => (f.endsWith('#INDEX') ? ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f.slice(0, -6))) : read(f));
-  for (const f of SITES) ok(readSite(f).includes(PREDECESSOR), `${f} back-references the predecessor ${PREDECESSOR} (all sites name ONE version)`);
+  for (const f of SITES) ok(verdictOf(readSite(f).includes(PREDECESSOR)), `${f} back-references the predecessor ${PREDECESSOR} (all sites name ONE version)`);
   // A leftover mention of 2.369.61 is only allowed where it is ABOUT the
   // renumber (the same line names the predecessor) — anywhere else it is still
   // a cross-reference pointing at somebody else's release.
@@ -773,7 +773,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     // ① the back-reference RESOLVES: the release exists and is about the work
     //    the sites cite it for.
     const pred = claimants(PREDECESSOR);
-    ok(pred.length > 0 && pred.every(describesTheEffortTopic),
+    ok(pred.length > 0 && verdictOf(pred.every(describesTheEffortTopic)),
       `${PREDECESSOR} is a RELEASED ancestor about the effort work every site cites it for (a marker is a cross-reference — it must resolve)`,
       JSON.stringify(pred).slice(0, 200));
     // ② the number the integrator will take is genuinely free — derived from
@@ -803,8 +803,8 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     if (Number.isFinite(curN)) for (let n = latestN + 1; n <= curN; n++) { const v = `2.369.${n}`; if (headsEntry(v)) CLAIMED_HERE.add(v); }
     const cutting = CLAIMED_HERE.has(CURRENT);
     NEXT_FREE = `2.369.${Math.max(latestN, cutting ? curN : latestN) + 1}`;
-    ok([...CLAIMED_HERE].every((v) => claimants(v).length === 0), `the release(s) being cut here (${[...CLAIMED_HERE].join(', ') || 'none'}) are not yet on ${REF} — the census exempts exactly them, and only because this tree's CHANGELOG heads each`, JSON.stringify([...CLAIMED_HERE].map((v) => claimants(v))).slice(0, 200));
-    ok(Number.isFinite(latestN) && claimants(`2.369.${latestN}`).length > 0, `the latest release on ${REF_AT} is 2.369.${latestN} (derived, not declared)`, JSON.stringify(releasedNs.slice(-5)));
+    ok(verdictOf([...CLAIMED_HERE].every((v) => claimants(v).length === 0)), `the release(s) being cut here (${[...CLAIMED_HERE].join(', ') || 'none'}) are not yet on ${REF} — the census exempts exactly them, and only because this tree's CHANGELOG heads each`, JSON.stringify([...CLAIMED_HERE].map((v) => claimants(v))).slice(0, 200));
+    ok(gateOf(Number.isFinite(latestN)) && claimants(`2.369.${latestN}`).length > 0, `the latest release on ${REF_AT} is 2.369.${latestN} (derived, not declared)`, JSON.stringify(releasedNs.slice(-5)));
     const next = claimants(NEXT_FREE);
     ok(next.length === 0, `${NEXT_FREE} is unclaimed on ${REF_AT} — the integrator may take it`, JSON.stringify(next));
     // ③ and this branch stamps NO unreleased number in any of the files a
@@ -822,22 +822,22 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     // NEGATIVE CONTROL C: the census has teeth — the same predicate over a
     // site's text with an unreleased stamp spliced in reports it. (The r2
     // defect was a green assert over a number nobody had checked against git.)
-    ok(unreleasedIn(read('CLAUDE.md') + '\n(2.369.9001 residue)').includes('2.369.9001')
+    ok(gateOf(unreleasedIn(read('CLAUDE.md') + '\n(2.369.9001 residue)').includes('2.369.9001'))
        && unreleasedIn(read('CLAUDE.md')).length === 0,
       'negative control C: the census reports an unreleased stamp spliced into a real site, and is silent on the real text');
     // NEGATIVE CONTROL D: the exemption is exactly the version being cut —
     // NEXT_FREE (one past it) is still reported, and so is any number this
     // tree's CHANGELOG does not head (a bump without an entry is not a claim).
-    ok(unreleasedIn(`(${NEXT_FREE} residue)`).includes(NEXT_FREE), `negative control D: the number after the release being cut (${NEXT_FREE}) is still reported by the census`);
+    ok(verdictOf(unreleasedIn(`(${NEXT_FREE} residue)`).includes(NEXT_FREE)), `negative control D: the number after the release being cut (${NEXT_FREE}) is still reported by the census`);
     // NEGATIVE CONTROL D′: a number inside the cut range that this tree's
     // CHANGELOG does NOT head is still reported — the range is not a blanket.
     { const gap = `2.369.${latestN + 1}`; const gapClaimed = CLAIMED_HERE.has(gap);
-      ok(gapClaimed ? unreleasedIn(`(${gap} residue)`).length === 0 : unreleasedIn(`(${gap} residue)`).includes(gap),
+      ok(gapClaimed ? unreleasedIn(`(${gap} residue)`).length === 0 : verdictOf(unreleasedIn(`(${gap} residue)`).includes(gap)),
         `negative control D′: 2.369.${latestN + 1} is exempt only if this tree's CHANGELOG heads it (${gapClaimed ? 'it does' : 'it does not — reported'})`); }
     // NEGATIVE CONTROL A — the leg's own r2 defect: the predecessor release is
     // ON TOPIC, so the OLD predicate cleared it while the strict one does not.
     // This is the permanent proof that a same-topic squatter is now visible.
-    ok(pred.every(describesTheEffortTopic) && !pred.some(describesThisChange),
+    ok(gateOf(pred.every(describesTheEffortTopic)) && !pred.some(describesThisChange),
       'negative control A: the SAME-TOPIC predecessor 2.369.62 passes the old topic regex and FAILS the strict one (the blindness this r2 fixed)',
       JSON.stringify(pred).slice(0, 200));
     // NEGATIVE CONTROL B — an OFF-TOPIC squatter is still caught (the r2 case
@@ -853,11 +853,11 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     const nameOf = (x) => typeof x === 'string' && refRe.test(x);
     const readOnce = (calls) => { const logs = calls.filter((a) => a[0] === 'log'), named = calls.filter((a) => a.some(nameOf)); return logs.length === 1 && named.length === 2 && named.every((a) => a[0] === 'rev-parse'); };   // the existence check + the snapshot
     const logReads = gitCalls.filter((a) => a[0] === 'log'), byName = gitCalls.filter((a) => a.some(nameOf));
-    ok(readOnce(gitCalls),
+    ok(verdictOf(readOnce(gitCalls)),
       `⑩ reads the integration branch ONCE — ${logReads.length} log read(s) (one: the snapshot at ${REF_AT}), ${REF} named ${byName.length} time(s), only to rev-parse (the existence check and the snapshot: ${byName.map((a) => a[0]).join(', ')})`,
       JSON.stringify(gitCalls.map((a) => a.slice(0, 3))).slice(0, 400));
     { const n0 = gitCalls.length; git('log', '--format=%s', '-1', REF);   // CONTROL: one read the release's way — REF by name, through the same helper
-      ok(readOnce(gitCalls.slice(0, n0)) && !readOnce(gitCalls) && [`${REF}~1`, `${REF}@{1}`, `x..${REF}`, `${REF}:CHANGELOG.md`].every(nameOf) && !nameOf(REF_SHA) && !nameOf(`${REF_SHA}:x`) && (REF !== 'master' || !nameOf('origin/master')),
+      ok(gateOf(readOnce(gitCalls.slice(0, n0))) && !readOnce(gitCalls) && gateOf([`${REF}~1`, `${REF}@{1}`, `x..${REF}`, `${REF}:CHANGELOG.md`].every(nameOf)) && !nameOf(REF_SHA) && !nameOf(`${REF_SHA}:x`) && (REF !== 'master' || !nameOf('origin/master')),
         `CONTROL: the guard's own check, true on ⑩'s reads, is FALSE once one \`git log … ${REF}\` (a read per call, the release's way) joins them; the matcher names REF in its ~ / @{} / .. / :path forms and never the sha`); }
     // AN ILLUSTRATION of what the guard prevents (never the guard): a branch that gains the number this tree must find free BETWEEN two
     // reads — the release's per-call reader finds the latest AND ${NEXT_FREE} claimed; the one snapshot finds ${NEXT_FREE} free
@@ -884,7 +884,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
       const next = changelog.indexOf('\n## ', head.index + 1);
       entry = changelog.slice(head.index, next < 0 ? changelog.length : next);
     }
-    ok(!entry || describesThisChange(entry),
+    ok(!entry || verdictOf(describesThisChange(entry)),
       `CHANGELOG ${NEXT_FREE} is either unwritten (this branch makes no release) or describes THIS change`, entry ? entry.slice(0, 160) : 'no entry yet');
   }
 }
@@ -958,7 +958,7 @@ console.log('— ⑪a2 r2: dialog → client → THE WIRE → server ladder → 
 
   // (a) the dialog's FIRST option, on a NEW session, with the instance default set
   const autoMsg = createMsg('', 'xhigh', null);
-  ok(Object.prototype.hasOwnProperty.call(autoMsg, 'effort') && autoMsg.effort === '',
+  ok(gateOf(Object.prototype.hasOwnProperty.call(autoMsg, 'effort')) && autoMsg.effort === '',
     'r2: an explicit "Auto (model default)" survives the JSON wire as a STATED empty on a NEW create',
     JSON.stringify(autoMsg));
   const autoPick = serverPick(autoMsg, '', 'xhigh', true);
@@ -1054,13 +1054,13 @@ console.log('— ⑪b end-to-end: a rollout at ultra → descriptor → ladder �
   const ev11 = () => out11.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   const meta11Read = () => { try { return JSON.parse(fs.readFileSync(meta11, 'utf8')); } catch { return null; } };
   const wait11 = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(60); } return pred(); };
-  ok(await wait11(() => meta11Read()?.threadId === 'th-eff'), 'the ladder-env bench resumed');
-  ok(await wait11(() => ev11().some((r) => r.type === 'turn_context')), 'it produced a turn_context');
+  ok(verdictOf(await wait11(() => meta11Read()?.threadId === 'th-eff')), 'the ladder-env bench resumed');
+  ok(verdictOf(await wait11(() => ev11().some((r) => r.type === 'turn_context'))), 'it produced a turn_context');
   const tcs11 = ev11().filter((r) => r.type === 'turn_context');
   ok(tcs11[0]?.payload?.effort === 'ultra',
     'THE FIX, end to end: the FIRST (provisional) turn_context already says ultra — there is no window in which a reader sees xhigh',
     JSON.stringify(tcs11.map((r) => r.payload.effort)));
-  ok(tcs11.every((r) => r.payload.effort === 'ultra'), 'and every copy of it agrees', JSON.stringify(tcs11.map((r) => r.payload.effort)));
+  ok(verdictOf(tcs11.every((r) => r.payload.effort === 'ultra')), 'and every copy of it agrees', JSON.stringify(tcs11.map((r) => r.payload.effort)));
   // through the REAL normalizer, fed ONLY up to that first record (the owner's
   // 1137-line buffer had exactly one turn_context — that is the shape that must
   // now be right, not just the corrected restatement)
@@ -1136,8 +1136,8 @@ console.log('— ⑪b end-to-end: a rollout at ultra → descriptor → ladder �
   //     `--model claude-fable-5` on a `claude-fable-5[1m]` conversation turns
   //     1M of context into 200k.
   const rerouteRecs = realOrder.map((l) => JSON.parse(l));
-  ok(rerouteRecs.filter((r) => r.type === 'assistant').every((r) => !/\[/.test(r.message.model))
-    && /\[1m\]$/.test(rerouteRecs.find((r) => r.subtype === 'model_refusal_fallback').originalModel),
+  ok(gateOf(rerouteRecs.filter((r) => r.type === 'assistant').every((r) => !/\[/.test(r.message.model)))
+    && verdictOf(/\[1m\]$/.test(rerouteRecs.find((r) => r.subtype === 'model_refusal_fallback').originalModel)),
     'r2 ①b: the served model is BARE while the CLI’s own record proves the conversation ran a [1m] variant — the field cannot express what a resume must command');
   // …and the same measurement against the REAL corpus when there is one (this
   // is what makes (b) a fact about the format rather than about a fixture).
@@ -1191,7 +1191,7 @@ console.log('— ⑪b end-to-end: a rollout at ultra → descriptor → ladder �
   ok(!cArgs.args.includes('--model') && !cArgs.args.includes('--effort'),
     'and the claude adapter spawns the resume with NO model and NO effort flag', JSON.stringify(cArgs.args));
   const harmArgs = new ClaudeCodeAdapter({}).buildSessionArgs({ cwd: '/w', resumeId: FID, model: 'claude-fable-5', mode: 'chat' });
-  ok(harmArgs.args.join(' ').includes('--model claude-fable-5'),
+  ok(verdictOf(harmArgs.args.join(' ').includes('--model claude-fable-5')),
     'negative control: the served id WOULD have been commanded verbatim — which is the [1m] downgrade, in one argv');
 }
 
@@ -1435,4 +1435,4 @@ console.log('— ⑬ r3: a claude resume commands no model, and still gets a poo
 
 console.log(fail ? `\nFAILED (${fail} of ${pass + fail})` : `\nALL PASS (${pass})`);
 if (werr && fail) console.error('wrapper stderr:\n' + werr.slice(-2000));
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

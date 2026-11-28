@@ -22,7 +22,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ok  ' + m); } else { fail++; console.log('  ✗   ' + m + (extra ? ' — ' + extra : '')); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ok  ' + m); } else { fail++; console.log('  ✗   ' + m + (extra ? ' — ' + extra : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -63,22 +63,22 @@ function table(mod) {
 console.log('— ① the adapter derives the fork flags from the fork fact');
 const real = require(path.join(REPO, 'src/adapters/claude-code.js'));
 const t = table(real);
-ok(t.fork, 'fork:true + resumeId (no extraArgs — the API shape) ⇒ --resume <parent> --fork-session', JSON.stringify(t.argv.fork));
-ok(t.resume, 'a plain resume ⇒ neither --fork-session nor --resume-session-at');
-ok(t.at, 'forkAt ⇒ --resume-session-at <uuid> beside --fork-session', JSON.stringify(t.argv.at));
-ok(t.staleOnce, 'a stale client\'s extraArgs copy ⇒ each flag spelled ONCE (the copy dropped, other extraArgs kept)');
-ok(t.noFact, 'extraArgs --fork-session WITHOUT the fork fact ⇒ dropped (a guarded plain resume, never a half-fork the server does not track)');
-ok(t.junkAt, 'a fork point that is not id-shaped never becomes an argv token (the fork still forks)');
-ok(t.newSess, 'fork:true with no resume id ⇒ nothing to fork from, no flag');
+ok(verdictOf(t.fork), 'fork:true + resumeId (no extraArgs — the API shape) ⇒ --resume <parent> --fork-session', JSON.stringify(t.argv.fork));
+ok(verdictOf(t.resume), 'a plain resume ⇒ neither --fork-session nor --resume-session-at');
+ok(verdictOf(t.at), 'forkAt ⇒ --resume-session-at <uuid> beside --fork-session', JSON.stringify(t.argv.at));
+ok(verdictOf(t.staleOnce), 'a stale client\'s extraArgs copy ⇒ each flag spelled ONCE (the copy dropped, other extraArgs kept)');
+ok(verdictOf(t.noFact), 'extraArgs --fork-session WITHOUT the fork fact ⇒ dropped (a guarded plain resume, never a half-fork the server does not track)');
+ok(verdictOf(t.junkAt), 'a fork point that is not id-shaped never becomes an argv token (the fork still forks)');
+ok(verdictOf(t.newSess), 'fork:true with no resume id ⇒ nothing to fork from, no flag');
 
 console.log('— ① every transport composes that one argv');
 const { buildRemoteExec } = require(path.join(REPO, 'src/remote-shell.js'));
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const remote = buildRemoteExec({ cwd: '/w', shq, parts: ['claude', ...t.argv.at.map(shq)] });
-ok(remote.includes(`'--resume' '${P}' '--fork-session' '--resume-session-at' '${AT}'`), 'buildRemoteExec (ssh + dial) carries the adapter\'s fork flags verbatim', remote.slice(-160));
+ok(verdictOf(remote.includes(`'--resume' '${P}' '--fork-session' '--resume-session-at' '${AT}'`)), 'buildRemoteExec (ssh + dial) carries the adapter\'s fork flags verbatim', remote.slice(-160));
 const wc = codeOnly(read('src/ws-create.js'));
-ok(/let spawnArgs = sessionSpec\.args \|\| \[\];/.test(wc) && /exe: spawnCmd, args: spawnArgs,/.test(wc), 'local dtach + daemon pipe: the ONE line (sessionSpawnLine) runs spawnArgs, seeded from the adapter\'s sessionSpec.args');
-ok(/forkAt: data\.fork && data\.forkAtUuid \? String\(data\.forkAtUuid\) : null,/.test(wc), 'ws-create hands the fork point (data.forkAtUuid) to buildSessionArgs, only on a fork');
+ok(gateOf(/let spawnArgs = sessionSpec\.args \|\| \[\];/.test(wc)) && verdictOf(/exe: spawnCmd, args: spawnArgs,/.test(wc)), 'local dtach + daemon pipe: the ONE line (sessionSpawnLine) runs spawnArgs, seeded from the adapter\'s sessionSpec.args');
+ok(verdictOf(/forkAt: data\.fork && data\.forkAtUuid \? String\(data\.forkAtUuid\) : null,/.test(wc)), 'ws-create hands the fork point (data.forkAtUuid) to buildSessionArgs, only on a fork');
 const sshSrc = codeOnly(read('src/spawn/ssh.js')), dialSrc = codeOnly(read('src/spawn/dial.js'));
 ok((sshSrc.match(/spawnArgs\.map\(shq\)/g) || []).length >= 1 && (dialSrc.match(/spawnArgs\.map\(shq\)/g) || []).length >= 1, 'ssh.js / dial.js compose spawnArgs (the adapter argv) into buildRemoteExec');
 
@@ -88,12 +88,12 @@ const spellers = files.filter(f => /['"`]--fork-session\b/.test(codeOnly(fs.read
 ok(spellers.length === 1 && spellers[0] === path.join('adapters', 'claude-code.js'), 'the --fork-session literal lives in src/adapters/claude-code.js only (the client copy removed)', JSON.stringify(spellers));
 const sl = codeOnly(read('src/lib/session-lifecycle.js'));
 const doFork = sl.slice(sl.indexOf('async _doForkSession('), sl.indexOf('viewSession(sessionId'));
-ok(/fork: true,/.test(doFork) && /forkAtUuid: resumeAt \|\| undefined,/.test(doFork) && !/extraArgs/.test(doFork), 'the client\'s fork create sends the fact (fork + forkAtUuid), no extraArgs');
+ok(gateOf(/fork: true,/.test(doFork)) && gateOf(/forkAtUuid: resumeAt \|\| undefined,/.test(doFork)) && !/extraArgs/.test(doFork), 'the client\'s fork create sends the fact (fork + forkAtUuid), no extraArgs');
 
 const M = mutantCopies('fork-flag', REPO);
 const adSrc = read('src/adapters/claude-code.js');
 const mutSrc = editAnchor(editAnchor(adSrc, "    args.push(...claudeForkArgs({ resumeId, fork: options.fork, forkAt: options.forkAt }));\n", '', "src/adapters/claude-code.js"), "    if (FORK_FLAGS.has(flag)) {", '    if (false) {', "src/adapters/claude-code.js");   // (billing pick alive's cure: the person's extra args are read by normalizeExtraArgs — the adapter's own, shared with the create)
-ok(mutSrc !== adSrc && mutSrc.includes('if (false) {'), 'control edit applied (the adapter reads the flag from the client\'s extraArgs again)');
+ok(mutSrc !== adSrc && verdictOf(mutSrc.includes('if (false) {')), 'control edit applied (the adapter reads the flag from the client\'s extraArgs again)');
 const mt = table(M.load('src/adapters/claude-code.js', mutSrc, 'client-flag'));
 ok(!mt.fork && !mt.at, 'control: the client-extraArgs adapter ⇒ an API fork (no extraArgs) RESUMES the parent ⇒ ① RED', JSON.stringify(mt.argv.fork));
 
@@ -131,9 +131,9 @@ ok(cr.betrayed === null && cr.attempts > 0, 'a proof that throws ⇒ no verdict,
 
 const wcFull = read('src/ws-create.js');
 const wire = codeOnly(wcFull.slice(wcFull.indexOf('armLockCapture({'), wcFull.indexOf('onAdopt: (lockId)')));
-ok(/proof: \(\) => captureForkProof\(\{ session, sessionsDir: SESSIONS_DIR, sidecarPath: metaFileW, readPpid \}\)/.test(wire)
-  && /process\.kill\(Number\(lock\.pid\), 'SIGKILL'\)/.test(wire) && /session\.pty\?\.kill\(\)/.test(wire)
-  && /code: 'fork-resumed-parent'/.test(wire) && /reqId: data\.reqId/.test(wire), 'ws-create: the create chain arms the proof; a verdict SIGKILLs the fork\'s CLI, ends its session and answers the creator fork-resumed-parent');
+ok(gateOf(/proof: \(\) => captureForkProof\(\{ session, sessionsDir: SESSIONS_DIR, sidecarPath: metaFileW, readPpid \}\)/.test(wire))
+  && gateOf(/process\.kill\(Number\(lock\.pid\), 'SIGKILL'\)/.test(wire)) && gateOf(/session\.pty\?\.kill\(\)/.test(wire))
+  && gateOf(/code: 'fork-resumed-parent'/.test(wire)) && verdictOf(/reqId: data\.reqId/.test(wire)), 'ws-create: the create chain arms the proof; a verdict SIGKILLs the fork\'s CLI, ends its session and answers the creator fork-resumed-parent');
 
 console.log(`\ntest-fork-flag: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

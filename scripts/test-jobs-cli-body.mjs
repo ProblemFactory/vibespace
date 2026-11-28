@@ -62,7 +62,7 @@ const { UserTodoManager, URGENCIES } = require('../src/user-todos.js');
 const M = require('../src/job-model.js');
 
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra !== undefined ? `\n      ${String(extra).slice(0, 700)}` : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra !== undefined ? `\n      ${String(extra).slice(0, 700)}` : ''}`); } };
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-jobs-cli-body-'));
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });   // a crash leaves no scratch
 const CWD = path.join(tmp, 'work'); fs.mkdirSync(CWD);
@@ -257,7 +257,7 @@ const NU = "        notifyUser: !!flags['notify-user'],\n";
 const COPY = "        if (schedule) body.action = { type: 'spawn-task', task: { ...task, notifyUser: body.notifyUser } };\n";
 ok(SRC.split(NU).length === 2, 'the CLI writes notifyUser ONCE at the top, in the body every shape shares');
 ok(SRC.split(COPY).length === 2, 'the CLI adds the compatibility copy ONCE, to a scheduled run\'s task (the control below cuts it)');
-ok(HANDS && STORES && SAIDS, 'src/jobs.js hands a cron child its parent\'s setting at every fire, stores the action without the nested copy, gives the fire\'s words to their author whole and belts a subscriber\'s copy — ONCE each (the controls cut them)');
+ok(gateOf(HANDS) && gateOf(STORES) && verdictOf(SAIDS), 'src/jobs.js hands a cron child its parent\'s setting at every fire, stores the action without the nested copy, gives the fire\'s words to their author whole and belts a subscriber\'s copy — ONCE each (the controls cut them)');
 const DROPPED = mutCli('mut', SRC.replace(NU, ''));
 const NOCOPY = mutCli('mut-nocopy', SRC.replace(COPY, "        if (schedule) body.action = { type: 'spawn-task', task };\n"));
 const [urgRaw, svcRaw] = await Promise.all([
@@ -302,31 +302,31 @@ ok(!cliBad.length && urgRaw.status === 200 && svcRaw.status === 200, `every CLI 
 console.log('(1) WIRE — the real CLI\'s POST body, three shapes; two refusals said at the prompt');
 const jobOf = (E, name) => [...E.jm.jobs.values()].find((j) => j.name === name && !j.cronParent);
 const childOf = (E, job) => [...E.jm.jobs.values()].find((j) => j.cronParent === job.id);
-ok(bodyOf('nc1') && bodyOf('nc1').notifyUser === true && bodyOf('nc1').action.type === 'notify', 'notify-cron --notify-user ⇒ body.notifyUser: true (it was never sent)', JSON.stringify(bodyOf('nc1')));
-ok(bodyOf('nc0') && bodyOf('nc0').notifyUser === false, 'CONTROL: notify-cron without the flag ⇒ body.notifyUser: false', JSON.stringify(bodyOf('nc0')));
-ok(bodyOf('at1') && bodyOf('at1').notifyUser === true && bodyOf('at1').action.type === 'spawn-task' && bodyOf('at1').action.task.notifyUser === true,
+ok(gateOf(bodyOf('nc1')) && bodyOf('nc1').notifyUser === true && bodyOf('nc1').action.type === 'notify', 'notify-cron --notify-user ⇒ body.notifyUser: true (it was never sent)', JSON.stringify(bodyOf('nc1')));
+ok(gateOf(bodyOf('nc0')) && bodyOf('nc0').notifyUser === false, 'CONTROL: notify-cron without the flag ⇒ body.notifyUser: false', JSON.stringify(bodyOf('nc0')));
+ok(gateOf(bodyOf('at1')) && bodyOf('at1').notifyUser === true && bodyOf('at1').action.type === 'spawn-task' && bodyOf('at1').action.task.notifyUser === true,
   'a scheduled run --at … --notify-user ⇒ body.notifyUser: true at the TOP, and the compatibility copy in its task', JSON.stringify(bodyOf('at1')));
-ok(bodyOf('ev1') && bodyOf('ev1').notifyUser === true && bodyOf('ev1').action.task.notifyUser === true, 'a scheduled run --every … --notify-user ⇒ the same two', JSON.stringify(bodyOf('ev1')));
-ok(bodyOf('at0') && bodyOf('at0').notifyUser === false && bodyOf('at0').action.task.notifyUser === false, 'CONTROL: a scheduled run without the flag ⇒ false, both', JSON.stringify(bodyOf('at0')));
-ok(bodyOf('tk1') && bodyOf('tk1').notifyUser === true && bodyOf('tk0') && bodyOf('tk0').notifyUser === false, 'a plain run: true with the flag, false without', `${JSON.stringify(bodyOf('tk1'))} / ${JSON.stringify(bodyOf('tk0'))}`);
+ok(gateOf(bodyOf('ev1')) && bodyOf('ev1').notifyUser === true && bodyOf('ev1').action.task.notifyUser === true, 'a scheduled run --every … --notify-user ⇒ the same two', JSON.stringify(bodyOf('ev1')));
+ok(gateOf(bodyOf('at0')) && bodyOf('at0').notifyUser === false && bodyOf('at0').action.task.notifyUser === false, 'CONTROL: a scheduled run without the flag ⇒ false, both', JSON.stringify(bodyOf('at0')));
+ok(gateOf(bodyOf('tk1')) && bodyOf('tk1').notifyUser === true && gateOf(bodyOf('tk0')) && bodyOf('tk0').notifyUser === false, 'a plain run: true with the flag, false without', `${JSON.stringify(bodyOf('tk1'))} / ${JSON.stringify(bodyOf('tk0'))}`);
 {
   const s1 = jobOf(REAL, 'at1');
-  ok(s1 && s1.notifyUser === true && s1.action && s1.action.task && !('notifyUser' in s1.action.task), 'the STORE keeps one field: the cron record holds notifyUser at the top, its task none (create drops the copy)', JSON.stringify(s1 && { top: s1.notifyUser, task: s1.action && s1.action.task }));
-  ok(/^--urgency must be one of low\/normal\/high\/urgent — the For you tray's own set; nothing was created$/m.test(R.urgc.err) && !bodyOf('urgc'), 'notify-cron --urgency critical --notify-user is refused AT THE PROMPT by name, nothing sent — in the store\'s own set', R.urgc.err);
-  ok(R.urgu.code === 0 && bodyOf('urgu') && bodyOf('urgu').action.urgency === 'urgent', 'notify-cron --urgency urgent --notify-user is CREATED (r2 refused the store\'s own \'urgent\' with a false reason)', R.urgu.err || JSON.stringify(bodyOf('urgu')));
-  ok(R.urgn.code === 0 && bodyOf('urgn'), '…and without --notify-user the urgency is never read, so it is never checked (created)', R.urgn.err);
+  ok(gateOf(s1) && s1.notifyUser === true && gateOf(s1.action) && gateOf(s1.action.task) && !('notifyUser' in s1.action.task), 'the STORE keeps one field: the cron record holds notifyUser at the top, its task none (create drops the copy)', JSON.stringify(s1 && { top: s1.notifyUser, task: s1.action && s1.action.task }));
+  ok(gateOf(/^--urgency must be one of low\/normal\/high\/urgent — the For you tray's own set; nothing was created$/m.test(R.urgc.err)) && !bodyOf('urgc'), 'notify-cron --urgency critical --notify-user is refused AT THE PROMPT by name, nothing sent — in the store\'s own set', R.urgc.err);
+  ok(R.urgu.code === 0 && gateOf(bodyOf('urgu')) && bodyOf('urgu').action.urgency === 'urgent', 'notify-cron --urgency urgent --notify-user is CREATED (r2 refused the store\'s own \'urgent\' with a false reason)', R.urgu.err || JSON.stringify(bodyOf('urgu')));
+  ok(R.urgn.code === 0 && verdictOf(bodyOf('urgn')), '…and without --notify-user the urgency is never read, so it is never checked (created)', R.urgn.err);
   const CT = require('../src/agent-cli-text.js');
-  ok(CT.FOR_YOU_URGENCIES === URGENCIES && /require\('\.\.\/\.\.\/src\/agent-cli-text\.js'\)/.test(SRC) && /require\('\.\/agent-cli-text\.js'\)/.test(SRC) && !/\['low', 'normal', 'high'\]/.test(SRC), 'the CLI\'s set IS the store\'s set — ONE constant (src/agent-cli-text.js FOR_YOU_URGENCIES, the store\'s URGENCIES), read in both layouts, no literal of its own', URGENCIES.join('/'));
+  ok(CT.FOR_YOU_URGENCIES === URGENCIES && gateOf(/require\('\.\.\/\.\.\/src\/agent-cli-text\.js'\)/.test(SRC)) && gateOf(/require\('\.\/agent-cli-text\.js'\)/.test(SRC)) && !/\['low', 'normal', 'high'\]/.test(SRC), 'the CLI\'s set IS the store\'s set — ONE constant (src/agent-cli-text.js FOR_YOU_URGENCIES, the store\'s URGENCIES), read in both layouts, no literal of its own', URGENCIES.join('/'));
   const ASKSRC = fs.readFileSync(ASK, 'utf8');
   const usageSet = (src) => [...src.matchAll(/--urgency (low(?:\|[a-z]+)+)/g)].map((m) => m[1]);
-  ok(/URGENCIES = \(TX && TX\.FOR_YOU_URGENCIES\) \|\| null;/.test(ASKSRC) && !/\['low', 'normal', 'high'/.test(ASKSRC) && [...usageSet(SRC), ...usageSet(ASKSRC)].length >= 2 && [...usageSet(SRC), ...usageSet(ASKSRC)].every((u) => u === URGENCIES.join('|')),
+  ok(gateOf(/URGENCIES = \(TX && TX\.FOR_YOU_URGENCIES\) \|\| null;/.test(ASKSRC)) && !/\['low', 'normal', 'high'/.test(ASKSRC) && [...usageSet(SRC), ...usageSet(ASKSRC)].length >= 2 && verdictOf([...usageSet(SRC), ...usageSet(ASKSRC)].every((u) => u === URGENCIES.join('|'))),
     'BOTH agent CLIs offer the store\'s ONE set (r4: vibespace-ask kept its own list) — vibespace-ask reads FOR_YOU_URGENCIES off agent-cli-text, and each usage line prints exactly that set', JSON.stringify([...usageSet(SRC), ...usageSet(ASKSRC)]));
-  ok(/^vibespace-ask: unknown urgency "critical" \(valid: low\/normal\/high\/urgent\)$/m.test(R.askc.err) && askWire.length === 1 && askWire[0].add && askWire[0].add.urgency === 'urgent' && R.asku.code === 0, '…and at the prompt: vibespace-ask --urgency critical is refused naming the set, --urgency urgent is filed', `${R.askc.err} | ${JSON.stringify(askWire)}`);
+  ok(gateOf(/^vibespace-ask: unknown urgency "critical" \(valid: low\/normal\/high\/urgent\)$/m.test(R.askc.err)) && askWire.length === 1 && gateOf(askWire[0].add) && askWire[0].add.urgency === 'urgent' && R.asku.code === 0, '…and at the prompt: vibespace-ask --urgency critical is refused naming the set, --urgency urgent is filed', `${R.askc.err} | ${JSON.stringify(askWire)}`);
   // r8 (accept-r7 confirmed 0 — the brief: «the create echo shows the stored name so the author sees the loss at once»): a name a part of
   // which was hidden is SAID, in a line of its own; a name with no value («password reset» — e6d6299e6 stored `password-«redacted»`) is echoed as typed
-  ok(/^name stored as "deploy-ghp_«redacted»": a part of it looked like a secret and is hidden for every reader, you included/m.test(R.hidn.out) && !R.hidn.out.includes(SHAPEMAT.slice(0, 12))
-    && /^started \S+ \(service password-reset\)$/m.test(R.pwr.out) && !/name stored as/.test(R.pwr.out), 'r8 the create output says the STORED name when a part of it was hidden (a token in the name); «password reset» is stored and echoed as typed, no such line', JSON.stringify([R.hidn.out, R.pwr.out]));
-  ok(/^--notify-user is refused with --keep-up/.test(R.svcn.err) && !bodyOf('svcn'), 'run --keep-up --notify-user is refused by name, nothing sent: a service never tells the user at its end', R.svcn.err);
+  ok(gateOf(/^name stored as "deploy-ghp_«redacted»": a part of it looked like a secret and is hidden for every reader, you included/m.test(R.hidn.out)) && !R.hidn.out.includes(SHAPEMAT.slice(0, 12))
+    && gateOf(/^started \S+ \(service password-reset\)$/m.test(R.pwr.out)) && !/name stored as/.test(R.pwr.out), 'r8 the create output says the STORED name when a part of it was hidden (a token in the name); «password reset» is stored and echoed as typed, no such line', JSON.stringify([R.hidn.out, R.pwr.out]));
+  ok(gateOf(/^--notify-user is refused with --keep-up/.test(R.svcn.err)) && !bodyOf('svcn'), 'run --keep-up --notify-user is refused by name, nothing sent: a service never tells the user at its end', R.svcn.err);
   const dead = wire.filter((w) => 'env' in w.body || 'cwd' in w.body).map((w) => w.body.name);
   ok(!dead.length && !/flags\.env\b/.test(SRC), 'no body carries the dead `env` / top-level `cwd` (the route maps neither) and the CLI reads no --env', dead.join(','));
 }
@@ -342,25 +342,25 @@ const lost = Object.keys(PINS).flatMap((f) => landing(f, bodies, specs));
 ok(!lost.length, `every pin lands: ${Object.keys(PINS).length} flags in the POST body and in the spec the real route hands the engine`, lost.join(' | '));
 {
   const planted = censusFindings(SRC.replace('[--stdin-open]', '[--stdin-open] [--frobnicate]'));
-  ok(same(planted.unpinned, ['--frobnicate']), 'CONTROL: a flag planted in a copy of the usage is red BY NAME', JSON.stringify(planted));
+  ok(verdictOf(same(planted.unpinned, ['--frobnicate'])), 'CONTROL: a flag planted in a copy of the usage is red BY NAME', JSON.stringify(planted));
   const read = censusFindings(SRC.replace("stdinOpen: !!flags['stdin-open'],", "stdinOpen: !!flags['stdin-open'], shadow: flags['shadow-flag'],"));
-  ok(same(read.unpinned, ['--shadow-flag']), 'CONTROL: a flag the branch starts reading (and the usage never prints) is red by name too', JSON.stringify(read));
+  ok(verdictOf(same(read.unpinned, ['--shadow-flag'])), 'CONTROL: a flag the branch starts reading (and the usage never prints) is red by name too', JSON.stringify(read));
   // lane vault-job-road (L0's acceptance): RUN_FLAGS — the flags the CLI ACCEPTS for run / notify-cron (every other one refused
   // by name, nothing created) — is exactly what the usage prints and the branch reads; a drift either way is red
   const runFlags = (src) => { const m = /const RUN_FLAGS = Object\.freeze\(\[([\s\S]*?)\]\)/.exec(src); return m ? new Set([...m[1].matchAll(/'([a-z][a-z-]*)'/g)].map((x) => '--' + x[1])) : null; };
   const drift = (src) => { const rf = runFlags(src); if (!rf) return ['(no RUN_FLAGS)']; const named = new Set([...printedFlags(src), ...readFlags(src)]); return [...[...named].filter((f) => !rf.has(f)), ...[...rf].filter((f) => !named.has(f))].sort(); };
   ok(!drift(SRC).length, `RUN_FLAGS (the flags run accepts — ${runFlags(SRC) ? runFlags(SRC).size : 0}) is exactly the usage's and the branch's`, drift(SRC));
-  ok(same(drift(SRC.replace('[--stdin-open]', '[--stdin-open] [--frobnicate]')), ['--frobnicate']), 'CONTROL: a flag the usage starts printing but RUN_FLAGS does not accept is red by name');
+  ok(verdictOf(same(drift(SRC.replace('[--stdin-open]', '[--stdin-open] [--frobnicate]')), ['--frobnicate'])), 'CONTROL: a flag the usage starts printing but RUN_FLAGS does not accept is red by name');
   // …and on the wire: an unknown flag ⇒ exit 2, named with the flags run knows, the body NEVER sent; a pasted value ⇒ exit 2, nothing
   // sent, never echoed; the ROUTE refuses a field it does not copy (an older hub meeting a newer CLI says so — 400 unknown_field)
-  ok(R.unk.code === 2 && /an unknown flag \(--vualt\)/.test(R.unk.err) && /The flags run knows: [^\n]*--vault/.test(R.unk.err) && !bodyOf('unk'), 'an unknown flag (--vualt) ⇒ exit 2, named with the flags run knows — the body is never sent', JSON.stringify({ code: R.unk.code, sent: !!bodyOf('unk'), err: R.unk.err.slice(0, 200) }));
+  ok(R.unk.code === 2 && gateOf(/an unknown flag \(--vualt\)/.test(R.unk.err)) && gateOf(/The flags run knows: [^\n]*--vault/.test(R.unk.err)) && !bodyOf('unk'), 'an unknown flag (--vualt) ⇒ exit 2, named with the flags run knows — the body is never sent', JSON.stringify({ code: R.unk.code, sent: !!bodyOf('unk'), err: R.unk.err.slice(0, 200) }));
   ok(R.pv.code === 2 && !bodyOf('pv') && ![R.pv.err, R.pv.out].some((t) => t.includes(PASTED)), 'a VALUE where a --vault reference belongs ⇒ exit 2, nothing sent, the value never echoed', JSON.stringify({ code: R.pv.code, sent: !!bodyOf('pv') }));
   const uf = await post('census', { kind: 'task', name: 'uf', cmd: { argv: ['true'] }, envFromX: ['A'] });
-  ok(uf.status === 400 && uf.j.code === 'unknown_field' && same(uf.j.fields, ['envFromX']) && /unknown field: envFromX/.test(uf.j.error), 'the route refuses a field it does not copy BY NAME (400 unknown_field) — nothing created', JSON.stringify(uf));
+  ok(uf.status === 400 && uf.j.code === 'unknown_field' && gateOf(same(uf.j.fields, ['envFromX'])) && verdictOf(/unknown field: envFromX/.test(uf.j.error)), 'the route refuses a field it does not copy BY NAME (400 unknown_field) — nothing created', JSON.stringify(uf));
   const envBack = censusFindings(SRC.replace('        schedule,\n', '        env: [].concat(flags.env || []).length ? undefined : undefined,\n        schedule,\n'));
-  ok(same(envBack.unpinned, ['--env']), 'CONTROL: the dead --env read put back is red by name (no row can declare it off the wire)', JSON.stringify(envBack));
+  ok(verdictOf(same(envBack.unpinned, ['--env'])), 'CONTROL: the dead --env read put back is red by name (no row can declare it off the wire)', JSON.stringify(envBack));
   const dropped = landing('--notify-user', { ...bodies, nc: bodyOf('census-nc-dropped') }, null);
-  ok(dropped.length === 1 && /^--notify-user → POST body notifyUser = undefined \(nc\)$/.test(dropped[0]), 'CONTROL: a CLI copy that drops the field (the 2.369.360 notify-cron) is red by flag, field and shape', JSON.stringify(dropped));
+  ok(dropped.length === 1 && verdictOf(/^--notify-user → POST body notifyUser = undefined \(nc\)$/.test(dropped[0])), 'CONTROL: a CLI copy that drops the field (the 2.369.360 notify-cron) is red by flag, field and shape', JSON.stringify(dropped));
 }
 
 console.log('(3) FIRE — through the real route into the engine: the user\'s For you copy and the owner conversation');
@@ -380,27 +380,27 @@ await new Promise((r) => setTimeout(r, 30));   // the owner lane's delivery sett
 const lanes = (j) => (j && j.notifyLog || []).filter((e) => e.ok).map((e) => e.lane).sort().join(',');
 {
   const j1 = jobOf(REAL, 'nc1'), j0 = jobOf(REAL, 'nc0');
-  ok(j1 && REAL.inbox.some((n) => n.jobId === j1.id && said(n) === 'reminder for the user NC1' && n.fact === 'fire' && n.words.key === '{text}'), 'notify-cron --notify-user fires ⇒ deps.notifyUser gets the text as a FIELD (the For you copy: {text}, fact fire)', JSON.stringify(REAL.inbox));
-  ok(j1 && REAL.told.some((t) => t.cid === cidOf('nc1') && t.text.includes('reminder for the user NC1')), '…AND the owner conversation is messaged', JSON.stringify(REAL.told.map((t) => t.cid)));
+  ok(gateOf(j1) && verdictOf(REAL.inbox.some((n) => n.jobId === j1.id && said(n) === 'reminder for the user NC1' && n.fact === 'fire' && n.words.key === '{text}')), 'notify-cron --notify-user fires ⇒ deps.notifyUser gets the text as a FIELD (the For you copy: {text}, fact fire)', JSON.stringify(REAL.inbox));
+  ok(gateOf(j1) && verdictOf(REAL.told.some((t) => t.cid === cidOf('nc1') && t.text.includes('reminder for the user NC1'))), '…AND the owner conversation is messaged', JSON.stringify(REAL.told.map((t) => t.cid)));
   ok(lanes(j1) === 'message,user-inbox', '…both lanes journaled', JSON.stringify(j1 && j1.notifyLog));
-  ok(j0 && !REAL.inbox.some((n) => n.jobId === j0.id) && REAL.told.some((t) => t.cid === cidOf('nc0')) && lanes(j0) === 'message', 'CONTROL: without the flag the fire messages the conversation ONLY (option A, 2.363.1)', JSON.stringify(j0 && j0.notifyLog));
+  ok(gateOf(j0) && !REAL.inbox.some((n) => n.jobId === j0.id) && gateOf(REAL.told.some((t) => t.cid === cidOf('nc0'))) && lanes(j0) === 'message', 'CONTROL: without the flag the fire messages the conversation ONLY (option A, 2.363.1)', JSON.stringify(j0 && j0.notifyLog));
   const a1 = jobOf(REAL, 'at1'), a0 = jobOf(REAL, 'at0'), e1 = jobOf(REAL, 'ev1');
   const c1 = a1 && childOf(REAL, a1), c0 = a0 && childOf(REAL, a0), ce = e1 && childOf(REAL, e1);
-  ok(c1 && c0 && ce, 'each scheduled run\'s fire made its child (spawn stubbed)', `${!!c1} ${!!c0} ${!!ce}`);
+  ok(gateOf(c1) && gateOf(c0) && verdictOf(ce), 'each scheduled run\'s fire made its child (spawn stubbed)', `${!!c1} ${!!c0} ${!!ce}`);
   for (const c of [c1, c0, ce]) if (c) endRun(REAL, c);
-  ok(c1 && REAL.inbox.some((n) => n.jobId === c1.id && /^Task at1 run: done \(ok\)$/.test(said(n)) && n.fact === 'end:done:ok'), 'a scheduled run --at … --notify-user: its child\'s end tells the user', JSON.stringify(REAL.inbox.map(said)));
-  ok(ce && REAL.inbox.some((n) => n.jobId === ce.id), '…and --every … --notify-user the same', JSON.stringify(REAL.inbox.map(said)));
-  ok(c0 && !REAL.inbox.some((n) => n.jobId === c0.id), 'CONTROL: a scheduled run without the flag: the child ends silently for the user');
+  ok(gateOf(c1) && verdictOf(REAL.inbox.some((n) => n.jobId === c1.id && /^Task at1 run: done \(ok\)$/.test(said(n)) && n.fact === 'end:done:ok')), 'a scheduled run --at … --notify-user: its child\'s end tells the user', JSON.stringify(REAL.inbox.map(said)));
+  ok(gateOf(ce) && verdictOf(REAL.inbox.some((n) => n.jobId === ce.id)), '…and --every … --notify-user the same', JSON.stringify(REAL.inbox.map(said)));
+  ok(gateOf(c0) && !REAL.inbox.some((n) => n.jobId === c0.id), 'CONTROL: a scheduled run without the flag: the child ends silently for the user');
   const t1 = jobOf(REAL, 'tk1'), t0 = jobOf(REAL, 'tk0');
   for (const t of [t1, t0]) if (t) endRun(REAL, t);
-  ok(t1 && t0 && REAL.inbox.some((n) => n.jobId === t1.id && /^Task tk1: done \(ok\)$/.test(said(n))) && !REAL.inbox.some((n) => n.jobId === t0.id), 'a plain run: told at its end with the flag, not without', JSON.stringify(REAL.inbox.map(said)));
+  ok(gateOf(t1) && gateOf(t0) && gateOf(REAL.inbox.some((n) => n.jobId === t1.id && /^Task tk1: done \(ok\)$/.test(said(n)))) && !REAL.inbox.some((n) => n.jobId === t0.id), 'a plain run: told at its end with the flag, not without', JSON.stringify(REAL.inbox.map(said)));
   const k = jobOf(NOHAND, 'ctl'), kc = k && childOf(NOHAND, k);
   if (kc) endRun(NOHAND, kc);
-  ok(k && k.notifyUser === true && kc && !NOHAND.inbox.some((n) => n.jobId === kc.id), 'CONTROL: a jobs.js copy without the parent→child hand-over leaves the scheduled child silent (the leg above would go red)', JSON.stringify(NOHAND.inbox));
+  ok(gateOf(k) && k.notifyUser === true && gateOf(kc) && !NOHAND.inbox.some((n) => n.jobId === kc.id), 'CONTROL: a jobs.js copy without the parent→child hand-over leaves the scheduled child silent (the leg above would go red)', JSON.stringify(NOHAND.inbox));
   const o1 = jobOf(OLD, 'old1'), om = jobOf(OLD, 'oldm'), oc1 = o1 && childOf(OLD, o1), ocm = om && childOf(OLD, om);
   for (const c of [oc1, ocm]) if (c) endRun(OLD, c);
-  ok(oc1 && OLD.inbox.some((n) => n.jobId === oc1.id && /^Task old1 run: done \(ok\)$/.test(said(n))), 'an engine with 2.369.360\'s two lines (no hand-over, the action stored as sent): the scheduled child STILL tells the user — the compatibility copy', JSON.stringify(OLD.inbox.map(said)));
-  ok(ocm && !OLD.inbox.some((n) => n.jobId === ocm.id), 'CONTROL: a CLI without the copy (514a962c) on that engine: the child ends silently for the user', JSON.stringify(OLD.inbox.map(said)));
+  ok(gateOf(oc1) && verdictOf(OLD.inbox.some((n) => n.jobId === oc1.id && /^Task old1 run: done \(ok\)$/.test(said(n)))), 'an engine with 2.369.360\'s two lines (no hand-over, the action stored as sent): the scheduled child STILL tells the user — the compatibility copy', JSON.stringify(OLD.inbox.map(said)));
+  ok(gateOf(ocm) && !OLD.inbox.some((n) => n.jobId === ocm.id), 'CONTROL: a CLI without the copy (514a962c) on that engine: the child ends silently for the user', JSON.stringify(OLD.inbox.map(said)));
 }
 
 console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-you store: the agent\'s words as FIELDS, the author\'s own whole, an honest journal for every copy');
@@ -409,23 +409,23 @@ console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-y
   const items = () => { const s = todos.snapshot(); return [...s.open, ...s.resolved]; };
   const jm = jobOf(WIRED, 'mask'), ju = jobOf(WIRED, 'urg'), jf = jobOf(WIRED, 'full'), jg = jobOf(WIRED, 'urgu');
   const itm = items().filter((i) => jm && i.jobId === jm.id);
-  ok(itm.length === 1 && !leaks(itm[0].text) && /«redacted»/.test(itm[0].text) && itm[0].text.startsWith('rotate the deploy key:') && itm[0].jobFact === 'fire', 'the agent\'s --text lands in For you MASKED as a field (a secret-named KV, a token shape — the words around them kept; fact fire)', JSON.stringify(itm.map((i) => [i.text, i.jobFact])));
+  ok(itm.length === 1 && !leaks(itm[0].text) && gateOf(/«redacted»/.test(itm[0].text)) && gateOf(itm[0].text.startsWith('rotate the deploy key:')) && itm[0].jobFact === 'fire', 'the agent\'s --text lands in For you MASKED as a field (a secret-named KV, a token shape — the words around them kept; fact fire)', JSON.stringify(itm.map((i) => [i.text, i.jobFact])));
   const wm = WTOLD.filter((t) => t.cid === cidOf('mask')), ws = WTOLD.filter((t) => t.cid === cidOf('sub'));
-  ok(wm.length === 1 && wm[0].text.includes(SECRET_TEXT), 'the AUTHOR — the owner conversation that wrote the --text — gets it WHOLE (r2 belted its own reminder: «Renew the auth token: «redacted»»)', JSON.stringify(wm.map((t) => t.text.slice(0, 200))));
-  ok(ws.length === 1 && !leaks(ws[0].text) && /«redacted»/.test(ws[0].text) && ws[0].text.includes('rotate the deploy key:'), '…while a SUBSCRIBER (another conversation) gets it belted', JSON.stringify(ws.map((t) => t.text.slice(0, 200))));
-  ok(!leaks(fs.readFileSync(path.join(WDIR, 'user-todos.json'), 'utf8')) && !leaks(JSON.stringify(jm.notifyLog)) && !leaks(JSON.stringify(WIRED.jm.snapshot(jm))) && leaks(WIRED.jm.snapshot(jm, { author: true }).actionText), '…no raw secret in the For you store on disk, the journal, or the snapshot the panel and another lineage read — its AUTHOR\'s snapshot keeps the reminder whole');
+  ok(wm.length === 1 && verdictOf(wm[0].text.includes(SECRET_TEXT)), 'the AUTHOR — the owner conversation that wrote the --text — gets it WHOLE (r2 belted its own reminder: «Renew the auth token: «redacted»»)', JSON.stringify(wm.map((t) => t.text.slice(0, 200))));
+  ok(ws.length === 1 && !leaks(ws[0].text) && gateOf(/«redacted»/.test(ws[0].text)) && verdictOf(ws[0].text.includes('rotate the deploy key:')), '…while a SUBSCRIBER (another conversation) gets it belted', JSON.stringify(ws.map((t) => t.text.slice(0, 200))));
+  ok(!leaks(fs.readFileSync(path.join(WDIR, 'user-todos.json'), 'utf8')) && !leaks(JSON.stringify(jm.notifyLog)) && !leaks(JSON.stringify(WIRED.jm.snapshot(jm))) && verdictOf(leaks(WIRED.jm.snapshot(jm, { author: true }).actionText)), '…no raw secret in the For you store on disk, the journal, or the snapshot the panel and another lineage read — its AUTHOR\'s snapshot keeps the reminder whole');
   ok(lanes(jm) === 'message,message,user-inbox' && (jm.notifyLog || []).filter((e) => e.lane === 'message' && e.ok && e.sub).length === 1, '…and the journal says all three landed — For you, the owner, the subscriber (✓ is each lane\'s own answer)', JSON.stringify(jm && jm.notifyLog));
   const ctl = todos.add(`claude:${cidOf('mask')}`, { text: SECRET_TEXT, origin: 'agent' });
-  ok(ctl && !leaks(ctl.text) && /«redacted»/.test(ctl.text), 'CONTROL (unchanged): the same words as a vibespace-ask come out masked', ctl && ctl.text);
+  ok(gateOf(ctl) && !leaks(ctl.text) && verdictOf(/«redacted»/.test(ctl.text)), 'CONTROL (unchanged): the same words as a vibespace-ask come out masked', ctl && ctl.text);
   const nb = NOBELT.told.filter((t) => t.cid === cidOf('sub'));
-  ok(nb.length === 1 && leaks(nb[0].text), 'CONTROL: a jobs.js copy whose fire skips the subscriber\'s belt carries the raw secret to the subscriber (the belt is load-bearing)', JSON.stringify(nb.map((t) => leaks(t.text))));
+  ok(nb.length === 1 && verdictOf(leaks(nb[0].text)), 'CONTROL: a jobs.js copy whose fire skips the subscriber\'s belt carries the raw secret to the subscriber (the belt is load-bearing)', JSON.stringify(nb.map((t) => leaks(t.text))));
   const gi = items().find((i) => jg && i.jobId === jg.id);
-  ok(gi && gi.urgency === 'urgent' && gi.text === 'deploy window', 'notify-cron --urgency urgent --notify-user: the fire files it at «urgent» (the store\'s own set)', JSON.stringify(gi && { u: gi.urgency, t: gi.text }));
+  ok(gateOf(gi) && gi.urgency === 'urgent' && gi.text === 'deploy window', 'notify-cron --urgency urgent --notify-user: the fire files it at «urgent» (the store\'s own set)', JSON.stringify(gi && { u: gi.urgency, t: gi.text }));
   const fyOf = (j) => [...(j && j.notifyLog || [])].reverse().find((e) => e.lane === 'user-inbox');
   const fu = fyOf(ju), ff = fyOf(jf);
-  ok(fu && fu.ok === false && fu.copy === 'fire' && /^urgency must be one of /.test(fu.reason) && !items().some((i) => i.jobId === ju.id), 'a copy the store refuses (the agent\'s own POST, urgency «critical») is journaled user-inbox ✗ with the store\'s why — never ✓', JSON.stringify(ju && ju.notifyLog));
-  ok(ff && ff.ok === false && ff.reason === 'For you is full (20 open)' && !items().some((i) => i.jobId === jf.id), '…and so is one refused at the conversation\'s open cap: «For you is full (20 open)»', JSON.stringify(jf && jf.notifyLog));
-  ok(lanes(ju).includes('message') && lanes(jf).includes('message'), '…while the owner conversation is still messaged (the refusal is the For you lane\'s alone)', `${lanes(ju)} / ${lanes(jf)}`);
+  ok(gateOf(fu) && fu.ok === false && fu.copy === 'fire' && gateOf(/^urgency must be one of /.test(fu.reason)) && !items().some((i) => i.jobId === ju.id), 'a copy the store refuses (the agent\'s own POST, urgency «critical») is journaled user-inbox ✗ with the store\'s why — never ✓', JSON.stringify(ju && ju.notifyLog));
+  ok(gateOf(ff) && ff.ok === false && ff.reason === 'For you is full (20 open)' && !items().some((i) => i.jobId === jf.id), '…and so is one refused at the conversation\'s open cap: «For you is full (20 open)»', JSON.stringify(jf && jf.notifyLog));
+  ok(gateOf(lanes(ju).includes('message')) && verdictOf(lanes(jf).includes('message')), '…while the owner conversation is still messaged (the refusal is the For you lane\'s alone)', `${lanes(ju)} / ${lanes(jf)}`);
   // EVERY copy the engine files is journaled the same way (r3 — r2 journaled the notify fire only): at the same open cap, a
   // task's end, an ask, a park, a missed time — each through the ONE door (src/jobs.js _forYou)
   const mk = async (body) => { const r = await post('full', body); return r.j && r.j.job ? WIRED.jm.jobs.get(r.j.job.id) : null; };
@@ -442,7 +442,7 @@ console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-y
   if (tm) { tm.nextFireAt = Date.now() - 600e3; await WIRED.jm._cronTick(); }
   landedJ();
   const capped = [[te, 'end'], [ta, 'ask'], [ts, 'parked'], [tm, 'missed']].map(([j, c]) => { const e = fyOf(j); return { c, ok: !!(j && e && e.ok === false && e.copy === c && e.reason === 'For you is full (20 open)' && !items().some((i) => i.jobId === j.id)), e }; });
-  ok(capped.every((x) => x.ok), 'EVERY copy refused at the cap is journaled user-inbox ✗ with the store\'s why, naming the copy — a task\'s end, an ask, a park, a missed time (r2: silent, no line)', JSON.stringify(capped));
+  ok(verdictOf(capped.every((x) => x.ok)), 'EVERY copy refused at the cap is journaled user-inbox ✗ with the store\'s why, naming the copy — a task\'s end, an ask, a park, a missed time (r2: silent, no line)', JSON.stringify(capped));
   // r4: a scheduled run whose end copy is refused (its CRON is what the agent polls), and the ask's verdict pushed out of the window
   const tr = await mk({ kind: 'cron', name: 'cap-run', schedule: { everyMs: 3600e3 }, notifyUser: true, action: { type: 'spawn-task', task: { kind: 'task', cmd: { argv: ['true'], cwd: CWD } } } });
   if (tr) WIRED.jm._fireCron(tr, 'cron');
@@ -451,12 +451,12 @@ console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-y
   if (ta) for (let i = 0; i < 9; i++) WIRED.jm._notifyLogPush(ta, { lane: 'message', ok: true, to: 'owner' });
   const [pu, pf, pm, su, pe, pa, pr] = await Promise.all([cli(['poll', ju.id], { leg: 'urg' }), cli(['poll', jf.id], { leg: 'full' }), cli(['poll', jm.id], { leg: 'mask' }), cli(['show', ju.id], { leg: 'urg' }), cli(['poll', te && te.id], { leg: 'full' }), cli(['show', ta && ta.id], { leg: 'full' }), cli(['poll', tr && tr.id], { leg: 'full' })]);
   const NR = ' \\(a refused copy is not retried — free For you and run it again\\)$';   // r4: poll / show say it is never retried
-  ok(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(pu.out) && new RegExp('^for you: the fire copy was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pf.out), 'the agent\'s poll says the copy was NOT filed, in the store\'s words — and that it is not retried', `${pu.out} | ${pf.out}`);
-  ok(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(su.out), '…and so does show', su.out);
-  ok(new RegExp('^for you: the end copy was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pe.out) && new RegExp('^for you: the ask was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pa.out), '…for every copy, by name (the end copy\'s poll, the ask\'s show)', `${pe.out} | ${pa.out}`);
-  ok(ta && !(WIRED.jm.snapshot(ta).notifyLog || []).some((e) => e.lane === 'user-inbox'), '…the ask\'s show says it PAST the journal\'s window: 9 later lines pushed its verdict out of the snapshot\'s 8, the record keeps the last verdict per copy (r4: the refusal left poll while the ask stayed unfiled)', JSON.stringify(ta && WIRED.jm.snapshot(ta).forYouLast));
-  ok(tr && new RegExp(`^for you: the end copy of run ${trc && trc.id} was NOT filed — For you is full \\(20 open\\)` + NR, 'm').test(pr.out), 'a SCHEDULED run\'s refused end copy: `poll <the cron id>` — the id the agent holds — says it, naming the run (r4: journaled on the hidden child only)', pr.out);
-  ok(!/^for you:/m.test(pm.out) && pm.out.includes('text: ' + SECRET_TEXT), 'CONTROL: a copy that landed adds no such line to the poll — and the AUTHOR\'s poll prints its reminder whole (the snapshot keeps it)', pm.out);
+  ok(gateOf(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(pu.out)) && verdictOf(new RegExp('^for you: the fire copy was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pf.out)), 'the agent\'s poll says the copy was NOT filed, in the store\'s words — and that it is not retried', `${pu.out} | ${pf.out}`);
+  ok(verdictOf(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(su.out)), '…and so does show', su.out);
+  ok(gateOf(new RegExp('^for you: the end copy was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pe.out)) && verdictOf(new RegExp('^for you: the ask was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pa.out)), '…for every copy, by name (the end copy\'s poll, the ask\'s show)', `${pe.out} | ${pa.out}`);
+  ok(gateOf(ta) && !(WIRED.jm.snapshot(ta).notifyLog || []).some((e) => e.lane === 'user-inbox'), '…the ask\'s show says it PAST the journal\'s window: 9 later lines pushed its verdict out of the snapshot\'s 8, the record keeps the last verdict per copy (r4: the refusal left poll while the ask stayed unfiled)', JSON.stringify(ta && WIRED.jm.snapshot(ta).forYouLast));
+  ok(gateOf(tr) && verdictOf(new RegExp(`^for you: the end copy of run ${trc && trc.id} was NOT filed — For you is full \\(20 open\\)` + NR, 'm').test(pr.out)), 'a SCHEDULED run\'s refused end copy: `poll <the cron id>` — the id the agent holds — says it, naming the run (r4: journaled on the hidden child only)', pr.out);
+  ok(!/^for you:/m.test(pm.out) && verdictOf(pm.out.includes('text: ' + SECRET_TEXT)), 'CONTROL: a copy that landed adds no such line to the poll — and the AUTHOR\'s poll prints its reminder whole (the snapshot keeps it)', pm.out);
   // A JOB NAMED WITH A SECRET WORD (r3, accept-r2 confirmed 0–2): the mask covers the agent's words as FIELDS, never the
   // product's sentence — r2's whole-sentence belt read «Task refresh-token: done (ok)» as `token: …`, merged the failure into
   // the success, and ate «needs» from «rotate-db-password needs your input» (the answered ask stayed open for good)
@@ -474,14 +474,14 @@ console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-y
   landedJ();
   const of = (j) => items().filter((i) => j && i.jobId === j.id).map((i) => i.text).sort();
   const four = { end: of(nr), ask: of(np), park: of(ns), missed: of(nm) };
-  ok(same(four.end, ['Task refresh-token: done (ok)', 'Task refresh-token: failed (error)']), 'a job NAMED refresh-token: «Task refresh-token: done (ok)» and «…: failed (error)» — the outcome whole, TWO items (the dedupe key is the job + its outcome, never the words)', JSON.stringify(four.end));
-  ok(same(four.ask, ['rotate-db-password needs your input']) && same(four.park, [`Service db-password crash-looped and was parked — vibespace-job start ${ns && ns.id} to retry`]) && same(four.missed, ['Scheduled job api-password MISSED its time (server was down)']), 'the ask, the park and the missed time of jobs named …-password keep the product\'s sentence whole', JSON.stringify(four));
+  ok(verdictOf(same(four.end, ['Task refresh-token: done (ok)', 'Task refresh-token: failed (error)'])), 'a job NAMED refresh-token: «Task refresh-token: done (ok)» and «…: failed (error)» — the outcome whole, TWO items (the dedupe key is the job + its outcome, never the words)', JSON.stringify(four.end));
+  ok(gateOf(same(four.ask, ['rotate-db-password needs your input'])) && gateOf(same(four.park, [`Service db-password crash-looped and was parked — vibespace-job start ${ns && ns.id} to retry`])) && verdictOf(same(four.missed, ['Scheduled job api-password MISSED its time (server was down)'])), 'the ask, the park and the missed time of jobs named …-password keep the product\'s sentence whole', JSON.stringify(four));
   const ans = np && WIRED.jm.answerPanel(np, { button: 'ok', version: np.interaction.pending.version });
   landedJ();
   const askItem = items().find((i) => np && i.jobId === np.id);
-  ok(ans && ans.ok && askItem && askItem.status === 'done' && askItem.jobFact === 'ask', 'the answered ask CLOSES — the resolver keys on the item\'s fact (jobFact ask), never on its words', JSON.stringify(askItem && { s: askItem.status, f: askItem.jobFact }));
+  ok(gateOf(ans) && gateOf(ans.ok) && gateOf(askItem) && askItem.status === 'done' && askItem.jobFact === 'ask', 'the answered ask CLOSES — the resolver keys on the item\'s fact (jobFact ask), never on its words', JSON.stringify(askItem && { s: askItem.status, f: askItem.jobFact }));
   const refused = (o) => { try { todos.add(`claude:${cidOf('named')}`, { origin: 'jobs', i18n: { text: { key: '{name} x', params: { name: 'n' } } }, ...o }); return null; } catch (e) { return e.message; } };
-  ok(/^jobFact must be a short kebab word/.test(refused({ jobId: 'jb-0000beef', jobFact: 'Bad Fact!' }) || '') && /only a Background Work item with its jobId/.test(refused({ jobFact: 'ask' }) || '') && refused({ jobId: 'jb-0000beef', jobFact: 'parked-memory' }) === null, 'the store\'s fact is a short kebab word (a new copy names its own) or end:<state>:<cause>, only with its jobId — anything else is refused by name');
+  ok(gateOf(/^jobFact must be a short kebab word/.test(refused({ jobId: 'jb-0000beef', jobFact: 'Bad Fact!' }) || '')) && gateOf(/only a Background Work item with its jobId/.test(refused({ jobFact: 'ask' }) || '')) && refused({ jobId: 'jb-0000beef', jobFact: 'parked-memory' }) === null, 'the store\'s fact is a short kebab word (a new copy names its own) or end:<state>:<cause>, only with its jobId — anything else is refused by name');
 }
 
 console.log('(5) SHOW — the params line says what the flag does; the create echo names the user\'s copy; the panel\'s words have zh + ja');
@@ -494,9 +494,9 @@ console.log('(5) SHOW — the params line says what the flag does; the create ec
   const bad = shows.map((r, i) => (new RegExp(` notifyOk=(true|false) notifyUser=${want[i]}$`).test(line(r)) ? null : `${names[i]}: ${line(r) || r.err}`)).filter(Boolean);
   ok(!bad.length, 'show prints notifyUser=true|false beside notifyOk (notify-cron and a scheduled run, with and without the flag) — and n/a for a service', bad.join(' | '));
   if (s1) endRun(REAL, s1);
-  ok(s1 && WIRED && REAL.jm.snapshot(s1).notifyUser === false && !REAL.inbox.some((n) => n.jobId === s1.id), 'a service the agent POSTed with notifyUser:true: the one reader says false (nothing tells at its end) — and its end files nothing', JSON.stringify(s1 && { snap: REAL.jm.snapshot(s1).notifyUser, inbox: REAL.inbox.filter((n) => n.jobId === s1.id) }));
+  ok(gateOf(s1) && gateOf(WIRED) && REAL.jm.snapshot(s1).notifyUser === false && !REAL.inbox.some((n) => n.jobId === s1.id), 'a service the agent POSTed with notifyUser:true: the one reader says false (nothing tells at its end) — and its end files nothing', JSON.stringify(s1 && { snap: REAL.jm.snapshot(s1).notifyUser, inbox: REAL.inbox.filter((n) => n.jobId === s1.id) }));
   const fyEcho = (r) => (/^for you: .*$/m.exec(r.out) || [''])[0];
-  ok(/at every fire \(--notify-user: set at creation — rm and recreate to change it\)$/.test(fyEcho(R.nc1)) && /when each fire's run ends /.test(fyEcho(R.at1)) && /when it ends /.test(fyEcho(R.tk1)) && !fyEcho(R.nc0) && !fyEcho(R.tk0),
+  ok(gateOf(/at every fire \(--notify-user: set at creation — rm and recreate to change it\)$/.test(fyEcho(R.nc1))) && gateOf(/when each fire's run ends /.test(fyEcho(R.at1))) && gateOf(/when it ends /.test(fyEcho(R.tk1))) && !fyEcho(R.nc0) && !fyEcho(R.tk0),
     'the create echo names the USER\'s copy beside auto-notify (when it lands; set at creation) — and only with the flag', [R.nc1, R.at1, R.tk1, R.nc0].map(fyEcho).join(' | '));
   const aj = (n) => REAL.jm.snapshot(jobOf(REAL, n)).actionType;
   ok(aj('nc1') === 'notify' && aj('at1') === 'spawn-task' && aj('tk1') === null, 'the snapshot names a cron\'s action TYPE — the panel\'s «when it fires» (notify) vs «when each run ends» (a scheduled run) reads it', `${aj('nc1')} ${aj('at1')} ${aj('tk1')}`);
@@ -507,7 +507,7 @@ console.log('(5) SHOW — the params line says what the flag does; the create ec
   const ZH = dict('src/lib/i18n-zh.js'), JA = dict('src/lib/i18n-ja.js');
   const valueOf = (src, k) => { const m = new RegExp(`^  ${JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: ("(?:[^"\\\\]|\\\\.)*"),$`, 'm').exec(src); return m ? JSON.parse(m[1]) : null; };
   const missing = keys.flatMap((k) => [['zh', ZH], ['ja', JA]].filter(([, src]) => { const v = valueOf(src, k); return !v || v === k; }).map(([l]) => `${l}: ${k}`));
-  ok(/job\.actionType === 'notify'/.test(blk) && !/job\.action\b(?!Type)/.test(blk), 'the row reads the snapshot\'s actionType (a client job carries no `action` — r2\'s shot caught «each run» on a notify cron)');
+  ok(gateOf(/job\.actionType === 'notify'/.test(blk)) && !/job\.action\b(?!Type)/.test(blk), 'the row reads the snapshot\'s actionType (a client job carries no `action` — r2\'s shot caught «each run» on a notify cron)');
   ok(keys.length === 11 && !missing.length, `the For-you row's ${keys.length} sentences each have a zh AND a ja entry (i18n-check counts parity, not these keys)`, missing.join(' | ') || keys.join(' | '));
   // THE ALWAYS-LINE SAYS ONLY WHAT THE ENGINE DOES FOR THAT KIND (r3, accept-r2 unverified 3/6: «Asks, missed times and parks
   // always reach you» was drawn on every kind — a park exists only for a service, a notify cron never asks, and a missed fire
@@ -547,16 +547,16 @@ console.log('(6) A JOB THAT WAITS IS NEVER «started» — its first line says i
   const APPR = /at its start ONE card naming its entries asks the user in their For-you tray \(a schedule: at its first fire\); the job starts by itself once they allow it, and is refused if they deny it; a value this conversation PUT itself needs no approval \(vibespace-vault put <name> --stdin/;   // lane vault-job-approval: the card exists — the wait names it
   const waits = (leg, E, door) => { const r = W6[leg], j = jobOf(E, leg); return r.code === 0 && new RegExp(`^waiting: jb-[0-9a-f]{8} \\(service ${leg}\\) was created and is NOT started — `).test(first(r)) && door.test(first(r)) && !/^started\b/m.test(r.out) && !!j && j.state === 'waiting' && j.runs.length === 0; };
   const shown = (leg) => `${W6[leg].code}: ${first(W6[leg]) || W6[leg].err}`;
-  ok(waits('vwl', VWL, LOCK), 'the vault LOCKED ⇒ the first line says waiting (never «started») and the door: a person unlocks it on this instance\'s page (⚙ System ▸ Vault…), the user already told — exit 0, the job waits with no run', shown('vwl'));
-  ok(waits('vwm', VWU, APPR) && /\(a key the user stored, or a value the hub minted\)/.test(first(W6.vwm)), 'a value the hub MINTED, no vault-job row ⇒ the first line says waiting for the user\'s approval, that ONE card asks them in For you (the job starts by itself on 允许), and names the door that needs nobody (an entry the agent puts)', shown('vwm'));
-  ok(waits('vws', VWU, APPR), 'a key the USER stored (the owner\'s main case — lane vault-job-approval\'s card) ⇒ the first line says waiting and the same words: the card in For you, a start by itself once allowed', shown('vws'));
-  ok(W6.vwc.code === 0 && /^scheduled: jb-[0-9a-f]{8} \(cron vwc\) — but each fire's run WAITS and is NOT started: waiting for the user's approval/.test(first(W6.vwc)) && APPR.test(first(W6.vwc)), 'a SCHEDULE whose fires would wait says so beside «scheduled» at its create (never a bare «started»)', shown('vwc'));
-  ok(W6.vwr.code === 0 && /^started jb-[0-9a-f]{8} \(task vwr\)$/.test(first(W6.vwr)), 'CONTROL: a job that runs ⇒ «started» (its first line unchanged)', shown('vwr'));
+  ok(verdictOf(waits('vwl', VWL, LOCK)), 'the vault LOCKED ⇒ the first line says waiting (never «started») and the door: a person unlocks it on this instance\'s page (⚙ System ▸ Vault…), the user already told — exit 0, the job waits with no run', shown('vwl'));
+  ok(gateOf(waits('vwm', VWU, APPR)) && verdictOf(/\(a key the user stored, or a value the hub minted\)/.test(first(W6.vwm))), 'a value the hub MINTED, no vault-job row ⇒ the first line says waiting for the user\'s approval, that ONE card asks them in For you (the job starts by itself on 允许), and names the door that needs nobody (an entry the agent puts)', shown('vwm'));
+  ok(verdictOf(waits('vws', VWU, APPR)), 'a key the USER stored (the owner\'s main case — lane vault-job-approval\'s card) ⇒ the first line says waiting and the same words: the card in For you, a start by itself once allowed', shown('vws'));
+  ok(W6.vwc.code === 0 && gateOf(/^scheduled: jb-[0-9a-f]{8} \(cron vwc\) — but each fire's run WAITS and is NOT started: waiting for the user's approval/.test(first(W6.vwc))) && verdictOf(APPR.test(first(W6.vwc))), 'a SCHEDULE whose fires would wait says so beside «scheduled» at its create (never a bare «started»)', shown('vwc'));
+  ok(W6.vwr.code === 0 && verdictOf(/^started jb-[0-9a-f]{8} \(task vwr\)$/.test(first(W6.vwr))), 'CONTROL: a job that runs ⇒ «started» (its first line unchanged)', shown('vwr'));
   const id = (E, leg) => (jobOf(E, leg) || {}).id || 'none';
   const S6 = await all({ vwl: cli(['start', id(VWL, 'vwl')], { leg: 'vwl' }), vws: cli(['start', id(VWU, 'vws')], { leg: 'vws' }), vwc: cli(['start', id(VWU, 'vwc')], { leg: 'vwc' }) });
-  ok(S6.vwl.code === 0 && /^waiting: NOT started — /.test(first(S6.vwl)) && LOCK.test(first(S6.vwl)) && jobOf(VWL, 'vwl').state === 'waiting', '`start` on the job waiting for the vault ⇒ «waiting: NOT started — <the door>», never «started»', `${S6.vwl.code}: ${first(S6.vwl) || S6.vwl.err}`);
-  ok(S6.vws.code === 0 && /^waiting: NOT started — waiting for the user's approval/.test(first(S6.vws)) && APPR.test(first(S6.vws)), '`start` on the job waiting for an approval ⇒ the same honest wait', `${S6.vws.code}: ${first(S6.vws) || S6.vws.err}`);
-  ok(S6.vwc.code === 0 && /^scheduled — but each fire's run WAITS and is NOT started: /.test(first(S6.vwc)), '`start` on the schedule whose fires would wait ⇒ «scheduled — but each fire\'s run WAITS»', `${S6.vwc.code}: ${first(S6.vwc) || S6.vwc.err}`);
+  ok(S6.vwl.code === 0 && gateOf(/^waiting: NOT started — /.test(first(S6.vwl))) && gateOf(LOCK.test(first(S6.vwl))) && jobOf(VWL, 'vwl').state === 'waiting', '`start` on the job waiting for the vault ⇒ «waiting: NOT started — <the door>», never «started»', `${S6.vwl.code}: ${first(S6.vwl) || S6.vwl.err}`);
+  ok(S6.vws.code === 0 && gateOf(/^waiting: NOT started — waiting for the user's approval/.test(first(S6.vws))) && verdictOf(APPR.test(first(S6.vws))), '`start` on the job waiting for an approval ⇒ the same honest wait', `${S6.vws.code}: ${first(S6.vws) || S6.vws.err}`);
+  ok(S6.vwc.code === 0 && verdictOf(/^scheduled — but each fire's run WAITS and is NOT started: /.test(first(S6.vwc))), '`start` on the schedule whose fires would wait ⇒ «scheduled — but each fire\'s run WAITS»', `${S6.vwc.code}: ${first(S6.vwc) || S6.vwc.err}`);
   const vwr = jobOf(REAL, 'vwr');
   if (vwr) endRun(REAL, vwr);   // its run ended (no process here: the engine's spawn is stubbed) — a start runs it again
   const startR = await cli(['start', id(REAL, 'vwr')], { leg: 'vwr' });
@@ -581,10 +581,10 @@ console.log('(B-d73c) the CLI\'s memory line: a Node program\'s heap, and doors 
   const show = (id) => new Promise((resolve) => { const p = spawn(process.execPath, [CLI, 'show', id], { env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: tmp, VIBESPACE_API: `http://127.0.0.1:${hs.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_heap' } }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => resolve({ code, out, err })); });
   const [a, b, c, d] = await Promise.all(['jb-named', 'jb-plain', 'jb-big', 'jb-park'].map(show));
   const memOf = (r) => r.out.split('\n').find((l) => l.startsWith('memory: ')) || '';
-  ok(a.code === 0 && memOf(a).endsWith(" · a Node program in this job: heap 6 GB (75 % of the job's bound — handed as --max-old-space-size beside its NODE_OPTIONS)"), '(B-d73c) a job that named 8G: the heap a Node program in it is handed — 75 % of the job\'s BOUND', memOf(a) || a.err);
-  ok(b.code === 0 && memOf(b).endsWith(" · a Node program in this job gets Node's own default heap under this bound: about 2 GB — name the memory it already has (vibespace-job memory jb-plain 4G) to give it 75 % of the bound, or set NODE_OPTIONS=--max-old-space-size=N"), '(B-d73c) a job that named none: B\'s sentence, its door naming the 4G it already has', memOf(b) || b.err);
-  ok(c.code === 0 && memOf(c).includes('(vibespace-job memory jb-big 16G)') && !memOf(c).includes(' 8G)'), '(B-d73c) a 16G bound from a setting: the door names 16G — typing it never LOWERS the bound (it said 8G)', memOf(c) || c.err);
-  ok(d.code === 0 && memOf(d).includes('raise it (vibespace-job memory jb-park 32G)'), '(B-d73c, ALSO CURED) a parked 16G job: «raise it» asks 32G, never 8G (a lower bound)', memOf(d) || d.err);
+  ok(a.code === 0 && verdictOf(memOf(a).endsWith(" · a Node program in this job: heap 6 GB (75 % of the job's bound — handed as --max-old-space-size beside its NODE_OPTIONS)")), '(B-d73c) a job that named 8G: the heap a Node program in it is handed — 75 % of the job\'s BOUND', memOf(a) || a.err);
+  ok(b.code === 0 && verdictOf(memOf(b).endsWith(" · a Node program in this job gets Node's own default heap under this bound: about 2 GB — name the memory it already has (vibespace-job memory jb-plain 4G) to give it 75 % of the bound, or set NODE_OPTIONS=--max-old-space-size=N")), '(B-d73c) a job that named none: B\'s sentence, its door naming the 4G it already has', memOf(b) || b.err);
+  ok(c.code === 0 && gateOf(memOf(c).includes('(vibespace-job memory jb-big 16G)')) && !memOf(c).includes(' 8G)'), '(B-d73c) a 16G bound from a setting: the door names 16G — typing it never LOWERS the bound (it said 8G)', memOf(c) || c.err);
+  ok(d.code === 0 && verdictOf(memOf(d).includes('raise it (vibespace-job memory jb-park 32G)')), '(B-d73c, ALSO CURED) a parked 16G job: «raise it» asks 32G, never 8G (a lower bound)', memOf(d) || d.err);
   hs.close();
 }
 
@@ -605,10 +605,10 @@ console.log('(B-b14a) the CLI\'s memory line: the instance\'s budget for running
   const show = (id) => new Promise((resolve) => { const p = spawn(process.execPath, [CLI, 'show', id], { env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: tmp, VIBESPACE_API: `http://127.0.0.1:${hs.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_budget' } }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => resolve({ code, out, err })); });
   const [u, n, x, h] = await Promise.all(['jb-used', 'jb-unread', 'jb-nolimit', 'jb-half'].map(show));
   const memOf = (r) => r.out.split('\n').find((l) => l.startsWith('memory: ')) || '';
-  ok(u.code === 0 && memOf(u).endsWith(" · the instance's memory budget for jobs: 9 GB — 6 GB in use by 2 running jobs"), '(B-b14a) the budget and what the running jobs USE, on the memory line', memOf(u) || u.err);
-  ok(n.code === 0 && memOf(n).endsWith(" · the instance's memory budget for jobs: 9 GB — not judged right now (the memory of 1 running job could not be read)"), '(B-b14a) a running job unmeasured: «not judged right now», said', memOf(n) || n.err);
+  ok(u.code === 0 && verdictOf(memOf(u).endsWith(" · the instance's memory budget for jobs: 9 GB — 6 GB in use by 2 running jobs")), '(B-b14a) the budget and what the running jobs USE, on the memory line', memOf(u) || u.err);
+  ok(n.code === 0 && verdictOf(memOf(n).endsWith(" · the instance's memory budget for jobs: 9 GB — not judged right now (the memory of 1 running job could not be read)")), '(B-b14a) a running job unmeasured: «not judged right now», said', memOf(n) || n.err);
   ok(x.code === 0 && memOf(x) !== '' && !memOf(x).includes('budget'), '(B-b14a) CONTROL: no limit (memoryBudget null) — the line as it was, no budget word', memOf(x) || x.err);
-  ok(h.code === 0 && memOf(h).endsWith(" · the instance's memory budget for jobs: 3 GB — 100 MB in use by 1 running job · this job names no memory: a start of it is judged at 1.5 GB, half the budget"), '(B-b14a r924) a job that names no memory: the line says its start is judged at half the budget', memOf(h) || h.err);
+  ok(h.code === 0 && verdictOf(memOf(h).endsWith(" · the instance's memory budget for jobs: 3 GB — 100 MB in use by 1 running job · this job names no memory: a start of it is judged at 1.5 GB, half the budget")), '(B-b14a r924) a job that names no memory: the line says its start is judged at half the budget', memOf(h) || h.err);
   hs.close();
 }
 
@@ -618,4 +618,4 @@ for (const E of [CENSUS, REAL, NOHAND, OLD, NOBELT, WIRED, VWL, VWU]) E.jm.shutd
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\ntest-jobs-cli-body: ${pass} passed, ${fail} failed`);
 console.log(fail ? 'FAILED' : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

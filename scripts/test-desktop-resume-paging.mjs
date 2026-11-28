@@ -105,7 +105,7 @@ const PROJ = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-
 const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 let failed = 0, passed = 0;   // COUNTED, not a hand-maintained constant (the pre-round-2 label said 15 for 16 checks)
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── 1. synthetic transcript > 34MB (JSONL_HEAD 2MB + JSONL_TAIL 32MB is the
@@ -538,7 +538,7 @@ const run = async (label) => {
 
 // ── 4. FIXED build: the resume must change nothing ──
 const good = await run('fixed');
-check('scenario ran (chat opened, gap sentinel installed, windowStart > 0)', good?.ok, JSON.stringify(good).slice(0, 400));
+check('scenario ran (chat opened, gap sentinel installed, windowStart > 0)', verdictOf(good?.ok), JSON.stringify(good).slice(0, 400));
 if (good?.ok) {
   const tags = good.traces.map((e) => e.tag);
   check('resume does NOT page up (no extendTop:done)', !tags.includes('extendTop:done'), JSON.stringify(good.traces).slice(0, 900));
@@ -548,16 +548,16 @@ if (good?.ok) {
   check('the view is still PINNED after the resume', good.after.pinned === true, JSON.stringify(good.after));
   check('the window still ends at the live tail (windowEnd === total)', good.after.we === good.after.total, JSON.stringify(good.after));
   check('the view sits at the bottom (within 8px)', good.after.fromBottom <= 8, JSON.stringify(good.after));
-  check('…and never left the bottom during the whole 4s settle', good.samples.every((s) => s.fromBottom <= 8),
+  check('…and never left the bottom during the whole 4s settle', verdictOf(good.samples.every((s) => s.fromBottom <= 8)),
     JSON.stringify(good.samples.filter((s) => s.fromBottom > 8)).slice(0, 500));
   check('SENTINEL PROBE: an input-less scrollTop→0 makes the observer fire and be REFUSED (gapSkip)',
-    good.probeTraces.some((x) => x.startsWith('gapSkip')), JSON.stringify(good.probeTraces));
+    verdictOf(good.probeTraces.some((x) => x.startsWith('gapSkip'))), JSON.stringify(good.probeTraces));
   check('SENTINEL PROBE: …and nothing pages (no extendTop:done, no trimBottom)',
     !good.probeTraces.some((x) => x === 'extendTop:done' || x === 'trimBottom'), JSON.stringify(good.probeTraces));
   check('RE-TAIL GAP: an input-less scrollTop→0 at resume+1210ms (between the settle expiring and the re-tail running) ends PINNED at the tail',
     good.retail.pinned === true && good.retail.fromBottom <= 8, JSON.stringify(good.retail).slice(0, 500));
   check('a REAL wheel-up after the settle still pages normally (the gates refuse displacement, never a reader)',
-    good.wheelTraces.includes('extendTop:done'), JSON.stringify({ wheelTraces: good.wheelTraces, wheelState: good.wheelState }));
+    verdictOf(good.wheelTraces.includes('extendTop:done')), JSON.stringify({ wheelTraces: good.wheelTraces, wheelState: good.wheelState }));
   // ── ROUND 2 ──
   check('NAV DURING THE SETTLE: a jumpToIndex at resume+400ms STAYS where the reader jumped (the re-tail never yanks a navigating reader back to the tail)',
     good.nav.after.ws === good.nav.landed.ws && good.nav.after.pinned === false && good.nav.after.we < good.nav.after.total,
@@ -566,13 +566,13 @@ if (good?.ok) {
     good.navControl.after.ws !== good.navControl.landed.ws || good.navControl.after.pinned === true,
     JSON.stringify(good.navControl).slice(0, 500));
   check('DISPLACEMENT SWEEP: an input-less scrollTop→0 at 1240/1400/1900/2400ms after the resume ALL end pinned at the tail (the settle alone was a one-shot cliff)',
-    good.sweep.length === 4 && good.sweep.every((s) => s.pinned === true && s.fromBottom <= 8), JSON.stringify(good.sweep));
+    good.sweep.length === 4 && verdictOf(good.sweep.every((s) => s.pinned === true && s.fromBottom <= 8)), JSON.stringify(good.sweep));
   // ── ROUND 8 ──
   check('A SEND AT THE LIVE TAIL INSIDE THE RESUME (lane needs-card-tail r8): a send 0.3 s after the window is shown again, then the re-measure\'s input-less displacement at +1400 / +1900 ms — the window ENDS PINNED at the tail, the repair still armed after the send (r7 stranded it 3637 px up: userNav:send, unpin/scrolledAway)',
-    !!good.sendLegs && good.sendLegs.slice(0, 2).every((l) => l.atTail && l.afterSend.pinnedAtSuspend && l.afterSend.series > 0 && l.pinned === true && l.fromBottom <= 8 && !l.traces.includes('unpin/scrolledAway')),
+    !!good.sendLegs && verdictOf(good.sendLegs.slice(0, 2).every((l) => l.atTail && l.afterSend.pinnedAtSuspend && l.afterSend.series > 0 && l.pinned === true && l.fromBottom <= 8 && !l.traces.includes('unpin/scrolledAway'))),
     JSON.stringify(good.sendLegs).slice(0, 900));
   check('…and its control proves the leg touches the path: with r7\'s send (the whole _noteUserNav at the live tail) on the SAME build, the SAME +1400 ms displacement strands the window',
-    !!good.sendLegs && good.sendLegs[2].atTail && good.sendLegs[2].afterSend.pinnedAtSuspend === false && (good.sendLegs[2].pinned === false || good.sendLegs[2].fromBottom > 8),
+    !!good.sendLegs && gateOf(good.sendLegs[2].atTail) && good.sendLegs[2].afterSend.pinnedAtSuspend === false && (good.sendLegs[2].pinned === false || good.sendLegs[2].fromBottom > 8),
     JSON.stringify(good.sendLegs && good.sendLegs[2]).slice(0, 600));
   check('…and its control proves the leg touches the path: with the unpin gate off and a one-shot re-tail, the SAME +1900ms displacement strands the window',
     good.cliffControl.pinned === false || good.cliffControl.fromBottom > 8, JSON.stringify(good.cliffControl));
@@ -585,7 +585,7 @@ if (good?.ok) {
   // show up. (A sweep that passes for an older guard's reasons is the "+1240
   // survived by accident" mistake in test form.)
   check('…and past every OLDER guard (1900/2400ms — beyond the 1500ms collapsed-geometry settling window) the sweep is carried by the unpin gate itself: unpinSkipResume',
-    good.sweep.filter((s) => s.off >= 1900).every((s) => s.traces.includes('unpinSkipResume')),
+    verdictOf(good.sweep.filter((s) => s.off >= 1900).every((s) => s.traces.includes('unpinSkipResume'))),
     JSON.stringify(good.sweep.map((s) => ({ off: s.off, traces: s.traces }))).slice(0, 600));
   // A real reader inside the horizon: the gate never fires against them, their
   // page-up happens — AND THEY KEEP IT (B-9702, round 5). The pre-B-9702
@@ -598,7 +598,7 @@ if (good?.ok) {
   // OWN re-tail scroll chain writing the view back to the tail milliseconds
   // after the reader moved it. The reader's outcome IS this suite's business.
   check('…while a REAL wheel-up at resume+1400ms (inside the same horizon) still pages, and the unpin gate NEVER fires against a reader',
-    good.resumeWheel.traces.includes('extendTop:done') && !good.resumeWheel.traces.includes('unpinSkipResume'),
+    gateOf(good.resumeWheel.traces.includes('extendTop:done')) && !good.resumeWheel.traces.includes('unpinSkipResume'),
     JSON.stringify(good.resumeWheel).slice(0, 400));
   check('…and THE READER KEEPS THAT PAGE-UP: unpinned, away from the live tail, window moved up, and never re-pinned off an automatic write (B-9702)',
     good.resumeWheel.settled.pinned === false && good.resumeWheel.settled.fromBottom > 8
@@ -608,7 +608,7 @@ if (good?.ok) {
   // chain armed immediately before the wheel (all 10 frames still ahead of it)
   // is exactly the race the +1400ms leg wins only by timing luck.
   check('B-9702: a wheel-up while our OWN scroll chain is mid-flight cancels the chain (fsbCancel) and the reader keeps their page-up',
-    good.chainWheel.traces.includes('extendTop:done') && good.chainWheel.traces.includes('fsbCancel')
+    gateOf(good.chainWheel.traces.includes('extendTop:done')) && gateOf(good.chainWheel.traces.includes('fsbCancel'))
     && good.chainWheel.settled.pinned === false && good.chainWheel.settled.fromBottom > 8
     && good.chainWheel.settled.ws < good.chainWheel.pre.ws,
     JSON.stringify(good.chainWheel).slice(0, 600));
@@ -619,7 +619,7 @@ if (good?.ok) {
     good.chainWheelControl.fsbAfterWheel >= 1,
     JSON.stringify(good.chainWheelControl).slice(0, 600));
   check(`…while with the cancel in place the chain NEVER writes after the wheel — not one frame (×${good.chainWheel.fsbAfterWheel}; fsbCancel ends it at the wheel)`,
-    good.chainWheel.fsbAfterWheel === 0 && good.chainWheel.traces.includes('fsbCancel'),
+    good.chainWheel.fsbAfterWheel === 0 && verdictOf(good.chainWheel.traces.includes('fsbCancel')),
     JSON.stringify(good.chainWheel).slice(0, 600));
   // THE REPLAY (seam C): the .360 mirror (run 40662629945 attempt 1, heavy 1/6) recorded this control red 2/2 as
   // {"minFromBottom":300, traces: userPos, unpin, wheelTop, scroll, scroll, trimSkipZone, wheelCarry, extendTop:done, scroll,
@@ -784,10 +784,10 @@ if (good?.ok) {
   check('…and its control proves the leg touches the path: with the click running the OLD full _endResumeSettle() the same displacement strands the window',
     trusted.clickControl.pinned === false || trusted.clickControl.fromBottom > 8, JSON.stringify(trusted.clickControl).slice(0, 500));
   check('TRUSTED WHEEL: a real wheel-up at resume+300ms unpins IMMEDIATELY and pages (a positioning act loses nothing to the split)',
-    trusted.wheelPinned === false && trusted.wheel.traces.includes('extendTop:done') && !trusted.wheel.traces.includes('unpinSkipResume'),
+    trusted.wheelPinned === false && gateOf(trusted.wheel.traces.includes('extendTop:done')) && !trusted.wheel.traces.includes('unpinSkipResume'),
     JSON.stringify({ wheelPinned: trusted.wheelPinned, wheel: trusted.wheel }).slice(0, 600));
   check('TRUSTED SCROLLBAR DRAG: a real drag at resume+300ms IS positioning (userPos/scrollbar-drag) — it ends the repair and the reader is left where they dragged to',
-    trusted.drag.traces.some((x) => x === 'userPos/scrollbar-drag') && trusted.drag.fromBottom > 8,
+    gateOf(trusted.drag.traces.some((x) => x === 'userPos/scrollbar-drag')) && trusted.drag.fromBottom > 8,
     JSON.stringify(trusted.drag).slice(0, 700));
   // POSITION, not the pin flag: the fixed leg ALSO ends `pinned:true` here —
   // under collapsed geometry the scroll handler makes no boundary decision at
@@ -806,7 +806,7 @@ if (good?.ok) {
     trusted.nearControl.pinned === false || trusted.nearControl.fromBottom > 8,
     JSON.stringify(trusted.nearControl).slice(0, 600));
   check('ROUND 4 ②: a scrollbar drag whose first move comes 900ms after the press is STILL positioning — the reader is left where they dragged to (userPos/scrollbar-drag)',
-    trusted.holdDrag.onScrollbar === true && trusted.holdDrag.traces.some((x) => x === 'userPos/scrollbar-drag') && trusted.holdDrag.fromBottom > 8,
+    trusted.holdDrag.onScrollbar === true && gateOf(trusted.holdDrag.traces.some((x) => x === 'userPos/scrollbar-drag')) && trusted.holdDrag.fromBottom > 8,
     JSON.stringify(trusted.holdDrag).slice(0, 700));
   check('…and its control proves the leg touches the path: with the press not recognised as a gutter press (the pre-fix outcome for a late move) the SAME drag is yanked back to the live tail',
     trusted.holdDragControl.fromBottom <= 8, JSON.stringify(trusted.holdDragControl).slice(0, 700));
@@ -861,16 +861,16 @@ patch('public/chat.css', [['.chat-msg { max-width: 100%; min-width: 0; flex-shri
 buildBundle();
 const bad = await run('gates-removed');
 check('NEGATIVE CONTROL: without the gates the resume DOES page up (extendTop:done)',
-  bad?.ok && bad.traces.some((e) => e.tag === 'extendTop:done'), JSON.stringify(bad).slice(0, 900));
+  gateOf(bad?.ok) && verdictOf(bad.traces.some((e) => e.tag === 'extendTop:done')), JSON.stringify(bad).slice(0, 900));
 check('NEGATIVE CONTROL: …and the rendered window MOVES with zero user input',
-  bad?.ok && bad.after.ws !== bad.before.ws, `${bad?.before?.ws} → ${bad?.after?.ws}`);
+  gateOf(bad?.ok) && bad.after.ws !== bad.before.ws, `${bad?.before?.ws} → ${bad?.after?.ws}`);
 // …through EITHER branch of that door: the tail-mode extend, or — when the control's own
 // gates-removed walk has already consumed the registered tail (by count from a 40-card
 // target it walks ws → 0 in the 4 s above, the incident itself) — the seek slab (gapUp:done).
 check('NEGATIVE CONTROL: the sentinel probe pages through the gap door',
-  bad?.ok && (bad.probeTraces.includes('extendTop:done') || bad.probeTraces.includes('gapUp:done')), JSON.stringify(bad?.probeTraces));
+  gateOf(bad?.ok) && (verdictOf(bad.probeTraces.includes('extendTop:done')) || verdictOf(bad.probeTraces.includes('gapUp:done'))), JSON.stringify(bad?.probeTraces));
 check('NEGATIVE CONTROL: …and the re-tail-gap injection strands the window (unpinned / away from the tail)',
-  bad?.ok && (bad.retail.pinned === false || bad.retail.fromBottom > 8), JSON.stringify(bad?.retail).slice(0, 500));
+  gateOf(bad?.ok) && (bad.retail.pinned === false || bad.retail.fromBottom > 8), JSON.stringify(bad?.retail).slice(0, 500));
 
 // THE REAL HOME IS UNTOUCHED (see test-chat-paging.mjs §5 for the rule).
 {
@@ -881,7 +881,7 @@ check('NEGATIVE CONTROL: …and the re-tail-gap injection strands the window (un
   check(`the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`,
     lit.offenders.length === 0, JSON.stringify(lit.offenders.slice(0, 3)));
   check('the fixture really was written under the isolated home (isolation did not skip the work)',
-    fs.existsSync(path.join(PROJ, `${SID}.jsonl`)), path.join(PROJ, `${SID}.jsonl`));
+    verdictOf(fs.existsSync(path.join(PROJ, `${SID}.jsonl`))), path.join(PROJ, `${SID}.jsonl`));
 }
 
 // ── 2.369.144 the accessibility-tree lever (the owner's Windows freeze: Chrome's browser UI thread
@@ -909,10 +909,10 @@ check('NEGATIVE CONTROL: …and the re-tail-gap injection strands the window (un
     const back = wins.map((w) => w.element.hasAttribute('aria-hidden'));
     return { n, off, on, wins: wins.length, wentHidden, hidden, cameBack, back };
   })()`);
-  check(`accessibility.exposeChat=false marks every chat message list aria-hidden and true removes it (${ax.n} lists, live)`, ax.n > 0 && ax.off.every((v) => v === 'true') && ax.on.every((v) => v === false), JSON.stringify(ax));
-  check(`a desktop-hidden window carries aria-hidden and loses it when its desktop returns (${ax.wins} windows)`, ax.wins > 0 && ax.wentHidden && ax.hidden.every((v) => v === 'true') && ax.cameBack && ax.back.every((v) => v === false), JSON.stringify(ax));
+  check(`accessibility.exposeChat=false marks every chat message list aria-hidden and true removes it (${ax.n} lists, live)`, ax.n > 0 && gateOf(ax.off.every((v) => v === 'true')) && verdictOf(ax.on.every((v) => v === false)), JSON.stringify(ax));
+  check(`a desktop-hidden window carries aria-hidden and loses it when its desktop returns (${ax.wins} windows)`, ax.wins > 0 && gateOf(ax.wentHidden) && gateOf(ax.hidden.every((v) => v === 'true')) && gateOf(ax.cameBack) && verdictOf(ax.back.every((v) => v === false)), JSON.stringify(ax));
 }
 ws.close();
 
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

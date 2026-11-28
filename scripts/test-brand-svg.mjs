@@ -21,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/');
 let pass = 0, fail = 0;
-const ok = (c, m, x = '') => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}${x ? ` — ${x}` : ''}`); } };
+const ok = (c, m, x = '') => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}${x ? ` — ${x}` : ''}`); } };
 
 // ── the checker: what an XML parser refuses, the subset a drawn SVG can trip ──────────────────────────────────────
 const NAME = /^[A-Za-z_:][\w.:-]*/;
@@ -130,10 +130,10 @@ const files = readers.map((p) => ({ rel: rel(p), text: readFileSync(p, 'utf8') }
 
 console.log('① the census — every brand SVG the product draws exists and parses as XML');
 const C = census({ served, meta: Object.values(BACKEND_META), files });
-for (const r of C.rows) ok(r.exists && !r.problems.length, `${r.file} ${r.exists ? 'parses' : 'EXISTS'} — named by ${r.who.join(' · ')}`, r.exists ? r.problems.join('; ') : 'referenced but absent');
+for (const r of C.rows) ok(gateOf(r.exists) && !r.problems.length, `${r.file} ${r.exists ? 'parses' : 'EXISTS'} — named by ${r.who.join(' · ')}`, r.exists ? r.problems.join('; ') : 'referenced but absent');
 ok(!C.unresolved.length, 'every /brand/ path spelled through a template resolves (TEMPLATES)', C.unresolved.join('; '));
 const metaSrcs = Object.values(BACKEND_META).filter((m) => m.iconSrc);
-ok(metaSrcs.length >= 4 && metaSrcs.every((m) => C.rows.some((r) => r.web === m.iconSrc)), `every BACKEND_META iconSrc is in the census (${metaSrcs.map((m) => m.id).join(', ')})`);
+ok(metaSrcs.length >= 4 && verdictOf(metaSrcs.every((m) => C.rows.some((r) => r.web === m.iconSrc))), `every BACKEND_META iconSrc is in the census (${metaSrcs.map((m) => m.id).join(', ')})`);
 const joined = C.rows.filter((r) => r.who.includes('served') && r.who.length >= 2);
 ok(joined.length >= 7, `the census joins both sides: ${joined.length} served files are also named by code (${joined.map((r) => r.web.slice(7)).join(' ')})`);
 
@@ -147,7 +147,7 @@ if (shipped !== null) ok(shipped.split('\n')[0] === BASE_COMMENT, `the embedded 
 else console.log(`  SKIP the byte check against git's ${BASE} (a shallow clone holds no such object) — the control runs on the embedded line + today's drawing`);
 const control = shipped ?? BASE_COMMENT + now.slice(now.indexOf('\n'));
 const cv = xmlProblems(control);
-ok(cv.length && /double hyphen inside a comment/.test(cv[0]) && /--backend-icon-color/.test(cv[0]), `the checker REFUSES the shipped file: ${cv[0]}`, JSON.stringify(cv));
+ok(gateOf(cv.length) && gateOf(/double hyphen inside a comment/.test(cv[0])) && verdictOf(/--backend-icon-color/.test(cv[0])), `the checker REFUSES the shipped file: ${cv[0]}`, JSON.stringify(cv));
 ok(!xmlProblems(now).length && !now.split('-->')[0].slice(4).includes('--'), 'today\'s antigravity.svg passes and its comment holds no double hyphen');
 
 console.log('③ RED CONTROLS — each rule refuses its own fixture; the well-formed shapes pass');
@@ -172,7 +172,7 @@ const REDS = [
   ['attributes with no space between them', G.replace('viewBox="0 0 24 24"', 'width="1"height="1"'), /malformed attribute/],
   ['an XML declaration past the start', ' <?xml version="1.0"?>' + G, /XML declaration past the start/],
 ];
-for (const [what, src, want] of REDS) { const v = xmlProblems(src); ok(v.some((p) => want.test(p)), `refuses ${what}: ${v[0] || '(passed)'}`, JSON.stringify(v)); }
+for (const [what, src, want] of REDS) { const v = xmlProblems(src); ok(verdictOf(v.some((p) => want.test(p))), `refuses ${what}: ${v[0] || '(passed)'}`, JSON.stringify(v)); }
 const GREENS = [
   ['the bare shape', G],
   ['a declaration, comments around the root, single hyphens', `<?xml version="1.0" encoding="UTF-8"?>\n<!-- a - b, a mask recoloured by the backend-icon-color custom property -->\n${G}\n<!-- tail -->\n`],
@@ -183,12 +183,12 @@ for (const [what, src] of GREENS) { const v = xmlProblems(src); ok(!v.length, `p
 
 console.log('④ RED CONTROLS — the census itself');
 const absent = census({ served: [], meta: [{ id: 'ghost', iconSrc: '/brand/ghost-backend.svg' }], files: [{ rel: 'src/lib/x.js', text: "const a = '/brand/nope.svg';" }] });
-ok(absent.rows.length === 2 && absent.rows.every((r) => !r.exists), `a referenced-but-absent path is RED (${absent.rows.map((r) => r.web).join(', ')})`);
+ok(absent.rows.length === 2 && verdictOf(absent.rows.every((r) => !r.exists)), `a referenced-but-absent path is RED (${absent.rows.map((r) => r.web).join(', ')})`);
 const tpl = census({ served: [], meta: [], files: [{ rel: 'src/lib/elsewhere.js', text: 'g.style.setProperty("--m", `url(/brand/${who}.svg)`);' }] });
-ok(tpl.unresolved.length === 1 && /elsewhere\.js/.test(tpl.unresolved[0]), `a template path outside TEMPLATES is RED: ${tpl.unresolved[0]}`);
+ok(tpl.unresolved.length === 1 && verdictOf(/elsewhere\.js/.test(tpl.unresolved[0])), `a template path outside TEMPLATES is RED: ${tpl.unresolved[0]}`);
 const chan = brandRefs([{ rel: 'src/lib/channel-chrome.js', text: 'g.style.setProperty(\'--mark\', `url(/brand/${mark}.svg)`);' }]);
-ok(['gmail', 'lark', 'slack'].every((n) => chan.refs.has(`/brand/${n}.svg`)), `the channel badge template resolves through icons.js's vendor-* glyphs (${[...chan.refs.keys()].join(', ')})`);
+ok(verdictOf(['gmail', 'lark', 'slack'].every((n) => chan.refs.has(`/brand/${n}.svg`))), `the channel badge template resolves through icons.js's vendor-* glyphs (${[...chan.refs.keys()].join(', ')})`);
 ok(!brandRefs([{ rel: 'a.js', text: '// public/brand/<vendor>.svg and public/brand/{lark,gmail}.svg' }]).refs.size, 'prose spellings (<vendor>, {a,b}) are not paths');
 
 console.log(`\ntest-brand-svg: ${pass} passed, ${fail} failed (${(performance.now() - t0).toFixed(0)} ms in-process)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

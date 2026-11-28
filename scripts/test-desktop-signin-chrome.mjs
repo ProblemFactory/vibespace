@@ -36,7 +36,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const NOVNC = path.join(REPO, 'public/novnc.js');
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -98,7 +98,7 @@ const HAND = '  return (a) => bridgeRfb(a.ws, a.id, a.port, a.viewerId, a.req, a
 const blindRelay = MUT.write('src/server/stream-relay-rfb.js', editAnchor(relaySrc, HAND, HAND.replace('a.signIn || null', 'null'), "src/server/stream-relay-rfb.js"), 'blind');
 const blindRegs = MUT.write('src/server/stream-relays.js', fs.readFileSync(path.join(REPO, 'src/server/stream-relays.js'), 'utf8').replace("require('./stream-relay-rfb.js')", `require(${JSON.stringify(blindRelay)})`), 'blind');
 const DSblind = MUT.load('src/server/desktop-stream.js', fs.readFileSync(path.join(REPO, 'src/server/desktop-stream.js'), 'utf8').replace("require('./stream-relays.js')", `require(${JSON.stringify(blindRegs)})`), 'blind');
-ok(relaySrc.includes(HAND) && su && su.ok, 'the vault is set up; ⑧\'s blind relay copy is built from the hand-over line');
+ok(gateOf(relaySrc.includes(HAND)) && gateOf(su) && verdictOf(su.ok), 'the vault is set up; ⑧\'s blind relay copy is built from the hand-over line');
 const express = require(path.join(REPO, 'node_modules/express'));
 const R = require(path.join(REPO, 'src/routes/desktop-apps.js'));
 R.setup({ access, stream: bridge, vnc: { status: async () => ({ available: true, running: false }) } });
@@ -190,81 +190,81 @@ console.log('① – ⑥ zh');
   const p = await page('zh');
   const n0 = mWin.seen.length;
   await p.ev('window.__open()');
-  ok(await asked(p), '① the window asks for the sign-in (nothing kept yet)');
+  ok(verdictOf(await asked(p)), '① the window asks for the sign-in (nothing kept yet)');
   const f0 = await dialogFacts(p);
-  ok(f0 && f0.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 不会保存。' && f0.keep && f0.keep.checked === false && f0.keep.label === '记住这台机器的登录' && !f0.refused && !f0.locked, '① 「…VibeSpace 不会保存。」 and the tick 「记住这台机器的登录」, unticked', f0);
+  ok(gateOf(f0) && f0.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 不会保存。' && gateOf(f0.keep) && f0.keep.checked === false && f0.keep.label === '记住这台机器的登录' && !f0.refused && !f0.locked, '① 「…VibeSpace 不会保存。」 and the tick 「记住这台机器的登录」, unticked', f0);
   await tick(p);
   const f1 = await dialogFacts(p);
-  ok(f1 && f1.keep.checked === true && f1.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 会把它封进保险库，保险库解锁时自动登录。', '① ticked ⇒ the sentence says it is sealed in the vault and signs in by itself', f1 && f1.said);
+  ok(gateOf(f1) && f1.keep.checked === true && f1.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 会把它封进保险库，保险库解锁时自动登录。', '① ticked ⇒ the sentence says it is sealed in the vault and signs in by itself', f1 && f1.said);
   await p.shot('signin-ticked.png', `${DLG}`);
   await type(p, PW);
-  ok(await connected(p), '① the password typed ⇒ 已连接');
-  ok(await toast(p, '/已记住WIN-DESK1的登录（封进了保险库）/'), '① the toast 「已记住WIN-DESK1的登录（封进了保险库）」');
+  ok(verdictOf(await connected(p)), '① the password typed ⇒ 已连接');
+  ok(verdictOf(await toast(p, '/已记住WIN-DESK1的登录（封进了保险库）/')), '① the toast 「已记住WIN-DESK1的登录（封进了保险库）」');
   const s1 = await stateOf();
   const file1 = fileNow();
-  ok(s1 && s1.kept && s1.auth === 'vnc' && s1.auto && file1.includes(`desktop-signin/${HOST}`) && !file1.includes(PW), '① the hub keeps the row (vnc · auto); integrations.json holds its ciphertext, never the password', s1);
-  ok(mWin.seen.slice(n0).some((r) => r.type === 2 && r.verdict === 'ok'), '① the machine took the typed sign-in (noVNC in the page answered its challenge)');
+  ok(gateOf(s1) && gateOf(s1.kept) && s1.auth === 'vnc' && gateOf(s1.auto) && gateOf(file1.includes(`desktop-signin/${HOST}`)) && !file1.includes(PW), '① the hub keeps the row (vnc · auto); integrations.json holds its ciphertext, never the password', s1);
+  ok(verdictOf(mWin.seen.slice(n0).some((r) => r.type === 2 && r.verdict === 'ok')), '① the machine took the typed sign-in (noVNC in the page answered its challenge)');
 
   await reopen(p);
   let n1 = mWin.seen.length;
   const up = await connected(p);
   const dlg = await p.ev(`!!document.querySelector('${DLG}')`);
-  ok(up && !dlg, '② reopened: NO dialog — 已连接 by itself', { up, dlg });
-  ok(mWin.seen.slice(n1).filter((r) => r.verdict === 'ok').length === 1 && mWin.seen.slice(n1).every((r) => r.verdict !== 'refused'), '② the machine took the HUB\'s answer (one sign-in, none refused)', mWin.seen.slice(n1));
+  ok(gateOf(up) && !dlg, '② reopened: NO dialog — 已连接 by itself', { up, dlg });
+  ok(mWin.seen.slice(n1).filter((r) => r.verdict === 'ok').length === 1 && verdictOf(mWin.seen.slice(n1).every((r) => r.verdict !== 'refused')), '② the machine took the HUB\'s answer (one sign-in, none refused)', mWin.seen.slice(n1));
 
   mWin.st.password = PW2;
   await reopen(p);
-  ok(await asked(p), '③ the password changed on the machine: reopened ⇒ the dialog');
+  ok(verdictOf(await asked(p)), '③ the password changed on the machine: reopened ⇒ the dialog');
   const f3 = await dialogFacts(p);
-  ok(f3 && f3.refused === '上次记住的密码不对，请重输' && f3.keep && f3.keep.checked === true && f3.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 会把它封进保险库，保险库解锁时自动登录。', '③ 「上次记住的密码不对，请重输」, the tick ON (the sentence says sealed)', f3);
+  ok(gateOf(f3) && f3.refused === '上次记住的密码不对，请重输' && gateOf(f3.keep) && f3.keep.checked === true && f3.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 会把它封进保险库，保险库解锁时自动登录。', '③ 「上次记住的密码不对，请重输」, the tick ON (the sentence says sealed)', f3);
   await p.shot('signin-refused.png', `${DLG}`);
   await type(p, PW2);
-  ok(await connected(p) && await toast(p, '/已记住WIN-DESK1的登录/'), '③ the new password typed ⇒ 已连接 + 「已记住」');
+  ok(gateOf(await connected(p)) && verdictOf(await toast(p, '/已记住WIN-DESK1的登录/')), '③ the new password typed ⇒ 已连接 + 「已记住」');
   const s3 = await stateOf();
-  ok(s3 && s3.kept && !s3.refused && s3.auto && s3.at >= s1.at, '③ the row rewritten: refused cleared, auto', s3);
+  ok(gateOf(s3) && gateOf(s3.kept) && !s3.refused && gateOf(s3.auto) && s3.at >= s1.at, '③ the row rewritten: refused cleared, auto', s3);
   await reopen(p);
-  ok(await connected(p) && !(await p.ev(`!!document.querySelector('${DLG}')`)), '③ the next window connects by itself again');
+  ok(gateOf(await connected(p)) && !(await p.ev(`!!document.querySelector('${DLG}')`)), '③ the next window connects by itself again');
 
   eng.lock('test');
   const before4 = fileNow();
   await reopen(p);
-  ok(await asked(p), '④ the vault LOCKED: reopened ⇒ the dialog');
+  ok(verdictOf(await asked(p)), '④ the vault LOCKED: reopened ⇒ the dialog');
   const f4 = await dialogFacts(p);
-  ok(f4 && f4.locked === '保险库已锁定——先解锁后可自动登录' && f4.keep === null && f4.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 不会保存。', '④ 「保险库已锁定——先解锁后可自动登录」, no tick, 「不会保存」', f4);
-  ok(f4 && f4.where === '页面顶部的「解锁…」；「待你处理」里写明了在等它的事', '④ …and the two facts (where to unlock, For you) on their own line beside it — the words stay verbatim (test-vault-words)', f4);
+  ok(gateOf(f4) && f4.locked === '保险库已锁定——先解锁后可自动登录' && f4.keep === null && f4.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 不会保存。', '④ 「保险库已锁定——先解锁后可自动登录」, no tick, 「不会保存」', f4);
+  ok(gateOf(f4) && f4.where === '页面顶部的「解锁…」；「待你处理」里写明了在等它的事', '④ …and the two facts (where to unlock, For you) on their own line beside it — the words stay verbatim (test-vault-words)', f4);
   await p.shot('signin-locked.png', `${DLG}`);
   await type(p, PW2);
-  ok(await connected(p), '④ typed ⇒ 已连接');
+  ok(verdictOf(await connected(p)), '④ typed ⇒ 已连接');
   await sleep(400);
   ok(fileNow() === before4, '④ nothing stored (integrations.json byte-identical)');
   await eng.unlock(VAULT_PW);
   await reopen(p);
-  ok(await connected(p) && !(await p.ev(`!!document.querySelector('${DLG}')`)), '④ unlocked ⇒ by itself again');
+  ok(gateOf(await connected(p)) && !(await p.ev(`!!document.querySelector('${DLG}')`)), '④ unlocked ⇒ by itself again');
 
   await p.ev('window.__closeAll()');
   await p.ev('window.__dialog()');
-  ok(await p.until(`!!document.querySelector('#machine-desktop-dialog .machine-signin-forget')`, 8000), '⑤ the machine\'s dialog shows 「忘掉登录」 (a sign-in is kept)');
+  ok(verdictOf(await p.until(`!!document.querySelector('#machine-desktop-dialog .machine-signin-forget')`, 8000)), '⑤ the machine\'s dialog shows 「忘掉登录」 (a sign-in is kept)');
   const fb = await p.ev(`(() => { const b = document.querySelector('#machine-desktop-dialog .machine-signin-forget'); return { text: b.textContent, title: b.title }; })()`);
-  ok(fb.text === '忘掉登录' && /保险库/.test(fb.title), '⑤ its words: 忘掉登录 (the title: sealed in the vault, forget to be asked again)', fb);
+  ok(fb.text === '忘掉登录' && verdictOf(/保险库/.test(fb.title)), '⑤ its words: 忘掉登录 (the title: sealed in the vault, forget to be asked again)', fb);
   await p.shot('machine-dialog.png', '#machine-desktop-dialog');
   await p.ev(`document.querySelector('#machine-desktop-dialog .machine-signin-forget').click()`);
-  ok(await toast(p, '/已忘掉WIN-DESK1的登录/') && await p.until(`!document.querySelector('#machine-desktop-dialog .machine-signin-forget')`, 5000), '⑤ pressed ⇒ 「已忘掉WIN-DESK1的登录」, the button gone');
+  ok(gateOf(await toast(p, '/已忘掉WIN-DESK1的登录/')) && verdictOf(await p.until(`!document.querySelector('#machine-desktop-dialog .machine-signin-forget')`, 5000)), '⑤ pressed ⇒ 「已忘掉WIN-DESK1的登录」, the button gone');
   const s5 = await stateOf();
-  ok(s5 && s5.kept === false && !fileNow().includes(`desktop-signin/${HOST}`), '⑤ the row is gone', s5);
+  ok(gateOf(s5) && s5.kept === false && !fileNow().includes(`desktop-signin/${HOST}`), '⑤ the row is gone', s5);
   await p.ev('window.__closeAll()');
   await p.ev('window.__open()');
-  ok(await asked(p), '⑤ the next window asks again');
+  ok(verdictOf(await asked(p)), '⑤ the next window asks again');
   const f5 = await dialogFacts(p);
-  ok(f5 && f5.keep && f5.keep.checked === false && !f5.refused, '⑤ …with the tick off and no refused line', f5);
+  ok(gateOf(f5) && gateOf(f5.keep) && f5.keep.checked === false && !f5.refused, '⑤ …with the tick off and no refused line', f5);
   await p.ev('window.__closeAll()');
 
   await p.ev('window.__chip(true)');
   const c6 = await p.ev(`(() => { const card = document.getElementById('chip-card'), c = card.querySelector('.agents-mach-signin'); if (!c) return null; const a = card.getBoundingClientRect(), b = c.getBoundingClientRect();
     return { text: c.textContent, title: c.title, inside: b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom, oneLine: b.height < 20, w: Math.round(b.width) }; })()`);
-  ok(c6 && c6.text === '登录已记住' && c6.inside && c6.oneLine && /保险库/.test(c6.title) && /忘掉/.test(c6.title), '⑥ the Machines card\'s chip 「登录已记住」: one line inside the card, its title says sealed in the vault + where to forget it', c6);
+  ok(gateOf(c6) && c6.text === '登录已记住' && gateOf(c6.inside) && gateOf(c6.oneLine) && gateOf(/保险库/.test(c6.title)) && verdictOf(/忘掉/.test(c6.title)), '⑥ the Machines card\'s chip 「登录已记住」: one line inside the card, its title says sealed in the vault + where to forget it', c6);
   await p.shot('machines-chip.png', '#chip-card');
   await p.ev(`document.getElementById('chip-card').remove(); window.__chip(false)`);
-  ok(await p.ev(`!document.querySelector('#chip-card .agents-mach-signin')`), '⑥ none when nothing is kept');
+  ok(verdictOf(await p.ev(`!document.querySelector('#chip-card .agents-mach-signin')`)), '⑥ none when nothing is kept');
   p.close();
 }
 
@@ -274,11 +274,11 @@ console.log('⑦ ja');
   mWin.st.password = PW;
   const p = await page('ja');
   await p.ev('window.__open()');
-  ok(await asked(p), '⑦ ja: the remembered one refused ⇒ the dialog');
+  ok(verdictOf(await asked(p)), '⑦ ja: the remembered one refused ⇒ the dialog');
   const f7 = await dialogFacts(p);
-  ok(f7 && f7.keep && f7.keep.label === 'このマシンのサインインを記憶する' && f7.refused === '記憶したパスワードが通りませんでした。もう一度入力してください' && /保管庫に封印/.test(f7.said), '⑦ ja words: このマシンのサインインを記憶する · 記憶したパスワードが通りませんでした… · 保管庫に封印', f7);
+  ok(gateOf(f7) && gateOf(f7.keep) && f7.keep.label === 'このマシンのサインインを記憶する' && f7.refused === '記憶したパスワードが通りませんでした。もう一度入力してください' && verdictOf(/保管庫に封印/.test(f7.said)), '⑦ ja words: このマシンのサインインを記憶する · 記憶したパスワードが通りませんでした… · 保管庫に封印', f7);
   await type(p, PW);
-  ok(await connected(p), '⑦ typed ⇒ connected');
+  ok(verdictOf(await connected(p)), '⑦ typed ⇒ connected');
   p.close();
 }
 
@@ -294,12 +294,12 @@ console.log('⑧ RED CONTROL');
   await p.ev('window.__open()');
   const upReal = await connected(p);
   const dlgReal = await p.ev(`!!document.querySelector('${DLG}')`);
-  ok(s && s.auto && askedBlind && upReal && !dlgReal, '⑧ a relay that ignores the remembered sign-in ⇒ the window ASKS (the real one: by itself) — ②\'s leg can fail', { auto: s && s.auto, askedBlind, upReal, dlgReal });
+  ok(gateOf(s) && gateOf(s.auto) && gateOf(askedBlind) && gateOf(upReal) && !dlgReal, '⑧ a relay that ignores the remembered sign-in ⇒ the window ASKS (the real one: by itself) — ②\'s leg can fail', { auto: s && s.auto, askedBlind, upReal, dlgReal });
   p.close();
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 try { access.shutdown(); } catch { /* gone */ }
 try { eng.close(); } catch { /* gone */ }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

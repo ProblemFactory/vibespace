@@ -30,7 +30,7 @@ const SW = require(path.join(REPO, 'src/store-writer.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 const ROOT = scratch('csol-writer-laws');
 const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } };
 process.on('exit', cleanup);
@@ -70,7 +70,7 @@ console.log('(g) C1: the unsaved-sign-in warning is withdrawn only by a write th
   await sleep(300);
   const diskEnc1 = (((readJson(path.join(dir, 'adapters.json')) || {}).adapters || []).find((x) => x.id === 'fake-poll') || {}).auth;
   const g2open = !!filed && filed.status === 'open', g2disk = !!(diskEnc1 && diskEnc1.tokenEnc === liveEnc);
-  ok(!!(p2 && p2.ok) && g2open && !g2disk, `(g2) a pass that SUCCEEDED on the in-memory token (ok ${!!(p2 && p2.ok)}) does NOT withdraw it while adapters.json still lacks the sign-in (item ${filed ? filed.status : 'none'}; the file holds the new token: ${g2disk})`, { p2: p2 && { ok: p2.ok, why: p2.why }, status: filed && filed.status, g2disk });
+  ok(!!(p2 && p2.ok) && gateOf(g2open) && !g2disk, `(g2) a pass that SUCCEEDED on the in-memory token (ok ${!!(p2 && p2.ok)}) does NOT withdraw it while adapters.json still lacks the sign-in (item ${filed ? filed.status : 'none'}; the file holds the new token: ${g2disk})`, { p2: p2 && { ok: p2.ok, why: p2.why }, status: filed && filed.status, g2disk });
   fs.rmdirSync(block);   // the storage takes writes again
   await eng.pass('fake-poll');
   let landedAt = null, doneAt = null; const t0 = performance.now();
@@ -109,7 +109,7 @@ console.log('(h) C2: steady stamps across several snapshots — the journal stay
   const snaps = writes() - writes0, atEnd = lines();
   // THE LAW, per landing: at most the keys set since the snapshot's bytes were made (≤ the ${KEYS.length} keys) + the
   // few stamps appended between the landing and this read
-  ok(snaps >= 2 && atLanding.length >= 2 && atLanding.every((x) => x <= KEYS.length + 4) && atEnd < n / 2, `(h1) ${n} stamps across ${snaps} snapshot(s), each written while stamps kept coming: right after each landing the journal held ${JSON.stringify(atLanding)} line(s) (≤ ${KEYS.length} keys + the stamps since) — bounded by one period's stamps (worst ${worst}, at the end ${atEnd}), never all ${n}`, { n, snaps, atLanding, worst, atEnd });
+  ok(snaps >= 2 && atLanding.length >= 2 && gateOf(atLanding.every((x) => x <= KEYS.length + 4)) && atEnd < n / 2, `(h1) ${n} stamps across ${snaps} snapshot(s), each written while stamps kept coming: right after each landing the journal held ${JSON.stringify(atLanding)} line(s) (≤ ${KEYS.length} keys + the stamps since) — bounded by one period's stamps (worst ${worst}, at the end ${atEnd}), never all ${n}`, { n, snaps, atLanding, worst, atEnd });
   unhold('poll-stamps.json');
   for (let k = 0; k < 400 && w.pending(st.stamps.file); k++) await sleep(25);   // a compaction in flight lands
   st.stamps.flush();   // B-360d: the journal under its bound stays the record — the suite's synchronous flush writes the last snapshot
@@ -142,7 +142,7 @@ console.log('(i) C3: the writer stalled — the doors leave the loop on time (a 
     await Promise.all([durable, grp]);
     const doneMs = Math.round(performance.now() - t0);
     late = meter.stop();
-    ok(late < HOLD / 3 && pacedMs < HOLD / 3 && doneMs >= HOLD && hasRec(st.adaptersFile, 'acct', 'label', 'acted'), `(i) the writer held every write ${HOLD} ms: a paced update resolved in ${pacedMs} ms, the durable act and a group verb waited ${doneMs} ms — ASYNCHRONOUSLY: the main loop's worst lateness ${late} ms`, { late, pacedMs, doneMs });
+    ok(late < HOLD / 3 && pacedMs < HOLD / 3 && doneMs >= HOLD && verdictOf(hasRec(st.adaptersFile, 'acct', 'label', 'acted')), `(i) the writer held every write ${HOLD} ms: a paced update resolved in ${pacedMs} ms, the durable act and a group verb waited ${doneMs} ms — ASYNCHRONOUSLY: the main loop's worst lateness ${late} ms`, { late, pacedMs, doneMs });
   } finally { if (late === null) meter.stop(); unhold('adapters.json'); unhold('groups.json'); }
   for (let k = 0; k < 400 && (w.pending(st.adaptersFile) || w.pending(st.groupsFile)); k++) await sleep(10);
   w.stop();
@@ -217,10 +217,10 @@ console.log('(k) the two ORDER laws of test-channel-store ⑭ on the writer\'s t
     return { signal: k.signal, ...said, written: disk.includes('"changed"'), stripped: !/lastPollAt|walkStartedAt|lastScanAt/.test(disk), back };
   };
   const r1 = k1('real', null);
-  ok(r1.signal === 'SIGKILL' && r1.jl === 300 && r1.landed === true && r1.written && r1.stripped && r1.side === false && r1.back === 300,
+  ok(r1.signal === 'SIGKILL' && r1.jl === 300 && r1.landed === true && gateOf(r1.written) && gateOf(r1.stripped) && r1.side === false && r1.back === 300,
     `(k1) OWED on the writer's thread: the journal held all ${r1.jl} healed stamps BEFORE any index write; the writer's write of the index landed (${r1.landed}) without a stamp in it (side file ${r1.side ? 'present' : 'absent'}); SIGKILLed right after — the next start reads ${r1.back} of 300 back`, r1);
   const c1 = k1('cut', HEAL_J);
-  ok(c1.signal === 'SIGKILL' && c1.jl === 0 && c1.written && c1.stripped && c1.back === 0,
+  ok(c1.signal === 'SIGKILL' && c1.jl === 0 && gateOf(c1.written) && gateOf(c1.stripped) && c1.back === 0,
     `(k1) CONTROL: the heal not journaled — the same index write and kill leave ${c1.back} of 300 stamps (each row «never polled») — red`, c1);
   // (k2) the side file's write fails on the (stand-in) writer's thread — the journal is not folded until a write LANDS
   const KEYS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
@@ -244,12 +244,12 @@ console.log('(k) the two ORDER laws of test-channel-store ⑭ on the writer\'s t
     return r;
   };
   const r2 = await k2('real', null);
-  ok(r2.j0 === 6 && r2.failed && r2.jFailed === 6 && !r2.side && r2.back === 6 && r2.writes >= 1 && r2.jHealed === 0 && r2.sideHealed,
+  ok(r2.j0 === 6 && gateOf(r2.failed) && r2.jFailed === 6 && !r2.side && r2.back === 6 && r2.writes >= 1 && r2.jHealed === 0 && verdictOf(r2.sideHealed),
     `(k2) FOLD on the writer's thread: the side file's write FAILED — the journal kept ${r2.jFailed} of ${r2.j0} lines and a store started then reads ${r2.back} of 6 stamps; once the storage healed, the landing (${r2.writes} write) folded it to ${r2.jHealed} lines`, r2);
   const c2 = await k2('cut', FOLD_OK, { heal: false });
-  ok(c2.failed && c2.jFailed === 0 && !c2.side && c2.back === 0,
+  ok(gateOf(c2.failed) && c2.jFailed === 0 && !c2.side && c2.back === 0,
     `(k2) CONTROL: a fold on the failed write too — the journal emptied (${c2.jFailed} lines) with no side file, a store started then reads ${c2.back} of 6 stamps — red`, c2);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

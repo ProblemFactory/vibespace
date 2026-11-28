@@ -26,7 +26,7 @@ const IMAGE = process.env.VS_APP_SYSTEM_IMAGE || 'node:22-bookworm-slim';
 const FLEET = IMAGE !== 'node:22-bookworm-slim';
 const T0 = Date.now();
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}`); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}`); } };
 const finish = () => { console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${skipped ? `, ${skipped} skipped` : ''}) in ${Math.round((Date.now() - T0) / 1000)} s`); process.exit(fail ? 1 : 0); };
 const dk = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { encoding: 'utf8' });
 if (dk.status !== 0) { skipped++; console.log(`  ⊘ SKIP docker is not usable here: ${(dk.error && dk.error.message) || (dk.stderr || '').trim().split('\n')[0]}`); finish(); }
@@ -55,7 +55,7 @@ const r = spawnSync('docker', ['run', '--rm', '--name', name, '--cap-add', 'SYS_
 const vr = spawnSync('docker', ['volume', 'rm', pvc], { encoding: 'utf8' });
 ok(vr.status === 0, `the PVC stand-in (volume ${pvc}) removed — the container was --rm`);
 const legs = String(r.stdout || '').split('\n').filter((l) => l.startsWith('@@ ')).map((l) => { try { return JSON.parse(l.slice(3)); } catch { return { leg: l.slice(3, 200), ok: false }; } });
-for (const l of legs) ok(l.ok, l.leg + (l.ok || l.detail == null ? '' : ` — ${JSON.stringify(l.detail).slice(0, 900)}`));
+for (const l of legs) ok(verdictOf(l.ok), l.leg + (l.ok || l.detail == null ? '' : ` — ${JSON.stringify(l.detail).slice(0, 900)}`));
 const WANT = ['boot:', 'control: a broken drop-in', 'create (rung B', '§5 P3', 'install hello', 'catalog: sys.xterm', 'a plan INTO', 'GET /api/apps', '~/.vibespace/sysroot/bin/hello', 'P7:', 'the token never inside', 'a private mount namespace', 'the keeper\'s group kill', 'a crash (SIGKILL)', 'refused BY NAME', 'an install left unpacked', 'Repair (', 'create (rung A', 'the Rebase plan', 'Rebase:', 'Roll back swaps', 'Delete the previous', 'remove hello', 'CONTROL private namespace', 'CONTROL env -i', 'CONTROL HOME', 'CONTROL realpath', 'CONTROL root-owned', 'CONTROL identity contract', 'CONTROL arch', 'CONTROL chroot --userspec', 'CONTROL --root allowlist', 'CONTROL the sudoers drop-in', 'done'];
 WANT.push('design 019: a host entry', 'design 019: forget is refused', 'design 019: forget through', 'design 019: a REAL move'); // lane app-layers-tidy
 WANT.push('d019 r1 check 1 (root)', 'd019 r1 check 2: with the index', 'd019 r1 check 3: after the restart', 'd019 r1 check 3: the second click', 'd019 r1 check 5: the REAL Roll back', 'd019 r1 check 5: a second status()', 'd019 r1 check 5: rolling back again'); // app-layers-tidy verify r1
@@ -63,4 +63,4 @@ WANT.push('hardening 5 (r2):', 'hardening 1: a planted', 'hardening 1: etc/passw
 WANT.push('app-system-env: a process with VIBESPACE_APP_SYSTEM'); // lane app-system-env
 const missing = WANT.filter((w) => !legs.some((l) => l.leg.startsWith(w)));
 ok(!missing.length && r.status === 0, `every leg reported (${legs.length}) and the container exited 0${missing.length ? ` — missing: ${missing.join(' · ')}` : ''}${r.status ? ` — exit ${r.status}: ${String(r.stderr || '').trim().split('\n').slice(-5).join(' | ').slice(0, 600)}` : ''}`);
-finish();
+finish(); import { verdictOf } from './lib/check.mjs';

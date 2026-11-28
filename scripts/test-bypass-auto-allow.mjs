@@ -19,7 +19,7 @@ const DOOR_REL = 'src/server/bypass-auto-allow.js';
 const D = require(path.join(REPO, DOOR_REL));
 
 let pass = 0, fail = 0;
-function ok(name, cond, extra) {
+function ok(name, cond, extra) { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); }
 }
 /** The door with ONE source edit, compiled at its own path (its relative requires still resolve). */
@@ -66,18 +66,18 @@ console.log('§1 an ask under bypass + switch on ⇒ allowed at once with the ex
   ok('the door answered it', did === true);
   const frame = r.writes.length === 1 ? JSON.parse(r.writes[0]) : null;
   ok('ONE control_response on stdin: allow, the SAME request id, updatedInput = the exact input the CLI asked about',
-    frame && JSON.stringify(frame) === JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: 'R1', response: { behavior: 'allow', updatedInput: { command: CMD } } } }), frame);
-  ok('no permission card: the tool card carries no permission', r.card('T1') && !r.card('T1').permission, r.card('T1')?.permission);
+    gateOf(frame) && JSON.stringify(frame) === JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: 'R1', response: { behavior: 'allow', updatedInput: { command: CMD } } } }), frame);
+  ok('no permission card: the tool card carries no permission', gateOf(r.card('T1')) && !r.card('T1').permission, r.card('T1')?.permission);
   ok('nothing pending ⇒ main-ask / the parked-turn machinery have nothing to file', r.mm.pendingAsks().length === 0);
   ok('no op ever carried a permission for the card', !r.ops.some((o) => o.op === 'edit' && o.fields && o.fields.permission));
   const L = r.lines();
   ok('ONE quiet line (role system, the dim harness notice — never counted as a message)', L.length === 1 && L[0].role === 'system' && L[0].content[0].level === 'notice', L.length);
   const p = L[0]?.content[0]?.params || {};
-  ok('the line says the tool + the command head (its first 120 chars) + the CLI\'s reason type', p.tool === 'Bash' && p.head === CMD.slice(0, 120) && p.head.length === 120 && p.reasonType === 'safetyCheck' && /could not be checked/.test(p.reason), p);
-  ok('the line is EMITTED live (a create op an open window paints)', r.ops.some((o) => o.op === 'create' && (o.message || o.msg)?.content?.[0]?.say === 'bypass-auto-allow'));
+  ok('the line says the tool + the command head (its first 120 chars) + the CLI\'s reason type', p.tool === 'Bash' && p.head === CMD.slice(0, 120) && p.head.length === 120 && p.reasonType === 'safetyCheck' && verdictOf(/could not be checked/.test(p.reason)), p);
+  ok('the line is EMITTED live (a create op an open window paints)', verdictOf(r.ops.some((o) => o.op === 'create' && (o.message || o.msg)?.content?.[0]?.say === 'bypass-auto-allow')));
   const audit = r.logs.find(([k, s]) => k === 'log' && s.startsWith('[bypass] auto-allow '));
   const row = audit ? JSON.parse(audit[1].slice('[bypass] auto-allow '.length)) : null;
-  ok('the audit row (server console ring → the incident bundle): {op:auto-allow, tool, reasonType, head}', row && row.op === 'auto-allow' && row.tool === 'Bash' && row.reasonType === 'safetyCheck' && row.head === CMD.slice(0, 120), row);
+  ok('the audit row (server console ring → the incident bundle): {op:auto-allow, tool, reasonType, head}', gateOf(row) && row.op === 'auto-allow' && row.tool === 'Bash' && row.reasonType === 'safetyCheck' && row.head === CMD.slice(0, 120), row);
   ok('the per-session count (Session Properties) = 1', r.session._autoAllowed === 1);
   const recs = r.session.buffer.split('\n').filter(Boolean).map((l) => JSON.parse(l));
   ok('the buffer holds the allow AND our own record after it (the rebuild draws the same line)', recs.length === 2 && recs[0].type === 'control_response' && recs[1].type === 'system' && recs[1].subtype === 'vs_auto_allow' && recs[1].request_id === 'R1' && JSON.parse(recs[1].input).command === CMD, recs.map((x) => x.type));
@@ -85,7 +85,7 @@ console.log('§1 an ask under bypass + switch on ⇒ allowed at once with the ex
   const mm2 = createMessageManager('claude', 'bnp-rebuild');
   mm2.convertHistory([callOf('T1'), askOf('R1', 'T1'), ...recs]);
   const c2 = mm2.messages.find((m) => m.toolCallId === 'T1');
-  ok('REBUILD: no permission on the card, nothing pending, ONE quiet line', c2 && !c2.permission && mm2.pendingAsks().length === 0 && mm2.messages.filter((m) => m.content?.[0]?.say === 'bypass-auto-allow').length === 1, c2?.permission);
+  ok('REBUILD: no permission on the card, nothing pending, ONE quiet line', gateOf(c2) && !c2.permission && mm2.pendingAsks().length === 0 && mm2.messages.filter((m) => m.content?.[0]?.say === 'bypass-auto-allow').length === 1, c2?.permission);
   r.mm.processLive(resultOf('T1', 'e'));
   ok('the tool ran: its result stays a plain notice line', r.lines()[0].content[0].level === 'notice' && !r.lines()[0].content[0].params.refused);
 }
@@ -97,11 +97,11 @@ console.log('§2 no silent failure: an auto-allowed call the CLI then refuses is
   r.ask(askOf('R2', 'T2'));
   r.mm.processLive(resultOf('T2', 'Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). Try a different approach or report the limitation to complete your task.', true));
   const b = r.lines()[0]?.content[0];
-  ok('a denial result turns the quiet line into a warning that names it', b && b.level === 'warning' && /Permission for this tool use was denied/.test(b.params.refused), b);
-  ok('…and the change is EMITTED (an edit op on the line)', r.ops.some((o) => o.op === 'edit' && o.id === r.lines()[0].id && o.fields?.content));
+  ok('a denial result turns the quiet line into a warning that names it', gateOf(b) && b.level === 'warning' && verdictOf(/Permission for this tool use was denied/.test(b.params.refused)), b);
+  ok('…and the change is EMITTED (an edit op on the line)', verdictOf(r.ops.some((o) => o.op === 'edit' && o.id === r.lines()[0].id && o.fields?.content)));
   const n = rig({ pty: false });
   n.mm.processLive(callOf('T3'));
-  ok('no live process ⇒ the door steps aside (the card forms) and says why', n.ask(askOf('R3', 'T3')) === false && n.card('T3')?.permission?.requestId === 'R3' && n.logs.some(([k, s]) => k === 'warn' && /could not answer/.test(s)));
+  ok('no live process ⇒ the door steps aside (the card forms) and says why', n.ask(askOf('R3', 'T3')) === false && n.card('T3')?.permission?.requestId === 'R3' && verdictOf(n.logs.some(([k, s]) => k === 'warn' && /could not answer/.test(s))));
 }
 
 console.log('§3 the switch: OFF ⇒ the card as today; RED control — a door that ignores the switch answers anyway');
@@ -165,20 +165,20 @@ console.log('§6 wiring + words: the door sits on the claude stdout path before 
   const cs = read('src/server/stdout/claude-stream-json.js');
   const door = cs.indexOf("if (bypassAutoAllow.door(session, id, msg, { feedLive })) continue;");
   ok('claude-stream-json: the door runs right before the live feed (the last feedLive of the line loop)', door > 0 && door < cs.lastIndexOf('feedLive(session, msg);') && cs.lastIndexOf('feedLive(session, msg);') - door < 400);
-  ok('the door answers through THE one answer path (helper-asks.answerUnasked → permission-answer.js)', /answerUnasked\(session, \{ requestId: v\.requestId, approved: true, toolInput: v\.input \}/.test(read(DOOR_REL)) && /answerUnasked\(session, data, \{ adapterRegistry, feedLive \} = \{\}\) \{ return answerPermission\(/.test(read('src/server/helper-asks.js')));
+  ok('the door answers through THE one answer path (helper-asks.answerUnasked → permission-answer.js)', gateOf(/answerUnasked\(session, \{ requestId: v\.requestId, approved: true, toolInput: v\.input \}/.test(read(DOOR_REL))) && verdictOf(/answerUnasked\(session, data, \{ adapterRegistry, feedLive \} = \{\}\) \{ return answerPermission\(/.test(read('src/server/helper-asks.js'))));
   const S = require(path.join(REPO, 'src/lib/settings-schema.js'));
   const schema = S.SETTINGS_SCHEMA || S.SCHEMA || S.default || S;
   const row = schema && schema[D.SETTING];
-  ok('settings row permissions.bypassAnswersAsks: boolean, default ON, liveApply, the plain words', row && row.type === 'boolean' && row.default === true && row.liveApply === true && /safety-check prompts/.test(String(row.description)) && /every auto-allow is logged in the chat/.test(String(row.description)), row && { type: row.type, default: row.default });
+  ok('settings row permissions.bypassAnswersAsks: boolean, default ON, liveApply, the plain words', gateOf(row) && row.type === 'boolean' && row.default === true && row.liveApply === true && gateOf(/safety-check prompts/.test(String(row.description))) && verdictOf(/every auto-allow is logged in the chat/.test(String(row.description))), row && { type: row.type, default: row.default });
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   for (const k of ['Auto-allowed (bypass): {tool} — {head}', 'Auto-allowed (bypass), but the CLI did not run it: {tool} — {why}', 'Answer Claude Code’s own safety prompts in bypass mode', 'Auto-allowed under bypass', '{n} this run']) {
-    ok(`zh + ja carry "${k.slice(0, 44)}"`, zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'));
+    ok(`zh + ja carry "${k.slice(0, 44)}"`, gateOf(zh.includes(JSON.stringify(k) + ':')) && verdictOf(ja.includes(JSON.stringify(k) + ':')));
   }
-  ok('zh says 自动放行（bypass）', zh.includes('"自动放行（bypass）：{tool} — {head}"'));
+  ok('zh says 自动放行（bypass）', verdictOf(zh.includes('"自动放行（bypass）：{tool} — {head}"')));
   const cr = read('src/lib/chat-renderers.js');
-  ok('the client draws the line from `say` (the card\'s words, a refused one in its own sentence)', /b\.say === 'bypass-auto-allow' \? bypassLineWords\(p\)/.test(cr) && /p\.refused\s*\? t\('Auto-allowed \(bypass\), but the CLI did not run it/.test(cr));
-  ok('Session Properties shows the count; the session list carries it', /t\('Auto-allowed under bypass'\)/.test(read('src/lib/session-props.js')) && /autoAllowed: s\._autoAllowed \|\| 0/.test(read('server.js')));
+  ok('the client draws the line from `say` (the card\'s words, a refused one in its own sentence)', gateOf(/b\.say === 'bypass-auto-allow' \? bypassLineWords\(p\)/.test(cr)) && verdictOf(/p\.refused\s*\? t\('Auto-allowed \(bypass\), but the CLI did not run it/.test(cr)));
+  ok('Session Properties shows the count; the session list carries it', gateOf(/t\('Auto-allowed under bypass'\)/.test(read('src/lib/session-props.js'))) && verdictOf(/autoAllowed: s\._autoAllowed \|\| 0/.test(read('server.js'))));
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

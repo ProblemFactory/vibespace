@@ -35,7 +35,7 @@ import { writeStub } from './codex-app-server-stub.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (cond, name, detail = '') => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? ' — ' + String(detail).slice(0, 600) : ''}`); } };
+const ok = (cond, name, detail = '') => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? ' — ' + String(detail).slice(0, 600) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -66,11 +66,11 @@ const TABLES = measuredTables(REPO);
 ok(TABLES.length >= 2, `at least two measured tables (the newest + the one before it, the census's control): ${TABLES.map((t) => t.version).join(', ')}`);
 for (const { version, table } of TABLES) {
   const wm = table.wrapperMethods || {};
-  ok(table.codexVersion === version && /^\d{4}-\d{2}-\d{2}$/.test(table.measuredAt || '') && Object.keys(table.clientRequests || {}).length > 50 && (table.serverNotifications || []).length > 20,
+  ok(table.codexVersion === version && gateOf(/^\d{4}-\d{2}-\d{2}$/.test(table.measuredAt || '')) && Object.keys(table.clientRequests || {}).length > 50 && (table.serverNotifications || []).length > 20,
     `${version}: names its own version, a date, the CLI's request + notification sets`);
-  ok(Object.keys(wm).every((m) => table.clientRequests[m] && JSON.stringify(table.clientRequests[m].required) === JSON.stringify(wm[m].required)),
+  ok(verdictOf(Object.keys(wm).every((m) => table.clientRequests[m] && JSON.stringify(table.clientRequests[m].required) === JSON.stringify(wm[m].required))),
     `${version}: every probed wrapper method's required set equals the schema row`);
-  ok(/\b(unshare|empty network namespace)\b/.test(table.how?.live || '') ? (table.how.network && table.how.network.inetOk === 0) : true,
+  ok(/\b(unshare|empty network namespace)\b/.test(table.how?.live || '') ? (gateOf(table.how.network) && table.how.network.inetOk === 0) : true,
     `${version}: the live half (when it ran) recorded ZERO internet-family calls that succeeded`, JSON.stringify(table.how?.network));
 }
 const NEWEST = TABLES[TABLES.length - 1];
@@ -78,15 +78,15 @@ const NEWEST = TABLES[TABLES.length - 1];
 console.log('— ② the wrapper judged against every measured table');
 const sites = wrapperRequestSites(SRC);
 const methods = [...new Set(sites.flatMap((s) => s.methods))].sort();
-ok(sites.length >= 20 && sites.every((s) => s.methods.length > 0), `the census reads ${sites.length} request() sites, every one resolved to a method (${methods.length} methods)`, JSON.stringify(sites.filter((s) => !s.methods.length)));
-ok(methods.includes('thread/start') && methods.includes('thread/resume') && methods.includes('thread/fork'), 'the dynamic site (startThread\'s `request(method, params)`) resolves to thread/start | thread/resume | thread/fork');
+ok(sites.length >= 20 && verdictOf(sites.every((s) => s.methods.length > 0)), `the census reads ${sites.length} request() sites, every one resolved to a method (${methods.length} methods)`, JSON.stringify(sites.filter((s) => !s.methods.length)));
+ok(gateOf(methods.includes('thread/start')) && gateOf(methods.includes('thread/resume')) && verdictOf(methods.includes('thread/fork')), 'the dynamic site (startThread\'s `request(method, params)`) resolves to thread/start | thread/resume | thread/fork');
 const missingFromNewest = methods.filter((m) => !(m in (NEWEST.table.wrapperMethods || {})));
 ok(missingFromNewest.length === 0, `every method the wrapper calls was PROBED by the newest table (${NEWEST.version}) — a new call is measured before it ships`, missingFromNewest.join(', ') + ' — run node scripts/measure-codex-protocol.mjs');
 for (const { version, table } of TABLES) {
   const f = judge(table, SRC, RULES);
   ok(f.length === 0, `codex ${version}: the wrapper is in step (0 findings over ${methods.length} methods + ${wrapperConsumed(SRC).compared.length} consumed names)`, f.map((x) => `[${x.kind}] ${x.detail}${x.line ? ' (line ' + x.line + ')' : ''}`).join(' | '));
 }
-for (const [n, why] of Object.entries(NEVER_SHIPPED)) ok(TABLES.every(({ table }) => !table.serverNotifications.includes(n) && !table.serverRequests.includes(n)), `never shipped, pinned: ${n} — ${why.split(' — ')[0]}`);
+for (const [n, why] of Object.entries(NEVER_SHIPPED)) ok(verdictOf(TABLES.every(({ table }) => !table.serverNotifications.includes(n) && !table.serverRequests.includes(n))), `never shipped, pinned: ${n} — ${why.split(' — ')[0]}`);
 for (const [n, row] of Object.entries(RETIRED)) {
   const v = retiredRowVerdict(n, row, TABLES, SRC);
   const asks = TABLES.filter(({ table }) => table.serverRequests.includes(n) || table.serverNotifications.includes(n)).map((t) => t.version);
@@ -102,11 +102,11 @@ for (const [n, row] of Object.entries(RETIRED)) {
     ['no reason', { since: row.since, why: '' }, /a reason/],
     ['the first measured version (nothing before it asks the name)', { ...row, since: TABLES[0].version }, /no measured table before/],
   ];
-  for (const [what, bad, re] of wrong) { const v = retiredRowVerdict(n, bad, TABLES, SRC); ok(typeof v === 'string' && re.test(v), `CONTROL: a retired row with ${what} is RED by name`, v); }
+  for (const [what, bad, re] of wrong) { const v = retiredRowVerdict(n, bad, TABLES, SRC); ok(typeof v === 'string' && verdictOf(re.test(v)), `CONTROL: a retired row with ${what} is RED by name`, v); }
   const noAsk = retiredRowVerdict('thread/resumed', { since: TABLES[1].version, why: 'x' }, TABLES, SRC);
-  ok(typeof noAsk === 'string' && /do not send or ask it/.test(noAsk), 'CONTROL: a retired row for a name NO measured table asks (the never-shipped alias) is RED — a kept reply needs a version that asks it', noAsk);
+  ok(typeof noAsk === 'string' && verdictOf(/do not send or ask it/.test(noAsk)), 'CONTROL: a retired row for a name NO measured table asks (the never-shipped alias) is RED — a kept reply needs a version that asks it', noAsk);
   const stale = retiredRowVerdict(n, row, TABLES, SRC.replace(/'currentTime\/read': \{ kind: 'auto'/, "'currentTime/gone': { kind: 'auto'"));
-  ok(typeof stale === 'string' && /no longer handles it/.test(stale), 'CONTROL: a retired row for a name the wrapper no longer handles is RED (a stale row)', stale);
+  ok(typeof stale === 'string' && verdictOf(/no longer handles it/.test(stale)), 'CONTROL: a retired row for a name the wrapper no longer handles is RED (a stale row)', stale);
 }
 // the census's changed rows, printed (what moved between the last two tables)
 {
@@ -120,9 +120,9 @@ for (const [n, row] of Object.entries(RETIRED)) {
     if (add.length || rm.length) rows.push(`${m}: ${add.length ? '+' + add.join(',') : ''}${rm.length ? ' -' + rm.join(',') : ''}`);
   }
   console.log(`  · ${a.version} → ${b.version}, the wrapper's methods: ${rows.length ? rows.join(' · ') : 'unchanged'}`);
-  ok(rows.every((r) => !/required|retired/.test(r)), `${a.version} → ${b.version}: no wrapper method gained a required field or was retired (additive optional fields only)`, rows.join(' | '));
+  ok(verdictOf(rows.every((r) => !/required|retired/.test(r))), `${a.version} → ${b.version}: no wrapper method gained a required field or was retired (additive optional fields only)`, rows.join(' | '));
   const consume = 'account/rateLimitResetCredit/consume';
-  ok(TABLES.every(({ table }) => JSON.stringify(table.clientRequests[consume]?.required) === '["idempotencyKey"]'),
+  ok(verdictOf(TABLES.every(({ table }) => JSON.stringify(table.clientRequests[consume]?.required) === '["idempotencyKey"]')),
     `pinned: ${consume} requires idempotencyKey on EVERY measured version (${TABLES.map((t) => t.version).join(', ')}) — the keyless consume was broken before 0.159.3 too`);
   const e = NEWEST.table.wrapperMethods[consume]?.errorOnEmpty?.message || '';
   ok(e === 'Invalid request: missing field `idempotencyKey`', `the incident's words are the CLI's own answer to the keyless consume (measured live on ${NEWEST.version})`, e);
@@ -135,21 +135,21 @@ console.log('— ②b the reset-credit helper (lane reset-path) judged against e
   const HELPER = read('src/codex-reset-helper.js');
   const hs = wrapperRequestSites(HELPER);
   const hm = [...new Set(hs.flatMap((x) => x.methods))].sort();
-  ok(JSON.stringify(hm) === JSON.stringify(['account/rateLimitResetCredit/consume', 'account/rateLimits/read', 'initialize']) && hs.every((x) => x.methods.length === 1),
+  ok(JSON.stringify(hm) === JSON.stringify(['account/rateLimitResetCredit/consume', 'account/rateLimits/read', 'initialize']) && verdictOf(hs.every((x) => x.methods.length === 1)),
     `the helper's census reads its three requests (${hm.join(', ')})`, JSON.stringify(hs));
-  ok(hm.every((m) => m in (NEWEST.table.wrapperMethods || {})), `every helper method was PROBED by the newest table (${NEWEST.version})`, hm.filter((m) => !(m in (NEWEST.table.wrapperMethods || {}))).join(', '));
+  ok(verdictOf(hm.every((m) => m in (NEWEST.table.wrapperMethods || {}))), `every helper method was PROBED by the newest table (${NEWEST.version})`, hm.filter((m) => !(m in (NEWEST.table.wrapperMethods || {}))).join(', '));
   ok(JSON.stringify(wrapperConsumed(HELPER).notifies) === '["initialized"]', 'the helper sends exactly one notification: initialized');
   for (const { version, table } of TABLES) {
     const f = judge(table, HELPER, RULES);
     ok(f.length === 0, `codex ${version}: the helper is in step (0 findings)`, f.map((x) => `[${x.kind}] ${x.detail}`).join(' | '));
   }
   const pre = editAnchor(HELPER, "request('account/rateLimitResetCredit/consume', { idempotencyKey })", "request('account/rateLimitResetCredit/consume', {})", "src/codex-reset-helper.js");
-  ok(pre !== HELPER && judge(NEWEST.table, pre, RULES).some((x) => x.kind === 'missing-required' && x.field === 'idempotencyKey'), 'CONTROL: a helper consume without the key is named — missing-required idempotencyKey');
+  ok(pre !== HELPER && verdictOf(judge(NEWEST.table, pre, RULES).some((x) => x.kind === 'missing-required' && x.field === 'idempotencyKey')), 'CONTROL: a helper consume without the key is named — missing-required idempotencyKey');
 }
 console.log('— ② controls: each finding kind is produced when its drift is planted');
 {
   const consumeLine = "request('account/rateLimitResetCredit/consume', { idempotencyKey }, RESET_CREDIT_CONSUME_TIMEOUT_MS)";
-  ok(SRC.includes(consumeLine), 'the consume site is spelled as the controls expect');
+  ok(verdictOf(SRC.includes(consumeLine)), 'the consume site is spelled as the controls expect');
   const preFix = SRC.replace(consumeLine, "request('account/rateLimitResetCredit/consume', {}, 30000)");
   for (const { version, table } of TABLES) {
     const f = judge(table, preFix, RULES);
@@ -187,9 +187,9 @@ console.log('— ③ every reset-credit outcome the CLI declares is handled');
   // verify r3 (money): the PURE rule's closed set IS the measured enum, both ways — a word a re-measure adds is RED here
   // until it is classified, and a word in our set no table lists is a stale row; a word outside the set fails CLOSED
   for (const { version, table } of TABLES) ok(JSON.stringify([...table.resetCreditOutcomes].sort()) === JSON.stringify([...RCP.VENDOR_OUTCOMES].sort()), `codex ${version}: the measured outcome enum equals src/reset-credit.js VENDOR_OUTCOMES (${RCP.VENDOR_OUTCOMES.join(', ')})`, table.resetCreditOutcomes.join(', '));
-  ok(RCP.creditAnswerOf({ outcome: 'somethingNew', idempotencyKey: 'k', attempts: 1 }).outcome === 'unknown-outcome' && RCP.outcomeArmsFloor('unknown-outcome') && RCP.UNSETTLED_OUTCOMES.includes('unknown-outcome') && RCP.creditAnswerOf({ result: {}, outcome: null, idempotencyKey: 'k', attempts: 1 }).outcome === 'unknown-outcome', 'an outcome word outside the measured enum (or an answer with none) fails CLOSED — unknown-outcome: charged, the floor, unsettled until a reading; never "nothing spent"');
-  ok(RCP.creditAnswerOf({ outcome: 'alreadyRedeemed', idempotencyKey: 'k', attempts: 2 }).outcome === 'reset' && RCP.creditAnswerOf({ outcome: 'alreadyRedeemed' }).outcome === 'alreadyRedeemed' && /const ans = resetCredit\.creditAnswerOf\(payload\);/.test(ENGINE), 'a KEYED alreadyRedeemed is the press\'s own reset (the schema: "the same idempotency key already completed a reset")');
-  ok(/session\.pty\.write\(JSON\.stringify\(\{ type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/.test(ENGINE) && /const idemKey = crypto\.randomUUID\(\);/.test(ENGINE), 'the engine\'s one writer mints the key per press and hands it down in the verb (lane reset-path verify r8 T0: with `readFirst` for a person\'s press on a wrapper that reads first)');
+  ok(RCP.creditAnswerOf({ outcome: 'somethingNew', idempotencyKey: 'k', attempts: 1 }).outcome === 'unknown-outcome' && gateOf(RCP.outcomeArmsFloor('unknown-outcome')) && gateOf(RCP.UNSETTLED_OUTCOMES.includes('unknown-outcome')) && RCP.creditAnswerOf({ result: {}, outcome: null, idempotencyKey: 'k', attempts: 1 }).outcome === 'unknown-outcome', 'an outcome word outside the measured enum (or an answer with none) fails CLOSED — unknown-outcome: charged, the floor, unsettled until a reading; never "nothing spent"');
+  ok(RCP.creditAnswerOf({ outcome: 'alreadyRedeemed', idempotencyKey: 'k', attempts: 2 }).outcome === 'reset' && RCP.creditAnswerOf({ outcome: 'alreadyRedeemed' }).outcome === 'alreadyRedeemed' && verdictOf(/const ans = resetCredit\.creditAnswerOf\(payload\);/.test(ENGINE)), 'a KEYED alreadyRedeemed is the press\'s own reset (the schema: "the same idempotency key already completed a reset")');
+  ok(gateOf(/session\.pty\.write\(JSON\.stringify\(\{ type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/.test(ENGINE)) && verdictOf(/const idemKey = crypto\.randomUUID\(\);/.test(ENGINE)), 'the engine\'s one writer mints the key per press and hands it down in the verb (lane reset-path verify r8 T0: with `readFirst` for a person\'s press on a wrapper that reads first)');
 }
 
 console.log('— ④ THE VERSION GATE: the installed codex-cli was measured');
@@ -206,9 +206,9 @@ const versionVerdict = (installed, tables) => {
   const inst = handedBin ? installedCodexVersion({ bin: handedBin, env: withoutVendorKeys(process.env) }) : null;
   const v = versionVerdict(inst && inst.version, TABLES);
   if (v.skip) console.log('  SKIP: no `codex` on the handed PATH — the version gate did not run (② still judges the wrapper against every measured table)');
-  else ok(v.ok, `the installed codex-cli ${inst.version} (${path.basename(inst.how)}) has a measured table`, v.why);
+  else ok(verdictOf(v.ok), `the installed codex-cli ${inst.version} (${path.basename(inst.how)}) has a measured table`, v.why);
   const c = versionVerdict('9.99.0', TABLES);
-  ok(!c.ok && /codex-cli 9\.99\.0 is installed/.test(c.why) && /measure-codex-protocol/.test(c.why), 'CONTROL: an unmeasured version FAILS by name, with the remedy', c.why);
+  ok(!c.ok && gateOf(/codex-cli 9\.99\.0 is installed/.test(c.why)) && verdictOf(/measure-codex-protocol/.test(c.why)), 'CONTROL: an unmeasured version FAILS by name, with the remedy', c.why);
 }
 
 console.log('— ⑤ the REAL wrapper against a stub app-server driven by the measured table');
@@ -254,7 +254,7 @@ const refusedOf = (ctx) => ctx.rpc().filter((r) => r.verdict !== 'ok');
       await c.until(() => ['thread/name/set', 'thread/goal/set', 'config/read', 'turn/start'].every((m) => c.rpc().some((r) => r.method === m)));
     },
   });
-  ok(a.booted, 'boot: the real wrapper came up on the stub (initialize → thread/start → … → thread/queue/list)');
+  ok(verdictOf(a.booted), 'boot: the real wrapper came up on the stub (initialize → thread/start → … → thread/queue/list)');
   for (const r of a.rpc()) exercised.add(r.method);
   ok(refusedOf(a).length === 0, `boot + driven verbs: every request passed the ${NEWEST.version} table's validation (${a.rpc().length} requests over ${new Set(a.rpc().map((r) => r.method)).size} methods)`, JSON.stringify(refusedOf(a)));
   const consumes = a.rpc().filter((r) => r.method === 'account/rateLimitResetCredit/consume');
@@ -271,7 +271,7 @@ const refusedOf = (ctx) => ctx.rpc().filter((r) => r.verdict !== 'ok');
     drive: async (c) => { c.send({ type: 'codex-reset-credit', idempotencyKey: 'k-press-0002' }); await c.until(() => c.events('reset_credit_result').length > 0, 6000); },
   });
   const consumes = r.rpc().filter((x) => x.method === 'account/rateLimitResetCredit/consume');
-  ok(consumes.length === 2 && consumes.every((x) => x.params.idempotencyKey === 'k-press-0002'), 'RETRY: a consume with no answer is retried ONCE with the SAME key (the vendor dedupes — never two credits for one press)', JSON.stringify(consumes.map((x) => x.params)));
+  ok(consumes.length === 2 && verdictOf(consumes.every((x) => x.params.idempotencyKey === 'k-press-0002')), 'RETRY: a consume with no answer is retried ONCE with the SAME key (the vendor dedupes — never two credits for one press)', JSON.stringify(consumes.map((x) => x.params)));
   const res = r.events('reset_credit_result')[0] || {};
   ok(res.outcome === 'alreadyRedeemed' && res.attempts === 2 && res.idempotencyKey === 'k-press-0002', 'RETRY: the retry is answered `alreadyRedeemed` (this key\'s reset completed) and the answer says two attempts — the engine reads it as the press\'s reset', JSON.stringify(res));
 }
@@ -280,12 +280,12 @@ const refusedOf = (ctx) => ctx.rpc().filter((r) => r.verdict !== 'ok');
     drive: async (c) => { c.send({ type: 'codex-reset-credit' }); await c.until(() => c.events('reset_credit_result').length > 0); },
   });
   const k = o.rpc().find((x) => x.method === 'account/rateLimitResetCredit/consume')?.params?.idempotencyKey || '';
-  ok(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(k) && (o.events('reset_credit_result')[0] || {}).idempotencyKey === k, 'a verb with NO key (a server older than the key) — the wrapper mints its own UUID and echoes it', k);
+  ok(gateOf(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(k)) && (o.events('reset_credit_result')[0] || {}).idempotencyKey === k, 'a verb with NO key (a server older than the key) — the wrapper mints its own UUID and echoes it', k);
 }
 {
   const res = await runWrapper('resume', { env: { CODEX_WEBUI_RESUME_ID: 'th-resumed-1' } });
   for (const r of res.rpc()) exercised.add(r.method);
-  ok(res.booted && res.rpc().some((r) => r.method === 'thread/resume' && r.params.threadId === 'th-resumed-1') && refusedOf(res).length === 0, 'resume boot: thread/resume carries its threadId and every request passes', JSON.stringify(refusedOf(res)));
+  ok(gateOf(res.booted) && gateOf(res.rpc().some((r) => r.method === 'thread/resume' && r.params.threadId === 'th-resumed-1')) && refusedOf(res).length === 0, 'resume boot: thread/resume carries its threadId and every request passes', JSON.stringify(refusedOf(res)));
 }
 {
   // CONTROL: the PRE-FIX wrapper (the consume back to `{}`) against the same stub reproduces the incident
@@ -307,4 +307,4 @@ const uncovered = methods.filter((m) => !exercised.has(m) && m !== 'account/rate
 console.log(`  · stub-driven: ${[...exercised].filter((m) => methods.includes(m)).length}/${methods.length} wrapper methods; judged statically only: ${uncovered.join(', ')}`);
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${fail ? ' passed' : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

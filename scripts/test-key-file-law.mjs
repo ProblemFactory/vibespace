@@ -42,7 +42,7 @@ const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const acorn = require('acorn');
 let pass = 0, fail = 0;
-function ok(cond, msg, detail) { if (cond) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 600) : '')); } }
+function ok(cond, msg, detail) { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 600) : '')); } }
 const ROOT = scratch('keyfilelaw');
 const MUT = mutantCopies('key-file-law', REPO);
 const KF = require(path.join(REPO, 'src/key-file.js'));
@@ -61,7 +61,7 @@ console.log('① PURE loadOrMintKey');
     return { r, calls };
   };
   let a = run({ read: () => { throw enoent(); } });
-  ok(a.r.ok && a.r.minted && a.r.key.length === 32 && a.calls.mint === 1 && a.calls.holds === 1, 'absent + no ciphertext ⇒ ONE mint (the store was asked first)', JSON.stringify(a));
+  ok(gateOf(a.r.ok) && gateOf(a.r.minted) && a.r.key.length === 32 && a.calls.mint === 1 && a.calls.holds === 1, 'absent + no ciphertext ⇒ ONE mint (the store was asked first)', JSON.stringify(a));
   a = run({ read: () => { throw enoent(); }, holds: () => true });
   ok(!a.r.ok && a.r.code === 'key-missing' && a.calls.mint === 0, 'absent + ciphertext ⇒ key-missing, the mint never called', JSON.stringify(a));
   a = run({ read: () => { throw enoent(); }, holds: () => { throw errno('EACCES'); } });
@@ -77,10 +77,10 @@ console.log('① PURE loadOrMintKey');
     ok(!a.r.ok && a.r.code === 'key-malformed' && a.calls.mint === 0, `a ${label} key file ⇒ key-malformed, never replaced`);
   }
   a = run({ read: () => HEX + '\n' });
-  ok(a.r.ok && !a.r.minted && a.r.key.toString('hex') === HEX && a.calls.holds === 0, '64 hex (+ newline) ⇒ the key, the store never asked');
+  ok(gateOf(a.r.ok) && !a.r.minted && a.r.key.toString('hex') === HEX && a.calls.holds === 0, '64 hex (+ newline) ⇒ the key, the store never asked');
   let n = 0;
   a = run({ read: () => { if (n++ === 0) throw enoent(); return HEX; }, mint: () => null });
-  ok(a.r.ok && a.r.key.toString('hex') === HEX && a.calls.mint === 1, 'a lost mint race (mint → null) reads the key the other writer landed');
+  ok(gateOf(a.r.ok) && a.r.key.toString('hex') === HEX && a.calls.mint === 1, 'a lost mint race (mint → null) reads the key the other writer landed');
   n = 0;
   a = run({ read: () => { if (n++ === 0) throw enoent(); throw errno('EIO'); }, mint: () => null });
   ok(!a.r.ok && a.r.code === 'key-unreadable:EIO', '…and that re-read failing is key-unreadable, never a second mint');
@@ -88,13 +88,13 @@ console.log('① PURE loadOrMintKey');
   ok(!a.r.ok && a.r.code === 'key-unreadable:EROFS', 'a mint that fails (EROFS) ⇒ key-unreadable:EROFS');
   const raw32 = crypto.randomBytes(32);
   a = run({ read: () => raw32, parse: KF.parseRawKey });
-  ok(a.r.ok && a.r.key.equals(raw32), 'the raw 32-byte shape (the passkey store) reads');
+  ok(gateOf(a.r.ok) && verdictOf(a.r.key.equals(raw32)), 'the raw 32-byte shape (the passkey store) reads');
   a = run({ read: () => raw32.subarray(0, 31), parse: KF.parseRawKey });
   ok(!a.r.ok && a.r.code === 'key-malformed', '…31 bytes ⇒ key-malformed');
   let threw = null; try { KF.loadOrMintKey({ readKey: () => HEX, mintKey: () => null }); } catch (e) { threw = e; }
   ok(threw instanceof TypeError, 'no hasCiphertext door ⇒ a TypeError: no store is exempt from the question');
   ok(JSON.stringify(KF.refusalOf('key-unreadable:EIO')) === '{"kind":"key-unreadable","errno":"EIO"}' && KF.refusalOf('key-missing').kind === 'key-missing' && KF.refusalOf('nope') === null, 'refusalOf parses the three codes, nothing else');
-  ok(/restore it from a backup/.test(KF.refusalWords('key-missing', '.x-key')) && /could not be read \(EIO\)/.test(KF.refusalWords('key-unreadable:EIO', '.x-key')) && /damaged/.test(KF.refusalWords('key-malformed', '.x-key')), 'refusalWords: restore / could not be read (EIO) / damaged — the code and the file name only');
+  ok(gateOf(/restore it from a backup/.test(KF.refusalWords('key-missing', '.x-key'))) && gateOf(/could not be read \(EIO\)/.test(KF.refusalWords('key-unreadable:EIO', '.x-key'))) && verdictOf(/damaged/.test(KF.refusalWords('key-malformed', '.x-key'))), 'refusalWords: restore / could not be read (EIO) / damaged — the code and the file name only');
 }
 
 // ── ② THE CENSUS ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -404,7 +404,7 @@ async function storeLegs(S) {
   const h = await S.seal(st, 'secret-one');
   const kf = S.keyFile(A);
   let mode = null; try { mode = fs.statSync(kf).mode & 0o777; } catch { }
-  ok(mode === 0o600 && S.shape(realRead(kf)), `${S.tag}: a fresh dir mints ONE key (0600, its shape)`, `mode ${mode && mode.toString(8)}`);
+  ok(mode === 0o600 && verdictOf(S.shape(realRead(kf))), `${S.tag}: a fresh dir mints ONE key (0600, its shape)`, `mode ${mode && mode.toString(8)}`);
   const st1 = await S.make(A, mod);
   ok(await S.open(st1, h) === 'secret-one', `${S.tag}: …and a second store over the same dir opens the secret (one key)`);
   const ct = () => S.ctFiles(A).map((f) => `${path.basename(f)}=${bytes(f)}`).join(',');
@@ -419,7 +419,7 @@ async function storeLegs(S) {
     return { opened, code, sealed, minted: fs.existsSync(S.keyFile(B)), same: S.ctFiles(B).map(bytes).join(',') === ct0 };
   };
   const km = await missing(mod);
-  ok(km.opened !== 'secret-one' && !km.minted && km.code === 'key-missing' && km.same && !km.sealed, `${S.tag}: key file gone over ciphertext ⇒ key-missing on its row, NOTHING minted, the ciphertext byte-identical, a new secret refused`, JSON.stringify(km));
+  ok(km.opened !== 'secret-one' && !km.minted && km.code === 'key-missing' && gateOf(km.same) && !km.sealed, `${S.tag}: key file gone over ciphertext ⇒ key-missing on its row, NOTHING minted, the ciphertext byte-identical, a new secret refused`, JSON.stringify(km));
   fs.renameSync(S.keyFile(B) + '.backup', S.keyFile(B));
   ok(await S.open(await S.make(B, mod), h) === 'secret-one', `${S.tag}: the key restored from the backup opens every secret`);
   // EIO on the SAME store, then the error clears
@@ -447,7 +447,7 @@ async function storeLegs(S) {
   // RED control: the store's base rule
   fs.rmSync(S.keyFile(B)); fs.copyFileSync(S.keyFile(A), S.keyFile(B) + '.backup'); // B: no key again, ciphertext from A
   BELT.paused++; let red; try { red = await missing(S.baseRule()); } finally { BELT.paused--; } // the base rule mints outside the law ON PURPOSE
-  ok(red.minted || red.code !== 'key-missing', `${S.tag}: RED control — the base rule over the same dir ${red.minted ? 'MINTS a new key over the ciphertext' : 'never says key-missing'} (the key-missing leg fails on it)`, JSON.stringify(red));
+  ok(verdictOf(red.minted) || red.code !== 'key-missing', `${S.tag}: RED control — the base rule over the same dir ${red.minted ? 'MINTS a new key over the ciphertext' : 'never says key-missing'} (the key-missing leg fails on it)`, JSON.stringify(red));
   BOOTED.set(S.tag, A);
   return { A };
 }
@@ -555,10 +555,10 @@ for (const e of engines) { try { await e.stop?.(); } catch { } }
   const r = await heldRun(ENG);
   console.log(`    facts: held ${JSON.stringify(r.held)} · after ${JSON.stringify(r.after)}`);
   ok(!r.held.minted && !r.held.sealed && r.held.code === 'key-missing' && r.held.aside === 0, 'channels B-f276: adapters.json HELD at a start (its read failed) while the value is missing — NOTHING minted (key-missing), the file not set aside', JSON.stringify(r.held));
-  ok(r.after.ev === 'loaded' && r.after.opened === 'secret-held' && r.after.theValue && r.after.records.includes('acct-held'), 'channels B-f276: …the value put back and the file read again: the accounts taken in, the sealed sign-in opens WITH THE VALUE THAT SEALED IT', JSON.stringify(r.after));
+  ok(r.after.ev === 'loaded' && r.after.opened === 'secret-held' && gateOf(r.after.theValue) && verdictOf(r.after.records.includes('acct-held')), 'channels B-f276: …the value put back and the file read again: the accounts taken in, the sealed sign-in opens WITH THE VALUE THAT SEALED IT', JSON.stringify(r.after));
   const t = await tornRun(ENG);
   ok(t.held.kind === 'damaged' && t.held.code === 'key-missing' && !t.held.minted, 'channels B-f276 1b: torn adapters.json HELD as damaged (its sealed sign-in still in the bytes it keeps where they are) — NOTHING minted', JSON.stringify(t.held));
-  ok(t.after.state === 'pass' && Array.isArray(t.after.listed) && t.after.listed.length === 1 && /^adapters\.json\.damaged-/.test(t.after.listed[0]) && t.after.code === 'key-missing' && !t.after.minted, 'channels B-f276 1b: …a person starts it empty (the damaged door): the bytes set aside under a dated name are LISTED among the accounts\' copies — the copy counts: NOTHING minted', JSON.stringify(t.after));
+  ok(t.after.state === 'pass' && gateOf(Array.isArray(t.after.listed)) && t.after.listed.length === 1 && gateOf(/^adapters\.json\.damaged-/.test(t.after.listed[0])) && t.after.code === 'key-missing' && !t.after.minted, 'channels B-f276 1b: …a person starts it empty (the damaged door): the bytes set aside under a dated name are LISTED among the accounts\' copies — the copy counts: NOTHING minted', JSON.stringify(t.after));
   // B-f276 1b, its read r1 S4: a LEGACY copy (a release before 1b set torn bytes aside as .corrupt-) beside a store that RAN there is listed
   // off the loop and counts; a FIRST start's empty list is taken again once a family's file appears (the folder changed under it)
   const legacyRun = async (m) => {
@@ -582,8 +582,8 @@ for (const e of engines) { try { await e.stop?.(); } catch { } }
     return { upd, listed: e.store.adapters.asideCopies(), code, minted: fs.existsSync(kfOf(B)) };
   };
   const lg = await legacyRun(ENG), lt = await lateRun(ENG);
-  ok(Array.isArray(lg.listed) && lg.listed.length === 1 && /\.corrupt-/.test(lg.listed[0]) && lg.code === 'key-missing' && !lg.minted, 'channels B-f276 1b (r1 S4): a legacy .corrupt- copy beside a store that ran there is LISTED (off the loop) and counts — NOTHING minted over its sealed sign-in', JSON.stringify(lg));
-  ok(lt.upd === 'store-appeared' && Array.isArray(lt.listed) && lt.listed.length === 1 && lt.code === 'key-missing' && !lt.minted, 'channels B-f276 1b (r1 S4): a FIRST start\'s empty list is taken again once a family\'s file APPEARED — the legacy copy that came counts: NOTHING minted', JSON.stringify(lt));
+  ok(gateOf(Array.isArray(lg.listed)) && lg.listed.length === 1 && gateOf(/\.corrupt-/.test(lg.listed[0])) && lg.code === 'key-missing' && !lg.minted, 'channels B-f276 1b (r1 S4): a legacy .corrupt- copy beside a store that ran there is LISTED (off the loop) and counts — NOTHING minted over its sealed sign-in', JSON.stringify(lg));
+  ok(lt.upd === 'store-appeared' && gateOf(Array.isArray(lt.listed)) && lt.listed.length === 1 && lt.code === 'key-missing' && !lt.minted, 'channels B-f276 1b (r1 S4): a FIRST start\'s empty list is taken again once a family\'s file APPEARED — the legacy copy that came counts: NOTHING minted', JSON.stringify(lt));
   // CONTROLS — an engine copy over a store copy
   const storeSrc = realRead(path.join(REPO, STORE_REL), 'utf-8'), engSrc = realRead(path.join(REPO, ENG_REL), 'utf-8');
   const HOLD = ["    if (st === 'missing') { fam.value = empty(); fam.missing = true; return fam; }\n", "    if (st !== 'data') { fam.value = empty(); fam.missing = true; return fam; }   /* MUTANT: the release — a failed read starts EMPTY */\n"];   // B-f276 1b: the store hold's answer
@@ -605,10 +605,10 @@ for (const e of engines) { try { await e.stop?.(); } catch { } }
     c3 = await tornRun(copiesEng); c4 = await legacyRun(copiesEng); c5 = await lateRun(copiesEng);
   } finally { BELT.paused--; }
   ok(!c1.after.records.includes('acct-held') && c1.after.ev !== 'loaded', 'channels B-f276 CONTROL: the hold cut (the release\'s read: a failed read starts EMPTY) — the file that reads again is never taken in, the account gone from the store — red', JSON.stringify({ held: c1.held, after: c1.after }));
-  ok(c2.after.minted, 'channels B-f276 CONTROL: the set-aside copies not read — after the door a value is minted over the damaged copy\'s sealed sign-in — red', JSON.stringify(c2));
-  ok(c4.minted && Array.isArray(c4.listed) && c4.listed.length === 0, 'channels B-f276 1b CONTROL (every start taken for a first one): the legacy copy is never listed — a value minted over its sealed sign-in — red', JSON.stringify(c4));
-  ok(c5.minted && Array.isArray(c5.listed) && c5.listed.length === 0, 'channels B-f276 1b CONTROL (a first start never lists again): the copy that came with the mount is never counted — a value minted over its sealed sign-in — red', JSON.stringify(c5));
-  ok(c3.after.minted && Array.isArray(c3.after.listed) && c3.after.listed.length === 0, 'channels B-f276 1b CONTROL: the door\'s copy not listed (the release of this unit before its cure) — a value minted over the sealed sign-in the copy keeps — red', JSON.stringify(c3));
+  ok(verdictOf(c2.after.minted), 'channels B-f276 CONTROL: the set-aside copies not read — after the door a value is minted over the damaged copy\'s sealed sign-in — red', JSON.stringify(c2));
+  ok(gateOf(c4.minted) && gateOf(Array.isArray(c4.listed)) && c4.listed.length === 0, 'channels B-f276 1b CONTROL (every start taken for a first one): the legacy copy is never listed — a value minted over its sealed sign-in — red', JSON.stringify(c4));
+  ok(gateOf(c5.minted) && gateOf(Array.isArray(c5.listed)) && c5.listed.length === 0, 'channels B-f276 1b CONTROL (a first start never lists again): the copy that came with the mount is never counted — a value minted over its sealed sign-in — red', JSON.stringify(c5));
+  ok(gateOf(c3.after.minted) && gateOf(Array.isArray(c3.after.listed)) && c3.after.listed.length === 0, 'channels B-f276 1b CONTROL: the door\'s copy not listed (the release of this unit before its cure) — a value minted over the sealed sign-in the copy keeps — red', JSON.stringify(c3));
   for (const e of engines2) { try { await e.stop?.(); } catch { } }
 }
 // app-secrets (the machine's master; the sealed stores are per app)
@@ -627,7 +627,7 @@ const WIRING = realRead(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 
 const PKF = realRead(path.join(REPO, 'src/server/browser-passkey-file.js'), 'utf-8');
 const pkStart = PKF.indexOf('function passkeyFileStore({ dataDir }) {'), pkEnd = PKF.indexOf('\n}\n', pkStart);
 const PK_IIFE = pkStart > 0 && pkEnd > pkStart ? `(() => { ${PKF.slice(pkStart, pkEnd + 2)}\nreturn passkeyFileStore({ dataDir: path.join(rootDir, 'data') }); })()` : null;
-ok(!!PK_IIFE && PK_IIFE.includes('lawfulKey(keyFile, { raw: true, hasCiphertext') && WIRING.includes("passkeys: require('./browser-passkey-file.js').passkeyFileStore({ dataDir: path.join(rootDir, 'data') }),"), 'passkeys: the store\'s maker extracted verbatim (it reads its key through lawfulKey, raw, with the store\'s question) — and the wiring builds the store through it');
+ok(!!PK_IIFE && gateOf(PK_IIFE.includes('lawfulKey(keyFile, { raw: true, hasCiphertext')) && verdictOf(WIRING.includes("passkeys: require('./browser-passkey-file.js').passkeyFileStore({ dataDir: path.join(rootDir, 'data') }),")), 'passkeys: the store\'s maker extracted verbatim (it reads its key through lawfulKey, raw, with the store\'s question) — and the wiring builds the store through it');
 const pkModule = (iife) => ({ make: (rootDir) => new Function('rootDir', 'path', 'fs', 'require', `return ${iife};`)(rootDir, path, fs, createRequire(path.join(REPO, 'src/server/mounts-plugins-wiring.js'))) });
 await storeLegs({
   tag: 'passkeys', keyFile: (d) => path.join(d, 'data', 'browser-passkeys.key'), shape: (b) => b.length === 32, ctFiles: (d) => [path.join(d, 'data', 'browser-passkeys.json')],
@@ -645,7 +645,7 @@ await storeLegs({
   let first, second, landed;
   BELT.paused++; // the minter called bare ON PURPOSE (the belt would rightly say: not under key-file.js)
   try { first = SB.mintKeyFile(kf); landed = realRead(kf, 'utf-8'); second = SB.mintKeyFile(kf); } finally { fs.linkSync = realLink; BELT.paused--; }
-  ok(first && first.toString('hex') === landed && (fs.statSync(kf).mode & 0o777) === 0o600 && second === null && realRead(kf, 'utf-8') === landed && fs.readdirSync(d).length === 1, 'L2: a filesystem without hard links (linkSync EPERM) ⇒ an EXCLUSIVE create: the first mint lands (0600), a second answers null (EEXIST — the landed key is re-read), never a rename over it; no tmp left', JSON.stringify({ second, files: fs.readdirSync(d) }));
+  ok(gateOf(first) && first.toString('hex') === landed && (fs.statSync(kf).mode & 0o777) === 0o600 && second === null && realRead(kf, 'utf-8') === landed && fs.readdirSync(d).length === 1, 'L2: a filesystem without hard links (linkSync EPERM) ⇒ an EXCLUSIVE create: the first mint lands (0600), a second answers null (EEXIST — the landed key is re-read), never a rename over it; no tmp left', JSON.stringify({ second, files: fs.readdirSync(d) }));
   const e = freshDir('applink'), real = path.join(e, 'real-app'); fs.mkdirSync(path.join(real, 'portal'), { recursive: true });
   fs.writeFileSync(path.join(real, 'portal', 'secrets.json'), JSON.stringify({ v: 1, n: 2, sealed: 'x' }));
   fs.mkdirSync(path.join(e, 'desktop-apps')); fs.symlinkSync(real, path.join(e, 'desktop-apps', 'app-link'));
@@ -680,26 +680,26 @@ await beltRed("the passkey wiring's old inline mint (writeFileSync(keyFile, key,
   process.emitWarning = emit;
   const zh = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, ja = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
   const keys = ['Key file {file} is missing — restore it from a backup', 'Key file {file} is damaged — restore it from a backup; nothing was replaced', 'Key file {file} could not be read ({code}) — no new key was made', 'Stored logins: {why}'];
-  ok(W.keyFileWords('key-missing', '.mounts-key') === 'Key file .mounts-key is missing — restore it from a backup' && W.keyFileWords('key-unreadable:EIO', '.mounts-key').includes('(EIO)') && /damaged/.test(W.keyFileWords('key-malformed', 'x')) && W.keyFileWords('bad-ciphertext', 'x') === '', 'keyFileWords: missing → restore, unreadable names the errno, malformed → damaged; nothing else is worded');
+  ok(W.keyFileWords('key-missing', '.mounts-key') === 'Key file .mounts-key is missing — restore it from a backup' && gateOf(W.keyFileWords('key-unreadable:EIO', '.mounts-key').includes('(EIO)')) && gateOf(/damaged/.test(W.keyFileWords('key-malformed', 'x'))) && W.keyFileWords('bad-ciphertext', 'x') === '', 'keyFileWords: missing → restore, unreadable names the errno, malformed → damaged; nothing else is worded');
   ok(W.appSecretsKeyWords('unavailable: key-missing (.app-secrets-key)') === 'Key file .app-secrets-key is missing — restore it from a backup' && W.appSecretsKeyWords('unavailable: python3 not found on this machine') === '' && W.appSecretsKeyWords('on') === '', 'appSecretsKeyWords: the app\'s secrets state carries the code + the key file; any other unavailable says nothing new');
-  ok(keys.every((k) => zh[k] && ja[k]) && zh[keys[0]].includes('从备份恢复') && zh[keys[2]].includes('{code}'), 'zh / ja carry every key-file line (zh: 「密钥文件 {file} 丢失——请从备份恢复」)');
+  ok(gateOf(keys.every((k) => zh[k] && ja[k])) && gateOf(zh[keys[0]].includes('从备份恢复')) && verdictOf(zh[keys[2]].includes('{code}')), 'zh / ja carry every key-file line (zh: 「密钥文件 {file} 丢失——请从备份恢复」)');
   // L3 (key-file-law-fix): the integrations card's storeError names the file, so the card says the law's own words
   {
     const d = freshDir('int-words'); const s0 = IS.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet });
     s0.setIntegration('cloud:browserless', { apiKey: 'kfl-words', apiUrl: 'https://chrome.example.net' }); fs.rmSync(path.join(d, '.integrations-key'));
     const se = IS.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet }).publicView('cloud:browserless').storeError || {};
     const card = realRead(path.join(REPO, 'src/lib/integrations-window.js'), 'utf-8');
-    ok(se.reason === 'key-missing' && se.file === '.integrations-key' && W.keyFileWords(se.reason, se.file) === 'Key file .integrations-key is missing — restore it from a backup' && /keyFileWords\(err\.reason, err\.file\)/.test(card), "L3: the integrations card's storeError carries {reason: key-missing, file: .integrations-key} ⇒ its line is the law's translated 'Key file .integrations-key is missing — restore it from a backup' (never 'could not be read' for a missing file)", JSON.stringify(se));
+    ok(se.reason === 'key-missing' && se.file === '.integrations-key' && W.keyFileWords(se.reason, se.file) === 'Key file .integrations-key is missing — restore it from a backup' && verdictOf(/keyFileWords\(err\.reason, err\.file\)/.test(card)), "L3: the integrations card's storeError carries {reason: key-missing, file: .integrations-key} ⇒ its line is the law's translated 'Key file .integrations-key is missing — restore it from a backup' (never 'could not be read' for a missing file)", JSON.stringify(se));
   }
   // the passkey key line's detail (key-file-law-fix, F1) is translated too
   const pkDetail = require(path.join(REPO, 'src/browser-passkey.js')).keyForYouItem({ code: 'key-missing', file: 'x' }).detail;
-  ok(zh[pkDetail] && ja[pkDetail], 'zh / ja carry the passkey key line\'s detail', pkDetail);
+  ok(gateOf(zh[pkDetail]) && verdictOf(ja[pkDetail]), 'zh / ja carry the passkey key line\'s detail', pkDetail);
   // the app-secrets facts → the plan's secrets state → the words (a fake python3 with gi, so the key read is reached)
   const fakeBin = freshDir('fakebin'); fs.writeFileSync(path.join(fakeBin, 'python3'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const E = freshDir('app-facts'); const f = path.join(E, 'desktop-apps', 'app-kfl', 'portal', 'secrets.json'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify({ v: 1, n: 2, sealed: 'x' }));
   const facts = await AS.appSecretsFacts({ env: { PATH: fakeBin }, mode: 'on', dataDir: E, id: 'app-kfl' });
   const plan = require(path.join(REPO, 'src/desktop-apps.js')).secretServicePlan({ plan: { ok: true, dirs: ['/tmp/kfl-root'] }, facts });
-  ok(plan.secrets === 'unavailable: key-missing (.app-secrets-key)' && !fs.existsSync(path.join(E, '.app-secrets-key')) && W.appSecretsKeyWords(plan.secrets).includes('restore'), `app-secrets: a sealed store with no master ⇒ the window's state '${plan.secrets}' ⇒ its ⋯ says restore; nothing minted, no service key`, JSON.stringify({ facts, plan: plan.secrets }));
+  ok(plan.secrets === 'unavailable: key-missing (.app-secrets-key)' && !fs.existsSync(path.join(E, '.app-secrets-key')) && verdictOf(W.appSecretsKeyWords(plan.secrets).includes('restore')), `app-secrets: a sealed store with no master ⇒ the window's state '${plan.secrets}' ⇒ its ⋯ says restore; nothing minted, no service key`, JSON.stringify({ facts, plan: plan.secrets }));
 }
 
 // ── ④ THE PASSKEY DOORS (key-file-law-fix, verify r1 F1) ─────────────────────────────────────────────────────────────
@@ -754,7 +754,7 @@ console.log('④ the passkey doors — a key refusal is a VALUE: nothing thrown 
   const thrown = P.added(); await ticks(4);
   ok(!thrown && P.rows() === 1 && realRead(P.store, 'utf-8') === before && !fs.existsSync(P.keyFile), 'harvest: a NEW passkey over sealed rows with the key file gone ⇒ nothing thrown out of the socket listener, nothing stored, nothing minted (the store byte-identical)', JSON.stringify({ thrown: thrown && thrown.message }));
   const fy = P.items[0] || {};
-  ok(P.items.length === 1 && fy.text === 'Key file browser-passkeys.key is missing — restore it from a backup' && fy.i18n && fy.i18n.text.key === 'Key file {file} is missing — restore it from a backup' && fy.i18n.text.params.file === 'browser-passkeys.key' && /passkeys are sealed under this key/.test(fy.detail) && locked(P) === 1, "…and the person is told ONCE: one For-you line naming the key file + the refusal (the key-file law's own words and i18n keys), one server-log line", JSON.stringify({ items: P.items, warns: P.warns }));
+  ok(P.items.length === 1 && fy.text === 'Key file browser-passkeys.key is missing — restore it from a backup' && gateOf(fy.i18n) && fy.i18n.text.key === 'Key file {file} is missing — restore it from a backup' && fy.i18n.text.params.file === 'browser-passkeys.key' && gateOf(/passkeys are sealed under this key/.test(fy.detail)) && locked(P) === 1, "…and the person is told ONCE: one For-you line naming the key file + the refusal (the key-file law's own words and i18n keys), one server-log line", JSON.stringify({ items: P.items, warns: P.warns }));
   P.added(); await ticks(4);
   ok(P.items.length === 1 && locked(P) === 1 && P.rows() === 1, '…a second new passkey in the same state: still ONE line, still nothing stored');
   // the gate: a modal get for the site of the stored passkey (policy yes)
@@ -763,13 +763,13 @@ console.log('④ the passkey doors — a key refusal is a VALUE: nothing thrown 
   const sent = P.f.log.slice(n0).map((x) => x.method + (verbOf(x) ? `(${verbOf(x)})` : ''));
   // "at once" is the ANSWER to the start (lane wall-clock-ratchet-down: `< 1000 ms` judged the machine): the release is
   // what the start brought — the fake clock never moved, so no hold of the product's ran out; the base sent nothing
-  ok(!t2 && sent.includes('Runtime.callFunctionOn(release)') && !sent.includes('WebAuthn.addCredential') && P.items.length === 1, `gate: a modal get over the refused key ⇒ RELEASED at once (${sent.join(', ')}; ${Date.now() - s0} ms), nothing loaded, no second line — the base's hang (nothing sent after the start) closed`, JSON.stringify(sent));
+  ok(!t2 && gateOf(sent.includes('Runtime.callFunctionOn(release)')) && !sent.includes('WebAuthn.addCredential') && P.items.length === 1, `gate: a modal get over the refused key ⇒ RELEASED at once (${sent.join(', ')}; ${Date.now() - s0} ms), nothing loaded, no second line — the base's hang (nothing sent after the start) closed`, JSON.stringify(sent));
   P.step(PKm.PENDING_SAID_MS + 50);
   const v = P.D.passkeyIn('bp-1', null);
-  ok(v.state === 'passkey_open' && v.text.includes("VibeSpace's saved passkeys are locked: browser-passkeys.key is missing — restore it from a backup"), "…while the page still waits, the agent's sentence carries the restore words", JSON.stringify(v).slice(0, 400));
+  ok(v.state === 'passkey_open' && verdictOf(v.text.includes("VibeSpace's saved passkeys are locked: browser-passkeys.key is missing — restore it from a backup")), "…while the page still waits, the agent's sentence carries the restore words", JSON.stringify(v).slice(0, 400));
   fs.writeFileSync(P.keyFile, P.k0, { mode: 0o600 }); // restored from the backup
   P.added(); await ticks(4);
-  ok(P.rows() === 2 && P.resolved.includes('fy-1'), 'the key file restored ⇒ the next new passkey is kept, and the For-you line resolves itself', JSON.stringify({ rows: P.rows(), resolved: P.resolved }));
+  ok(P.rows() === 2 && verdictOf(P.resolved.includes('fy-1')), 'the key file restored ⇒ the next new passkey is kept, and the For-you line resolves itself', JSON.stringify({ rows: P.rows(), resolved: P.resolved }));
   P.D.shutdown();
   // an unreadable key (EISDIR) names its errno
   const U = await pkDoor(); fs.mkdirSync(U.keyFile); U.added(); await ticks(4);
@@ -806,7 +806,7 @@ console.log('④ the passkey doors — a key refusal is a VALUE: nothing thrown 
     const R = await pkDoor({ iife: THROWS, dialogs: MUT.load('src/server/browser-dialogs.js', unguard(DIALOGS_SRC), 'f1-shape') });
     const th = R.added(); const m0 = R.f.log.length; R.start(1); await new Promise((r) => setTimeout(r, 300)); // the fixed tree releases in < 20 ms
     const after = R.f.log.slice(m0).map((x) => x.method + (verbOf(x) ? `(${verbOf(x)})` : ''));
-    ok(THROWS !== PK_IIFE && th && th.code === 'key-missing' && !after.includes('Runtime.callFunctionOn(release)'), `RED control — 952bb5aef's shape (the refusal thrown, the watch unguarded) ⇒ ${th ? `the harvest throws ${th.code} out of the listener` : 'no throw'} and the gate sends ${after.length ? after.join(', ') : 'NOTHING'} after the start (the page hangs)`, JSON.stringify({ th: th && th.message, after }));
+    ok(THROWS !== PK_IIFE && gateOf(th) && th.code === 'key-missing' && !after.includes('Runtime.callFunctionOn(release)'), `RED control — 952bb5aef's shape (the refusal thrown, the watch unguarded) ⇒ ${th ? `the harvest throws ${th.code} out of the listener` : 'no throw'} and the gate sends ${after.length ? after.join(', ') : 'NOTHING'} after the start (the page hangs)`, JSON.stringify({ th: th && th.message, after }));
     R.D.shutdown();
   }
   BELT.paused++;
@@ -814,14 +814,14 @@ console.log('④ the passkey doors — a key refusal is a VALUE: nothing thrown 
     const R = await pkDoor({ iife: PK_IIFE.replace(PK_NEW, PK_OLD) });
     R.added(); await ticks(4);
     const rows = PSm.profileOf(JSON.parse(realRead(R.store, 'utf-8')), 'bp-1').rows;
-    ok(fs.existsSync(R.keyFile) && rows.length === 2 && PSm.open(PSm.cipherOf(crypto, realRead(R.keyFile)), rows.find((x) => x.userName === 'alice')) === null, "RED control — the base wiring (5e9530069's inline mint) ⇒ a NEW key minted beside the sealed rows: the new passkey kept, the old one never opens again");
+    ok(gateOf(fs.existsSync(R.keyFile)) && rows.length === 2 && PSm.open(PSm.cipherOf(crypto, realRead(R.keyFile)), rows.find((x) => x.userName === 'alice')) === null, "RED control — the base wiring (5e9530069's inline mint) ⇒ a NEW key minted beside the sealed rows: the new passkey kept, the old one never opens again");
     R.D.shutdown();
   } finally { BELT.paused--; }
 }
 
 // ③b's verdict over EVERYTHING above (③, the boots, ④) — the RED controls' own hits were taken out where they ran
 ok(BELT.hits.length === 0 && BELT.lawful > 0, `BEHAVIOUR: ${BELT.lawful} key-file fs calls while the six stores ran every leg, booted over fresh + filled dirs (mounts' restore() too) and the passkey doors ran — every one from src/secret-box.js under key-file.js's loadOrMintKey`, BELT.hits.join(' | '));
-for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 // ── ⑤ RULE 5′ (lane vault-login r22): NO sha256(…secret…) WRITTEN UNDER data/ ────────────────────────────────────────
 console.log('⑤ RULE 5′: no sha256(…secret…) written under data/ — static census + runtime data/ sweep + planted writer RED');
@@ -999,7 +999,7 @@ try {
     }
   };
   const sweepHits0 = await sweep5(d5, '(the live run)');
-  ok(fillCur5.ok && fillNew5.ok && Boolean(p15) && walkDataFiles5(d5).length >= 3 && sweepHits0.length === 0,
+  ok(gateOf(fillCur5.ok) && gateOf(fillNew5.ok) && Boolean(p15) && walkDataFiles5(d5).length >= 3 && sweepHits0.length === 0,
     'RULE 5′ runtime data/ sweep (live browser-dialogs fillVaultField): store keys, vault password, account secret and typed web-login P0/P1 leave 0 raw/sha256/sha1/sha512 traces across all files under data/',
     sweepHits0.join(' | '));
   const dsrc5 = realRead(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
@@ -1037,10 +1037,10 @@ try {
     w5M4.shutdown();
   }
   ok(Boolean(Dm5M4)
-    && sweepHitsM4.includes('browser-profiles.json:loginP1')
-    && sweepHitsM4.includes(`${path.join('sub', 'nested-sha512.json')}:loginP0`)
-    && sweepHitsM4.includes(`${path.join('profiles', 'bp-00000001', 'leak.json')}:loginP0`)
-    && sweepHitsM4.includes(`${path.join('run', 'leak.json')}:loginP0`),
+    && gateOf(sweepHitsM4.includes('browser-profiles.json:loginP1'))
+    && gateOf(sweepHitsM4.includes(`${path.join('sub', 'nested-sha512.json')}:loginP0`))
+    && gateOf(sweepHitsM4.includes(`${path.join('profiles', 'bp-00000001', 'leak.json')}:loginP0`))
+    && verdictOf(sweepHitsM4.includes(`${path.join('run', 'leak.json')}:loginP0`)),
     Dm5M4 ? 'RULE 5′ PIN B evasive-mutant M4 RED control: smuggling credSigs.sha256 into the persisted fence record via live fillVaultField (and digests under sub/, profiles/, and run/) goes RED' : 'RULE 5′ PIN B M4: its anchor is gone in src/server/browser-dialogs.js (the fence record\'s address line)',
     sweepHitsM4.join(' | '));
   w5.shutdown();
@@ -1051,4 +1051,4 @@ try {
 } finally { BELT.paused--; }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

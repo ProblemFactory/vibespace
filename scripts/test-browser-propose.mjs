@@ -48,7 +48,7 @@ const { UserTodoManager } = require('../src/user-todos.js');
 const express = require('express');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -133,20 +133,20 @@ const SIGNIN = 'https://accounts.google.com/v3/signin/identifier?TL=AInv3nt3d0b'
 let r = await j('POST', '/api/agent/browser/blocked', { url: SIGNIN, why: 'sign-in-refused', evidence: 'the page says: This browser or app may not be secure', tier: 2 }, as(sB));
 const idB = r.json && r.json.claim && r.json.claim.id;
 const eB = idB ? keeper.proposalEntry(idB) : null;
-ok(r.status === 200 && eB && eB.proposal.state === 'unavailable' && eB.proposal.plan.kind === 'none' && eB.proposal.plan.why === 'unavailable' && eB.proposal.backend === null && eB.proposal.site === 'accounts.google.com' && eB.proposal.digest === SW.proposalDigest(eB.proposal),
+ok(r.status === 200 && gateOf(eB) && eB.proposal.state === 'unavailable' && eB.proposal.plan.kind === 'none' && eB.proposal.plan.why === 'unavailable' && eB.proposal.backend === null && eB.proposal.site === 'accounts.google.com' && eB.proposal.digest === SW.proposalDigest(eB.proposal),
   'the claim files ONE proposal: unavailable from birth (no plan kind switches a browser in this version), the site = the claim\'s host, a digest over the frozen fields', eB && eB.proposal);
-ok(r.json.proposal && r.json.proposal.id === idB && r.json.proposal.state === 'unavailable' && WHY_NONE.test(r.json.next) && /Do not work around it/.test(r.json.next) && /tell them in ONE sentence which page refused you/.test(r.json.next) && !('digest' in r.json.proposal), 'the agent\'s answer: nothing can be offered and why — tell the user in one sentence, do not work around it (no digest handed to the agent)', r.json);
+ok(gateOf(r.json.proposal) && r.json.proposal.id === idB && r.json.proposal.state === 'unavailable' && gateOf(WHY_NONE.test(r.json.next)) && gateOf(/Do not work around it/.test(r.json.next)) && gateOf(/tell them in ONE sentence which page refused you/.test(r.json.next)) && !('digest' in r.json.proposal), 'the agent\'s answer: nothing can be offered and why — tell the user in one sentence, do not work around it (no digest handed to the agent)', r.json);
 const opsB0 = cardOps('sess-b', idB);
 const card0 = opsB0[0] && opsB0[0].message;
 ok(opsB0.length === 1 && opsB0[0].op === 'create' && card0.role === 'system' && card0.noticeKind === 'browser-proposal' && card0.content[0].type === 'browser_proposal' && card0.content[0].digest === eB.proposal.digest && card0.content[0].state === 'unavailable', 'ONE card op: a VibeSpace notice keyed by the claim id, carrying the frozen block (structure, never markup)', opsB0);
 const itemB = todos.get(eB.proposal.itemId || '');
 const L = SW.proposalLines(SW.proposalCardBlock(eB));
 const Lnone = L.none || {}; // (a build whose lines have no `none` row reads as a named ✗ below, never a TypeError)
-ok(itemB && itemB.origin === 'browser' && itemB.kind === 'notice' && !itemB.action && itemB.i18n.detail.length === 2 && itemB.i18n.detail[0].key === L.claim.key && itemB.i18n.detail[1].key === Lnone.key && Lnone.key === (SW.NO_SWITCH_WORDS || {}).unavailable && itemB.detail.split('\n').length === 2,
+ok(gateOf(itemB) && itemB.origin === 'browser' && itemB.kind === 'notice' && !itemB.action && itemB.i18n.detail.length === 2 && itemB.i18n.detail[0].key === L.claim.key && itemB.i18n.detail[1].key === Lnone.key && Lnone.key === (SW.NO_SWITCH_WORDS || {}).unavailable && itemB.detail.split('\n').length === 2,
   'ONE For-you NOTICE (origin browser, no Approve): its words are the card\'s claim + the one sentence, line for line', itemB);
-ok(/refused to sign in this browser/.test(L.claim.key) && /^No switch can be offered: this version of VibeSpace cannot switch the agent’s browser yet\. A browser plugin can be installed, then chosen for this profile with Change build…\.$/.test(Lnone.key) && L.plan.length === 0, 'the card\'s words (D5): the claim, then the sentence true with or without a plugin — no plan line', { claim: L.claim.key, none: Lnone.key });
+ok(gateOf(/refused to sign in this browser/.test(L.claim.key)) && gateOf(/^No switch can be offered: this version of VibeSpace cannot switch the agent’s browser yet\. A browser plugin can be installed, then chosen for this profile with Change build…\.$/.test(Lnone.key)) && L.plan.length === 0, 'the card\'s words (D5): the claim, then the sentence true with or without a plugin — no plan line', { claim: L.claim.key, none: Lnone.key });
 r = await j('POST', '/api/agent/browser/blocked', { url: SIGNIN, why: 'sign-in-refused', tier: 2 }, as(sB));
-ok(r.status === 200 && r.json.claim.id === idB && r.json.duplicate === true && cardOps('sess-b', idB).length === 1 && todos.snapshot().open.filter((i) => i.origin === 'browser' && /refused its browser/.test(i.text)).length === 1 && WHY_NONE.test(r.json.next), 'a second claim on the host while the proposal stands ⇒ the SAME card: no op, no second item, the same answer', r.json);
+ok(r.status === 200 && r.json.claim.id === idB && r.json.duplicate === true && cardOps('sess-b', idB).length === 1 && todos.snapshot().open.filter((i) => i.origin === 'browser' && /refused its browser/.test(i.text)).length === 1 && verdictOf(WHY_NONE.test(r.json.next)), 'a second claim on the host while the proposal stands ⇒ the SAME card: no op, no second item, the same answer', r.json);
 
 // ═══ ② the owner-only doors ════════════════════════════════════════════════════
 console.log('— ② owner-only: an agent never decides; the user\'s Approve of a proposal that offers nothing is refused by name');
@@ -157,7 +157,7 @@ for (const [m, p] of [['POST', `/api/browser/proposals/${idB}/approve`], ['POST'
 }
 const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
 const propRoutes = [...rsrc.matchAll(/router\.(get|post)\('(\/api\/browser\/proposals\/[^']*)', [^\n]*\n([^\n]*)\n/g)];
-ok(propRoutes.length === 3 && propRoutes.every((m) => /refuseHost/.test(m[3])) && propRoutes.every((m) => rsrc.slice(m.index, m.index + 400).includes('refuseAgentBearer(req, res, PROPOSAL_IS_USERS)')) && !/\/api\/agent\/browser\/proposal/.test(rsrc), 'CENSUS: every proposal route refuses an agent\'s bearer by name, and no /api/agent twin exists', propRoutes.map((m) => m[2]));
+ok(propRoutes.length === 3 && gateOf(propRoutes.every((m) => /refuseHost/.test(m[3]))) && gateOf(propRoutes.every((m) => rsrc.slice(m.index, m.index + 400).includes('refuseAgentBearer(req, res, PROPOSAL_IS_USERS)'))) && !/\/api\/agent\/browser\/proposal/.test(rsrc), 'CENSUS: every proposal route refuses an agent\'s bearer by name, and no /api/agent twin exists', propRoutes.map((m) => m[2]));
 r = await j('POST', `/api/browser/proposals/${idB}/approve`, { shown: eB.proposal.digest });
 ok(r.status === 409 && r.json.code === 'proposal_unavailable' && keeper.proposalEntry(idB).proposal.state === 'unavailable' && runner.running().length === 0, 'the user\'s Approve naming the card ⇒ 409 proposal_unavailable: nothing ran', r.json);
 r = await j('POST', `/api/browser/proposals/${idB}/approve`, {});
@@ -165,7 +165,7 @@ ok(r.status === 400 && r.json.code === 'shown_required', 'an Approve naming no c
 r = await j('POST', `/api/browser/proposals/${idB}/reject`, {});
 ok(r.status === 409 && r.json.code === 'proposal_state' && keeper.proposalEntry(idB).proposal.state === 'unavailable', 'a Reject of it ⇒ 409 proposal_state (there is nothing to decide)', r.json);
 r = await j('GET', `/api/browser/proposals/${idB}`);
-ok(r.status === 200 && r.json.proposal && r.json.proposal.id === idB && r.json.proposal.state === 'unavailable', 'the user reads the card (GET)', r.json);
+ok(r.status === 200 && gateOf(r.json.proposal) && r.json.proposal.id === idB && r.json.proposal.state === 'unavailable', 'the user reads the card (GET)', r.json);
 ok(fake.launches().length === launches0 && keeper.list().profiles.length === 0, '…and nothing moved: no browser launched, no profile made');
 // the PURE step still guards the proposals that DO run (a site reset rides the same record, card and routes)
 const openP = { ...eB.proposal, state: 'open' };
@@ -183,14 +183,14 @@ console.log('— ③ a site the page was refused reaches the agent by name (its 
   keeper.egressRefusals = (pid, since) => (pid === pE.id && since > 0 ? ['cdn.unknown-vendor.example'] : []);
   try {
     let au = await j('POST', '/api/agent/browser/audit', { verb: 'open', ok: true, profile: pE.id, since: Date.now() - 1 }, as(sB));
-    ok(au.status === 200 && au.json.egressRefused && JSON.stringify(au.json.egressRefused.hosts) === '["cdn.unknown-vendor.example"]' && /^this browser's site list refused cdn\.unknown-vendor\.example while this page loaded/.test(au.json.egressRefused.text) && /Do not work around it/.test(au.json.egressRefused.text), 'the agent\'s next verb answer names the refused site, and says not to work around it', au.json);
+    ok(au.status === 200 && gateOf(au.json.egressRefused) && JSON.stringify(au.json.egressRefused.hosts) === '["cdn.unknown-vendor.example"]' && gateOf(/^this browser's site list refused cdn\.unknown-vendor\.example while this page loaded/.test(au.json.egressRefused.text)) && verdictOf(/Do not work around it/.test(au.json.egressRefused.text)), 'the agent\'s next verb answer names the refused site, and says not to work around it', au.json);
     au = await j('POST', '/api/agent/browser/audit', { verb: 'open', ok: true, profile: pE.id, since: Date.now() - 1 }, as(sA));
     ok(au.status === 200 && !au.json.egressRefused, 'another conversation (no lease on that browser) is never told its refusals', au.json);
   } finally { keeper.egressRefusals = realRefusals; }
   r = await j('POST', '/api/agent/browser/blocked', { url: 'https://cdn.unknown-vendor.example/', why: 'egress-refused', tier: 2, profile: pE.id }, as(sB));
   const eS = keeper.proposalEntry(r.json.claim.id);
   const LS = SW.proposalLines(SW.proposalCardBlock(eS));
-  ok(eS && eS.proposal.state === 'unavailable' && LS.claim.key === 'The agent says its page needs {host}, which its browser\'s site list refused.' && LS.claim.params.host === 'cdn.unknown-vendor.example' && WHY_NONE.test(r.json.next), 'its claim is ONE card naming the site in its claim line (it offers nothing: the site list is the engine\'s own, ⚙ → Plugins)', { p: eS && eS.proposal, next: r.json.next });
+  ok(gateOf(eS) && eS.proposal.state === 'unavailable' && LS.claim.key === 'The agent says its page needs {host}, which its browser\'s site list refused.' && LS.claim.params.host === 'cdn.unknown-vendor.example' && verdictOf(WHY_NONE.test(r.json.next)), 'its claim is ONE card naming the site in its claim line (it offers nothing: the site list is the engine\'s own, ⚙ → Plugins)', { p: eS && eS.proposal, next: r.json.next });
   globalThis.__pE = pE;
 }
 
@@ -201,7 +201,7 @@ r = await j('POST', '/api/agent/browser/blocked', { url: 'https://shop.example/c
 const idN = r.json.claim.id;
 rejectedBefore(idN);
 let au = await j('POST', '/api/agent/browser/audit', { verb: 'open', ok: true, url: 'https://shop.example/cart', nav: { url: 'https://shop.example/cart', title: 'Cart' } }, as(sN));
-ok(au.status === 200 && au.json.proposalRejected && au.json.proposalRejected.site === 'shop.example' && /^the user rejected your proposal for shop\.example — do not work around the refusal/.test(au.json.proposalRejected.text) && keeper.proposalEntry(idN).proposal.told === true, 'the agent\'s next navigation to shop.example carries the rejection (told now)', au.json);
+ok(au.status === 200 && gateOf(au.json.proposalRejected) && au.json.proposalRejected.site === 'shop.example' && gateOf(/^the user rejected your proposal for shop\.example — do not work around the refusal/.test(au.json.proposalRejected.text)) && keeper.proposalEntry(idN).proposal.told === true, 'the agent\'s next navigation to shop.example carries the rejection (told now)', au.json);
 au = await j('POST', '/api/agent/browser/audit', { verb: 'open', ok: true, url: 'https://shop.example/cart', nav: { url: 'https://shop.example/cart', title: 'Cart' } }, as(sN));
 ok(au.status === 200 && !au.json.proposalRejected, '…ONCE: the next navigation carries nothing');
 r = await j('POST', '/api/agent/browser/blocked', { url: 'https://shop.example/checkout', why: 'captcha', tier: 2 }, as(sN));
@@ -209,18 +209,18 @@ ok(r.json.claim.id !== idN && keeper.proposalEntry(r.json.claim.id).proposal.sta
 const idN2 = r.json.claim.id;
 rejectedBefore(idN2);
 r = await j('POST', '/api/agent/browser/blocked', { url: 'https://shop.example/checkout', why: 'captcha', tier: 2 }, as(sN));
-ok(r.json.rejected === true && r.json.claim.id === idN2 && /the user REJECTED your proposal for shop\.example/.test(r.json.next) && keeper.proposalEntry(idN2).proposal.told === true, 'a claim while a rejection is untold ⇒ the agent is told the rejection instead (no new card)', r.json);
+ok(r.json.rejected === true && r.json.claim.id === idN2 && gateOf(/the user REJECTED your proposal for shop\.example/.test(r.json.next)) && keeper.proposalEntry(idN2).proposal.told === true, 'a claim while a rejection is untold ⇒ the agent is told the rejection instead (no new card)', r.json);
 
 // ═══ ⑧ nothing to offer, and why ════════════════════════════════════════════════
 console.log('— ⑧ a conversation on another machine: the proposal says why; the plan\'s three whys');
 r = await j('POST', '/api/agent/browser/blocked', { url: 'https://x.example/a', why: 'captcha', tier: 2 }, as(sR));
 const eR = r.status === 200 ? keeper.proposalEntry(r.json.claim.id) : null;
 const itR = eR ? todos.get(eR.proposal.itemId || '') : null;
-ok(eR && eR.proposal.state === 'unavailable' && eR.proposal.plan.why === 'remote' && itR && itR.kind === 'notice' && !itR.action && /no switch can be offered \(this conversation runs on another machine\)/.test(r.json.next) && /runs on another machine, and its browser is that machine's/.test((SW.proposalLines(SW.proposalCardBlock(eR)).none || {}).key), 'plan none (remote): state unavailable, a NOTICE item without buttons, the agent and the card told why', { p: eR && eR.proposal, next: r.json && r.json.next });
+ok(gateOf(eR) && eR.proposal.state === 'unavailable' && eR.proposal.plan.why === 'remote' && gateOf(itR) && itR.kind === 'notice' && !itR.action && gateOf(/no switch can be offered \(this conversation runs on another machine\)/.test(r.json.next)) && verdictOf(/runs on another machine, and its browser is that machine's/.test((SW.proposalLines(SW.proposalCardBlock(eR)).none || {}).key)), 'plan none (remote): state unavailable, a NOTICE item without buttons, the agent and the card told why', { p: eR && eR.proposal, next: r.json && r.json.next });
 r = await j('POST', `/api/browser/proposals/${eR.id}/approve`, { shown: eR.proposal.digest });
 ok(r.status === 409 && r.json.code === 'proposal_unavailable', 'an Approve of it is refused by name (409 proposal_unavailable)');
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-ok(same(SW.proposalPlan({ remote: true }), { kind: 'none', why: 'remote' }) && same(SW.proposalPlan({ target: { kind: 'profile', host: 'dev-1', label: 'Box' } }), { kind: 'none', why: 'other-machine', profileLabel: 'Box' }) && same(SW.proposalPlan({ target: { kind: 'profile', host: null, label: 'Here' } }), { kind: 'none', why: 'unavailable' }) && same(SW.proposalPlan({}), { kind: 'none', why: 'unavailable' }) && same(SW.PROPOSAL_PLANS, ['none']), 'proposalPlan: remote / a paired machine\'s profile (named) / everything else unavailable — the one plan kind left is none');
+ok(gateOf(same(SW.proposalPlan({ remote: true }), { kind: 'none', why: 'remote' })) && gateOf(same(SW.proposalPlan({ target: { kind: 'profile', host: 'dev-1', label: 'Box' } }), { kind: 'none', why: 'other-machine', profileLabel: 'Box' })) && gateOf(same(SW.proposalPlan({ target: { kind: 'profile', host: null, label: 'Here' } }), { kind: 'none', why: 'unavailable' })) && gateOf(same(SW.proposalPlan({}), { kind: 'none', why: 'unavailable' })) && verdictOf(same(SW.PROPOSAL_PLANS, ['none'])), 'proposalPlan: remote / a paired machine\'s profile (named) / everything else unavailable — the one plan kind left is none');
 
 // ═══ ⑧b verify r1: the claim store's bound never evicts another conversation's standing proposal ═══════════
 console.log('— ⑧b a conversation\'s 50 cheap claims never evict ANOTHER conversation\'s standing proposal (the store drops what nobody waits on first)');
@@ -232,7 +232,7 @@ console.log('— ⑧b a conversation\'s 50 cheap claims never evict ANOTHER conv
   const sX = mkSession('sess-x', 'bk-0000f2f2', 'Crawler');
   for (let i = 0; i < 60; i++) await j('POST', '/api/agent/browser/blocked', { url: `https://h${i}.example/`, why: 'http-403', tier: 1 }, as(sX));
   const eY = keeper.proposalEntry(idY);
-  ok(eY && eY.proposal.state === 'rejected' && eY.proposal.told === false && runner.cardsFor(sY._browserKey).some((c) => c.id === idY), 'after 60 tier-1 claims by another conversation the untold rejection is still there: its card, the agent still to be told', eY && eY.proposal.state);
+  ok(gateOf(eY) && eY.proposal.state === 'rejected' && eY.proposal.told === false && verdictOf(runner.cardsFor(sY._browserKey).some((c) => c.id === idY)), 'after 60 tier-1 claims by another conversation the untold rejection is still there: its card, the agent still to be told', eY && eY.proposal.state);
   const x = await j('GET', `/api/browser/proposals/${idY}`);
   ok(x.status === 200, '…and it can still be read (no 404)', x);
 }
@@ -241,7 +241,7 @@ console.log('— ⑧b a conversation\'s 50 cheap claims never evict ANOTHER conv
 console.log('— ⑨ a REBUILD places the card by time, with its latest state, under the same id');
 await N.rebuildHistory(sB, 'sess-b', [], {});
 const rebuilt = sB._normalizer.messages.find((m) => m.id === `sess-b:bp:${idB}`);
-ok(rebuilt && rebuilt.noticeKind === 'browser-proposal' && rebuilt.content[0].state === 'unavailable' && rebuilt.ts === keeper.proposalEntry(idB).at, 'the rebuilt conversation draws the proposal card from the keeper\'s record (state unavailable), at the claim\'s instant', rebuilt && rebuilt.content[0]);
+ok(gateOf(rebuilt) && rebuilt.noticeKind === 'browser-proposal' && rebuilt.content[0].state === 'unavailable' && rebuilt.ts === keeper.proposalEntry(idB).at, 'the rebuilt conversation draws the proposal card from the keeper\'s record (state unavailable), at the claim\'s instant', rebuilt && rebuilt.content[0]);
 ok(N.browserCardsFor({ session: sB }).filter((c) => c.type === 'browser_proposal' && c.id === idB).length === 1, 'the card source names it once');
 
 // ═══ ⑩ the shipped CLI ══════════════════════════════════════════════════════════
@@ -252,7 +252,7 @@ console.log('— ⑩ the shipped CLI: blocked prints the proposal, a sign-in ref
   const cli = (s, args) => new Promise((resolve) => execFile(process.execPath, ['--require', pw, path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: { ...cliEnv, VIBESPACE_SESSION_TOKEN: s.agentToken }, encoding: 'utf8', timeout: 30000, cwd: ROOT }, (err, so, se) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(so || ''), err: String(se || '') })));
   const sC = mkSession('sess-c', 'bk-0000e0e0', 'Calendar');
   const bl = await cli(sC, ['blocked', '--url', 'https://calendar.example/in', '--why', 'captcha', '--tier', '2']);
-  ok(bl.status === 0 && /recorded your claim/.test(bl.out) && /no switch can be offered/.test(bl.out) && /^proposal bl-[0-9a-f]{8}: nothing can be offered here$/m.test(bl.out), 'vibespace-browser blocked --tier 2 prints the next step and the proposal (nothing to offer)', bl.out + bl.err);
+  ok(bl.status === 0 && gateOf(/recorded your claim/.test(bl.out)) && gateOf(/no switch can be offered/.test(bl.out)) && verdictOf(/^proposal bl-[0-9a-f]{8}: nothing can be offered here$/m.test(bl.out)), 'vibespace-browser blocked --tier 2 prints the next step and the proposal (nothing to offer)', bl.out + bl.err);
   // the sign-in HINT end to end: the conversation attached to a profile, `open` of a page whose final url + title are Google's refusal
   keeper.createProfile({ label: 'Cal' }, { owner: { kind: 'instance', id: null } });
   const u = await cli(sC, ['use', 'Cal']);
@@ -260,13 +260,13 @@ console.log('— ⑩ the shipped CLI: blocked prints the proposal, a sign-in ref
   const REFUSED = 'https://accounts.google.com/v3/signin/rejected?TL=AInv3nt3d0c';
   fs.writeFileSync(path.join(AB, 'titles.json'), JSON.stringify({ [REFUSED]: 'Couldn\'t sign you in', 'https://calendar.example/in': 'Calendar' }));
   const op = await cli(sC, ['open', REFUSED]);
-  ok(op.status === 0 && /^hint: may-need-anti-bot — Google's sign-in page says this browser may not be secure — a hint from the page, not a detection/m.test(op.err) && /--why sign-in-refused --tier 2/.test(op.err) && !/may-need-cloak/.test(op.err), 'step 2 END TO END: `open` of the refusal page ⇒ the may-need-anti-bot hint on stderr, printed like the 403/429 one (D3: the server\'s word, the CLI echoes it)', op.out + op.err);
+  ok(op.status === 0 && gateOf(/^hint: may-need-anti-bot — Google's sign-in page says this browser may not be secure — a hint from the page, not a detection/m.test(op.err)) && gateOf(/--why sign-in-refused --tier 2/.test(op.err)) && !/may-need-cloak/.test(op.err), 'step 2 END TO END: `open` of the refusal page ⇒ the may-need-anti-bot hint on stderr, printed like the 403/429 one (D3: the server\'s word, the CLI echoes it)', op.out + op.err);
   const op2 = await cli(sC, ['open', 'https://calendar.example/in']);
   ok(op2.status === 0 && !/hint:/.test(op2.err), 'an ordinary page carries no hint', op2.err);
   rejectedBefore(bl.out.match(/proposal (bl-[0-9a-f]{8})/)[1]);
   const op3 = await cli(sC, ['open', 'https://calendar.example/in']);
   const op4 = await cli(sC, ['open', 'https://calendar.example/in']);
-  ok(/note: the user rejected your proposal for calendar\.example .*\[proposal_rejected\]/.test(op3.err) && !/proposal_rejected/.test(op4.err), 'a rejection untold: the next `open` of the host prints the rejection note ONCE, the one after nothing', op3.err + ' ||| ' + op4.err);
+  ok(gateOf(/note: the user rejected your proposal for calendar\.example .*\[proposal_rejected\]/.test(op3.err)) && !/proposal_rejected/.test(op4.err), 'a rejection untold: the next `open` of the host prints the rejection note ONCE, the one after nothing', op3.err + ' ||| ' + op4.err);
 }
 
 // ═══ ⑩c verify r1 V7: the agent's baseline intro teaches the claim (one clause) ═══════════════
@@ -274,7 +274,7 @@ console.log('— ⑩c the baseline browser intro line names the ONE command a re
 {
   const AR = require('../src/agent-routes.js');
   const iso = [...B.ISOLATED_VARIANTS].map((v) => { try { return AR.browserIntroLine(v); } catch { return ''; } }).find((l) => /THIS conversation's own browser/.test(l)) || '';
-  ok(/a site that refuses the browser ⇒ `vibespace-browser blocked --url <u> --tier 2` \(the user approves the switch — never a workaround\)/.test(iso), 'the intro line (the isolated variant) carries the one clause: a refused site ⇒ `blocked --url <u> --tier 2`, never a workaround', iso.slice(0, 600));
+  ok(verdictOf(/a site that refuses the browser ⇒ `vibespace-browser blocked --url <u> --tier 2` \(the user approves the switch — never a workaround\)/.test(iso)), 'the intro line (the isolated variant) carries the one clause: a refused site ⇒ `blocked --url <u> --tier 2`, never a workaround', iso.slice(0, 600));
 }
 
 // ═══ ⑩b what the card draws ════════════════════════════════════════════════════
@@ -303,7 +303,7 @@ console.log('— ⑩d every key the proposal card says (proposalStateText\'s sta
   const has = (d, k) => dictHasEntry(d, k) || d.includes(`  ${JSON.stringify(k)}:`); // a key with a double quote sits escaped (dictHasEntry matches raw)
   const missing = keys.filter((k) => !dicts.every((d) => has(d, k)));
   const state = card.slice(card.indexOf('export function proposalStateText'), card.indexOf('/** lane site-reset: a site-reset proposal'));
-  ok(keys.length >= 10 && keys.includes('Done.') && /tt\(i18nKey\('Done\.'\)\)/.test(state) && missing.length === 0, `the card's ${keys.length} keys — every state line proposalStateText answers among them («Done.» too) — are entries in zh AND ja`, missing);
+  ok(keys.length >= 10 && gateOf(keys.includes('Done.')) && gateOf(/tt\(i18nKey\('Done\.'\)\)/.test(state)) && missing.length === 0, `the card's ${keys.length} keys — every state line proposalStateText answers among them («Done.» too) — are entries in zh AND ja`, missing);
 }
 
 // ═══ ⑪ controls ═════════════════════════════════════════════════════════════════
@@ -312,14 +312,14 @@ const M = mutantCopies('bprop-propose', REPO);
 const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 { // c1 — no digest check
   const cut = "    if (shown !== p.digest) return refuse('proposal_changed', 'the card you pressed is not this proposal as it stands — nothing ran; read it again');\n";
-  ok(swSrc.includes(cut), 'c1: the digest check is where the control cuts it');
+  ok(verdictOf(swSrc.includes(cut)), 'c1: the digest check is where the control cuts it');
   const m = M.load('src/browser-switch.js', editAnchor(swSrc, cut, '', "src/browser-switch.js"), 'no-digest');
   const v = m.proposalStep(openP, { event: 'approve', by: 'user', shown: 'pd-00000000' });
   ok(v.ok === true, 'CONTROL c1: without the digest check an Approve naming another card RUNS — ② "proposal_changed" would be red');
 }
 { // c2 — no actor check
   const cut = "  if (human && by !== 'user') return refuse('agent_forbidden', 'approving or rejecting a proposal is the user\\'s act — an agent cannot decide its own proposal');\n";
-  ok(swSrc.includes(cut), 'c2: the actor check is where the control cuts it');
+  ok(verdictOf(swSrc.includes(cut)), 'c2: the actor check is where the control cuts it');
   const m = M.load('src/browser-switch.js', editAnchor(swSrc, cut, '', "src/browser-switch.js"), 'no-actor');
   const v = m.proposalStep(openP, { event: 'approve', by: 'agent', shown: openP.digest });
   ok(v.ok === true, 'CONTROL c2: without the actor check an AGENT\'s approve is a transition — the PURE refusal behind ② would be gone');
@@ -327,7 +327,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 { // c3 — every claim a new proposal (the keeper without claimVerdict's `same`)
   const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const cut = "    const cv = SW.claimVerdict({ existing: prior, tier: v.value.tier });";
-  ok(kSrc.includes(cut), 'c3: the keeper asks claimVerdict where the control cuts it');
+  ok(verdictOf(kSrc.includes(cut)), 'c3: the keeper asks claimVerdict where the control cuts it');
   const Km = M.load('src/server/browser-keeper.js', editAnchor(kSrc, cut, "    const cv = v.value.tier === 2 ? 'new' : 'claim-only';", "src/server/browser-keeper.js"), 'always-new');
   const d3 = path.join(ROOT, 'data-c3'); fs.mkdirSync(d3, { recursive: true });
   const k3 = Km.create({ dataDir: d3, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB }), serverSetting: () => undefined, liveKeys: () => new Set(['bk-000c3c30']), install: false, log: quiet, hostKnown: () => false });
@@ -337,7 +337,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 }
 { // c6 — the Approve route without the agent-bearer refusal
   const cut = "  if (refuseAgentBearer(req, res, PROPOSAL_IS_USERS)) return;\n  const pr = proposalsOr503(res); if (!pr) return;\n  if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });\n  const shown";
-  ok(rsrc.includes(cut), 'c6: the Approve route refuses an agent\'s bearer where the control cuts it');
+  ok(verdictOf(rsrc.includes(cut)), 'c6: the Approve route refuses an agent\'s bearer where the control cuts it');
   const Rm = M.load('src/routes/browser.js', editAnchor(rsrc, cut, "  const pr = proposalsOr503(res); if (!pr) return;\n  if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });\n  const shown", "src/routes/browser.js"), 'no-bearer-refusal');
   const app6 = express(); app6.use(express.json());
   Rm.setup({ keeper, activeSessions: active, proposals: { approve: () => ({ ok: true, started: true }) } });
@@ -349,7 +349,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 }
 { // c8 — verify r1 V1: the audit answer without the lease check tells ANOTHER conversation what this browser was refused
   const cut = " && typeof k.leasesFor === 'function' && k.leasesFor(f.browserKey).some((l) => l.profileId === profileId)";
-  ok(rsrc.includes(cut), 'c8: the audit answer asks for a lease where the control cuts it');
+  ok(verdictOf(rsrc.includes(cut)), 'c8: the audit answer asks for a lease where the control cuts it');
   const Rm = M.load('src/routes/browser.js', editAnchor(rsrc, cut, '', "src/routes/browser.js"), 'no-lease-check');
   const app8 = express(); app8.use(express.json());
   const pE = globalThis.__pE;
@@ -364,7 +364,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 { // c11 — verify r1: the keeper's store with the plain newest-50 bound evicts a standing proposal of another conversation
   const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const cut = "    const kept = SW.blockedKeep([...reg.blocked.filter((b) => !(mineOn(b) && !b.proposal)), entry]);";
-  ok(kSrc.includes(cut), 'c11: the keeper bounds its claims through blockedKeep where the control cuts it');
+  ok(verdictOf(kSrc.includes(cut)), 'c11: the keeper bounds its claims through blockedKeep where the control cuts it');
   const Km = M.load('src/server/browser-keeper.js', editAnchor(kSrc, cut, "    const kept = { keep: [...reg.blocked.filter((b) => !(mineOn(b) && !b.proposal)), entry].slice(-50), dropped: [] };", "src/server/browser-keeper.js"), 'slice-50');
   const d11 = path.join(ROOT, 'data-c11'); fs.mkdirSync(d11, { recursive: true });
   const k11 = Km.create({ dataDir: d11, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB }), serverSetting: () => undefined, liveKeys: () => new Set(['bk-000c1111', 'bk-000c2222']), install: false, log: quiet, hostKnown: () => false });
@@ -373,8 +373,8 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
   for (let i = 0; i < 60; i++) k11.blocked({ url: `https://h${i}.example/`, tier: 1, browserKey: 'bk-000c2222', sessionId: 'x' });
   ok(!k11.proposalEntry(y.claim.id), 'CONTROL c11: the plain newest-50 bound drops the other conversation\'s untold rejection — ⑧b would be red');
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(verdictOf(c.pass), c.name, c.detail);
 
 todos.stop();
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? ` passed, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -28,7 +28,7 @@ const D = require(path.join(repo, 'src/desktop-display.js'));
 const K = require(path.join(repo, 'src/server/desktop-app-keeper.js'));
 const A = require(path.join(repo, 'src/server/desktop-access.js'));
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : ''}`); } };
 const skip = (why) => { skipped++; console.log(`  - SKIP ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 10000, step = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
@@ -86,17 +86,17 @@ const r1 = v.id ? await until(() => { const r = keeper.get(v.id); return r && r.
 // lane remoteapp-fake-node-path: a launch that failed (master .288: the fake could not say its version) is the cause every
 // leg that needs its record names — never a TypeError that hides the legs after it
 const why1 = r1 ? null : `the launch made no record — ${v.error || 'it never left launching in 40 s'}`;
-ok(r1 && r1.state === 'ready' && r1.backend === 'remoteapp' && r1.via === 'xpra+xfreerdp' && r1.recipe === 'xpra-seamless' && r1.probe === 'http' && /^:\d+$/.test(r1.display), `ready in ${Date.now() - t0} ms on ${r1 && r1.display} (xpra-seamless, probe http) — lastError ${r1 && r1.lastError}`, r1 ? { state: r1.state, lastError: r1.lastError } : why1);
-ok(r1 && r1.pids.x > 0 && r1.pids.server === r1.pids.x && r1.pids.app > 0 && r1.pids.app !== r1.pids.x && keeper.streamTarget(v.id) && keeper.streamTarget(v.id).kind === 'xpra', 'ONE xpra pid = X + picture server; the fake xfreerdp is the app; the stream target is xpra', r1 ? r1.pids : why1);
+ok(gateOf(r1) && r1.state === 'ready' && r1.backend === 'remoteapp' && r1.via === 'xpra+xfreerdp' && r1.recipe === 'xpra-seamless' && r1.probe === 'http' && verdictOf(/^:\d+$/.test(r1.display)), `ready in ${Date.now() - t0} ms on ${r1 && r1.display} (xpra-seamless, probe http) — lastError ${r1 && r1.lastError}`, r1 ? { state: r1.state, lastError: r1.lastError } : why1);
+ok(gateOf(r1) && r1.pids.x > 0 && r1.pids.server === r1.pids.x && r1.pids.app > 0 && r1.pids.app !== r1.pids.x && gateOf(keeper.streamTarget(v.id)) && keeper.streamTarget(v.id).kind === 'xpra', 'ONE xpra pid = X + picture server; the fake xfreerdp is the app; the stream target is xpra', r1 ? r1.pids : why1);
 const fakePid = r1 && r1.pids.app;
 const saw = fakePid ? await until(() => { const s = fakeSaw(fakePid); return s.some((x) => x.phase === 'window') ? s : null; }, 15000) : null;
 const st = saw && saw.find((x) => x.phase === 'stdin'); const start = saw && saw.find((x) => x.phase === 'start');
-ok(st && st.lines === 1 && st.domainFromStdin === false && st.password && st.password.sha256 === sha(PW), 'the fake read ONE stdin line, and it is the password (sha256)', st || why1);
-ok(start && start.env.DISPLAY === r1.display && start.env.XDG_CONFIG_HOME === path.join(keeper.logRoot, v.id, 'rdp-config') && saw.find((x) => x.phase === 'connected').reply === 'VS-FAKE-MACHINE 3389', 'DISPLAY = the record\'s own xpra display; its own XDG_CONFIG_HOME; it reached the machine through the forward', start ? start.env : why1);
+ok(gateOf(st) && st.lines === 1 && st.domainFromStdin === false && gateOf(st.password) && st.password.sha256 === sha(PW), 'the fake read ONE stdin line, and it is the password (sha256)', st || why1);
+ok(gateOf(start) && start.env.DISPLAY === r1.display && start.env.XDG_CONFIG_HOME === path.join(keeper.logRoot, v.id, 'rdp-config') && saw.find((x) => x.phase === 'connected').reply === 'VS-FAKE-MACHINE 3389', 'DISPLAY = the record\'s own xpra display; its own XDG_CONFIG_HOME; it reached the machine through the forward', start ? start.env : why1);
 
 console.log('§2 the RAIL stand-in window is an X top-level on the record\'s display');
 const w = r1 ? await until(async () => { const r = await keeper.windows(v.id); return r.ok && r.windows.some((x) => /xfreerdp/i.test(`${x.instance || ''} ${x.cls || ''}`) || x.title === 'Notepad') ? r : null; }, 15000, 300) : null;
-ok(w && w.windows.length === 1 && (w.windows[0].title === 'Notepad' || /xfreerdp/i.test(`${w.windows[0].instance} ${w.windows[0].cls}`)), `windows(): exactly the RAIL stand-in (${w && JSON.stringify(w.windows.map((x) => [x.title, x.instance, x.cls, x.w, x.h]))}) — xpra's own wrappers filtered`, w || why1);
+ok(gateOf(w) && w.windows.length === 1 && (w.windows[0].title === 'Notepad' || verdictOf(/xfreerdp/i.test(`${w.windows[0].instance} ${w.windows[0].cls}`))), `windows(): exactly the RAIL stand-in (${w && JSON.stringify(w.windows.map((x) => [x.title, x.instance, x.cls, x.w, x.h]))}) — xpra's own wrappers filtered`, w || why1);
 if (SHOTS && w) {
   // xpra redirects its windows (Composite): a root grab is black — the window's OWN contents are read by its id
   const xenv = { ...process.env, DISPLAY: r1.display, XAUTHORITY: path.join(keeper.logRoot, v.id, 'Xauthority') };
@@ -142,8 +142,8 @@ console.log('§4 stop');
   const xm = ((saw || []).find((x) => x.phase === 'window') || {}).windowPid;
   if (v.id) await keeper.stop(v.id);
   const r = v.id ? await until(() => { const x = keeper.get(v.id); return x && !['launching', 'ready'].includes(x.state) ? x : null; }) : null;
-  ok(r && pidsOf(r1).every((p) => !alive(p)) && (!xm || !alive(xm)), `stopped (${r && r.state}): xpra, the fake and its window process are gone`, why1 || { pids: pidsOf(r1).map((p) => [p, alive(p)]), xm: xm && alive(xm) });
-  ok(await until(() => acc.forwards().length === 0 && conns.size === 0), 'the forward closed (no listener, the machine-side connection gone)', acc.forwards());
+  ok(gateOf(r) && gateOf(pidsOf(r1).every((p) => !alive(p))) && (!xm || !alive(xm)), `stopped (${r && r.state}): xpra, the fake and its window process are gone`, why1 || { pids: pidsOf(r1).map((p) => [p, alive(p)]), xm: xm && alive(xm) });
+  ok(verdictOf(await until(() => acc.forwards().length === 0 && conns.size === 0)), 'the forward closed (no listener, the machine-side connection gone)', acc.forwards());
 }
 
 console.log('§5 the machine\'s side drops mid-session ⇒ the session ends on its own');
@@ -153,9 +153,9 @@ console.log('§5 the machine\'s side drops mid-session ⇒ the session ends on i
   if (a) await until(() => fakeSaw(a.pids.app).some((x) => x.phase === 'connected'), 10000);
   for (const s of conns) s.destroy(); // the machine went away
   const e = a ? await until(() => { const x = keeper.get(v2.id); return x && !['launching', 'ready'].includes(x.state) ? x : null; }, 15000, 200) : null;
-  ok(e && e.rdp && e.rdp.ended === 'rdp_link_lost' && /dropped/.test(e.lastError || ''), `the client exited by itself; the record ended (${e && e.state}) saying why: ${e && e.lastError}`, e ? { state: e.state, rdp: e.rdp, exitCode: e.exitCode } : `the second launch was never ready — ${v2.error || (v2.id && keeper.get(v2.id) ? `${keeper.get(v2.id).state}: ${keeper.get(v2.id).lastError}` : 'no record')}`);
-  ok(a && await until(() => pidsOf(a).every((p) => !alive(p))) && await until(() => acc.forwards().length === 0), 'its display torn down and its forward closed', a ? undefined : 'not run: no session to tear down');
+  ok(gateOf(e) && gateOf(e.rdp) && e.rdp.ended === 'rdp_link_lost' && verdictOf(/dropped/.test(e.lastError || '')), `the client exited by itself; the record ended (${e && e.state}) saying why: ${e && e.lastError}`, e ? { state: e.state, rdp: e.rdp, exitCode: e.exitCode } : `the second launch was never ready — ${v2.error || (v2.id && keeper.get(v2.id) ? `${keeper.get(v2.id).state}: ${keeper.get(v2.id).lastError}` : 'no record')}`);
+  ok(gateOf(a) && gateOf(await until(() => pidsOf(a).every((p) => !alive(p)))) && verdictOf(await until(() => acc.forwards().length === 0)), 'its display torn down and its forward closed', a ? undefined : 'not run: no session to tear down');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -34,7 +34,7 @@ const PORT = await freePort(), CDP_PORT = await freePort();
 const wt = `/tmp/vs-attach-rescue-${process.pid}`;
 const fakeHome = scratch('attach-rescue-home');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree, fake HOME with a claude transcript ──────
@@ -136,23 +136,23 @@ try {
   await sleep(2500);
   const stA = await winState(wA);
   check('A: history rendered (not blank)', stA.msgs >= 4, `msgs=${stA.msgs}`);
-  check('A: transcript content visible', stA.text.includes('RESCUE-MARKER-HELLO') && stA.text.includes('RESCUE-MARKER-REPLY'));
-  check('A: Resume bar shown', stA.resumeBar);
+  check('A: transcript content visible', gateOf(stA.text.includes('RESCUE-MARKER-HELLO')) && verdictOf(stA.text.includes('RESCUE-MARKER-REPLY')));
+  check('A: Resume bar shown', verdictOf(stA.resumeBar));
 
   // B: dead serverId, NO host in the spec, transcript only in remote-jsonl cache
   const wB = await replayDead(SID_CACHED, 'rescue-cached');
   await sleep(2500);
   const stB = await winState(wB);
   check('B: host-less cached-remote rescue renders history', stB.msgs >= 4, `msgs=${stB.msgs}`);
-  check('B: cached transcript content visible', stB.text.includes('RESCUE-MARKER-REPLY'));
-  check('B: Resume bar shown', stB.resumeBar);
+  check('B: cached transcript content visible', verdictOf(stB.text.includes('RESCUE-MARKER-REPLY')));
+  check('B: Resume bar shown', verdictOf(stB.resumeBar));
 
   // C: dead serverId, no transcript anywhere — degrade gracefully, no loop
   const wC = await replayDead(SID_GONE, 'rescue-none');
   await sleep(2500);
   const stC = await winState(wC);
-  check('C: no-transcript window degrades to read-only notice', stC.resumeBar && !/RESCUE-MARKER/.test(stC.text) && /No messages/.test(stC.text), JSON.stringify(stC).slice(0, 200));
-  check('C: Resume BUTTON offered on a primary view', stC.resumeBtn);
+  check('C: no-transcript window degrades to read-only notice', gateOf(stC.resumeBar) && !/RESCUE-MARKER/.test(stC.text) && verdictOf(/No messages/.test(stC.text)), JSON.stringify(stC).slice(0, 200));
+  check('C: Resume BUTTON offered on a primary view', verdictOf(stC.resumeBtn));
 
   // D: a sub-agent's own conversation opened from its parent (codex collab
   // child / claude Task viewer path through viewSession with agentKind
@@ -167,7 +167,7 @@ try {
   const stD = await winState(wD);
   check('D: sub-agent view renders history', stD.msgs >= 4, `msgs=${stD.msgs}`);
   check('D: sub-agent view has NO Resume button', !stD.resumeBtn, JSON.stringify(stD).slice(0, 200));
-  check('D: sub-agent view explains read-only', stD.subNote && /Sub-agent conversation/.test(stD.text));
+  check('D: sub-agent view explains read-only', gateOf(stD.subNote) && verdictOf(/Sub-agent conversation/.test(stD.text)));
   // E (negative control): the same transcript viewed as a PRIMARY session keeps its Resume button.
   const wE = await evalJs(`(() => {
     const before = new Set(app.wm.windows.keys());
@@ -176,11 +176,11 @@ try {
   })()`);
   await sleep(2500);
   const stE = await winState(wE);
-  check('E: primary view keeps the Resume button', stE.resumeBtn && !stE.subNote, JSON.stringify(stE).slice(0, 200));
+  check('E: primary view keeps the Resume button', gateOf(stE.resumeBtn) && !stE.subNote, JSON.stringify(stE).slice(0, 200));
 } catch (e) {
   failed++;
   console.error('  ✗ harness error: ' + e.message);
 }
 
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -53,7 +53,7 @@ import { pathToFileURL } from 'node:url';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 400) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 400) : '')); } };
 const section = (t) => console.log('\n' + t);
 const MODEL = path.join(REPO, 'src/lib/doc-window-model.js');
 const M = await import(pathToFileURL(MODEL).href);
@@ -79,8 +79,8 @@ section('§1 the width model — Fit by default, Comfortable by choice, the phon
 ok(widthVerdicts(M).length === 0, 'Fit = the pane − 2×32 px (1811 → 1747), Comfortable = calc(76ch + 64px) (652 px at 15 px), a phone = Fit with 12 px (390 → 366); the default is Fit', widthVerdicts(M));
 ok(M.WIDTH_KEY === 'vs-doc-width' && JSON.stringify(M.WIDTHS) === '["fit","comfortable"]', 'the choice is a DEVICE\'s (localStorage `vs-doc-width`), two values only');
 const UI = rd('src/lib/doc-window-ui.js');
-ok(/widthChoice\(localStorage\.getItem\(WIDTH_KEY\)\)/.test(UI) && /localStorage\.setItem\(WIDTH_KEY, S\.width\)/.test(UI) && !/userState|writeUserState|\/api\/user-state/.test(UI), 'the window reads + writes the choice in localStorage only — never user-state');
-ok(UI.includes('.doc-window[data-width="fit"] .doc-page{max-width:none}') && UI.includes('.doc-page{font-size:15px;max-width:calc(76ch + 64px)') && UI.includes('.doc-window.doc-phone .doc-page{padding:18px 12px 80px}'), 'the window wears the rule: fit lifts the measure, comfortable keeps design 020\'s 76ch, the phone gutter is 12 px');
+ok(gateOf(/widthChoice\(localStorage\.getItem\(WIDTH_KEY\)\)/.test(UI)) && gateOf(/localStorage\.setItem\(WIDTH_KEY, S\.width\)/.test(UI)) && !/userState|writeUserState|\/api\/user-state/.test(UI), 'the window reads + writes the choice in localStorage only — never user-state');
+ok(gateOf(UI.includes('.doc-window[data-width="fit"] .doc-page{max-width:none}')) && gateOf(UI.includes('.doc-page{font-size:15px;max-width:calc(76ch + 64px)')) && verdictOf(UI.includes('.doc-window.doc-phone .doc-page{padding:18px 12px 80px}')), 'the window wears the rule: fit lifts the measure, comfortable keeps design 020\'s 76ch, the phone gutter is 12 px');
 // RED CONTROL: the owner's bug as a patched copy — Fit that keeps the fixed measure
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-docwidth-'));
 try {
@@ -92,31 +92,31 @@ try {
 } finally { fs.rmSync(TMP, { recursive: true, force: true }); }
 
 section('§2 a wide table scrolls in its own wrapper — never clipped');
-ok(/\.tableWrapper\{overflow-x:auto;[^}]*max-width:100%/.test(M.TABLE_CSS) && /:is\(td,th\):first-child\{position:sticky;left:0/.test(M.TABLE_CSS), 'TABLE_CSS: the wrapper scrolls horizontally, the first column is held (sticky)');
-ok(UI.includes('${TABLE_CSS}') && !/\.tableWrapper\{overflow:hidden/.test(UI), 'the window\'s stylesheet carries TABLE_CSS (one rule for both widths)');
+ok(gateOf(/\.tableWrapper\{overflow-x:auto;[^}]*max-width:100%/.test(M.TABLE_CSS)) && verdictOf(/:is\(td,th\):first-child\{position:sticky;left:0/.test(M.TABLE_CSS)), 'TABLE_CSS: the wrapper scrolls horizontally, the first column is held (sticky)');
+ok(gateOf(UI.includes('${TABLE_CSS}')) && !/\.tableWrapper\{overflow:hidden/.test(UI), 'the window\'s stylesheet carries TABLE_CSS (one rule for both widths)');
 
 section('§3 leaving — the file itself, ONE self-contained HTML, the print sheet');
 ok(M.downloadHref('', '/p/docs/A b.md') === '/api/download?path=%2Fp%2Fdocs%2FA+b.md' && M.downloadHref('h1', '/x.md') === '/api/download?host=h1&path=%2Fx.md', 'Download .md = the existing attachment route /api/download (host-aware) — no new URL shape');
-ok(/router\.get\('\/api\/download'/.test(rd('src/routes/files.js')) && /\/api\/download\b/.test(rd('scripts/test-raw-filename.mjs')), 'the route exists in src/routes/files.js and test-raw-filename\'s census already names it');
+ok(gateOf(/router\.get\('\/api\/download'/.test(rd('src/routes/files.js'))) && verdictOf(/\/api\/download\b/.test(rd('scripts/test-raw-filename.mjs'))), 'the route exists in src/routes/files.js and test-raw-filename\'s census already names it');
 ok(M.exportName('report.md') === 'report.html' && M.exportName('a.markdown') === 'a.html' && M.exportName('../x/y') === '.._x_y.html' && M.exportName('') === 'document.html', 'the export is named by the document (<stem>.html)');
 ok(M.localImagePath('img/a.png', '/p/docs/A.md') === '/p/docs/img/a.png' && M.localImagePath('../b.png?x=1', '/p/docs/A.md') === '/p/b.png' && M.localImagePath('/abs/c.png', '/p/A.md') === '/abs/c.png'
   && M.localImagePath('https://e.com/a.png', '/p/A.md') === '' && M.localImagePath('data:image/png;base64,AA', '/p/A.md') === '' && M.localImagePath('//cdn/x.png', '/p/A.md') === '', 'images beside the file are inlined (their /api/file/raw path); scheme / protocol-relative URLs are kept as written');
 const body = '<h1>T</h1><div class="tableWrapper"><table><tbody><tr><th>a</th></tr></tbody></table></div><p><a href="https://e.com/k">k</a> one = two, onion=3</p><img src="data:image/png;base64,AA">';
 const html = M.exportDocument({ title: 'A <b>.md', body, css: '.doc-page .ProseMirror h1{font-size:26px}', tokens: [['--text', '#ddd'], ['--bg-window', ' #111 '], ['--evil', 'red;}</style><script>'], ['nope', 'x']], font: 'Inter, sans-serif', wide: true });
-ok(typeof html === 'string' && html.startsWith('<!doctype html>') && !/<script\b/i.test(html) && html.includes('<title>A &lt;b&gt;.md</title>') && html.includes(':root{--text:#ddd;--bg-window:#111}') && html.includes('.doc-page .ProseMirror h1{font-size:26px}') && html.includes(body) && html.includes('https://e.com/k'), 'Export HTML: ONE document — no script, the title escaped, the theme tokens inlined (a hostile token value dropped), the editor\'s styles inlined, links kept', html && html.slice(0, 300));
-ok(html.includes('@page{margin:16mm}') && /@media print\{[^]*max-width:none!important[^]*tr,img,blockquote,figure\{break-inside:avoid\}[^]*h1,h2,h3,h4,h5,h6\{break-after:avoid\}/.test(html) && html.includes(M.TABLE_CSS), 'the print sheet: 16 mm pages, full width, rows / figures not split, headings kept with the next; the table rule rides too');
-ok(M.exportDocument({ body, wide: false }).includes('max-width:calc(76ch + 64px)') && M.exportDocument({ body, wide: true }).includes('max-width:none'), 'the export keeps the window\'s width (Fit = full, Comfortable = the measure)');
+ok(typeof html === 'string' && gateOf(html.startsWith('<!doctype html>')) && !/<script\b/i.test(html) && gateOf(html.includes('<title>A &lt;b&gt;.md</title>')) && gateOf(html.includes(':root{--text:#ddd;--bg-window:#111}')) && gateOf(html.includes('.doc-page .ProseMirror h1{font-size:26px}')) && gateOf(html.includes(body)) && verdictOf(html.includes('https://e.com/k')), 'Export HTML: ONE document — no script, the title escaped, the theme tokens inlined (a hostile token value dropped), the editor\'s styles inlined, links kept', html && html.slice(0, 300));
+ok(gateOf(html.includes('@page{margin:16mm}')) && gateOf(/@media print\{[^]*max-width:none!important[^]*tr,img,blockquote,figure\{break-inside:avoid\}[^]*h1,h2,h3,h4,h5,h6\{break-after:avoid\}/.test(html)) && verdictOf(html.includes(M.TABLE_CSS)), 'the print sheet: 16 mm pages, full width, rows / figures not split, headings kept with the next; the table rule rides too');
+ok(gateOf(M.exportDocument({ body, wide: false }).includes('max-width:calc(76ch + 64px)')) && verdictOf(M.exportDocument({ body, wide: true }).includes('max-width:none')), 'the export keeps the window\'s width (Fit = full, Comfortable = the measure)');
 const hostile = ['<script>alert(1)</script>', '<img src=x onerror="alert(1)">', '<a href="javascript:alert(1)">x</a>', '<a href=\' javascript:x\'>y</a>', '<iframe src="data:text/html,<b>"></iframe>', '<form action="vbscript:x"></form>'];
-ok(hostile.every((h) => M.exportDocument({ body: '<p>ok</p>' + h }) === null) && M.exportDocument({ body: '<p>javascript: is a word; onload = text &lt;script&gt;</p>' }) !== null, 'the belt: a fragment still carrying a script / an on* handler / a javascript:, vbscript: or data:text/html link is REFUSED (null); the words in text pass', hostile.map((h) => M.exportDocument({ body: h }) === null));
+ok(gateOf(hostile.every((h) => M.exportDocument({ body: '<p>ok</p>' + h }) === null)) && M.exportDocument({ body: '<p>javascript: is a word; onload = text &lt;script&gt;</p>' }) !== null, 'the belt: a fragment still carrying a script / an on* handler / a javascript:, vbscript: or data:text/html link is REFUSED (null); the words in text pass', hostile.map((h) => M.exportDocument({ body: h }) === null));
 
 section('§4 the window — the ⋯ at the right, the one sanitizer, the print frame');
-ok(/moreAlways: \(\) => true/.test(UI) && UI.indexOf("tool('width'") > UI.indexOf("bar.appendChild(btnStrip)") && UI.indexOf('bar.appendChild(more)') > UI.indexOf("tool('width'"), 'the bar\'s right end = comments · the width control · ⋯ (always shown: the doc\'s own rows live there)');
+ok(gateOf(/moreAlways: \(\) => true/.test(UI)) && UI.indexOf("tool('width'") > UI.indexOf("bar.appendChild(btnStrip)") && UI.indexOf('bar.appendChild(more)') > UI.indexOf("tool('width'"), 'the bar\'s right end = comments · the width control · ⋯ (always shown: the doc\'s own rows live there)');
 const rows = (UI.match(/row\('[a-z]+', t\('([^']+)'\)/g) || []).map((x) => x.replace(/^.*t\('/, '').replace(/'\)$/, ''));
 ok(JSON.stringify(rows) === JSON.stringify(['Download .md', 'Export HTML', 'Print / Save as PDF', 'Copy as Markdown', 'Copy as HTML']) && !/docx/i.test(UI.slice(UI.indexOf('function leaveRows'), UI.indexOf('const dirtyNow'))), 'the ⋯ rows: Download .md · Export HTML · Print / Save as PDF · Copy as Markdown · Copy as HTML — no .docx row (a reader, no writer), no greyed row', rows);
-ok(/readingHtml\(sourceNow\(\), \{ Marked, sanitize: sanitizeHtml \}\)/.test(UI) && !/S\.ed\.getHTML\(/.test(UI) && !/dompurify|from 'marked'/i.test(UI) && /import \{ sanitizeHtml \} from '\.\/safe-html\.js';/.test(rd('src/lib/doc-window.js')) && /import \{ Marked \} from 'marked';/.test(rd('src/lib/doc-window.js')) && /sanitizeHtml, copyText, Marked,/.test(rd('src/lib/doc-window.js')), 'the export fragment = the SOURCE through the house renderer (marked) + THE one sanitizer (src/lib/safe-html.js), both handed in from the main bundle — the lazy entry carries no second copy, and never the editor\'s DOM');
-ok(/setAttribute\('sandbox', 'allow-same-origin allow-modals'\)/.test(UI) && !/doc-print-frame[^\n]*allow-scripts/.test(UI) && /contentWindow\.print\(\)/.test(UI), 'Print: a transient hidden frame, sandbox WITHOUT allow-scripts (nothing in the document runs), this window calls print()');
-ok(/if \(dirtyNow\(\)\) \{[^]*t\('Save and download\?'\)[^]*if \(dirtyNow\(\)\) return;[^]*saveAs\(downloadHref\(host, path\), name\)/.test(UI), 'an unsaved edit is saved first (or nothing downloads) — never a stale file');
-ok((UI.match(/labelHtml/g) || []).length === 1 && /labelHtml: '<span class="doc-menu-ico">' \+ \(I\[icon\] \|\| ''\) \+ '<\/span>' \+ escH\(label\)/.test(UI), 'the ONE labelHtml site = a trusted icons.js glyph + the ESCAPED words (the menu\'s SVG icons; every other word stays textContent)');
+ok(gateOf(/readingHtml\(sourceNow\(\), \{ Marked, sanitize: sanitizeHtml \}\)/.test(UI)) && !/S\.ed\.getHTML\(/.test(UI) && !/dompurify|from 'marked'/i.test(UI) && gateOf(/import \{ sanitizeHtml \} from '\.\/safe-html\.js';/.test(rd('src/lib/doc-window.js'))) && gateOf(/import \{ Marked \} from 'marked';/.test(rd('src/lib/doc-window.js'))) && verdictOf(/sanitizeHtml, copyText, Marked,/.test(rd('src/lib/doc-window.js'))), 'the export fragment = the SOURCE through the house renderer (marked) + THE one sanitizer (src/lib/safe-html.js), both handed in from the main bundle — the lazy entry carries no second copy, and never the editor\'s DOM');
+ok(gateOf(/setAttribute\('sandbox', 'allow-same-origin allow-modals'\)/.test(UI)) && !/doc-print-frame[^\n]*allow-scripts/.test(UI) && verdictOf(/contentWindow\.print\(\)/.test(UI)), 'Print: a transient hidden frame, sandbox WITHOUT allow-scripts (nothing in the document runs), this window calls print()');
+ok(verdictOf(/if \(dirtyNow\(\)\) \{[^]*t\('Save and download\?'\)[^]*if \(dirtyNow\(\)\) return;[^]*saveAs\(downloadHref\(host, path\), name\)/.test(UI)), 'an unsaved edit is saved first (or nothing downloads) — never a stale file');
+ok((UI.match(/labelHtml/g) || []).length === 1 && verdictOf(/labelHtml: '<span class="doc-menu-ico">' \+ \(I\[icon\] \|\| ''\) \+ '<\/span>' \+ escH\(label\)/.test(UI)), 'the ONE labelHtml site = a trusted icons.js glyph + the ESCAPED words (the menu\'s SVG icons; every other word stays textContent)');
 for (const lang of ['zh', 'ja']) {
   const D = rd(`src/lib/i18n-${lang}.js`);
   const miss = ['Download, export, print', 'Comfortable', 'Fit width', 'Download .md', 'Export HTML', 'Print / Save as PDF', 'Copy as Markdown', 'Copy as HTML', 'Save and download?', 'Save and download', 'Page width: Fit width — press for Comfortable', 'Page width: Comfortable — press for Fit width'].filter((k) => !D.includes(JSON.stringify(k) + ':'));
@@ -143,7 +143,7 @@ function readingVerdicts(html) {
 const read = asRead(BRIEF);
 ok(readingVerdicts(read).length === 0, 'the brief fixture ⇒ an <h1> first, an <ol> of 4 items each with inline <code> + <strong>, NO raw block, every /p/<id> kept as text', readingVerdicts(read));
 const tp = /<p>TESTS: fast — ([^]*?)<\/p>/.exec(read);
-ok(!!tp && /\nDOCS: /.test(tp[1]) && /\nRules: /.test(tp[1]) && !/<pre/.test(tp[1]), 'the TESTS: / DOCS: / Rules: lines read as ONE paragraph (no blank line between them in the source; soft breaks wrap) — the shot\'s third code box');
+ok(!!tp && gateOf(/\nDOCS: /.test(tp[1])) && gateOf(/\nRules: /.test(tp[1])) && !/<pre/.test(tp[1]), 'the TESTS: / DOCS: / Rules: lines read as ONE paragraph (no blank line between them in the source; soft breaks wrap) — the shot\'s third code box');
 // RED CONTROL: the editor's DOM exported again (rel239's exportBody) — the blocks the wheel carries as raw blocks come back
 const D = await import(pathToFileURL(path.join(REPO, 'src/lib/doc-markdown.js')).href);
 const escT = (x) => String(x).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -157,8 +157,8 @@ const viaEditor = M.exportDocument({ title: 'lane-brief.md', body: editorHtml(D.
 const redV = readingVerdicts(viaEditor);
 ok(redV.length > 0 && !redV.includes('a raw block'), 'RED CONTROL: the editor\'s DOM exported again ⇒ red (its own markup, not the reading\'s) — no longer for raw blocks: since lane doc-table-native a bare /p/<id> is TEXT in the editor too (the heading, the list and TESTS: are native nodes there)', redV);
 ok(S(['<id>', '</sha>', '<my-el>', '<b>', '<br/>', '<details>', '<img src=x>'].map(M.placeholderHtml)) === S(['&lt;id&gt;', '&lt;/sha&gt;', '&lt;my-el&gt;', '<b>', '<br/>', '<details>', '<img src=x>']), 'placeholderHtml: a bare <word> naming no HTML element reads as TEXT; real tags go on to the sanitizer as written');
-ok((() => { try { M.readingHtml('# x', { Marked }); return false; } catch { return true; } })() && /^<pre><code>a: 1\n<\/code><\/pre>\n<h1>T<\/h1>/.test(M.readingHtml('---\na: 1\n---\n# T\n', { Marked, sanitize: (h) => h })), 'readingHtml fails CLOSED without the sanitizer; front matter reads as a plain block, not a rule + a heading');
-ok(S([0, 4, 5, 6, 7, 9, 10, 30].map(M.colsBand)) === S(['', '', 'm', 'm', 'l', 'l', 'xl', 'xl']) && /tb\.rows\[0\] \? tb\.rows\[0\]\.cells\.length : 0\); if \(band\) w\.dataset\.cols = band;/.test(UI), 'colsBand: ≤ 4 columns as written, 5–6 m (90 %), 7–9 l (80 %), 10+ xl (70 %) — the export wrapper carries it as data-cols');
+ok(gateOf((() => { try { M.readingHtml('# x', { Marked }); return false; } catch { return true; } })()) && verdictOf(/^<pre><code>a: 1\n<\/code><\/pre>\n<h1>T<\/h1>/.test(M.readingHtml('---\na: 1\n---\n# T\n', { Marked, sanitize: (h) => h }))), 'readingHtml fails CLOSED without the sanitizer; front matter reads as a plain block, not a rule + a heading');
+ok(S([0, 4, 5, 6, 7, 9, 10, 30].map(M.colsBand)) === S(['', '', 'm', 'm', 'l', 'l', 'xl', 'xl']) && verdictOf(/tb\.rows\[0\] \? tb\.rows\[0\]\.cells\.length : 0\); if \(band\) w\.dataset\.cols = band;/.test(UI)), 'colsBand: ≤ 4 columns as written, 5–6 m (90 %), 7–9 l (80 %), 10+ xl (70 %) — the export wrapper carries it as data-cols');
 /** The print sheet's verdicts (empty = it holds). */
 function sheetVerdicts(css) {
   const P = String(css).slice(String(css).indexOf('@media print')), v = [];
@@ -172,12 +172,12 @@ function sheetVerdicts(css) {
   return v;
 }
 ok(sheetVerdicts(M.PRINT_CSS).length === 0, 'the print sheet: pre / code / cells / long words wrap, no overflow:auto|hidden and no fixed height under print, tables 100 % + type stepped, img bounded, body 11 pt, code 9.5 pt, a pre may break, no scrollbar', sheetVerdicts(M.PRINT_CSS));
-ok(/\.doc-page \.ProseMirror\.doc-read\{white-space:normal\}/.test(read), 'the read article has normal white-space (the editor\'s pre-wrap would print marked\'s newlines as blank lines)');
+ok(verdictOf(/\.doc-page \.ProseMirror\.doc-read\{white-space:normal\}/.test(read)), 'the read article has normal white-space (the editor\'s pre-wrap would print marked\'s newlines as blank lines)');
 const TMP5 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-docprint-'));
 try {
   fs.writeFileSync(path.join(TMP5, 'p.mjs'), fs.readFileSync(MODEL, 'utf8').replace('white-space:pre-wrap!important;overflow-wrap:anywhere;', ''));
   const badSheet = sheetVerdicts((await import(pathToFileURL(path.join(TMP5, 'p.mjs')).href)).PRINT_CSS);
-  ok(badSheet.includes('pre / code do not wrap'), 'RED CONTROL: a patched sheet without the pre wrap ⇒ red', badSheet);
+  ok(verdictOf(badSheet.includes('pre / code do not wrap')), 'RED CONTROL: a patched sheet without the pre wrap ⇒ red', badSheet);
 } finally { fs.rmSync(TMP5, { recursive: true, force: true }); }
 section('§6 raw blocks READ as documents — the owner\'s table with inline <code> is a table; what stays raw is rendered, never source');
 const OWNER = rd('scripts/fixtures/doc-wheel/31-table-inline-html.md');
@@ -202,18 +202,18 @@ ok(rawVerdicts(readMixed).length === 0, 'the reading export of the owner\'s shap
 const ownerDoc = D.loadDoc(OWNER), kinds = []; ownerDoc.doc.descendants((n) => { kinds.push(n.type.name); });
 const ownerEditor = editorHtml(ownerDoc.doc);
 const rawSrcs = ownerDoc.nodes.filter((n) => n.type.name === 'rawBlock').map((n) => n.attrs.source);
-ok(kinds.includes('table') && rawSrcs.length === 0 && /<table[^>]*>[^]*<code[^>]*>STEP-nn<\/code>[^]*<kbd>Ctrl<\/kbd>[^]*<\/table>/.test(ownerEditor) && !/doc-rawblock/.test(ownerEditor) && (ownerEditor.match(/<table/g) || []).length === 2 && ownerEditor.includes('STEP-&lt;code&gt;-nn until export'), 'the owner\'s shape in the EDITOR: both tables are real tables (cells editable) — the paired tags drawn as code / kbd, the bare STEP-<code>-nn as its text (lane doc-table-native: a literal tag is text in the editor as in the reading); no raw block', { kinds: [...new Set(kinds)], rawSrcs });
+ok(gateOf(kinds.includes('table')) && rawSrcs.length === 0 && gateOf(/<table[^>]*>[^]*<code[^>]*>STEP-nn<\/code>[^]*<kbd>Ctrl<\/kbd>[^]*<\/table>/.test(ownerEditor)) && !/doc-rawblock/.test(ownerEditor) && (ownerEditor.match(/<table/g) || []).length === 2 && verdictOf(ownerEditor.includes('STEP-&lt;code&gt;-nn until export')), 'the owner\'s shape in the EDITOR: both tables are real tables (cells editable) — the paired tags drawn as code / kbd, the bare STEP-<code>-nn as its text (lane doc-table-native: a literal tag is text in the editor as in the reading); no raw block', { kinds: [...new Set(kinds)], rawSrcs });
 // RED CONTROL: the editor's DOM exported (rel239's exportBody) — the <details> rides as a raw block there: its source comes back
 const viaEd = rawVerdicts(editorHtml(D.loadDoc(MIXED).doc));
-ok(viaEd.includes('a raw block shown as source') && viaEd.includes('the <details> block not rendered'), 'RED CONTROL: the editor\'s DOM exported instead of the reading render ⇒ red (the <details> block comes back as its source)', viaEd);
+ok(gateOf(viaEd.includes('a raw block shown as source')) && verdictOf(viaEd.includes('the <details> block not rendered')), 'RED CONTROL: the editor\'s DOM exported instead of the reading render ⇒ red (the <details> block comes back as its source)', viaEd);
 const RR = (src, m = M) => m.rawReading(src, { Marked, sanitize: SIGN });
 const det = RR('<details>\n<summary>Why a bag</summary>'), com = RR('<!-- reviewer: keep the bag -->'), lone = RR('</details>'), fm = RR('---\ntitle: x\n---');
-ok(det.rendered && det.kind === 'html' && det.html.startsWith('<!--sanitized-->') && /<details>\s*<summary>Why a bag<\/summary>/.test(det.html), 'rawReading: a <details> block READS rendered — its HTML is the sanitizer\'s output (signed), kind HTML', det);
+ok(gateOf(det.rendered) && det.kind === 'html' && gateOf(det.html.startsWith('<!--sanitized-->')) && verdictOf(/<details>\s*<summary>Why a bag<\/summary>/.test(det.html)), 'rawReading: a <details> block READS rendered — its HTML is the sanitizer\'s output (signed), kind HTML', det);
 ok(!com.rendered && !lone.rendered && com.kind === 'html', 'rawReading: a block that reads as NOTHING (a comment, a lone </details>) ⇒ not rendered: the window shows its source, the chip says it cannot be rendered', { com, lone });
-ok(fm.rendered && fm.kind === 'front' && /<pre><code>title: x/.test(fm.html), 'rawReading: front matter reads as a plain block (kind front matter)', fm);
-ok((() => { try { M.rawReading('<b>x</b>', { Marked }); return false; } catch { return true; } })() && (() => { try { M.rawReading('<b>x</b>', { sanitize: SIGN }); return false; } catch { return true; } })(), 'rawReading fails CLOSED without the sanitizer (or the renderer)');
+ok(gateOf(fm.rendered) && fm.kind === 'front' && verdictOf(/<pre><code>title: x/.test(fm.html)), 'rawReading: front matter reads as a plain block (kind front matter)', fm);
+ok(gateOf((() => { try { M.rawReading('<b>x</b>', { Marked }); return false; } catch { return true; } })()) && verdictOf((() => { try { M.rawReading('<b>x</b>', { sanitize: SIGN }); return false; } catch { return true; } })()), 'rawReading fails CLOSED without the sanitizer (or the renderer)');
 const BARE = '| Mechanism | Rule |\n| --- | --- |\n| Lineage | the PR-<code>-nn label shifts |\n', bareDoc = D.loadDoc(BARE), bareR = RR(BARE);
-ok(bareDoc.nodes.length === 1 && bareDoc.nodes[0].type.name === 'table' && bareR.rendered && /<table>/.test(bareR.html) && !/\| Mechanism \|/.test(bareR.html) && bareR.html.includes('the PR-&lt;code&gt;-nn label shifts') && !/<code\b/.test(bareR.html), 'an UNMATCHED tag (a bare <code> placeholder in a cell): the editor carries the table NATIVELY, the tag its text (lane doc-table-native — the r2 raw block retired); its READING shows PR-<code>-nn as written, no <code> element opened (r2)', { raw: bareDoc.nodes.map((n) => n.type.name), html: bareR.html.slice(0, 200) });
+ok(bareDoc.nodes.length === 1 && bareDoc.nodes[0].type.name === 'table' && gateOf(bareR.rendered) && gateOf(/<table>/.test(bareR.html)) && !/\| Mechanism \|/.test(bareR.html) && gateOf(bareR.html.includes('the PR-&lt;code&gt;-nn label shifts')) && !/<code\b/.test(bareR.html), 'an UNMATCHED tag (a bare <code> placeholder in a cell): the editor carries the table NATIVELY, the tag its text (lane doc-table-native — the r2 raw block retired); its READING shows PR-<code>-nn as written, no <code> element opened (r2)', { raw: bareDoc.nodes.map((n) => n.type.name), html: bareR.html.slice(0, 200) });
 const UP = [['<code>-nn label', '<code>'], ['<b class="k">x y', '<b class="k">'], ['<code>x</code>', null], ['<CODE>x</code> y', null], ['<code>x</code', '<code>'], ['<br>', null], ['<img src="i.png">', null], ['<em/>', null], ['<id>', null], ['<sha> x </sha>', null], ['x <code>', null]];
 const upBad = UP.filter(([src, want]) => M.unpairedOpenTag(src) !== want).map(([src, want]) => `${src} ⇒ ${M.unpairedOpenTag(src)} (want ${want})`);
 ok(upBad.length === 0, 'unpairedOpenTag (PURE): an open tag whose close is not in the rest of its run ⇒ the tag (text); a paired one (any case), a void / self-closed one, a name that is no element (placeholderHtml\'s) ⇒ null', upBad);
@@ -223,14 +223,14 @@ const LT = [['<absent>', '<absent>'], ['</sha>', '</sha>'], ['<id/>', '<id/>'], 
 const ltBad = LT.filter(([src, want]) => M.literalTag(src) !== want).map(([src, want]) => `${src} ⇒ ${M.literalTag(src)} (want ${want})`);
 ok(ltBad.length === 0, 'literalTag (PURE — ONE predicate, the reading\'s LITERAL_TAG and the editor\'s tokenizer): a placeholder (<absent> </sha> <id/> <my-case>: no HTML element) or an unpaired open tag (a close inside a code span counts as none) ⇒ the tag as text; a paired / void / attributed-paired tag, an autolink, a stray real close ⇒ null', ltBad);
 const rCell = M.readingHtml('| a | b |\n|---|---|\n| 1 | <absent> |\n', { Marked, sanitize: (h) => h }), rSpan = M.readingHtml('a <b>x `</b>` y\n', { Marked, sanitize: (h) => h });
-ok(/<table>[^]*<td>&lt;absent&gt;<\/td>[^]*<\/table>/.test(rCell) && rSpan.includes('a &lt;b&gt;x <code>&lt;/b&gt;</code> y') && !/<b>/.test(rSpan), 'the READING: a bare <absent> in a cell is its text in a <table>; a <b> whose only close sits in a code span is text — no <b> element opened (a code span is literal)', { rCell: rCell.slice(0, 160), rSpan });
-ok(/const r = rawReading\(cur\.attrs\.source \|\| '', \{ Marked, sanitize: sanitizeHtml \}\);/.test(UI) && /e\.name === 'rawBlock' \? e\.extend\(\{ addNodeView: \(\) => \(\{ node, view, getPos \}\) => rawView\(node, view, getPos\) \}\)/.test(UI) && !/edit in Raw|'data-head'/.test(UI) && /dom\.contentEditable = 'false'/.test(UI),
+ok(gateOf(/<table>[^]*<td>&lt;absent&gt;<\/td>[^]*<\/table>/.test(rCell)) && gateOf(rSpan.includes('a &lt;b&gt;x <code>&lt;/b&gt;</code> y')) && !/<b>/.test(rSpan), 'the READING: a bare <absent> in a cell is its text in a <table>; a <b> whose only close sits in a code span is text — no <b> element opened (a code span is literal)', { rCell: rCell.slice(0, 160), rSpan });
+ok(gateOf(/const r = rawReading\(cur\.attrs\.source \|\| '', \{ Marked, sanitize: sanitizeHtml \}\);/.test(UI)) && gateOf(/e\.name === 'rawBlock' \? e\.extend\(\{ addNodeView: \(\) => \(\{ node, view, getPos \}\) => rawView\(node, view, getPos\) \}\)/.test(UI)) && !/edit in Raw|'data-head'/.test(UI) && verdictOf(/dom\.contentEditable = 'false'/.test(UI)),
   'the window: every raw block is the rawBlock node view drawing rawReading with THE sanitizer, read-only (contenteditable=false); the old source head (data-head "edit in Raw") is gone');
-ok(/const kind = t\(RAW_KIND_WORD\[r\.kind\] \|\| RAW_KIND_WORD\.markdown\);/.test(UI) && /head\.textContent = r\.rendered \? t\('\{kind\} · shown as its content · edit source', \{ kind \}\) : t\('\{kind\} · cannot be shown, source below · edit', \{ kind \}\);/.test(UI) && /head\.addEventListener\('click', \(\) => \(ta \? commit\(\) : open\(\)\), \{ signal \}\);/.test(UI) && /tr\.setNodeMarkup\(pos, null, \{ \.\.\.cur\.attrs, source: v \}\)/.test(UI),
+ok(gateOf(/const kind = t\(RAW_KIND_WORD\[r\.kind\] \|\| RAW_KIND_WORD\.markdown\);/.test(UI)) && gateOf(/head\.textContent = r\.rendered \? t\('\{kind\} · shown as its content · edit source', \{ kind \}\) : t\('\{kind\} · cannot be shown, source below · edit', \{ kind \}\);/.test(UI)) && gateOf(/head\.addEventListener\('click', \(\) => \(ta \? commit\(\) : open\(\)\), \{ signal \}\);/.test(UI)) && verdictOf(/tr\.setNodeMarkup\(pos, null, \{ \.\.\.cur\.attrs, source: v \}\)/.test(UI)),
   'the chip says WHAT it is — the block\'s kind word ("Markdown block") + "shown as its content · edit source" / "cannot be shown, source below · edit" (lane doc-table-native: "kept as written" read as "shown as source") — and is the one way in: a press opens the source in place, the edit lands as the node\'s attrs.source');
 for (const [lang, want, cannot] of [['zh', '"{kind} · shown as its content · edit source": "{kind} · 已按内容显示 · 点此编辑源码"', '"{kind} · cannot be shown, source below · edit": "{kind} · 无法显示，给出源码 · 点此编辑"'], ['ja', '"{kind} · shown as its content · edit source": "{kind} · 内容のとおり表示 · ソースを編集"', '"{kind} · cannot be shown, source below · edit": "{kind} · 表示できないためソースを表示 · 編集"']]) {
   const Dd = rd(`src/lib/i18n-${lang}.js`);
-  ok(Dd.includes(want) && Dd.includes(cannot) && Dd.includes('"Source of this block": ') && !Dd.includes('edit in Raw') && !Dd.includes('kept as written · edit source') && !Dd.includes('"front matter": '), `the chip's words are in i18n-${lang}.js (the retired "kept as written" / "cannot be rendered" / "front matter" keys gone)`);
+  ok(gateOf(Dd.includes(want)) && gateOf(Dd.includes(cannot)) && gateOf(Dd.includes('"Source of this block": ')) && !Dd.includes('edit in Raw') && !Dd.includes('kept as written · edit source') && !Dd.includes('"front matter": '), `the chip's words are in i18n-${lang}.js (the retired "kept as written" / "cannot be rendered" / "front matter" keys gone)`);
 }
 // RED CONTROL: a rawReading that renders WITHOUT the sanitizer (a patched copy)
 const TMP6 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-docraw-'));
@@ -243,12 +243,12 @@ try {
   const mut7 = src6.replace("extensions: [LITERAL_TAG], ", '');
   fs.writeFileSync(path.join(TMP6, 'u.mjs'), mut7);
   const v7 = rawVerdicts((await import(pathToFileURL(path.join(TMP6, 'u.mjs')).href)).readingHtml(MIXED, { Marked, sanitize: (h) => h }));
-  ok(mut7 !== src6 && v7.includes('the bare placeholder opened an element (the cell\'s tail in code type)'), 'RED CONTROL: the reader without its unpaired-tag rule ⇒ red (a <code> element opened at STEP-<code>-nn, the rest of the cell in code type)', v7);
+  ok(mut7 !== src6 && verdictOf(v7.includes('the bare placeholder opened an element (the cell\'s tail in code type)')), 'RED CONTROL: the reader without its unpaired-tag rule ⇒ red (a <code> element opened at STEP-<code>-nn, the rest of the cell in code type)', v7);
   // RED CONTROL (lane doc-table-native): a close inside a code span counted ⇒ the <b> opens and the rest of the run reads bold
   const mut8 = src6.replace(".test(s.slice(m[0].length).replace(CODE_SPANS, ''))", '.test(s.slice(m[0].length))');
   fs.writeFileSync(path.join(TMP6, 'c.mjs'), mut8);
   const m8 = await import(pathToFileURL(path.join(TMP6, 'c.mjs')).href), r8 = m8.readingHtml('a <b>x `</b>` y\n', { Marked, sanitize: (h) => h });
-  ok(mut8 !== src6 && m8.literalTag('<b>x `</b>` y') === null && /<b>/.test(r8), 'RED CONTROL: a close inside a code span counted ⇒ red (literalTag answers null, the reading opens a <b>)', r8);
+  ok(mut8 !== src6 && m8.literalTag('<b>x `</b>` y') === null && verdictOf(/<b>/.test(r8)), 'RED CONTROL: a close inside a code span counted ⇒ red (literalTag answers null, the reading opens a <b>)', r8);
 } finally { fs.rmSync(TMP6, { recursive: true, force: true }); }
 section('⑦ a raw block is commentable: rawCommentAnchor (PURE) — the selection → the anchor + the quote, or a refusal by name');
 {
@@ -290,9 +290,9 @@ section('⑦ a raw block is commentable: rawCommentAnchor (PURE) — the selecti
   const badT = TT.filter(([, bl, c, want]) => ((M.rawCommentTarget(bl, c) || {}).pos ?? null) !== want).map(([n, bl, c]) => n + ' ⇒ ' + J(M.rawCommentTarget(bl, c)));
   ok(badT.length === 0, `rawCommentTarget: ${TT.length} rows — after a reload / an edit above it the strip finds the block by its quote, else its place; gone ⇒ null`, badT);
   // the window wears it: one anchor model (the strip item gains ONE field), the selection reader, the strip's way back
-  ok(UI.includes("s instanceof NodeSelection && s.node.type.name === 'rawBlock' ? rawNodeSel(view, s)") && UI.includes("document.addEventListener('selectionchange'") && UI.includes("...(raw ? { raw } : {}), note });") && UI.includes('noteBox(quote, c, line, raw);') && UI.includes('rawCommentTarget(blocks, c)') && UI.includes("showToast(t('Press Finish first — a block whose source is open cannot be commented')"),
+  ok(gateOf(UI.includes("s instanceof NodeSelection && s.node.type.name === 'rawBlock' ? rawNodeSel(view, s)")) && gateOf(UI.includes("document.addEventListener('selectionchange'")) && gateOf(UI.includes("...(raw ? { raw } : {}), note });")) && gateOf(UI.includes('noteBox(quote, c, line, raw);')) && gateOf(UI.includes('rawCommentTarget(blocks, c)')) && verdictOf(UI.includes("showToast(t('Press Finish first — a block whose source is open cannot be commented')")),
     'the window: a NodeSelection on a raw block and a DOM selection inside one reach the SAME popover / note box; the comment stores ONE extra field `raw`; the strip re-finds the block; an open source box says why (a toast)');
-  for (const lang of ['zh', 'ja']) { const Dd = rd(`src/lib/i18n-${lang}.js`); ok(['HTML block', 'Front matter', 'Markdown block', 'Press Finish first — a block whose source is open cannot be commented', 'That block is no longer in the document'].every((k) => Dd.includes(`"${k}": `)), `the raw-comment words are in i18n-${lang}.js`); }
+  for (const lang of ['zh', 'ja']) { const Dd = rd(`src/lib/i18n-${lang}.js`); ok(verdictOf(['HTML block', 'Front matter', 'Markdown block', 'Press Finish first — a block whose source is open cannot be commented', 'That block is no longer in the document'].every((k) => Dd.includes(`"${k}": `))), `the raw-comment words are in i18n-${lang}.js`); }
   // RED CONTROL: the window's selNow without the raw branch (the pre-lane line) — a NodeSelection on an atom quotes nothing
   const pre = "const s = view.state.selection; return s.empty || !view.hasFocus() || S.mode !== 'rich' ? null : { from: s.from, to: s.to, view };";
   const cut = UI.replace(/const selNow = \(view\) => \{[^\n]*\n/, 'const selNow = (view) => { ' + pre + ' };\n');
@@ -339,22 +339,22 @@ section('⑧ a link opens and edits: linkBarModel / clipHref / linkPlan (PURE) �
   ok(J(preLane({ link: L }, { href: 'https://b.org', text: 'hello' })) !== J(T[9][2]), 'RED CONTROL: the pre-lane door (the caret on a link ⇒ extendMarkRange + unsetLink) fails the EDIT row');
   // the window wears it: one door for the toolbar / Ctrl+K / the bar's Edit; the bar keyed to the caret; read-only opens
   const door = UI.slice(UI.indexOf('async function editLink(on)'), UI.indexOf('function removeLink(l)'));
-  ok(door.length > 200 && !door.includes('unsetLink') && door.includes('linkPlan(cur, ans, safeHref)') && door.includes("say(t('Not a link this document can carry: {url}'")
-    && UI.includes("tool('link', I.link, t('Link'), 4, () => editLink())") && UI.includes("'Mod-k': () => { if (!S.view || !S.view.editable) return false; editLink(); return true; }"),
+  ok(door.length > 200 && !door.includes('unsetLink') && gateOf(door.includes('linkPlan(cur, ans, safeHref)')) && gateOf(door.includes("say(t('Not a link this document can carry: {url}'"))
+    && gateOf(UI.includes("tool('link', I.link, t('Link'), 4, () => editLink())")) && verdictOf(UI.includes("'Mod-k': () => { if (!S.view || !S.view.editable) return false; editLink(); return true; }")),
     'the window: ONE link door (the toolbar\'s Link, Ctrl/Cmd+K, the bar\'s Edit) runs linkPlan — it never unsets a link; a refusal is said');
-  ok(UI.includes('linkBar.show(caretLink(view))') && UI.includes("if (e.ctrlKey || e.metaKey || !v.editable) openHref(a.getAttribute('href')); else linkBar.show(linkAtDom(a), true);")
-    && UI.includes("linkBarModel(l, { editable: S.view.editable, judge: safeHref })") && /const openHref = \(href\) => \{ const u = safeHref\(href\); if \(u\) window\.open\(u, '_blank', 'noopener'\); \};/.test(UI),
+  ok(gateOf(UI.includes('linkBar.show(caretLink(view))')) && gateOf(UI.includes("if (e.ctrlKey || e.metaKey || !v.editable) openHref(a.getAttribute('href')); else linkBar.show(linkAtDom(a), true);"))
+    && gateOf(UI.includes("linkBarModel(l, { editable: S.view.editable, judge: safeHref })")) && verdictOf(/const openHref = \(href\) => \{ const u = safeHref\(href\); if \(u\) window\.open\(u, '_blank', 'noopener'\); \};/.test(UI)),
     'the window: the bar follows the caret (every update), a click on a link re-shows it, Ctrl/Cmd+click or a read-only view opens it — through safeHref, noopener');
-  ok(UI.includes("editorProps: { attributes: { 'data-own-mod-k': '' }") && PAL.includes("!e.target.closest?.('.xterm, [data-own-mod-k]')"),
+  ok(gateOf(UI.includes("editorProps: { attributes: { 'data-own-mod-k': '' }")) && verdictOf(PAL.includes("!e.target.closest?.('.xterm, [data-own-mod-k]')")),
     'Ctrl/Cmd+K: the house palette (session-palette, capture phase) steps aside for an editor that claims the chord — the Doc window\'s text; everywhere else the palette');
-  ok(/autolink: true, linkOnPaste: true, isAllowedUri: \(url\) => !!safeHref\(url\), shouldAutoLink: \(url\) => AUTO_LINK\.test\(url\) && !!safeHref\(url\)/.test(MD) && MD.includes('inclusive() { return false; }')
-    && UI.includes(".setMeta('doc-repaint', true).setMeta('addToHistory', false).setMeta('preventAutolink', true)"),
+  ok(gateOf(/autolink: true, linkOnPaste: true, isAllowedUri: \(url\) => !!safeHref\(url\), shouldAutoLink: \(url\) => AUTO_LINK\.test\(url\) && !!safeHref\(url\)/.test(MD)) && gateOf(MD.includes('inclusive() { return false; }'))
+    && verdictOf(UI.includes(".setMeta('doc-repaint', true).setMeta('addToHistory', false).setMeta('preventAutolink', true)")),
     'SafeLink: autolink + link-on-paste only for an address with its scheme (or www.) that safeHref keeps; links stay non-inclusive; a repaint from disk is never auto-linked');
   const AUTO = /^(https?:\/\/|mailto:|www\.)/i, auto = (u) => AUTO.test(u) && !!safeHref(u);
   const AT = [['https://a.com/x', true], ['www.a.com', true], ['mailto:a@b.com', true], ['README.md', false], ['node.js', false], ['javascript:alert(1)', false], ['data:text/html,x', false], ['http://a.com/\u0001', false]];
   const badA = AT.filter(([u, w]) => auto(u) !== w);
   ok(badA.length === 0, `shouldAutoLink: ${AT.length} rows — a URL with its scheme links, README.md / node.js stay words, javascript: / data: never`, badA);
-  for (const lang of ['zh', 'ja']) { const Dd = rd(`src/lib/i18n-${lang}.js`); ok(['Edit link', 'Remove link', 'Link text', 'Open link', 'Copy link', 'Link copied', 'Link address', 'Apply'].every((k) => Dd.includes(`"${k}":`)), `i18n-${lang}: the bar's and the dialog's words`); }
+  for (const lang of ['zh', 'ja']) { const Dd = rd(`src/lib/i18n-${lang}.js`); ok(verdictOf(['Edit link', 'Remove link', 'Link text', 'Open link', 'Copy link', 'Link copied', 'Link address', 'Apply'].every((k) => Dd.includes(`"${k}":`))), `i18n-${lang}: the bar's and the dialog's words`); }
 }
 console.log(`\n[doc-window-width] ${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

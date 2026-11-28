@@ -100,7 +100,7 @@ const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[proce
 for (const d of [stubDir, WORK, SHOTS, fontDir]) fs.mkdirSync(d, { recursive: true });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const POLL = 'fake-poll/fake-poll-ops', PUSH = 'fake-push/fake-push-ops';   // both titled «Ops room»: the SAME words
 
@@ -408,7 +408,7 @@ try {
     try { await A.load({ boundMs: 5000 }); } catch (e) { msg = String(e && e.message || e); } finally { mutant = null; }
     const planted = pageErrors.splice(errs0).filter((x) => !/vs-boot-control/.test(x));
     pageErrors.push(...planted);
-    check(`CONTROL (the boot's verdict): a page that never boots is red BY NAME with its scene — «${msg.slice(0, 160)}»`, /^boot did not finish in 5 s on page A, bundle the NEVER-BOOTS control — /.test(msg) && /"readyState"/.test(msg) && /"loadingScreen":true/.test(msg) && /"app":"none"/.test(msg) && /"bundle":"/.test(msg), msg);
+    check(`CONTROL (the boot's verdict): a page that never boots is red BY NAME with its scene — «${msg.slice(0, 160)}»`, gateOf(/^boot did not finish in 5 s on page A, bundle the NEVER-BOOTS control — /.test(msg)) && gateOf(/"readyState"/.test(msg)) && gateOf(/"loadingScreen":true/.test(msg)) && gateOf(/"app":"none"/.test(msg)) && verdictOf(/"bundle":"/.test(msg)), msg);
     await A.load();
   }
   for (const conv of [POLL, PUSH]) {
@@ -416,7 +416,7 @@ try {
     for (let i = 0; i < 80 && !(r && r.status === 200); i++) { r = await A.evalJs(`fetch('/api/channels/${conv}/reach', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ principal: { kind: 'agent', id: ${JSON.stringify(env && env.sid)} }, level: 'visible' }) }).then((r) => ({ status: r.status }))`); if (!r || r.status !== 200) await sleep(250); }
     if (!r || r.status !== 200) console.log(`  (setup: the reach write for ${conv} answered ${JSON.stringify(r)})`);
   }
-  check('setup: the stub conversation runs behind the real wrapper with its own session token (vsst_) — the agent the hub knows', !!env && /^vsst_/.test(String(env.token || '')) && !!SID, env && { sid: env.sid, token: String(env.token || '').slice(0, 5) });
+  check('setup: the stub conversation runs behind the real wrapper with its own session token (vsst_) — the agent the hub knows', !!env && gateOf(/^vsst_/.test(String(env.token || ''))) && !!SID, env && { sid: env.sid, token: String(env.token || '').slice(0, 5) });
 
   console.log('⓪b EVERY WRITER OF A WAKE WATCH ASKS THE PERSON VERDICT (round 2) — the watchers doors on the real hub');
   try {
@@ -441,7 +441,7 @@ try {
     const ntOut = (cliLog().split('### watchnt 0')[1] || '').split('###')[0];
     const mine = await (await fetch(ORIGIN + '/api/agent/channels/watches', { headers: V })).json().catch(() => null);
     say('now do:unwatchnt'); await logHas(/### unwatchnt 0 rc=/);
-    check(`…an agent's NON-wake write stays as it is: a next-turn row on the same door ⇒ ${nt.status} (a removal ⇒ ${cleared.status}); its own CLI road (\`watch --mode next-turn --keyword outage\`) sets it at once`, nt.status === 200 && cleared.status === 200 && / rc=0/.test(cliLog().split('### watchnt 0')[1] || '') && /next turn|next-turn/.test(JSON.stringify(mine)), { nt, cleared, ntOut: ntOut.trim().slice(0, 200), mine: JSON.stringify(mine).slice(0, 300) });
+    check(`…an agent's NON-wake write stays as it is: a next-turn row on the same door ⇒ ${nt.status} (a removal ⇒ ${cleared.status}); its own CLI road (\`watch --mode next-turn --keyword outage\`) sets it at once`, nt.status === 200 && cleared.status === 200 && gateOf(/ rc=0/.test(cliLog().split('### watchnt 0')[1] || '')) && verdictOf(/next turn|next-turn/.test(JSON.stringify(mine))), { nt, cleared, ntOut: ntOut.trim().slice(0, 200), mine: JSON.stringify(mine).slice(0, 300) });
     const page = await A.evalJs(`(async () => { const p = '/api/channels/${POLL}/watchers'; const put = (rows) => fetch(p, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ watchers: rows }) }).then((r) => r.status); const a = await put([${JSON.stringify(WAKE)}]); const b = await put([]); return { wrote: a, cleared: b }; })()`);
     check(`…this instance's own page (the owner's Notify…) writes the wake (${page.wrote}) and takes it back (${page.cleared})`, page.wrote === 200 && page.cleared === 200, page);
   } catch (e) { fail++; console.log('  ✗ ⓪b threw: ' + (e?.message || e)); }
@@ -478,10 +478,10 @@ try {
   for (const P of [A, B]) await P.waitFor(`document.querySelectorAll('.cn-card[data-item="${wrPoll && wrPoll.id}"], .cn-card[data-item="${wrPush && wrPush.id}"]').length === 2`, 15000);
   const cA = { poll: await A.evalJs(CARD(wrPoll && wrPoll.id)), push: await A.evalJs(CARD(wrPush && wrPush.id)) };
   const cB = { poll: await B.evalJs(CARD(wrPoll && wrPoll.id)), push: await B.evalJs(CARD(wrPush && wrPush.id)) };
-  check('…TWO cards in the asking chat on BOTH pages, each in the tool card that ran ITS `vibespace-channels watch` (never one merged card)', !!cA.poll && !!cA.push && !!cB.poll && !!cB.push && /vibespace-channels watch fake-poll/.test(cA.poll.hostCmd) && /vibespace-channels watch fake-push/.test(cA.push.hostCmd), { cA, cB });
-  check('…the newest open (its Approve / Deny), the older a folded row of the accordion — both their own card', !!cA.push && cA.push.open && !cA.push.fold && !!cA.poll && cA.poll.fold, { push: cA.push && { open: cA.push.open, fold: cA.push.fold }, poll: cA.poll && { fold: cA.poll.fold } });
-  check(`…Approve ✓ / Deny ✕ — an icon AND its word, ≥ 24 px at a desk (Approve ${cA.push?.approve?.w}×${cA.push?.approve?.h}, Deny ${cA.push?.deny?.w}×${cA.push?.deny?.h})`, !!cA.push?.approve && !!cA.push?.deny && cA.push.approve.icon && cA.push.deny.icon && cA.push.approve.word === 'Approve' && cA.push.deny.word === 'Deny' && cA.push.approve.w >= 24 && cA.push.approve.h >= 24 && cA.push.deny.w >= 24 && cA.push.deny.h >= 24, cA.push);
-  check('…the card says who asks and what Approve writes: «… asks to be woken by Ops room» + a billed turn + the agent\'s reason', !!cA.push && /asks to be woken by Ops room/.test(cA.push.text) && /a billed turn/.test(cA.push.text) && /so I can open an incident/.test(cA.push.text), cA.push && cA.push.text);
+  check('…TWO cards in the asking chat on BOTH pages, each in the tool card that ran ITS `vibespace-channels watch` (never one merged card)', !!cA.poll && !!cA.push && !!cB.poll && !!cB.push && gateOf(/vibespace-channels watch fake-poll/.test(cA.poll.hostCmd)) && verdictOf(/vibespace-channels watch fake-push/.test(cA.push.hostCmd)), { cA, cB });
+  check('…the newest open (its Approve / Deny), the older a folded row of the accordion — both their own card', !!cA.push && gateOf(cA.push.open) && !cA.push.fold && !!cA.poll && verdictOf(cA.poll.fold), { push: cA.push && { open: cA.push.open, fold: cA.push.fold }, poll: cA.poll && { fold: cA.poll.fold } });
+  check(`…Approve ✓ / Deny ✕ — an icon AND its word, ≥ 24 px at a desk (Approve ${cA.push?.approve?.w}×${cA.push?.approve?.h}, Deny ${cA.push?.deny?.w}×${cA.push?.deny?.h})`, !!cA.push?.approve && !!cA.push?.deny && gateOf(cA.push.approve.icon) && gateOf(cA.push.deny.icon) && cA.push.approve.word === 'Approve' && cA.push.deny.word === 'Deny' && cA.push.approve.w >= 24 && cA.push.approve.h >= 24 && cA.push.deny.w >= 24 && cA.push.deny.h >= 24, cA.push);
+  check('…the card says who asks and what Approve writes: «… asks to be woken by Ops room» + a billed turn + the agent\'s reason', !!cA.push && gateOf(/asks to be woken by Ops room/.test(cA.push.text)) && gateOf(/a billed turn/.test(cA.push.text)) && verdictOf(/so I can open an incident/.test(cA.push.text)), cA.push && cA.push.text);
   await A.evalJs(`document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"]').scrollIntoView({ block: 'center' })`); await sleep(400);
   await A.shot('after-two-cards-1280.png');
   // R4 — THE TRAY UNCHANGED: each request counted ONCE, its row keeps its own Approve (the mini tray / the For-you window)
@@ -490,7 +490,7 @@ try {
   await B.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wrPoll && wrPoll.id)} }); true`);
   await B.waitFor(`!!document.querySelector('.iw-item .iw-act[data-act="proposal-approve"]')`, 10000);
   const win = await B.evalJs(`(() => { const a = document.querySelector('.iw-item .iw-act[data-act="proposal-approve"]'), d = document.querySelector('.iw-item .iw-act[data-act="proposal-reject"]'); return { approve: !!a && a.offsetParent !== null, deny: !!d && d.offsetParent !== null, denyWord: d ? (d.textContent || '').trim() : null, acts: [...document.querySelectorAll('.iw-item .iw-act')].filter((x) => x.offsetParent).map((x) => x.dataset.act), title: (document.querySelector('.iw-item .iw-title')?.textContent || '').trim() }; })()`);
-  check('R4: the For-you window\'s row for the same request keeps its own Approve — the tray door is unchanged', win.approve && win.deny && /asks to be woken by Ops room/.test(win.title), win);
+  check('R4: the For-you window\'s row for the same request keeps its own Approve — the tray door is unchanged', gateOf(win.approve) && gateOf(win.deny) && verdictOf(/asks to be woken by Ops room/.test(win.title)), win);
   check(`round 2: …and there too a decision row has TWO verbs — Approve / «${win.denyWord}», no Mark done / Dismiss (${JSON.stringify(win.acts)})`, win.denyWord === 'Deny' && !win.acts.includes('done') && !win.acts.includes('dismiss'), win);
   await B.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
   // …and on a phone (B at 375 touch for one look — then back to its desk)
@@ -516,7 +516,7 @@ try {
   const afterTick = { item: ((await api()).resolved.find((i) => i.id === (wrPush && wrPush.id)) || null), card: await B.evalJs(CARD(wrPush && wrPush.id)) };
   afterTick.open = (await wakeItems()).open.some((i) => i.id === (wrPush && wrPush.id));
   await B.shot('r2-phone-after-press-375.png');
-  check(`the phone: no ✓ Mark done to press beside Approve / Deny — the request is still open, its card still has its two verbs${hasTick ? ` (the base: the press ${tickPress && tickPress.pressed ? 'resolved it «' + (afterTick.item && afterTick.item.resolvedBy) + '» — the record reads «' + (afterTick.card && afterTick.card.line) + '», toast «' + (tickPress && tickPress.toast) + '»' : 'missed'})` : ''}`, !hasTick && afterTick.open && !!afterTick.card && !!afterTick.card.approve, { hasTick, tickPress, item: afterTick.item && { status: afterTick.item.status, by: afterTick.item.resolvedBy }, line: afterTick.card && afterTick.card.line });
+  check(`the phone: no ✓ Mark done to press beside Approve / Deny — the request is still open, its card still has its two verbs${hasTick ? ` (the base: the press ${tickPress && tickPress.pressed ? 'resolved it «' + (afterTick.item && afterTick.item.resolvedBy) + '» — the record reads «' + (afterTick.card && afterTick.card.line) + '», toast «' + (tickPress && tickPress.toast) + '»' : 'missed'})` : ''}`, !hasTick && gateOf(afterTick.open) && !!afterTick.card && !!afterTick.card.approve, { hasTick, tickPress, item: afterTick.item && { status: afterTick.item.status, by: afterTick.item.resolvedBy }, line: afterTick.card && afterTick.card.line });
   await B.device(1280, 800, { mouse: true }); await B.load(); await openChat(B);
   await B.waitFor(`!!document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"]')`, 12000);
   // the tray (page A's For-you popup): both rows Approve / Deny only; «Mark all seen» on their band passes both by
@@ -527,16 +527,16 @@ try {
   const tr = { poll: await A.evalJs(ROWV(wrPoll && wrPoll.id)), push: await A.evalJs(ROWV(wrPush && wrPush.id)) };
   await A.shot('r2-tray-decision-rows-1280.png');
   const trOk = (x) => !!x && x.closers === 0 && x.answers.join('|') === 'Approve|Deny';
-  check(`the tray: each decision row's verbs are Approve / Deny and no ✓ / ✕ (${JSON.stringify(tr)})`, trOk(tr.poll) && (!tr.push || trOk(tr.push)), tr);
+  check(`the tray: each decision row's verbs are Approve / Deny and no ✓ / ✕ (${JSON.stringify(tr)})`, gateOf(trOk(tr.poll)) && (!tr.push || verdictOf(trOk(tr.push))), tr);
   const seenSel = `#user-todos-popup .ut-band:has(.ut-item[data-id="${wrPoll && wrPoll.id}"]) > .ut-band-bar > .ut-seen-all`;
   const hasSeen = await A.evalJs(`(() => { const b = document.querySelector(${JSON.stringify(seenSel)}); return !!b && !!b.offsetParent; })()`);
   let seenToast = '', seenHow = 'the band\'s «Mark all seen»';
   if (hasSeen) { await A.realClick(seenSel); await sleep(1200); seenToast = await A.evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`); }
   else { seenHow = 'its route (the band drew no «Mark all seen»)'; const r = await A.evalJs(`fetch('/api/user-todos/resolve-many', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [${JSON.stringify(wrPoll && wrPoll.id)}, ${JSON.stringify(wrPush && wrPush.id)}], status: 'dismissed' }) }).then((r) => r.json())`); seenToast = JSON.stringify(r); }
   const afterSeen = await wakeItems();
-  check(`«Mark all seen» (${seenHow}) passes the decision rows by — «${seenToast.slice(0, 80)}» — they stay until decided (${afterSeen.open.length} open)`, afterSeen.open.length === (afterTick.open ? 2 : 1) && /decisions? left for you/.test(seenToast), { seenToast, open: afterSeen.open.map((i) => i.id) });
+  check(`«Mark all seen» (${seenHow}) passes the decision rows by — «${seenToast.slice(0, 80)}» — they stay until decided (${afterSeen.open.length} open)`, afterSeen.open.length === (afterTick.open ? 2 : 1) && verdictOf(/decisions? left for you/.test(seenToast)), { seenToast, open: afterSeen.open.map((i) => i.id) });
   const scripted = await A.evalJs(`fetch('/api/user-todos/${wrPoll && wrPoll.id}', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then(async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) }))`);
-  check(`a scripted close of a decision row (the old ✓'s own route) ⇒ ${scripted.status} ${scripted.code} — said by name, the request still open`, scripted.status === 409 && scripted.code === 'decision_row' && (await wakeItems()).open.some((i) => i.id === (wrPoll && wrPoll.id)), scripted);
+  check(`a scripted close of a decision row (the old ✓'s own route) ⇒ ${scripted.status} ${scripted.code} — said by name, the request still open`, scripted.status === 409 && scripted.code === 'decision_row' && verdictOf((await wakeItems()).open.some((i) => i.id === (wrPoll && wrPoll.id))), scripted);
   await A.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`); await sleep(300);
   await lap('① done');
 
@@ -553,7 +553,7 @@ try {
   say('now do:selfapprove');
   await logHas(/### selfapprove 0 rc=/);
   const self = (cliLog().split('### selfapprove 0')[1] || '').split('###')[0];
-  check('the AGENT itself — its Bash POSTs the approve with its own token, its text says «approve» ⇒ the person\'s route answers 403 human_only, the agent-side twin is no door', /channels 403 human_only/.test(self) && /agent [45]\d\d/.test(self), self.trim());
+  check('the AGENT itself — its Bash POSTs the approve with its own token, its text says «approve» ⇒ the person\'s route answers 403 human_only, the agent-side twin is no door', gateOf(/channels 403 human_only/.test(self)) && verdictOf(/agent [45]\d\d/.test(self)), self.trim());
   say('approve');   // the OWNER typing «approve» to the agent — words, never a decision
   await sleep(2500);
   const still = await wakeItems();
@@ -563,7 +563,7 @@ try {
   console.log('③ THE FALSE BRANCH — a page whose role may not decide (no role has it today: the registry\'s deferred viewer row)');
   const wait = await A.evalJs(`(async () => { const v = ${VIEW}; v._needsCards._role = () => 'viewer'; v._needsCards.render(); await new Promise((r) => setTimeout(r, 300)); return null; })()`).then(() => A.evalJs(CARD(wrPush && wrPush.id)));
   await A.shot('waiting-owner-1280.png');
-  check('the card reads «waiting for the owner — answer it in the conversation or in For you» with NO button', !!wait && wait.wait && wait.buttons === 0 && /waiting for the owner — answer it in the conversation or in For you/.test(wait.text), wait);
+  check('the card reads «waiting for the owner — answer it in the conversation or in For you» with NO button', !!wait && gateOf(wait.wait) && wait.buttons === 0 && verdictOf(/waiting for the owner — answer it in the conversation or in For you/.test(wait.text)), wait);
   const back = await A.evalJs(`(async () => { const v = ${VIEW}; v._needsCards._role = () => 'owner'; v._needsCards.render(); await new Promise((r) => setTimeout(r, 300)); return null; })()`).then(() => A.evalJs(CARD(wrPush && wrPush.id)));
   check('…the owner\'s role back ⇒ Approve / Deny back (the owner decides from every view they open)', !!back && !back.wait && !!back.approve && !!back.deny, back);
   await lap('③ done');
@@ -578,11 +578,11 @@ try {
   // and «no Undo» on an empty toast is no check at all: the toast itself is waited for, bounded, then judged
   const toastOf = async (P, seen) => { if (seen) return seen; for (let i = 0; i < 100; i++) { const t = await P.evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`); if (t) return t; await sleep(150); } return ''; };
   const prToast = await toastOf(A, pr.toast);
-  check('a real click on the card\'s Approve ⇒ the hub resolved THAT request `allowed` (the other still open)', pressed && !!pushDone && pushDone.resolvedBy === 'allowed' && (await wakeItems()).open.some((i) => i.id === (wrPoll && wrPoll.id)), { pr, pushDone: pushDone && { by: pushDone.resolvedBy } });
+  check('a real click on the card\'s Approve ⇒ the hub resolved THAT request `allowed` (the other still open)', gateOf(pressed) && !!pushDone && pushDone.resolvedBy === 'allowed' && verdictOf((await wakeItems()).open.some((i) => i.id === (wrPoll && wrPoll.id))), { pr, pushDone: pushDone && { by: pushDone.resolvedBy } });
   check(`round 2: a decision is final — its toast (waited for, bound 15 s) offers no Undo («${prToast}»); the record carries the person verdict's mark`, !!prToast && !/Undo/.test(prToast) && !!pushDone && !!pushDone.resolvedFact && pushDone.resolvedFact.decidedBy === 'person', { toast: pr.toast, fact: pushDone && pushDone.resolvedFact });
   const watches = await (await fetch(ORIGIN + '/api/agent/channels/watches', { headers: { Authorization: 'Bearer ' + (env && env.token) } })).json().catch(() => null);
   const wake = ((watches && watches.watches) || []).find((w) => /fake-push-ops/.test(JSON.stringify(w)));
-  check('…the wake proceeds: the agent\'s own watch list now holds exactly what the card said — a WAKE on the Slack-like «Ops room» (and nothing on the other)', !!wake && /wake/.test(JSON.stringify(wake)) && !((watches && watches.watches) || []).some((w) => /fake-poll-ops/.test(JSON.stringify(w))), watches);
+  check('…the wake proceeds: the agent\'s own watch list now holds exactly what the card said — a WAKE on the Slack-like «Ops room» (and nothing on the other)', !!wake && gateOf(/wake/.test(JSON.stringify(wake))) && !((watches && watches.watches) || []).some((w) => /fake-poll-ops/.test(JSON.stringify(w))), watches);
   const stampPush = 'approved by you · ' + (await hm(B, pushDone && pushDone.resolvedAt));
   // B (the other client) is READ where it stands, in the back: its For-you store took the decision live (the broadcast — what
   // its tray row and its cards are drawn from). Its windows are not asserted here: a CDP page sent to the back drops its
@@ -591,7 +591,7 @@ try {
   const bModel = await B.waitFor(`(app._inboxModel?.todos.resolved || []).some((i) => i.id === ${JSON.stringify(wrPush && wrPush.id)} && i.resolvedBy === 'allowed')`, 10000);
   const bRec = await B.evalJs(CARD(wrPush && wrPush.id));
   if (!bRec) console.log('  (page B: ' + JSON.stringify(await B.evalJs(`({ vis: document.visibilityState, wins: [...app.wm.windows.values()].map((w) => w.type + ':' + (app.sessions.get(w.id)?.sessionId || '') + (w.minimized ? ':min' : '')), cards: [...document.querySelectorAll('.cn-card')].map((c) => c.dataset.item + (c.classList.contains('cn-done') ? ':done' : '')), msgs: document.querySelectorAll('.chat-message-list .chat-msg').length, resolved: (app._inboxModel?.todos.resolved || []).map((i) => i.id).slice(0, 5) })`)) + ')');
-  check(`page B (the other client, in the back): its For-you store took the decision live — the item resolved \`allowed\` (what its tray row and its card are drawn from)${bRec ? `; its card reads «${bRec.line.slice(0, 40)}»` : ''}`, !!bModel && (!bRec || (bRec.done && bRec.line.includes(stampPush))), bRec);
+  check(`page B (the other client, in the back): its For-you store took the decision live — the item resolved \`allowed\` (what its tray row and its card are drawn from)${bRec ? `; its card reads «${bRec.line.slice(0, 40)}»` : ''}`, !!bModel && (!bRec || (gateOf(bRec.done) && verdictOf(bRec.line.includes(stampPush)))), bRec);
   await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wrPush && wrPush.id)} }); true`);
   const aWin = await A.waitFor(`[...document.querySelectorAll('.iw-item .iw-meta, .iw-row')].some((e) => (e.textContent || '').includes(${JSON.stringify(stampPush)}))`, 10000);
   check(`page A's For-you window (the tray door) says the same «${stampPush}»`, !!aWin);
@@ -608,15 +608,15 @@ try {
   const denied = dr.pressed;
   const pollDone = await until(async () => (await wakeItems()).resolved.find((i) => i.id === (wrPoll && wrPoll.id)));
   const drToast = await toastOf(A, dr.toast);   // pass 3: the deny's toast, waited for (its answer follows the durable write)
-  check('a real click on Deny in the For-you window ⇒ the hub resolved that request `denied` — its toast (waited for, bound 15 s) offers no Undo', denied && !!pollDone && pollDone.resolvedBy === 'denied' && !!drToast && !/Undo/.test(drToast), { dr, drToast, pollDone: pollDone && pollDone.resolvedBy });
+  check('a real click on Deny in the For-you window ⇒ the hub resolved that request `denied` — its toast (waited for, bound 15 s) offers no Undo', gateOf(denied) && !!pollDone && pollDone.resolvedBy === 'denied' && !!drToast && !/Undo/.test(drToast), { dr, drToast, pollDone: pollDone && pollDone.resolvedBy });
   const stampPoll = 'denied by you · ' + (await hm(A, pollDone && pollDone.resolvedAt));
   await A.waitFor(`document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]')?.classList.contains('cn-done')`, 10000);
   const aRec = await A.evalJs(CARD(wrPoll && wrPoll.id));
   const keptA = await A.evalJs(`(window.__wkRecsA || []).filter((e) => e.isConnected).length + '/' + (window.__wkRecsA || []).length`);
   const bPoll = await B.evalJs(CARD(wrPoll && wrPoll.id));   // the other page, in the back, follows too
   await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
-  check(`page A: the SAME card element now reads «${stampPoll}» (✕) in the tool card that ran its watch; the transcript was not re-drawn (${keptA} records the same nodes)`, !!aRec && aRec.done && aRec.tag === 'A-poll' && aRec.line.includes(stampPoll) && /^✕/.test(aRec.line) && /vibespace-channels watch fake-poll/.test(aRec.hostCmd) && /^(\d+)\/\1$/.test(keptA), { aRec, keptA });
-  check(`…and page B (the other client) says «${stampPoll}» too`, !!bPoll && bPoll.done && bPoll.line.includes(stampPoll), bPoll);
+  check(`page A: the SAME card element now reads «${stampPoll}» (✕) in the tool card that ran its watch; the transcript was not re-drawn (${keptA} records the same nodes)`, !!aRec && gateOf(aRec.done) && aRec.tag === 'A-poll' && gateOf(aRec.line.includes(stampPoll)) && gateOf(/^✕/.test(aRec.line)) && gateOf(/vibespace-channels watch fake-poll/.test(aRec.hostCmd)) && verdictOf(/^(\d+)\/\1$/.test(keptA)), { aRec, keptA });
+  check(`…and page B (the other client) says «${stampPoll}» too`, !!bPoll && gateOf(bPoll.done) && verdictOf(bPoll.line.includes(stampPoll)), bPoll);
   // the shot: the run that holds both records opened (decided cards fold with their run, like any record)
   await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]'); const h = c && [...document.querySelectorAll('.chat-run-header')].find((x) => x.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING); h?.click(); return !!h; })()`); await sleep(600);
   await A.evalJs(`document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(300);
@@ -626,19 +626,19 @@ try {
   console.log('⑤b A DECISION IS FINAL (round 2) — a reopen refused by name; the decided rows carry no ↺ / Reopen');
   const reo = await A.evalJs(`Promise.all([${JSON.stringify(wrPoll && wrPoll.id)}, ${JSON.stringify(wrPush && wrPush.id)}].map((id) => fetch('/api/user-todos/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'open' }) }).then(async (r) => ({ status: r.status, code: (await r.json().catch(() => ({}))).code }))))`);
   const stillDone = (await wakeItems()).resolved.filter((i) => i.id === (wrPoll && wrPoll.id) || i.id === (wrPush && wrPush.id)).map((i) => i.resolvedBy).sort().join(',');
-  check(`reopening a decided request (the old ↺ / the 6 s Undo) ⇒ ${reo.map((x) => x.status + ' ' + x.code).join(', ')} — both records keep «${stillDone}»`, reo.every((x) => x.status === 409 && x.code === 'decision_final') && stillDone === 'allowed,denied', { reo, stillDone });
+  check(`reopening a decided request (the old ↺ / the 6 s Undo) ⇒ ${reo.map((x) => x.status + ' ' + x.code).join(', ')} — both records keep «${stillDone}»`, gateOf(reo.every((x) => x.status === 409 && x.code === 'decision_final')) && stillDone === 'allowed,denied', { reo, stillDone });
   await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wrPush && wrPush.id)} }); true`);
   await A.waitFor(`!!document.querySelector('.iw-item')`, 8000); await sleep(400);
   const finalActs = await A.evalJs(`[...document.querySelectorAll('.iw-item .iw-act')].filter((x) => x.offsetParent).map((x) => x.dataset.act)`);
   await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
-  check(`the For-you window on a decided request: ${JSON.stringify(finalActs)} — no Reopen`, Array.isArray(finalActs) && !finalActs.includes('reopen') && !finalActs.includes('done'), finalActs);
+  check(`the For-you window on a decided request: ${JSON.stringify(finalActs)} — no Reopen`, gateOf(Array.isArray(finalActs)) && !finalActs.includes('reopen') && !finalActs.includes('done'), finalActs);
   await lap('⑤b done');
 
   console.log('⑥ A RELOAD re-derives both records from the store; never stored twice; the agent never saw the card');
   await A.load(); await openChat(A);
   await A.waitFor(`document.querySelectorAll('.cn-card.cn-done[data-item="${wrPoll && wrPoll.id}"], .cn-card.cn-done[data-item="${wrPush && wrPush.id}"]').length === 2`, 15000);
   const rl = { poll: await A.evalJs(CARD(wrPoll && wrPoll.id)), push: await A.evalJs(CARD(wrPush && wrPush.id)) };
-  check('after a reload both records stand where they were filed, with their stamps', !!rl.poll && !!rl.push && rl.poll.line.includes(stampPoll) && rl.push.line.includes(stampPush) && /fake-poll/.test(rl.poll.hostCmd) && /fake-push/.test(rl.push.hostCmd), rl);
+  check('after a reload both records stand where they were filed, with their stamps', !!rl.poll && !!rl.push && gateOf(rl.poll.line.includes(stampPoll)) && gateOf(rl.push.line.includes(stampPush)) && gateOf(/fake-poll/.test(rl.poll.hostCmd)) && verdictOf(/fake-push/.test(rl.push.hostCmd)), rl);
   const t = await api(); const all = [...t.open, ...t.resolved];
   const stored = await A.evalJs(`(() => { let hit = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i), v = localStorage.getItem(k) || ''; if (v.includes(${JSON.stringify(wrPoll && wrPoll.id)}) || v.includes(${JSON.stringify(wrPush && wrPush.id)}) || /approved by you|denied by you/.test(v)) hit.push(k); } return hit; })()`);
   check(`never stored twice: the store holds each item once (${all.filter((i) => i.id === (wrPoll && wrPoll.id)).length}, ${all.filter((i) => i.id === (wrPush && wrPush.id)).length}); the page's storage holds no card (${stored.length} keys)`, all.filter((i) => i.id === (wrPoll && wrPoll.id)).length === 1 && all.filter((i) => i.id === (wrPush && wrPush.id)).length === 1 && stored.length === 0, stored);
@@ -651,7 +651,7 @@ try {
     await B.front(); await B.load(); await openChat(B);
     await B.waitFor(`document.querySelectorAll('.cn-card.cn-done').length >= 2`, 15000);
     const red = await B.evalJs(CARD(wrPush && wrPush.id));
-    check(`RED CONTROL: the base's record words — «${red && red.line.slice(0, 60)}»: neither who decided nor when`, !!red && red.done && /approved · /.test(red.line) && !/by you/.test(red.line), red);
+    check(`RED CONTROL: the base's record words — «${red && red.line.slice(0, 60)}»: neither who decided nor when`, !!red && gateOf(red.done) && gateOf(/approved · /.test(red.line)) && !/by you/.test(red.line), red);
   } catch (e) { fail++; console.log('  ✗ ⑥ RED threw: ' + (e?.message || e)); } finally { mutant = null; }
   await lap('⑥ done');
 
@@ -671,7 +671,7 @@ try {
   const has = await A.evalJs(`({ hide: !!document.querySelector(${J3(hideSel)})?.offsetParent, tick: !!document.querySelector(${J3(tickSel)})?.offsetParent })`);
   const rc0 = await A.evalJs(CARD(rqItem && rqItem.id));
   await A.shot('r3-chat-pointer-1280.png');
-  check(`r3 ⑦a: the access request's card in the asking chat offers ONE closer, ✕ Hide — no ✓ Mark done (${J3(rc0 && rc0.verbs)})`, !!rqItem && has.hide && !has.tick, { has, verbs: rc0 && rc0.verbs });
+  check(`r3 ⑦a: the access request's card in the asking chat offers ONE closer, ✕ Hide — no ✓ Mark done (${J3(rc0 && rc0.verbs)})`, !!rqItem && gateOf(has.hide) && !has.tick, { has, verbs: rc0 && rc0.verbs });
   const rqPress = (has.hide || has.tick) ? await A.restThenPress(has.hide ? hideSel : tickSel) : null;
   await sleep(900);
   const rqAfter = ((await api()).resolved || []).find((i) => i.id === (rqItem && rqItem.id)) || null;
@@ -679,11 +679,11 @@ try {
   const rqReq = ((((annView && annView.conversation) || {}).reach || {}).requests || []).find((r) => r.todoId === (rqItem && rqItem.id)) || null;   // the Reach dialog's own read
   const rc1 = await A.evalJs(CARD(rqItem && rqItem.id));
   await A.shot('r3-chat-pointer-hidden-1280.png');
-  check(`…its press HIDES it: the record «${rc1 && rc1.line}» (${rqAfter && rqAfter.resolvedBy}) says nothing about a decision; the request is still ${rqReq && rqReq.status} in the Reach dialog; the toast «${rqPress && rqPress.toast}» offers no Undo`, !!rqAfter && rqAfter.resolvedBy === 'hidden' && !!rc1 && /hidden — nothing was decided/.test(rc1.line) && !!rqReq && rqReq.status === 'open' && /Hidden — nothing was decided/.test((rqPress && rqPress.toast) || '') && !/Undo/.test((rqPress && rqPress.toast) || ''), { pressed: has.hide ? 'hide' : 'tick', by: rqAfter && rqAfter.resolvedBy, status: rqAfter && rqAfter.status, line: rc1 && rc1.line, request: rqReq && rqReq.status, toast: rqPress && rqPress.toast });
+  check(`…its press HIDES it: the record «${rc1 && rc1.line}» (${rqAfter && rqAfter.resolvedBy}) says nothing about a decision; the request is still ${rqReq && rqReq.status} in the Reach dialog; the toast «${rqPress && rqPress.toast}» offers no Undo`, !!rqAfter && rqAfter.resolvedBy === 'hidden' && !!rc1 && gateOf(/hidden — nothing was decided/.test(rc1.line)) && !!rqReq && rqReq.status === 'open' && gateOf(/Hidden — nothing was decided/.test((rqPress && rqPress.toast) || '')) && !/Undo/.test((rqPress && rqPress.toast) || ''), { pressed: has.hide ? 'hide' : 'tick', by: rqAfter && rqAfter.resolvedBy, status: rqAfter && rqAfter.status, line: rc1 && rc1.line, request: rqReq && rqReq.status, toast: rqPress && rqPress.toast });
   say('now do:request'); await logHas(/### request 0 rc=[\s\S]*### request 0 rc=/);
   const rqBack = await until(async () => (await api()).open.find((i) => i.id === (rqItem && rqItem.id)) || null, 8000);
   const reaskOut = cliLog().split('### request 0 rc=').pop();
-  check('…the agent asks again while it is open ⇒ the SAME request, its pointer back in the tray and the chat (the CLI says so)', !!rqBack && /already open/.test(reaskOut) && /it is back in their For-you tray/.test(reaskOut), reaskOut.slice(0, 300));
+  check('…the agent asks again while it is open ⇒ the SAME request, its pointer back in the tray and the chat (the CLI says so)', !!rqBack && gateOf(/already open/.test(reaskOut)) && verdictOf(/it is back in their For-you tray/.test(reaskOut)), reaskOut.slice(0, 300));
   await lap('⑦a done');
   // ⑦b A WAKE ASK SAYS ITS END — a new ask on the chat whose earlier ask was denied: «expires in 7 d» on its card; the agent told when
   const pollBy = ((await api()).resolved.find((i) => i.id === (wrPoll && wrPoll.id)) || {}).resolvedBy;
@@ -693,8 +693,8 @@ try {
   await A.waitFor(`!!document.querySelector('.cn-card[data-item="${nw && nw.id}"]')`, 15000);
   const nc = await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${nw && nw.id}"]'); const m = c && c.querySelector('.ut-meta'); return c ? { text: (m ? m.textContent : '').trim(), metaShown: !!(m && m.offsetParent) } : null; })()`);   // the card's meta line (its age · its end)
   const nwOut = cliLog().split('### ' + wv3 + ' 0 rc=').pop();
-  check(`r3 ⑦b: a new wake ask's card says its end — «${((nc && nc.text) || '').match(/expires in [^·]*/) || '—'}» (its meta line: «${nc && nc.text}»)`, !!nc && nc.metaShown && /expires in 7 d/.test(nc.text), nc);
-  check('…and the agent was told it: «Unanswered, it expires <when> UTC — then you can ask again.»', /Unanswered, it expires \d{4}-\d\d-\d\d \d\d:\d\d UTC — then you can ask again\./.test(nwOut), nwOut.slice(0, 400));
+  check(`r3 ⑦b: a new wake ask's card says its end — «${((nc && nc.text) || '').match(/expires in [^·]*/) || '—'}» (its meta line: «${nc && nc.text}»)`, !!nc && gateOf(nc.metaShown) && verdictOf(/expires in 7 d/.test(nc.text)), nc);
+  check('…and the agent was told it: «Unanswered, it expires <when> UTC — then you can ask again.»', verdictOf(/Unanswered, it expires \d{4}-\d\d-\d\d \d\d:\d\d UTC — then you can ask again\./.test(nwOut)), nwOut.slice(0, 400));
   if (nw) await A.evalJs(`fetch('/api/channels/reach-requests/${nw.action.id}/deny', { method: 'POST' }).then((r) => r.status)`);   // a wake row wakes — never left standing
   await lap('⑦b done');
   // ⑦c THE VAULT'S TWO ASKS IN THE ASKING CHAT (the owner: «他的索要和使用请求都不在聊天里») — the paste request's FORM card, answered
@@ -702,14 +702,14 @@ try {
   const SECOND = 'wake card second password 7';
   const VALUE = ['paste', 'leg', 'admin', 'pw', Date.now().toString(36)].join('-');
   const su = await A.evalJs(`fetch('/api/vault/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${J3(SECOND)} }) }).then(async (r) => ({ status: r.status, state: (await r.json().catch(() => ({}))).state }))`);
-  check('setup: the vault\'s second password set from the page (unlocked)', su && su.state === 'unlocked', su);
+  check('setup: the vault\'s second password set from the page (unlocked)', gateOf(su) && su.state === 'unlocked', su);
   say('now do:vreq'); await logHas(/### vreq 0 rc=/);
   const sr = await until(async () => (await api()).open.find((i) => i.action && i.action.type === 'secret-request') || null);
   await A.waitFor(`!!document.querySelector('.cn-card[data-item="${sr && sr.id}"] input.ut-secret-input')`, 15000);
   await A.evalJs(`document.querySelector('.cn-card[data-item="${sr && sr.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
   const sc = await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${sr && sr.id}"]'); if (!c) return null; const i = c.querySelector('input.ut-secret-input'); return { type: i && i.type, save: (c.querySelector('.ut-secret-save')?.textContent || '').trim(), deny: (c.querySelector('.ut-secret-deny')?.textContent || '').trim(), note: (c.querySelector('.ut-secret-note')?.textContent || '').trim(), closers: [...c.querySelectorAll('.ut-done, .ut-dismiss, .ut-reopen')].filter((x) => x.offsetParent).length, text: (c.textContent || '').slice(0, 220) }; })()`);
   await A.shot('r3-chat-vault-request-1280.png');
-  check(`r3 ⑦c: the vault's REQUEST is a card in the asking chat — the masked field (${sc && sc.type}), «${sc && sc.save}» / «${sc && sc.deny}», the note «${sc && sc.note}», no ✓ / ✕ (${sc && sc.closers})`, !!sc && sc.type === 'password' && sc.save === 'Save to vault' && /Wrong name or kind\? Refuse/.test(sc.note) && sc.closers === 0 && /Router local admin/.test(sc.text), sc);
+  check(`r3 ⑦c: the vault's REQUEST is a card in the asking chat — the masked field (${sc && sc.type}), «${sc && sc.save}» / «${sc && sc.deny}», the note «${sc && sc.note}», no ✓ / ✕ (${sc && sc.closers})`, !!sc && sc.type === 'password' && sc.save === 'Save to vault' && gateOf(/Wrong name or kind\? Refuse/.test(sc.note)) && sc.closers === 0 && verdictOf(/Router local admin/.test(sc.text)), sc);
   await A.evalJs(`document.querySelector('.cn-card[data-item="${sr && sr.id}"] input.ut-secret-input').focus(); true`);
   await A.cdp('Input.insertText', { text: VALUE });
   const svPress = await A.restThenPress(`.cn-card[data-item="${sr && sr.id}"] .ut-secret-save`);
@@ -718,7 +718,7 @@ try {
   await A.waitFor(`(document.querySelector('.cn-card[data-item="${sr && sr.id}"] .cn-line')?.textContent || '').includes(${J3(stampSr)})`, 8000);
   const srCard = await A.evalJs(CARD(sr && sr.id));
   const leakPage = await A.evalJs(`(document.documentElement.outerHTML + (document.body ? document.body.innerText : '') + [...document.querySelectorAll('input, textarea')].map((i) => i.value).join('')).includes(${J3(VALUE)})`);
-  check(`…pasted and saved IN THE CHAT CARD (the tray's own route): the card reads «${srCard && srCard.line}», its tray row resolved with it (${srDone && srDone.resolvedBy}); the value is nowhere on the page`, !!srDone && srDone.resolvedBy === 'stored' && !!srCard && srCard.line.includes(stampSr) && !leakPage && !!svPress && svPress.pressed, { by: srDone && srDone.resolvedBy, fact: srDone && srDone.resolvedFact, line: srCard && srCard.line, leakPage, toast: svPress && svPress.toast });
+  check(`…pasted and saved IN THE CHAT CARD (the tray's own route): the card reads «${srCard && srCard.line}», its tray row resolved with it (${srDone && srDone.resolvedBy}); the value is nowhere on the page`, !!srDone && srDone.resolvedBy === 'stored' && !!srCard && gateOf(srCard.line.includes(stampSr)) && !leakPage && !!svPress && verdictOf(svPress.pressed), { by: srDone && srDone.resolvedBy, fact: srDone && srDone.resolvedFact, line: srCard && srCard.line, leakPage, toast: svPress && svPress.toast });
   // 主开发's pin — A WIRE ASSERT, not a DOM one: the pasted value (raw, hex, base64, base64url) is in NO frame any page saw
   // (both directions), no hub broadcast, not the server's log, not what reached the agent (its stdin, its tool output, its
   // next-turn context); the field stayed masked (type password, no autocomplete)
@@ -728,7 +728,7 @@ try {
   const wire = { pageFrames: WS_SEEN.length, pageHits: hits(WS_SEEN.join('\n')), hubFrames: frames.length, hubHits: hits(frames.join('\n')), serverLog: hits(hub.log()),
     agentStdin: hits(fs.readFileSync(path.join(stubDir, 'seen.log'), 'utf8')), agentTools: hits(cliLog()), nextTurn: hits(ctxTurn), receipt: /STORED/.test(ctxTurn), masked: sc && sc.type === 'password',
     seesTheRequest: !!sr && WS_SEEN.join('\n').includes(sr.action.requestId) && frames.join('\n').includes(sr.action.requestId) };   // CONTROL: the frames DO carry the request (its sr- id) — a 0 is a real absence
-  check(`…THE WIRE: the pasted value is in none of ${wire.pageFrames} page WebSocket frames (both ways) nor ${wire.hubFrames} hub broadcasts, not the server log, not the agent's stdin / tool output / next turn (which says STORED); the field stayed masked`, wire.pageFrames > 0 && wire.hubFrames > 0 && wire.pageHits === 0 && wire.hubHits === 0 && wire.serverLog === 0 && wire.agentStdin === 0 && wire.agentTools === 0 && wire.nextTurn === 0 && wire.receipt && wire.masked && wire.seesTheRequest, wire);
+  check(`…THE WIRE: the pasted value is in none of ${wire.pageFrames} page WebSocket frames (both ways) nor ${wire.hubFrames} hub broadcasts, not the server log, not the agent's stdin / tool output / next turn (which says STORED); the field stayed masked`, wire.pageFrames > 0 && wire.hubFrames > 0 && wire.pageHits === 0 && wire.hubHits === 0 && wire.serverLog === 0 && wire.agentStdin === 0 && wire.agentTools === 0 && wire.nextTurn === 0 && gateOf(wire.receipt) && gateOf(wire.masked) && verdictOf(wire.seesTheRequest), wire);
   // 主开发's pin — the run card shows «Always» in the chat WHENEVER the tray offers it (one verdict: the item's `action.always`)
   const rungs = async (id) => {
     const chat = await A.evalJs(`[...document.querySelectorAll('.cn-card[data-item="${id}"] [data-answer]')].filter((b) => b.offsetParent).map((b) => b.dataset.answer)`);
@@ -744,7 +744,7 @@ try {
   const rgAll = await rungs(rAll && rAll.id);
   await A.evalJs(`document.querySelector('.cn-card[data-item="${rAll && rAll.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
   await A.shot('r3-chat-vault-always-1280.png');
-  check(`…the run card shows «Always» in the chat when the tray offers it (a known tool naming a host — action.always ${rAll && rAll.action.always}): chat ${J3(rgAll.chat)} = tray ${J3(rgAll.tray)}`, !!rAll && rAll.action.always === true && rgAll.chat.includes('always') && J3(rgAll.chat) === J3(rgAll.tray), { always: rAll && rAll.action.always, ...rgAll });
+  check(`…the run card shows «Always» in the chat when the tray offers it (a known tool naming a host — action.always ${rAll && rAll.action.always}): chat ${J3(rgAll.chat)} = tray ${J3(rgAll.tray)}`, !!rAll && rAll.action.always === true && gateOf(rgAll.chat.includes('always')) && J3(rgAll.chat) === J3(rgAll.tray), { always: rAll && rAll.action.always, ...rgAll });
   await A.restThenPress(`.cn-card[data-item="${rAll && rAll.id}"] [data-answer="deny"]`);
   await until(async () => (await api()).resolved.find((i) => i.id === (rAll && rAll.id)) || null, 10000);
   await logHas(/### vrunall 0 rc=/, 30000);
@@ -754,7 +754,7 @@ try {
   await A.evalJs(`document.querySelector('.cn-card[data-item="${ra && ra.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
   const rcRun = await A.evalJs(CARD(ra && ra.id));
   await A.shot('r3-chat-vault-cards-1280.png');
-  check(`r3 ⑦c: …then the RUN the agent makes with it is a card in the same chat — its own verbs ${J3(rcRun && rcRun.verbs)}, no ✓ / ✕ (${rcRun && rcRun.closers})`, !!rcRun && rcRun.closers === 0 && rcRun.verbs.some((v) => /^Allow once/.test(v)) && rcRun.verbs.some((v) => /^Deny/.test(v)), rcRun);
+  check(`r3 ⑦c: …then the RUN the agent makes with it is a card in the same chat — its own verbs ${J3(rcRun && rcRun.verbs)}, no ✓ / ✕ (${rcRun && rcRun.closers})`, !!rcRun && rcRun.closers === 0 && gateOf(rcRun.verbs.some((v) => /^Allow once/.test(v))) && verdictOf(rcRun.verbs.some((v) => /^Deny/.test(v))), rcRun);
   const rgNo = await rungs(ra && ra.id);
   check(`…and NO «Always» in the chat when the tray offers none (an interpreter — action.always ${ra && ra.action.always}): chat ${J3(rgNo.chat)} = tray ${J3(rgNo.tray)}`, !!ra && ra.action.always === false && !rgNo.chat.includes('always') && J3(rgNo.chat) === J3(rgNo.tray), { always: ra && ra.action.always, ...rgNo });
   await B.front(); await B.device(375, 812); await B.load();
@@ -764,7 +764,7 @@ try {
   await B.evalJs(`document.querySelector('.cn-card[data-item="${ra && ra.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
   const phRun = await B.evalJs(CARD(ra && ra.id));
   await B.shot('r3-phone-vault-cards-375.png');
-  check(`…on a phone (375 touch) the run card stands in the chat with its own verbs and no ✓ / ✕ (${J3(phRun && phRun.verbs)})`, !!phRun && phRun.closers === 0 && phRun.verbs.some((v) => /^Deny/.test(v)), phRun);
+  check(`…on a phone (375 touch) the run card stands in the chat with its own verbs and no ✓ / ✕ (${J3(phRun && phRun.verbs)})`, !!phRun && phRun.closers === 0 && verdictOf(phRun.verbs.some((v) => /^Deny/.test(v))), phRun);
   await B.device(1280, 800, { mouse: true }); await B.load();
   await A.front();
   const dPress = await A.restThenPress(`.cn-card[data-item="${ra && ra.id}"] [data-answer="deny"]`);
@@ -773,7 +773,7 @@ try {
   await A.waitFor(`(document.querySelector('.cn-card[data-item="${ra && ra.id}"] .cn-line')?.textContent || '').includes(${J3(stampRa)})`, 8000);
   const raCard = await A.evalJs(CARD(ra && ra.id));
   const ranOut = await logHas(/### vrun 0 rc=/, 30000) ? cliLog().split('### vrun 0 rc=').pop().slice(0, 300) : '';
-  check(`…Deny on the card: the record «${raCard && raCard.line}» (the person verdict's mark); the agent's run refused (${(ranOut.match(/ask_denied|denied|refused/) || ['?'])[0]})`, !!raDone && raDone.resolvedBy === 'denied' && !!raCard && raCard.line.includes(stampRa) && /ask_denied|denied/.test(ranOut) && !!dPress && dPress.pressed, { by: raDone && raDone.resolvedBy, line: raCard && raCard.line, ranOut });
+  check(`…Deny on the card: the record «${raCard && raCard.line}» (the person verdict's mark); the agent's run refused (${(ranOut.match(/ask_denied|denied|refused/) || ['?'])[0]})`, !!raDone && raDone.resolvedBy === 'denied' && !!raCard && gateOf(raCard.line.includes(stampRa)) && gateOf(/ask_denied|denied/.test(ranOut)) && !!dPress && verdictOf(dPress.pressed), { by: raDone && raDone.resolvedBy, line: raCard && raCard.line, ranOut });
   await A.evalJs(`document.querySelector('.cn-card[data-item="${sr && sr.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
   await A.shot('r3-chat-vault-records-1280.png');
   const wireEnd = { pageFrames: WS_SEEN.length, hits: hits(WS_SEEN.join('\n')) + hits(frames.join('\n')) + hits(hub.log()) + hits(fs.readFileSync(path.join(stubDir, 'seen.log'), 'utf8')) + hits(cliLog()) };
@@ -816,7 +816,7 @@ try {
     await A.shot('r4-chat-vault-grant-allowed-1280.png');
     // r6: For 8 hours records `granted` (the value every reader names) + {grantedFor: '8h', until} (a pre-.360 `granted` with no
     // duration reads «allowed»); the toast reads the answer's `grantedFor`
-    check(`…For 8 hours on the card (the second password first): the record «${gCard && gCard.line}» (${gDone && gDone.resolvedBy} + ${gDone && gDone.resolvedFact && gDone.resolvedFact.grantedFor}, the person verdict's mark), the toast «${toast8}»`, !!p8 && p8.pressed && !!gDone && gDone.resolvedBy === 'granted' && /Granted for 8 hours/.test(toast8 || '') && !!gDone.resolvedFact && gDone.resolvedFact.decidedBy === 'person' && gDone.resolvedFact.grantedFor === '8h' && Number(gDone.resolvedFact.until) > 0 && !!gCard && gCard.line.includes(stampG) && gCard.closers === 0, { by: gDone && gDone.resolvedBy, fact: gDone && gDone.resolvedFact, line: gCard && gCard.line, toast: toast8 });
+    check(`…For 8 hours on the card (the second password first): the record «${gCard && gCard.line}» (${gDone && gDone.resolvedBy} + ${gDone && gDone.resolvedFact && gDone.resolvedFact.grantedFor}, the person verdict's mark), the toast «${toast8}»`, !!p8 && gateOf(p8.pressed) && !!gDone && gDone.resolvedBy === 'granted' && gateOf(/Granted for 8 hours/.test(toast8 || '')) && !!gDone.resolvedFact && gDone.resolvedFact.decidedBy === 'person' && gDone.resolvedFact.grantedFor === '8h' && Number(gDone.resolvedFact.until) > 0 && !!gCard && gateOf(gCard.line.includes(stampG)) && gCard.closers === 0, { by: gDone && gDone.resolvedBy, fact: gDone && gDone.resolvedFact, line: gCard && gCard.line, toast: toast8 });
   }
   await lap('⑦d done');
   // ⑧ ROUND 7 — THE RUN CARD READS AS FACTS (the owner, 2026-10-27: «这个卡片的可读性很差» — an English prose wall on a Chinese
@@ -894,8 +894,8 @@ try {
       await B.front(); look7[l].phone = await surfaces(B, it, `${l}-390`); await A.front();
       const all = [...Object.values(look7[l].desk), ...Object.values(look7[l].phone)];
       check(`r7 ⑧ (${l}): the chat card, the tray row and the For-you window at 1280 and 390 read the FACTS — «${(look7[l].desk.chat || {}).headline}»; the command in its own box (wrapping inside it at 390), 发往 FIRST in the warning accent, 4 rows, the fold closed, no prose; the page never scrolls sideways`,
-        all.every(facts1) && all.every((o) => o.headline === HEAD[l]) && all.every((o) => o.deadline && /60/.test(o.deadline)), { desk: look7[l].desk, phone: look7[l].phone });
-      check(`r7 ⑧ (${l}): ${l === 'zh' ? '允许一次' : 'Allow once'} is the PRIMARY accent (never drawn disabled), Deny neutral, no «Always» — and beside them, in their row, why: «${(look7[l].desk.chat || {}).hint}»`, all.every(answers1), all.map((o) => o && { once: o.once, deny: o.deny, hint: o.hint, beside: o.hintBeside }));
+        gateOf(all.every(facts1)) && gateOf(all.every((o) => o.headline === HEAD[l])) && verdictOf(all.every((o) => o.deadline && /60/.test(o.deadline))), { desk: look7[l].desk, phone: look7[l].phone });
+      check(`r7 ⑧ (${l}): ${l === 'zh' ? '允许一次' : 'Allow once'} is the PRIMARY accent (never drawn disabled), Deny neutral, no «Always» — and beside them, in their row, why: «${(look7[l].desk.chat || {}).hint}»`, verdictOf(all.every(answers1)), all.map((o) => o && { once: o.once, deny: o.deny, hint: o.hint, beside: o.hintBeside }));
       if (l !== 'zh') { await release(it); continue; }
       // THE DEADLINE (zh): the warning accent under 15 s, then THE LATE CARD (the owner's ruling «A», r20b's mark — the stand-in):
       // past its 60 s the command is refused and the card stays OPEN — the late words replace the countdown, 允许一次 / 拒绝 stay
@@ -903,7 +903,7 @@ try {
       const warnAt = Number(it.expiresAt) - 12e3 - Date.now(); if (warnAt > 0) await sleep(warnAt);
       const w = await A.evalJs(LOOK7(CARD7(it.id))); await A.shot('r7-zh-1280-chat-warn.png');
       await B.front(); await B.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(300); const wB = await B.evalJs(LOOK7(CARD7(it.id))); await B.shot('r7-zh-390-chat-warn.png'); await A.front();
-      check(`r7 ⑧ the countdown ticks on the card «${w && w.deadline}» and turns to the warning accent under 15 s (1280 and 390)`, !!w && !!wB && w.dlWarn && wB.dlWarn && /还剩 1?\d 秒/.test(w.deadline || ''), { w: w && [w.deadline, w.dlWarn], wB: wB && [wB.deadline, wB.dlWarn] });
+      check(`r7 ⑧ the countdown ticks on the card «${w && w.deadline}» and turns to the warning accent under 15 s (1280 and 390)`, !!w && !!wB && gateOf(w.dlWarn) && gateOf(wB.dlWarn) && verdictOf(/还剩 1?\d 秒/.test(w.deadline || '')), { w: w && [w.deadline, w.dlWarn], wB: wB && [wB.deadline, wB.dlWarn] });
       await sleep(Math.max(0, Number(it.expiresAt) - Date.now() + 1500));
       const marked = await until(async () => (await api()).open.find((i) => i.id === it.id && i.action && i.action.late) || null, 15000);
       await A.waitFor(`/已超时/.test(document.querySelector('${CARD7(it.id)}')?.textContent || '')`, 8000);
@@ -912,7 +912,7 @@ try {
       await B.front(); await B.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 8000); await unfold(B, CARD7(it.id)); await B.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
       late.phone = await B.evalJs(LOOK7(CARD7(it.id))); await B.shot('r7-zh-390-late-chat.png'); await A.front();
       const LATE_W = '已超时 — agent 的命令被拒绝；现在允许 = 它下次运行这条命令时直接放行（1 次）';
-      check(`r7 ⑧ THE LATE CARD (the stand-in's \`late\` mark — r20b): the chat card, the tray and the window (and the 390 card) say «${LATE_W}» in place of the countdown and KEEP 允许一次 (primary) / 拒绝 — never «Always» (r8: the late door refuses it) (the base: no countdown, the card as it was)`, !!marked && [late.chat, late.tray, late.win, late.phone].every((o) => !!o && o.deadline === LATE_W && o.dlState === 'late' && !!o.once && o.once.primary && !!o.deny && !o.always), { marked: !!marked, ...Object.fromEntries(Object.entries(late).map(([k, o]) => [k, o && { deadline: o.deadline, once: o.once, deny: !!o.deny }])) });
+      check(`r7 ⑧ THE LATE CARD (the stand-in's \`late\` mark — r20b): the chat card, the tray and the window (and the 390 card) say «${LATE_W}» in place of the countdown and KEEP 允许一次 (primary) / 拒绝 — never «Always» (r8: the late door refuses it) (the base: no countdown, the card as it was)`, !!marked && verdictOf([late.chat, late.tray, late.win, late.phone].every((o) => !!o && o.deadline === LATE_W && o.dlState === 'late' && !!o.once && o.once.primary && !!o.deny && !o.always)), { marked: !!marked, ...Object.fromEntries(Object.entries(late).map(([k, o]) => [k, o && { deadline: o.deadline, once: o.once, deny: !!o.deny }])) });
       fs.rmSync(R7_LATE, { force: true });
       await until(async () => ran7() >= 1, 30000);   // its command was refused at 60 s — the turn is over
     }
@@ -928,7 +928,7 @@ try {
       const dB = await B.evalJs(LOOK7(CARD7(it.id))); await B.shot(`r7-zh-390-${name}.png`); await A.front();
       const sane = (o) => !!o && o.cmd && o.cmdWraps && o.cmdInside && !o.sideways && !o.overflowCard && !o.prose && o.rows.length <= 4;
       const want = name === 'hosts-known-always' ? (o) => o.always && !o.hint && !o.rows.some((x) => x.endsWith('!')) : name === 'config-reads' ? (o) => !o.always && (o.hint || '').includes(LV['config-reads'].always.directive) : (o) => o.rows[0] === 'program!' && o.rows.length === 4;
-      check(`r7 ⑧ ${name} (zh, 1280 + 390): ${name === 'stress' ? `a ${LV.stress.cmd.length}-character command, 4 entries (one named in 40+ CJK characters), 3 hosts — wrapped inside the card, nothing out of it, «程序» first (the deciding fact)` : name === 'config-reads' ? 'the hint names the reason and its directive' : '«Always» offered — no hint, nothing marked'}`, [dA, dB].every((o) => sane(o) && want(o)), { dA, dB });
+      check(`r7 ⑧ ${name} (zh, 1280 + 390): ${name === 'stress' ? `a ${LV.stress.cmd.length}-character command, 4 entries (one named in 40+ CJK characters), 3 hosts — wrapped inside the card, nothing out of it, «程序» first (the deciding fact)` : name === 'config-reads' ? 'the hint names the reason and its directive' : '«Always» offered — no hint, nothing marked'}`, verdictOf([dA, dB].every((o) => sane(o) && want(o))), { dA, dB });
       await release(it);
     }
     await lap('⑧ done');
@@ -942,7 +942,7 @@ try {
       const late = await surfaces(A, lateItem7, `${l}-1280-late`);
       const all = [late.chat, late.tray, late.win];
       check(`r9 ⑨ the LATE card in ${l} (chat, tray, window — shot r7-${l}-1280-late-*.png): «${(late.chat || {}).deadline}» in place of the countdown; ${l === 'en' ? 'Allow once' : '1 回だけ許可'} (primary) / ${l === 'en' ? 'Deny' : '拒否'} — never «Always»`,
-        all.every((o) => !!o && !!o.deadline && o.dlState === 'late' && !!o.once && o.once.primary && !!o.deny && !o.always) && (l !== 'en' || all.every((o) => o.deadline === LATE9.en)), all);
+        gateOf(all.every((o) => !!o && !!o.deadline && o.dlState === 'late' && !!o.once && o.once.primary && !!o.deny && !o.always)) && (l !== 'en' || verdictOf(all.every((o) => o.deadline === LATE9.en))), all);
     }
     await lang(A, 'zh', false); await A.front(); await quiet(A);
     const clip = [['2973', LV['clip-2973'], '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。'],   // r11: the producer's long commands (cmd, cmdCut, cmdFull — r23)
@@ -957,7 +957,7 @@ try {
       if (name === '2973') for (const l of ['en', 'ja']) { await lang(A, l, false); await A.front(); await quiet(A); await A.waitFor(`!!document.querySelector('${CARD7(it.id)} .ut-run-cut')`, 15000); await A.evalJs(`document.querySelector('${CARD7(it.id)} .ut-run-cut')?.scrollIntoView({ block: 'center' }); true`); await sleep(500); langs[l] = await A.evalJs(`document.querySelector('${CARD7(it.id)} .ut-run-cut')?.textContent.trim() || null`); await A.shot(`r9-${l}-1280-clip-${name}.png`); }
       if (name === '2973') { await lang(A, 'zh', false); await A.front(); await quiet(A); }
       check(`r9 ⑨ the clip note (${name} characters, the chat card — shot r9-*-1280-clip-${name}.png): «${said}»${name === '2973' ? ` · en «${langs.en}» · ja «${langs.ja}»` : ' (the fold cut at 4 096: never «the whole is under 技术细节»)'}`,
-        said === line && (name !== '2973' || (/^The command is 2973 characters long; the card shows its first 2000/.test(langs.en || '') && /^コマンドは 2973 文字あります/.test(langs.ja || ''))), { said, langs });
+        said === line && (name !== '2973' || (gateOf(/^The command is 2973 characters long; the card shows its first 2000/.test(langs.en || '')) && verdictOf(/^コマンドは 2973 文字あります/.test(langs.ja || '')))), { said, langs });
       await release(it);
     }
     // THE RULED WORDS: three closed run cards — r24's late allow and its lock settle (the stand-in), the door's own person deny
@@ -985,7 +985,7 @@ try {
         await A.shot(`r9-${l}-1280-ruled-${name}.png`);
       }
       check(`r9 ⑨ THE RULED WORDS in ${l} (the chat card's record line — shots r9-${l}-1280-ruled-*.png): ${words.map((w) => w ? `«${w.verb} · ${w.ago}»` : '—').join(' · ')} (the two a person decided stamped with their time)`,
-        words.length === 3 && words.every((w, k) => !!w && w.shown && w.verb === WANT9[l][k]) && /^\d\d:\d\d$/.test(words[0].ago || '') && /^\d\d:\d\d$/.test(words[1].ago || ''), { words, by: closed.map(([n, it]) => it && [n, it.resolvedBy, it.resolvedFact]) });
+        words.length === 3 && gateOf(words.every((w, k) => !!w && w.shown && w.verb === WANT9[l][k])) && gateOf(/^\d\d:\d\d$/.test(words[0].ago || '')) && verdictOf(/^\d\d:\d\d$/.test(words[1].ago || '')), { words, by: closed.map(([n, it]) => it && [n, it.resolvedBy, it.resolvedFact]) });
     }
     await lap('⑨ done');
     // ⑩ ROUND 11 — THE FOLD AND WHY IT ASKS AGAIN, DRAWN (the renderer pin owed to vault-agent-own): the producer's 2 100-character
@@ -1019,7 +1019,7 @@ try {
     await lang(B, 'zh', true); await B.front(); await quiet(B); f11.phone = await look11(B, it11.id, 'r11-zh-390-fold.png'); await A.front();
     const good11 = (o, w) => !!o && o.againShown && o.again === w.again && o.line === w.line && o.boxLabel === w.box && o.whole && o.inside && o.scrolls && !o.sideways;
     check(`r11 ⑩ THE FOLD AND WHY IT ASKS AGAIN (the chat card — shots r11-<lang>-1280-fold.png, r11-zh-390-fold.png): «${(f11.zh || {}).again}» on the face; the env line «${(f11.zh || {}).line}»; the 2 100-character value WHOLE in its own scrolling box «${(f11.zh || {}).boxLabel}», inside the card — zh / en / ja at 1280 and zh at 390 (704a0f4c: no again line, the value cut at 2 000 with no marker)`,
-      good11(f11.zh, W11.zh) && good11(f11.en, W11.en) && good11(f11.ja, W11.ja) && good11(f11.phone, W11.zh), f11);
+      gateOf(good11(f11.zh, W11.zh)) && gateOf(good11(f11.en, W11.en)) && gateOf(good11(f11.ja, W11.ja)) && verdictOf(good11(f11.phone, W11.zh)), f11);
     await lang(A, 'zh', false); await A.front(); await quiet(A);
     await release(it11);
     const itE = await runCard(LV['again-env']);
@@ -1036,7 +1036,7 @@ try {
       await A.waitFor(`!!document.querySelector('${CARD7(itP.id)}')`, 15000); await unfold(A, CARD7(itP.id)); await A.evalJs(`document.querySelector('${CARD7(itP.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
       const pl = await A.evalJs(LOOK7(CARD7(itP.id))); await A.shot('r11-zh-1280-producer.png');
       check(`r11 ⑩ THE REAL PRODUCER (shot r11-zh-1280-producer.png): the door's own facts (v ${fp.v}, who «${fp.who}», ${(fp.secrets || []).length} secret(s) «${entry}») drawn as they are — «${pl && pl.headline}»; nothing the renderer read elsewhere`,
-        fp.v === 2 && !!fp.who && fp.who !== 'ops watch' && !!entry && !!pl && pl.headline === want && pl.cmd && !pl.prose, { want, got: pl && pl.headline, facts: { v: fp.v, who: fp.who, secrets: (fp.secrets || []).map((x) => x.name) } });
+        fp.v === 2 && !!fp.who && fp.who !== 'ops watch' && !!entry && !!pl && pl.headline === want && gateOf(pl.cmd) && !pl.prose, { want, got: pl && pl.headline, facts: { v: fp.v, who: fp.who, secrets: (fp.secrets || []).map((x) => x.name) } });
       await release(itP);
     }
     await lap('⑩ done');
@@ -1046,4 +1046,4 @@ try {
 
 console.log(`  shots: ${SHOTS}`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

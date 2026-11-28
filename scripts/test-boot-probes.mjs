@@ -35,7 +35,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -182,11 +182,11 @@ try {
     const k = ignorer('new'), BOUND = 600;
     const { v: r, ms } = await timed(TLS.runChild('sh', k.args, BOUND));
     const pid = k.pid(), heldAtAnswer = alive(pid);
-    ok(r.code === 'TIMEOUT' && heldAtAnswer, `a TERM-ignoring child: the answer is TIMEOUT while the child still runs — the promise did not wait for it (${ms} ms over a ${BOUND} ms bound)`, r);
+    ok(r.code === 'TIMEOUT' && verdictOf(heldAtAnswer), `a TERM-ignoring child: the answer is TIMEOUT while the child still runs — the promise did not wait for it (${ms} ms over a ${BOUND} ms bound)`, r);
     ok(ms < BOUND + TLS.KILL_AFTER_MS, `…at the bound, before runChild's own KILL step (bound + KILL_AFTER_MS ${TLS.KILL_AFTER_MS} ms)`);
     ok(r.out === 'partial\n' && r.err === 'timeout', `what it wrote before the timer is the answer's out (${JSON.stringify(r.out)}), err 'timeout'`, r);
     await until(() => !alive(pid), 2 * TLS.KILL_AFTER_MS);
-    ok(pid && !alive(pid), `…and the child (pid ${pid}) is gone after the KILL step — KILLed, never waited on`);
+    ok(gateOf(pid) && !alive(pid), `…and the child (pid ${pid}) is gone after the KILL step — KILLed, never waited on`);
     const p = TLS.runChild('sh', ['-c', 'echo held-answer'], 200); const holdEnd = Date.now() + 700; while (Date.now() < holdEnd);
     const h = await p;
     ok(h.code === 0 && h.out === 'held-answer\n', `an answer given during a 700 ms hold over a 200 ms bound stays the child's own (code ${h.code}) — the bound never overtakes an exited child`, h);
@@ -201,22 +201,22 @@ try {
   const askedAtCap = askedA();
   {
     // CAP - 5: a Node timer may fire up to 1 ms early against Date.now() (monotonic ms truncation vs the wall clock) — the hosted runner measured 1499 ms on a 1500 ms cap (ci/int277)
-    ok(aOut.capped && aMs >= CAP - 5 && aMs < CAP + TLS.KILL_AFTER_MS, `twelve sockets whose fuser + pgrep never die: probeSockets settles at the cap (${aMs} ms, cap ${CAP})`);
+    ok(gateOf(aOut.capped) && aMs >= CAP - 5 && aMs < CAP + TLS.KILL_AFTER_MS, `twelve sockets whose fuser + pgrep never die: probeSockets settles at the cap (${aMs} ms, cap ${CAP})`);
     const qs = [...aOut.unanswered.values()];
     ok(aOut.unanswered.size === 12 && qs.filter((q) => q === 'fuser').length === 4 && qs.filter((q) => q === 'not asked').length === 8, `unanswered names every socket with its open question (4 fuser in flight, 8 not asked)`, [...aOut.unanswered]);
     const facts = A.api.probeFacts(aOut);
-    ok(!!facts && facts.unanswered === 12 && /^12 unanswered \(fuser cw-\d+-\d+, fuser cw-\d+-\d+, fuser cw-\d+-\d+, \+9\)$/.test(facts.note), `the boot trace's restore-probes facts: ${facts && facts.note}`, facts);
-    ok(RACE.test(brSrc), 'CONTROL setup: the cap\'s race is where the no-cap copy cuts it');
+    ok(!!facts && facts.unanswered === 12 && verdictOf(/^12 unanswered \(fuser cw-\d+-\d+, fuser cw-\d+-\d+, fuser cw-\d+-\d+, \+9\)$/.test(facts.note)), `the boot trace's restore-probes facts: ${facts && facts.note}`, facts);
+    ok(verdictOf(RACE.test(brSrc)), 'CONTROL setup: the cap\'s race is where the no-cap copy cuts it');
   }
 
   console.log('③ restoreSessions adopts what did not answer; the re-probe settles it');
   {
     const out = await rP;
-    ok(out.unanswered.size === 5 && out.unanswered.get(dOld.sock) && out.programs.get(dOld.sock) === 'unknown' && out.programs.get(dNew.sock) === 'unknown', `the probes: 5 unanswered, the pair's programs not proven (no child number in their side files) (${[...out.unanswered].map(([s, q]) => q + ' ' + s).join(', ')})`);
+    ok(out.unanswered.size === 5 && gateOf(out.unanswered.get(dOld.sock)) && out.programs.get(dOld.sock) === 'unknown' && out.programs.get(dNew.sock) === 'unknown', `the probes: 5 unanswered, the pair's programs not proven (no child number in their side files) (${[...out.unanswered].map(([s, q]) => q + ' ' + s).join(', ')})`);
     const t = await logged(async () => R.api.restoreSessions());
     const pend = R.api.probePending();
     ok(R.activeSessions.size === 5 && R.attached.length === 5, `every unanswered socket is adopted ALIVE and attached (${R.activeSessions.size} sessions, ${R.attached.length} attaches)`);
-    ok([live, dead, mute, dOld, dNew].every((x) => fs.existsSync(x.sockPath) && fs.existsSync(x.meta)) && !t.lines.some((l) => /Dead socket|Duplicate of/.test(l)) && !signals.length,
+    ok(gateOf([live, dead, mute, dOld, dNew].every((x) => fs.existsSync(x.sockPath) && fs.existsSync(x.meta))) && !t.lines.some((l) => /Dead socket|Duplicate of/.test(l)) && !signals.length,
       'nothing retired, nothing killed: every socket + meta in place, no Dead / Duplicate line, no signal sent', { lines: t.lines, signals });
     ok(pend.size === 5 && pend.get(live.sock).join() === 'alive' && pend.get(dOld.sock).join() === 'alive,dedup' && pend.get(dNew.sock).join() === 'alive,dedup', 'each is probe-pending with its open questions (the duplicate pair undecided: alive + dedup)', [...pend]);
     const pendLine = R.notes.filter((l) => /^5 session\(s\) adopted probe-pending — no answer \(fuser cw-/.test(l));
@@ -232,19 +232,19 @@ try {
     const tally = r.r;
     ok(tally.alive.sort().join() === [live.sock, dNew.sock].sort().join() && tally.dead.join() === dead.sock && tally.duplicate.join() === dOld.sock && tally.open.join() === mute.sock,
       `the re-probe settles each: alive ${tally.alive.join(' ')} · dead ${tally.dead.join(' ')} · duplicate ${tally.duplicate.join(' ')} · open ${tally.open.join(' ')}`, tally);
-    ok(!fs.existsSync(dead.sockPath) && !fs.existsSync(dead.meta) && !R.activeSessions.has(dead.id) && r.lines.some((l) => l.includes(`✗ Dead socket: ${dead.sock}`)) && R.broadcasts.n > b0,
+    ok(!fs.existsSync(dead.sockPath) && !fs.existsSync(dead.meta) && !R.activeSessions.has(dead.id) && gateOf(r.lines.some((l) => l.includes(`✗ Dead socket: ${dead.sock}`))) && R.broadcasts.n > b0,
       'dead ⇒ the boot\'s own dead-socket retire (socket + meta gone, the Dead line) and the adopted session goes (the list re-broadcast)');
     await until(() => !alive(victim.pid), 2 * TLS.KILL_AFTER_MS);
-    ok(!fs.existsSync(dOld.sockPath) && !fs.existsSync(dOld.meta) && !fs.existsSync(dOld.buf) && !R.activeSessions.has(dOld.id) && r.lines.some((l) => l.includes(`⤫ Duplicate of ${cid} — retiring stale ${dOld.sock}`))
-      && signals.some(([pid, sig]) => pid === victim.pid && sig === 'SIGTERM') && !alive(victim.pid),
+    ok(!fs.existsSync(dOld.sockPath) && !fs.existsSync(dOld.meta) && !fs.existsSync(dOld.buf) && !R.activeSessions.has(dOld.id) && gateOf(r.lines.some((l) => l.includes(`⤫ Duplicate of ${cid} — retiring stale ${dOld.sock}`)))
+      && gateOf(signals.some(([pid, sig]) => pid === victim.pid && sig === 'SIGTERM')) && !alive(victim.pid),
       'the older duplicate (its program proven ended) ⇒ the boot\'s own duplicate retire: SIGTERM to its wrapper, then to its socket\'s master — the fuser answer\'s pid, proven this session\'s by its wrapper\'s parent, by its birth (the husk is gone) — then socket + buffer + meta', { signals });
     await until(() => !fs.existsSync(dOldRcpt), 3000);   // its removal is the wrapper files' own async rm (B-b2d3 step 2: the retire's end now comes before the husk's wait ends)
     ok(!fs.existsSync(dOldRcpt), '…and its <id>.receipts with them (lane human-cli r5: THE ONE LIST of a wrapper\'s files — round 4 left this end path\'s to the 7-day sweep)');
-    ok(R.activeSessions.has(live.id) && R.activeSessions.has(dNew.id) && R.activeSessions.has(mute.id) && [live, dNew, mute].every((x) => fs.existsSync(x.sockPath)), 'the alive, the winner and the still-mute session stay adopted, their sockets in place');
+    ok(gateOf(R.activeSessions.has(live.id)) && gateOf(R.activeSessions.has(dNew.id)) && gateOf(R.activeSessions.has(mute.id)) && verdictOf([live, dNew, mute].every((x) => fs.existsSync(x.sockPath))), 'the alive, the winner and the still-mute session stay adopted, their sockets in place');
     ok(R.ended.slice().sort().join() === [dead.id, dOld.id].sort().join(), `each un-adopted session ends through the exit proxy's onSessionEnd, as any ended one (${R.ended.join(', ')})`, R.ended);
     ok([...R.api.probePending()].map(([s, q]) => s + ':' + q.join()).join() === `${mute.sock}:alive`, 'only the still-mute socket keeps its mark');
     const passLine = R.notes.filter((l) => l.startsWith('re-probe 1/5'));
-    ok(passLine.length === 1 && /^re-probe 1\/5: 2 alive, 1 dead \(retired\), 1 duplicate \(retired\), 1 still unanswered$/.test(passLine[0]) && R.notes.filter((l) => l === PAIR_WORDS).length === 1, `its line: ${passLine[0]} (the pair, now decided, not said again)`, R.notes);
+    ok(passLine.length === 1 && gateOf(/^re-probe 1\/5: 2 alive, 1 dead \(retired\), 1 duplicate \(retired\), 1 still unanswered$/.test(passLine[0])) && R.notes.filter((l) => l === PAIR_WORDS).length === 1, `its line: ${passLine[0]} (the pair, now decided, not said again)`, R.notes);
   }
 
   console.log('② (cont.) past the cap nothing more is asked; CONTROL no cap');
@@ -259,7 +259,7 @@ try {
   {
     const r = await settledBy(oldP, Math.max(0, 5000 - (Date.now() - oldT0)));
     const pid = oldK.pid();
-    ok(r === null && pid && alive(pid), `CONTROL the old runChild (a scratch copy): the same TERM-ignoring child is still PENDING at 5 s, the child alive (RED)`, r);
+    ok(r === null && gateOf(pid) && verdictOf(alive(pid)), `CONTROL the old runChild (a scratch copy): the same TERM-ignoring child is still PENDING at 5 s, the child alive (RED)`, r);
     if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { } }
   }
 
@@ -270,7 +270,7 @@ try {
     let tallies = [];
     try { const p = await G.api.probeSockets(); ok(p.unanswered.get(g1.sock) === 'pgrep' && !p.capped, `the probe: fuser + pgrep ENOENT ⇒ unanswered (${p.unanswered.get(g1.sock)}), not dead`); await logged(async () => G.api.restoreSessions()); for (let i = 0; i < 5; i++) tallies.push(await G.api.reprobePending()); }
     finally { process.env.PATH = PATH0; }
-    ok(tallies.length === 5 && tallies.every((t) => t.open.join() === g1.sock) && G.activeSessions.has(g1.id) && fs.existsSync(g1.sockPath) && fs.existsSync(g1.meta), `five passes, ${g1.sock} never answered: still adopted, socket + meta in place`, tallies);
+    ok(tallies.length === 5 && gateOf(tallies.every((t) => t.open.join() === g1.sock)) && gateOf(G.activeSessions.has(g1.id)) && gateOf(fs.existsSync(g1.sockPath)) && verdictOf(fs.existsSync(g1.meta)), `five passes, ${g1.sock} never answered: still adopted, socket + meta in place`, tallies);
     ok(G.notes.filter((l) => /^re-probe \d\/5: 0 alive, 0 dead \(retired\), 0 duplicate \(retired\), 1 still unanswered$/.test(l)).length === 5
       && G.notes.filter((l) => l === `re-probe gave up after 5 tries: ${g1.sock} kept alive — a non-answer is never a kill`).length === 1, `the Diagnostics lines: five passes, then once: ${G.notes.at(-1)}`, G.notes);
   }
@@ -313,12 +313,12 @@ try {
         mute = m; let t; try { t = await logged(async () => M3.X.api.reprobePending()); } finally { mute = null; process.env.PATH = P0; }
         noReply.push({ kind, t: t.r, asked: rec.slice(q), said: t.lines.filter((l) => l.startsWith('[child] ') && l.includes("through the hub's starter")) });
       }
-      ok(noReply.every((x) => x.t.open.length === 4 && !x.t.alive.length && !x.t.dead.length && !x.t.duplicate.length && x.asked.length === 8) && signals.length === s0 && socks.every((x) => fs.existsSync(x.sockPath) && fs.existsSync(x.meta)) && direct.length === d0,
+      ok(gateOf(noReply.every((x) => x.t.open.length === 4 && !x.t.alive.length && !x.t.dead.length && !x.t.duplicate.length && x.asked.length === 8)) && signals.length === s0 && gateOf(socks.every((x) => fs.existsSync(x.sockPath) && fs.existsSync(x.meta))) && direct.length === d0,
         `NO REPLY is never evidence — ${noReply.map((x) => x.kind).join(' / ')}: each pass asks its eight, leaves all four pending, retires nothing, signals nothing, starts nothing here`, noReply.map((x) => ({ kind: x.kind, t: x.t, asked: x.asked.length })));
       const said = noReply[0].said, WORD = { silence: 'none in 2000 ms', EAGAIN: 'EAGAIN', overflow: 'OVERFLOW', reject: 'REJECTED' };
-      ok(said.length === 8 && socks.every((x) => ['fuser', 'pgrep'].every((p) => said.some((l) => l.startsWith(`[child] ${p} ${x.sock}: no answer through the hub's starter (${WORD[KIND_OF[x.sock]]}) — no answer, never a kill`))))
-        && noReply.slice(1).every((x) => !x.said.length), `…and SAID by its kind, once per (program, socket) — ${said.length} lines on the first pass (silence / EAGAIN / OVERFLOW / REJECTED), none again`, noReply.map((x) => x.said));
-      ok(noReply[4].asked.every((x) => !('envAdd' in x.o)) && noReply[0].asked.every((x) => x.o.envAdd && x.o.envAdd.PATH === process.env.PATH), 'no PATH in the hub\'s env ⇒ no PATH sent (the starter\'s own) — never an empty one', noReply[4].asked.map((x) => x.o));
+      ok(said.length === 8 && gateOf(socks.every((x) => ['fuser', 'pgrep'].every((p) => said.some((l) => l.startsWith(`[child] ${p} ${x.sock}: no answer through the hub's starter (${WORD[KIND_OF[x.sock]]}) — no answer, never a kill`)))))
+        && verdictOf(noReply.slice(1).every((x) => !x.said.length)), `…and SAID by its kind, once per (program, socket) — ${said.length} lines on the first pass (silence / EAGAIN / OVERFLOW / REJECTED), none again`, noReply.map((x) => x.said));
+      ok(gateOf(noReply[4].asked.every((x) => !('envAdd' in x.o))) && verdictOf(noReply[0].asked.every((x) => x.o.envAdd && x.o.envAdd.PATH === process.env.PATH)), 'no PATH in the hub\'s env ⇒ no PATH sent (the starter\'s own) — never an empty one', noReply[4].asked.map((x) => x.o));
       // (f) RED (r4793): the tip da7320225's reading — through runViaStarter's table — reads an output past the buffer, a run that rejects
       // and an end with neither a number nor a signal as exit 1, «nobody owns it»: three live sockets retired as dead
       const TIP3 = C3.tip, TIPKIND = { [TIP3.over.sock]: 'overflow', [TIP3.rej.sock]: 'reject', [TIP3.noexit.sock]: 'no-exit' };
@@ -332,10 +332,10 @@ try {
       await until(() => !alive(v.pid), 3000);
       const asked3 = rec.slice(q0);
       ok(tools(asked3.map((x) => x.cmd)) === 'fuser fuser fuser fuser fuser pgrep' && tools(direct.slice(d1)) === '', `the pass's six questions — fuser ×5 (four sockets, then the retired one's master), pgrep ×1 (a dead socket's rung) — asked of the starter, NONE started from the hub's process (${tools(direct.slice(d1)) || 'none'})`, asked3.map((x) => x.cmd));
-      ok(asked3.every((x) => x.o.timeoutMs === (x.cmd === 'sh' ? 20000 : 2000) && x.o.maxBuffer === 4 * 1024 * 1024 && x.o.capture === true && x.o.envAdd && x.o.envAdd.PATH === process.env.PATH && Object.keys(x.o.envAdd).length === 1),
+      ok(verdictOf(asked3.every((x) => x.o.timeoutMs === (x.cmd === 'sh' ? 20000 : 2000) && x.o.maxBuffer === 4 * 1024 * 1024 && x.o.capture === true && x.o.envAdd && x.o.envAdd.PATH === process.env.PATH && Object.keys(x.o.envAdd).length === 1)),
         'THE BOUND, THE BUFFER AND THE ENV each hands: fuser / pgrep 2 s, runChild\'s 4 MiB, the hub\'s PATH of the moment and no other name', asked3.map((x) => ({ cmd: x.cmd, o: x.o })));
       ok(b.r.alive.sort().join() === [M3.up.sock, M3.dNew.sock].sort().join() && b.r.dead.join() === M3.gone.sock && b.r.duplicate.join() === M3.dOld.sock && !b.r.open.length
-        && !fs.existsSync(M3.gone.sockPath) && !fs.existsSync(M3.dOld.sockPath) && signals.some(([pid, sig]) => pid === v.pid && sig === 'SIGTERM') && !alive(v.pid),
+        && !fs.existsSync(M3.gone.sockPath) && !fs.existsSync(M3.dOld.sockPath) && gateOf(signals.some(([pid, sig]) => pid === v.pid && sig === 'SIGTERM')) && !alive(v.pid),
         `…with the release's answers: alive ${b.r.alive.join(' ')} · dead ${b.r.dead.join(' ')} · the older duplicate retired (its program proven ended), its wrapper and then its socket's master — the wrapper's proven parent — SIGTERMed by their births`, b.r);
       // (c) RED: a copy whose re-probe runner is the release's (runChild)
       const O3 = C3.old;
@@ -434,11 +434,11 @@ try {
     const r4 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, '  if (total <= ATTACH_BATCH) one(); else loopTurn(one);', '  one();', 'b-cd4b-first-in-turn'), 'cd4b-first-in-turn')), 'batches-red4');
     const r5 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, '    if (queue.length) { loopTurn(one); return; }', '    if (queue.length) { setImmediate(one); return; }', 'b-cd4b-immediate-chain'), 'cd4b-immediate-chain')), 'batches-red5');   // stale-pins: kept (the red plants the old chain)
     const cuOk = (c, G) => !!c && c.text === '$ ' + G && c.drop === '$ ';
-    ok(cuOk(g.cuBatched, g.GROWN) && cuOk(g.cuUsed, g.GROWN) && g.cuOther === null,
+    ok(gateOf(cuOk(g.cuBatched, g.GROWN)) && gateOf(cuOk(g.cuUsed, g.GROWN)) && g.cuOther === null,
       `THE ROUND'S MUST: a survivor that WROTE after the restore's read hands it to its attach, in the attach's turn — waiting for a later batch (${JSON.stringify(g.cuBatched)}) and used first; its read's partial last line moves with it (whole records); one that wrote nothing hands nothing`, { batched: g.cuBatched, used: g.cuUsed, other: g.cuOther });
     ok(r3.cuBatched === null && r3.cuUsed === null, 'RED: the catch-up dropped ⇒ the two attaches hand nothing — what was written in the window never reaches the conversation');
-    ok(g.atReturn.live === 20 && g.atReturn.attached === 0 && g.atReturn.pending === 20 && g.usedPend && g.usedAtOnce && g.usedOnce === 1 && g.after === 18 && g.goneAttached === false
-      && g.stillPending && g.thrownAttached && g.allLocal && !!g.warned && !!g.said && g.stepBetween,
+    ok(g.atReturn.live === 20 && g.atReturn.attached === 0 && g.atReturn.pending === 20 && gateOf(g.usedPend) && gateOf(g.usedAtOnce) && g.usedOnce === 1 && g.after === 18 && g.goneAttached === false
+      && gateOf(g.stillPending) && gateOf(g.thrownAttached) && gateOf(g.allLocal) && !!g.warned && !!g.said && verdictOf(g.stepBetween),
       `20 survivors: all 20 in the live set when restoreSessions returns, ${g.atReturn.attached} attached in that turn (the registration's turn holds no attach), ${g.atReturn.pending} waiting with their attach-at-first-use; the step asked after the restore ran between the first and the second batch (the order: ${JSON.stringify(g.order)}); one USED before its batch attached at once (and once: ${g.usedOnce}); then the batches, the one that ended never, the one whose attach threw said and kept pending — its next use attached it; every attach on the local road; said: ${g.said}`, g);
     ok(r4.atReturn.attached === 8 && r5.stepBetween === false && r5.stepAt > 8,
       `RED: the first batch back in the registration's turn ⇒ ${r4.atReturn.attached} attached at its return; the batches chained by setImmediate ⇒ the second batch runs before the step asked after the first (the step at ${r5.stepAt}: ${JSON.stringify(r5.order)})`, { r4: r4.atReturn, r5: r5.order });
@@ -471,7 +471,7 @@ try {
     const noChain = anchored(SHORT(brSrc), "      if (entry.timer) { console.warn(", "      if (false) { console.warn(", 'b-cd4b-no-chain-guard');
     const cr1 = await chain(require(M.write('src/server/boot-restore.js', noChain, 'cd4b-no-chain-guard')), 'chain-red1');
     const cr2 = await chain(require(M.write('src/server/boot-restore.js', anchored(SHORT(brSrc), '      if (entry.carded) return;\n', '', 'b-cd4b-no-card-guard'), 'cd4b-no-card-guard')), 'chain-red2');
-    ok(cg.tries === 7 && cg.cards === 1 && cg.armedSaid === 2 && cg.pending && /spawn EAGAIN/.test(cg.failed || ''),
+    ok(cg.tries === 7 && cg.cards === 1 && cg.armedSaid === 2 && gateOf(cg.pending) && verdictOf(/spawn EAGAIN/.test(cg.failed || '')),
       `ONE CARD, ONE CHAIN: an attach that always throws — 1 batch + 2 uses while its retry is armed + 3 retries + 1 use after = ${cg.tries} tries, ${cg.cards} card; each use said it armed none (${JSON.stringify(cg.uses)}); it stays pending, its failure named`, cg);
     ok(cr1.armedSaid === 0 && cr2.cards > 1, `RED: the chain's guard away ⇒ each failed use arms its own retry (none says it armed none: ${JSON.stringify(cr1.uses)}); the card's guard away ⇒ a card again (${cr2.cards} cards)`, { cr1, cr2 });
     // THE DOOR: the real sender, a chat survivor whose attach still waits
@@ -489,10 +489,10 @@ try {
     };
     const dg = door(require(path.join(REPO, 'src/server/user-input.js')));
     const dr = door(require(M.write('src/server/user-input.js', anchored(uiSrc, UI_HOOK, '    // (the ask taken away)', 'b-cd4b-door'), 'cd4b-door')));
-    ok(dg.attached && dg.written.length === 1 && /typed before its batch/.test(dg.written[0]) && !(dg.r && dg.r.code === 'not_chat'),
+    ok(gateOf(dg.attached) && dg.written.length === 1 && gateOf(/typed before its batch/.test(dg.written[0])) && !(dg.r && dg.r.code === 'not_chat'),
       `the door (the real send): a chat message to a survivor whose attach still waits attaches it and is written (${dg.written.length} line), never refused`, dg);
     ok(!dr.attached && dr.written.length === 0 && !!dr.r && dr.r.code === 'not_chat', `RED the door's ask taken away: «${dr.r && dr.r.error}», nothing written — the message lost`, dr);
-    ok(/async function handleMessage\(data\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(data && typeof data\.sessionId === 'string' && activeSessions\) \{ const s = activeSessions\.get\(data\.sessionId\); if \(s && !s\.pty && typeof s\._attachPending === 'function'\) s\._attachPending\(\); \}\n\s*switch \(data\.type\) \{/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')),
+    ok(verdictOf(/async function handleMessage\(data\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(data && typeof data\.sessionId === 'string' && activeSessions\) \{ const s = activeSessions\.get\(data\.sessionId\); if \(s && !s\.pty && typeof s\._attachPending === 'function'\) s\._attachPending\(\); \}\n\s*switch \(data\.type\) \{/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'))),
       'the page\'s socket (src/ws-handler.js): every message naming a session asks its attach-at-first-use BEFORE the switch (its input, an interrupt, a resize, an attach) — pinned by text: the handler is not loaded here');
   }
   console.log('⑥ B-cd4b (round wzvgb5033): what a survivor wrote between the restore\'s read and its attach reaches the conversation');
@@ -510,12 +510,12 @@ try {
     const rew6 = BR.restoreCatchUp(rb6);
     fs.writeFileSync(f6, '{"type":"another conversation"}\n');
     const lost6 = BR.restoreCatchUp(rb6);
-    ok(none6 === null && !!app6 && app6.text === partial6 + more6 && app6.drop === partial6 && !!rew6 && rew6.text === app6.text && rew6.drop === partial6 && !!lost6 && /rewritten/.test(lost6.skipped || ''),
+    ok(none6 === null && !!app6 && app6.text === partial6 + more6 && app6.drop === partial6 && !!rew6 && rew6.text === app6.text && rew6.drop === partial6 && !!lost6 && verdictOf(/rewritten/.test(lost6.skipped || '')),
       `restoreCatchUp: nothing new ⇒ nothing; appended ⇒ the read's partial last line + what followed (whole records); the ring rewritten ⇒ found after the read's last whole line, the same text; another file ⇒ said, nothing fed («${lost6 && lost6.skipped}»)`, { none6, app6, rew6, lost6 });
     // the backfill (PURE): the LAST source a buffer holds; none ⇒ unset; it reads the restore's own copy, never `<id>.buf` by name
     ok(BR.lastApiKeySource('{"apiKeySource":"none"}\n{"apiKeySource":"ANTHROPIC_API_KEY"}\n') === 'ANTHROPIC_API_KEY' && BR.lastApiKeySource('{"apiKeySource":"ANTHROPIC_API_KEY"}\n{"apiKeySource":"none"}\n') === 'none' && BR.lastApiKeySource('{"type":"system","subtype":"init"}\n') === null && BR.lastApiKeySource('') === null,
       'the backfill: the LATER of two billing sources wins (both orders); a buffer with none ⇒ unset (no meta write follows a null)');
-    ok(/const src = billingRead\.has\(s\) \? billingRead\.get\(s\) : lastApiKeySource\(typeof s\.buffer === 'string' \? s\.buffer : ''\);/.test(brSrc) && /const src = lastApiKeySource\(savedBuffer\); if \(src\) billingRead\.set\(session, src\);/.test(brSrc) && /if \(src\) \{\n\s*s\._apiKeySource = src;/.test(brSrc),
+    ok(gateOf(/const src = billingRead\.has\(s\) \? billingRead\.get\(s\) : lastApiKeySource\(typeof s\.buffer === 'string' \? s\.buffer : ''\);/.test(brSrc)) && gateOf(/const src = lastApiKeySource\(savedBuffer\); if \(src\) billingRead\.set\(session, src\);/.test(brSrc)) && verdictOf(/if \(src\) \{\n\s*s\._apiKeySource = src;/.test(brSrc)),
       'the backfill writes the source the REGISTRATION read (r1487: nothing fed after the attach takes it away), else the copy the restore holds (`s.buffer`: the file resolveWrapperFiles named, a counter collision included), and only a source it found — pinned by text');
     // THE CONSUMER SIDE (src/server/session-stdout.js setupSessionPty `catchUp`, the REAL claude consumer): the caught-up records are
     // parsed before the pty's first byte, the buffer holds them once (the partial line not doubled). RED: the feed taken away
@@ -542,10 +542,10 @@ try {
       `the consumer side: the caught-up records reach the REAL claude consumer before the pty's first byte (its init parsed: apiKeySource «${fg.apiKeySource}») and the buffer holds them once, the partial line not doubled`, fg);
     ok(!fr.threw && fr.apiKeySource === null, 'RED: the feed taken away ⇒ the consumer never sees the caught-up init (apiKeySource unset): what the CLI said in the window is lost to the conversation', fr);
     // an attach that keeps failing is said AT THE CONVERSATION (the card road) and in the send's own words, never «not a live chat session»
-    ok(/require\('\.\.\/normalizers'\)\.feedPeerCard\(session, \{ fromName: 'VibeSpace', kind: 'notification', text: `This conversation could not be reconnected after the restart \(\$\{why\}\)/.test(brSrc)
-      && /if \(!session\.pty && session\._attachFailed\) return \{ ok: false, code: 'attach_failed'/.test(fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8'))
-      && /if \(session && !session\.pty && typeof session\._attachPending === 'function'\) session\._attachPending\(\);/.test(fs.readFileSync(path.join(REPO, 'src/server/permission-answer.js'), 'utf8'))
-      && /return s && \(s\.pty !== null \|\| typeof s\._attachPending === 'function'\) \? null : \{ cause: 'not-running'/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8')),
+    ok(gateOf(/require\('\.\.\/normalizers'\)\.feedPeerCard\(session, \{ fromName: 'VibeSpace', kind: 'notification', text: `This conversation could not be reconnected after the restart \(\$\{why\}\)/.test(brSrc))
+      && gateOf(/if \(!session\.pty && session\._attachFailed\) return \{ ok: false, code: 'attach_failed'/.test(fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8')))
+      && gateOf(/if \(session && !session\.pty && typeof session\._attachPending === 'function'\) session\._attachPending\(\);/.test(fs.readFileSync(path.join(REPO, 'src/server/permission-answer.js'), 'utf8')))
+      && verdictOf(/return s && \(s\.pty !== null \|\| typeof s\._attachPending === 'function'\) \? null : \{ cause: 'not-running'/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8'))),
       'a survivor whose attach spent its retries: ONE card at the conversation, and a send answers «could not be reconnected after the restart (its words)»; the permission answer asks the attach first; the deliverer\'s wake gate counts a waiting survivor as running (r587) — pinned by text');
   }
   console.log('⑥b B-cd4b (the round\'s follow): the catch-up\'s close is said when it fails, never swallowed (test-fd-close-census\'s law)');
@@ -563,8 +563,8 @@ try {
     const cg6 = await failClose(BR), cr6 = await failClose(require(M.write('src/server/boot-restore.js', anchored(brSrc, SAID, 'catch { }', 'b-cd4b-close-swallowed'), 'cd4b-close-swallowed')));
     const saidRe = /^\[boot-restore\] the catch-up could not close its descriptor of \S*fc\.buf \(EBADF\)$/;
     const read6 = (x) => !!x.r && x.r.text === '{"type":"b"}\n' && x.r.drop === '{"ty';
-    ok(read6(cg6) && cg6.lines.filter((l) => saidRe.test(l)).length === 1, `a failed close is said once (${JSON.stringify(cg6.lines)}) and the catch-up still returns what it read (${JSON.stringify(cg6.r)})`, cg6);
-    ok(read6(cr6) && !cr6.lines.some((l) => /could not close/.test(l)), 'RED: the empty catch put back ⇒ the same return, the failed close unheard', cr6);
+    ok(gateOf(read6(cg6)) && cg6.lines.filter((l) => saidRe.test(l)).length === 1, `a failed close is said once (${JSON.stringify(cg6.lines)}) and the catch-up still returns what it read (${JSON.stringify(cg6.r)})`, cg6);
+    ok(gateOf(read6(cr6)) && !cr6.lines.some((l) => /could not close/.test(l)), 'RED: the empty catch put back ⇒ the same return, the failed close unheard', cr6);
   }
   console.log('⑦ B-cd4b (the round\'s follow): one job a loop turn — the listen step in turns of its own, the restore\'s batches in the same queue');
   {
@@ -608,10 +608,10 @@ try {
     const lA = srv.indexOf('  migrateLegacyHomeProjects(); hub.turn(() => { //'), lB = srv.indexOf('\n  restoreSessions(); hub.turn(() => { bootBrowserKeeper(); ');
     const lI = srv.indexOf("try { require('./src/server/local-index.js').configure("), lEnd = srv.indexOf("\n}, 'listen-rest'); }, 'restore'); })));");   // the separation's B2b: the listen rides .finally(() => hubForm.then(…)) — one more close
     ok(lA > 0 && srv.indexOf('\n', lA) === lB && lI > lB && lEnd > lI && srv.split("require('./src/server/local-index.js').configure(").length === 2
-      && /const hub = require\('\.\/src\/server\/tls\.js'\)\.create\(\{[^\n]*, step: \(name, fn\) => bootTrace\.step\(name, fn\) \}\);/.test(srv),
+      && verdictOf(/const hub = require\('\.\/src\/server\/tls\.js'\)\.create\(\{[^\n]*, step: \(name, fn\) => bootTrace\.step\(name, fn\) \}\);/.test(srv)),
       'server.js: the restore\'s registration in a loop turn of its own (\'restore\'), the rest of the listen step in the turn after it (\'listen-rest\'), the CLI index configured in that last turn, the turns named in the boot trace');
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + (e && e.stack || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

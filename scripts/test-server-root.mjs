@@ -26,7 +26,7 @@ const require = createRequire(import.meta.url);
 const SR = require(path.join(REPO, 'src/server-root.js'));
 
 let pass = 0, fail = 0;
-function ok(cond, name, detail) {
+function ok(cond, name, detail) { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); }
 }
@@ -98,9 +98,9 @@ function runTable(mod, rows = ROWS) {
 
 console.log('— ① the verdict table');
 const results = runTable(SR);
-for (const r of results) ok(r.good, `${r.name} → ${r.want}`, r.got);
+for (const r of results) ok(verdictOf(r.good), `${r.name} → ${r.want}`, r.got);
 const kindsSeen = new Set(results.map((r) => r.want));
-ok(SR.KINDS.every((k) => kindsSeen.has(k)) && SR.KINDS.length === 6, `the table covers every kind the module declares (${SR.KINDS.join(', ')}) — ${ROWS.length} rows`);
+ok(gateOf(SR.KINDS.every((k) => kindsSeen.has(k))) && SR.KINDS.length === 6, `the table covers every kind the module declares (${SR.KINDS.join(', ')}) — ${ROWS.length} rows`);
 ok(ROWS.length >= 30, `the table is not vacuous (${ROWS.length} rows)`);
 
 console.log('— ② gitdir parsing, the journal sentence, purity');
@@ -110,8 +110,8 @@ ok(SR.parseGitFile('ref: refs/heads/x') === null && SR.parseGitFile('') === null
 ok(SR.checkoutOfCommonDir('/h/v/.git') === '/h/v' && SR.checkoutOfCommonDir('/srv/v.git/') === '/srv/v.git', 'checkoutOfCommonDir: <repo>/.git names the repo, a bare dir names itself');
 const wtLine = SR.refusalLine(SR.rootVerdict(ROWS.find(([n]) => n.startsWith('a WORKTREE under /var/tmp (the 2026-10-01 incident shape)'))[1]));
 ok(wtLine === "hooks not registered: this server runs from a git worktree of /home/u/vibespace — the owner's CLI config belongs to that checkout's instance", 'refusalLine: THE worktree journal sentence, word for word', wtLine);
-ok(/^hooks not registered: this server runs from a temporary folder \(\/tmp\/vs-rail-9 is under \/tmp\) — a throwaway server never writes the owner's CLI config$/.test(SR.refusalLine(SR.rootVerdict(ROWS.find(([n]) => n.startsWith('a plain copy under /tmp/vs-* (no git)'))[1]))), 'refusalLine: the tmp sentence names the root and its tmp root');
-ok(/^hooks not registered: VIBESPACE_SKIP_AGENT_HOOKS=1 is set for this server$/.test(SR.refusalLine(SR.rootVerdict(ROWS.find(([n]) => n.startsWith('VIBESPACE_SKIP_AGENT_HOOKS=1 on a checkout'))[1]))), 'refusalLine: the override sentence names the env var');
+ok(verdictOf(/^hooks not registered: this server runs from a temporary folder \(\/tmp\/vs-rail-9 is under \/tmp\) — a throwaway server never writes the owner's CLI config$/.test(SR.refusalLine(SR.rootVerdict(ROWS.find(([n]) => n.startsWith('a plain copy under /tmp/vs-* (no git)'))[1])))), 'refusalLine: the tmp sentence names the root and its tmp root');
+ok(verdictOf(/^hooks not registered: VIBESPACE_SKIP_AGENT_HOOKS=1 is set for this server$/.test(SR.refusalLine(SR.rootVerdict(ROWS.find(([n]) => n.startsWith('VIBESPACE_SKIP_AGENT_HOOKS=1 on a checkout'))[1])))), 'refusalLine: the override sentence names the env var');
 ok(SR.refusalLine(SR.rootVerdict(ROWS[0][1])) === null && SR.refusalLine(null) === null, 'refusalLine: an ok verdict has no sentence');
 const src = fs.readFileSync(path.join(REPO, 'src/server-root.js'), 'utf8');
 const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -125,12 +125,12 @@ const CONTROLS = [
   { what: 'FORCE honoured whatever the HOME', needle: 'if (isAbs(h) && roots.some((t) => isUnder(h, t))) return', repl: 'if (true) return', reds: ['FORCE with the REAL HOME is ignored — a worktree still refused, and the why says so', 'FORCE with no HOME on a WORKTREE is ignored — still refused'] },
 ];
 for (const c of CONTROLS) {
-  ok(src.includes(c.needle), `control "${c.what}": the needle is in the shipped source (a stale control would prove nothing)`);
+  ok(verdictOf(src.includes(c.needle)), `control "${c.what}": the needle is in the shipped source (a stale control would prove nothing)`);
   const mod = M.load('src/server-root.js', editAnchor(src, c.needle, c.repl, "src/server-root.js"), c.what.replace(/\W+/g, '-').slice(0, 24));
   const red = runTable(mod).filter((r) => !r.good).map((r) => r.name);
-  ok(c.reds.every((n) => red.includes(n)), `control "${c.what}": the named rows go RED on the weakened copy (${red.length} red)`, red);
+  ok(verdictOf(c.reds.every((n) => red.includes(n))), `control "${c.what}": the named rows go RED on the weakened copy (${red.length} red)`, red);
 }
-for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(verdictOf(row.pass), row.name, row.detail);
 
 console.log('— ④ THE WRITER CENSUS: every site that can write the owner\'s CLI config asks the root verdict first');
 // DERIVED from the source: a line that calls a CLI-config writer (the CAS
@@ -185,7 +185,7 @@ const writers = SCOPE.flatMap((f) => writersIn(f, fs.readFileSync(path.join(REPO
 ok(writers.length === SITES.length, `the census finds exactly the ${SITES.length} named writers (${writers.length} found over ${SCOPE.length} files)`, writers.map((w) => `${w.file}:${w.line}`));
 for (const site of SITES) {
   const hit = writers.filter((w) => w.file === site.file && site.re.test(w.text));
-  ok(hit.length === 1 && hit[0].guarded, `${site.what} asks the root verdict first (${site.file}${hit[0] ? ':' + hit[0].line : ' — NOT FOUND'})`, hit);
+  ok(hit.length === 1 && verdictOf(hit[0].guarded), `${site.what} asks the root verdict first (${site.file}${hit[0] ? ':' + hit[0].line : ' — NOT FOUND'})`, hit);
 }
 const unlisted = writers.filter((w) => !SITES.some((x) => x.file === w.file && x.re.test(w.text)));
 ok(unlisted.length === 0, 'no writer outside the table', unlisted);
@@ -193,7 +193,7 @@ ok(unlisted.length === 0, 'no writer outside the table', unlisted);
   const planted = writersIn('src/x.js', "function f() {\n  writeJsonManaged(file, {}, m);\n}\n");
   const guarded = writersIn('src/x.js', "function f() {\n  if (refuseOwnerWrite()) return;\n  writeJsonManaged(file, {}, m);\n}\n");
   const probe = writersIn('src/x.js', 'x + `"$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --status`;\n');
-  ok(planted.length === 1 && !planted[0].guarded && guarded.length === 1 && guarded[0].guarded && probe.length === 0,
+  ok(planted.length === 1 && !planted[0].guarded && guarded.length === 1 && gateOf(guarded[0].guarded) && probe.length === 0,
     'NEGATIVE CONTROL: an unguarded writer is found and unguarded, a guarded one passes, the --status probe is not a writer');
 }
 { // CONTROL (verify r1 ②): a mutant COPY of the REAL cli-config sync with every guard spelling removed is found UNGUARDED by the census
@@ -201,7 +201,7 @@ ok(unlisted.length === 0, 'no writer outside the table', unlisted);
   const lost = editAnchor(syncSrc, /refusalNow\(\)|ownerWriteRefusal\(\)|refuseOwnerWrite\(\)|\(refused \? /g, (m) => (m === '(refused ? ' ? '(false ? ' : 'null'), "src/server/harness-config-sync.js");
   const f = M.write('src/server/harness-config-sync.js', lost, 'no-guard');
   const w = writersIn('src/server/harness-config-sync.js', fs.readFileSync(f, 'utf8'));
-  ok(lost !== syncSrc && w.length === 1 && !w[0].guarded && /return applyThisMachine\(\{ reason \}\)/.test(w[0].text), 'CONTROL: a copy of harness-config-sync.js without its guard is found UNGUARDED (the census goes red on a real file)', w);
+  ok(lost !== syncSrc && w.length === 1 && !w[0].guarded && verdictOf(/return applyThisMachine\(\{ reason \}\)/.test(w[0].text)), 'CONTROL: a copy of harness-config-sync.js without its guard is found UNGUARDED (the census goes red on a real file)', w);
   const nameHit = writersIn('src/x.js', "  fs.writeFileSync(path.join(os.homedir(), '.codex', 'config.toml'), toml);\n");
   ok(nameHit.length === 1 && !nameHit[0].guarded, 'CONTROL: a raw writeFileSync toward a CLI config file NAME is a writer (unguarded, no row)');
 }
@@ -209,34 +209,34 @@ ok(unlisted.length === 0, 'no writer outside the table', unlisted);
 console.log('— ⑤ wiring + the words: the status surfaces say the refusal, never "registered"');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const srv = read('server.js'), gen = read('src/server/agent-tool-generators.js'), sync = read('src/server/harness-config-sync.js');
-ok(/rootVerdict\(\{\s*\.\.\.f,\s*tmpRoots: f\.tmpRoots \|\| tmpSpellings\(\),\s*envOverride: process\.env\[serverRoot\.OVERRIDE_ENV\] === '1',\s*force: process\.env\[serverRoot\.FORCE_ENV\] === '1',\s*home: f\.home \|\| os\.homedir\(\),/.test(gen)
-  && gen.includes("const tmpSpellings = () => require('./throwaway-root.js').tmpRootsOf({ home: os.homedir(), realpath: (p) => p });") && !/\bTMP_ROOTS\b/.test(gen) && /for \(const t of tmpSpellings\(\)\) tmp\.push\(await realOr\(t\)\);\n\s*facts\.tmpRoots = tmp; facts\.home = await realOr\(os\.homedir\(\)\);/.test(gen),
+ok(gateOf(/rootVerdict\(\{\s*\.\.\.f,\s*tmpRoots: f\.tmpRoots \|\| tmpSpellings\(\),\s*envOverride: process\.env\[serverRoot\.OVERRIDE_ENV\] === '1',\s*force: process\.env\[serverRoot\.FORCE_ENV\] === '1',\s*home: f\.home \|\| os\.homedir\(\),/.test(gen))
+  && gateOf(gen.includes("const tmpSpellings = () => require('./throwaway-root.js').tmpRootsOf({ home: os.homedir(), realpath: (p) => p });")) && !/\bTMP_ROOTS\b/.test(gen) && verdictOf(/for \(const t of tmpSpellings\(\)\) tmp\.push\(await realOr\(t\)\);\n\s*facts\.tmpRoots = tmp; facts\.home = await realOr\(os\.homedir\(\)\);/.test(gen)),
   "the ORCH reads THE one list of temp roots as spelled (src/server/throwaway-root.js tmpRootsOf — B-ba47 shape H r1278), both env flags as booleans, and the real HOME — realpath'd in the facts' own read (B-1425: off the loop)");
-ok(/if \(st\.isDirectory\(\)\) \{ facts\.gitDir = facts\.gitCommonDir = await realOr\(dotGit\); return facts; \}/.test(gen) && /path\.join\(facts\.gitDir, 'commondir'\)/.test(gen) && !/execFileSync\('git'/.test(gen.slice(gen.indexOf('function readRootFacts'), gen.indexOf('function rootVerdict'))),
+ok(gateOf(/if \(st\.isDirectory\(\)\) \{ facts\.gitDir = facts\.gitCommonDir = await realOr\(dotGit\); return facts; \}/.test(gen)) && gateOf(/path\.join\(facts\.gitDir, 'commondir'\)/.test(gen)) && !/execFileSync\('git'/.test(gen.slice(gen.indexOf('function readRootFacts'), gen.indexOf('function rootVerdict'))),
   'the facts come from fs: .git dir → checkout, .git file → gitdir + commondir (never a git child at boot)');
-ok(/const k = r && !r\.pending \? `\$\{r\.kind\}\|\$\{r\.why\}` : null;\n  if \(k && _refusalSaid !== k\) \{ _refusalSaid = k; console\.log\(r\.line\); \}/.test(gen), 'ONE journal line per refusal: the first refused writer says it, the latch keeps the rest quiet — never spent on «not judged yet» (B-1425 r827)');
-ok(/function hookRegistrationSafe\(\) \{ return rootVerdict\(\)\.ok; \}/.test(gen) && !/here\.startsWith\(tmp\)/.test(gen), 'hookRegistrationSafe() IS the verdict now (the old /tmp-only prefix test is gone)');
-ok(/refused: ownerWriteRefusal\(\), registeredAfterError: _registeredAfterError \};/.test(gen) && /const refused = refusalNow\(\);\n\s*return \{ safe: !refused, refused, registeredAfterError: recoveryNow\(\), files:/.test(sync), 'agentHooksStatus and cliConfigStatus carry the refusal (verify r2: and the recovery fact)');
-ok(/hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,\n\s*log:/.test(srv) && /hosts\.ownerWriteRefusal = refuseOwnerWrite;/.test(srv) && /cliConfigPlanB64, cliConfigGate: \(\) => harnessConfig\.startGate\(\), ownerWriteRefusal: refuseOwnerWrite,/.test(srv),
+ok(verdictOf(/const k = r && !r\.pending \? `\$\{r\.kind\}\|\$\{r\.why\}` : null;\n  if \(k && _refusalSaid !== k\) \{ _refusalSaid = k; console\.log\(r\.line\); \}/.test(gen)), 'ONE journal line per refusal: the first refused writer says it, the latch keeps the rest quiet — never spent on «not judged yet» (B-1425 r827)');
+ok(gateOf(/function hookRegistrationSafe\(\) \{ return rootVerdict\(\)\.ok; \}/.test(gen)) && !/here\.startsWith\(tmp\)/.test(gen), 'hookRegistrationSafe() IS the verdict now (the old /tmp-only prefix test is gone)');
+ok(gateOf(/refused: ownerWriteRefusal\(\), registeredAfterError: _registeredAfterError \};/.test(gen)) && verdictOf(/const refused = refusalNow\(\);\n\s*return \{ safe: !refused, refused, registeredAfterError: recoveryNow\(\), files:/.test(sync)), 'agentHooksStatus and cliConfigStatus carry the refusal (verify r2: and the recovery fact)');
+ok(gateOf(/hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,\n\s*log:/.test(srv)) && gateOf(/hosts\.ownerWriteRefusal = refuseOwnerWrite;/.test(srv)) && verdictOf(/cliConfigPlanB64, cliConfigGate: \(\) => harnessConfig\.startGate\(\), ownerWriteRefusal: refuseOwnerWrite,/.test(srv)),
   'server.js hands the verdict to the cli-config sync, to hosts and to the ws ctx');
-ok(/'cliConfigPlanB64', 'cliConfigGate', 'ownerWriteRefusal',/.test(read('src/ws-handler.js')) && /cliConfigPlanB64, cliConfigGate, ownerWriteRefusal,\n/.test(read('src/ws-create.js')), 'ownerWriteRefusal is in WS_CTX_CONTRACT and ws-create destructures it');
-ok(/if \(results\.refused\) return res\.status\(409\)\.json\(\{ error: results\.refused\.line, refused: results\.refused/.test(srv), 'the explicit Install route refuses by name (409 + the sentence), never "installed"');
-ok(/refused: this\._ownerWriteRefusal\(\) \};/.test(read('src/hosts.js')), "a host's agent-tools status carries the refusal too");
+ok(gateOf(/'cliConfigPlanB64', 'cliConfigGate', 'ownerWriteRefusal',/.test(read('src/ws-handler.js'))) && verdictOf(/cliConfigPlanB64, cliConfigGate, ownerWriteRefusal,\n/.test(read('src/ws-create.js'))), 'ownerWriteRefusal is in WS_CTX_CONTRACT and ws-create destructures it');
+ok(verdictOf(/if \(results\.refused\) return res\.status\(409\)\.json\(\{ error: results\.refused\.line, refused: results\.refused/.test(srv)), 'the explicit Install route refuses by name (409 + the sentence), never "installed"');
+ok(verdictOf(/refused: this\._ownerWriteRefusal\(\) \};/.test(read('src/hosts.js'))), "a host's agent-tools status carries the refusal too");
 const ma = read('src/lib/manage-agents.js'), su = read('src/lib/settings-ui.js');
-ok(/\} else if \(hs\.refused\) \{[\s\S]{0,600}refusalLine\(hs\.refused, \{ t \}\)\.text[\s\S]{0,300}row\.append\(left\);/.test(ma) && !/\} else if \(hs\.refused\) \{[\s\S]{0,700}installBtn/.test(ma),
+ok(gateOf(/\} else if \(hs\.refused\) \{[\s\S]{0,600}refusalLine\(hs\.refused, \{ t \}\)\.text[\s\S]{0,300}row\.append\(left\);/.test(ma)) && !/\} else if \(hs\.refused\) \{[\s\S]{0,700}installBtn/.test(ma),
   'Manage Agents: a refused root shows the refusal and NO Install / Remove (no ✓ read off the owner\'s file)');
-ok(/if \(cc\.refused\) lines\.push\(refusalLine\(cc\.refused, \{ t, remote \}\)\)/.test(ma) && /refused: rs\.refused \|\| null/.test(ma), 'the chips lead with the refusal, on this machine and on a host row');
-ok(/if \(cc\.refused\) addLine\(refusalLine\(cc\.refused, \{ t \}\)\)/.test(su) && /if \(own && own\.cliConfig && own\.cliConfig\.refused\) addLine\(refusalLine\(own\.cliConfig\.refused, \{ t, remote: true \}\)\)/.test(su),
+ok(gateOf(/if \(cc\.refused\) lines\.push\(refusalLine\(cc\.refused, \{ t, remote \}\)\)/.test(ma)) && verdictOf(/refused: rs\.refused \|\| null/.test(ma)), 'the chips lead with the refusal, on this machine and on a host row');
+ok(gateOf(/if \(cc\.refused\) addLine\(refusalLine\(cc\.refused, \{ t \}\)\)/.test(su)) && verdictOf(/if \(own && own\.cliConfig && own\.cliConfig\.refused\) addLine\(refusalLine\(own\.cliConfig\.refused, \{ t, remote: true \}\)\)/.test(su)),
   'Settings: the cli-config chip and "Check machines…" say the refusal');
 const chips = await import(path.join(REPO, 'src/lib/cli-config-chips.js'));
 const tt = (s, p) => String(s).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != null ? p[k] : `{${k}}`));
 const words = Object.fromEntries(['worktree', 'tmp', 'override', 'unknown'].map((k) => [k, chips.refusalLine({ kind: k, checkout: '/home/u/vibespace' }, { t: tt })]));
-ok(Object.values(words).every((w) => w.tone === 'warn' && /^Not registered — /.test(w.text) && !/\bregistered\b(?<!Not registered)/.test(w.text.slice(15))), 'every refusal kind has its line, each starts "Not registered —" and none says registered', words);
-ok(words.worktree.text.includes('/home/u/vibespace') && /git worktree/.test(words.worktree.text) && /temporary folder/.test(words.tmp.text) && /VIBESPACE_SKIP_AGENT_HOOKS=1/.test(words.override.text), '…naming the checkout, the temporary folder, the env var', words);
-ok(/other machines either/.test(chips.refusalLine({ kind: 'tmp' }, { t: tt, remote: true }).text) && chips.refusalLine(null, { t: tt }) === null, '…a remote surface adds "no CLI config on other machines either"; no refusal → no line');
+ok(verdictOf(Object.values(words).every((w) => w.tone === 'warn' && /^Not registered — /.test(w.text) && !/\bregistered\b(?<!Not registered)/.test(w.text.slice(15)))), 'every refusal kind has its line, each starts "Not registered —" and none says registered', words);
+ok(gateOf(words.worktree.text.includes('/home/u/vibespace')) && gateOf(/git worktree/.test(words.worktree.text)) && gateOf(/temporary folder/.test(words.tmp.text)) && verdictOf(/VIBESPACE_SKIP_AGENT_HOOKS=1/.test(words.override.text)), '…naming the checkout, the temporary folder, the env var', words);
+ok(gateOf(/other machines either/.test(chips.refusalLine({ kind: 'tmp' }, { t: tt, remote: true }).text)) && chips.refusalLine(null, { t: tt }) === null, '…a remote surface adds "no CLI config on other machines either"; no refusal → no line');
 const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
 const keysUsed = [...read('src/lib/cli-config-chips.js').matchAll(/t\('((?:Not registered|It writes no CLI config)[^']*)'/g)].map((m) => m[1]);
-ok(keysUsed.length === 5 && keysUsed.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')), `the ${keysUsed.length} new words have zh + ja entries`, keysUsed);
+ok(keysUsed.length === 5 && verdictOf(keysUsed.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))), `the ${keysUsed.length} new words have zh + ja entries`, keysUsed);
 
 console.log('— ⑦ verify r2: the unknown verdict is RE-JUDGED with backoff, said ONCE PER CAUSE, the recovery said once and shown on the chip; the facts age out; FORCE and the device daemon censused');
 {
@@ -244,10 +244,10 @@ console.log('— ⑦ verify r2: the unknown verdict is RE-JUDGED with backoff, s
   ok(JSON.stringify(SR.REJUDGE_BACKOFF_MS) === JSON.stringify([30000, 60000, 120000, 300000, 600000, 1800000]) && [0, 1, 2, 3, 4, 5, 6, 40].map(SR.nextRejudgeDelay).join() === '30000,60000,120000,300000,600000,1800000,1800000,1800000' && SR.nextRejudgeDelay(-3) === 30000 && SR.nextRejudgeDelay('x') === 30000, 'PURE: the re-judge ladder 30 s → 60 s → 2 → 5 → 10 → 30 min, then the cap for ever; a bad attempt reads as the first');
   ok(SR.ROOT_FACTS_TTL_MS === 60000, 'PURE: facts read without error are kept 60 s at most');
   const d1 = SR.unknownNoticeDue(null, 'the server root could not be judged: /x/.git cannot be read (EIO)');
-  ok(d1.post === true && d1.memo.cause.startsWith('the server root') && SR.unknownNoticeDue(d1.memo, d1.memo.cause).post === false && SR.unknownNoticeDue(d1.memo, 'another cause').post === true && SR.unknownNoticeDue({ cause: 'x' }, '').post === false && SR.unknownNoticeDue('garbage', 'c').post === true, 'PURE: the unknown notice is due once per CAUSE — the same cause again (the next boot) posts nothing, a new cause posts, no cause posts nothing, a garbage memo is no memo');
-  ok(/^VibeSpace registered the agent hooks at 09:41 after an earlier read error \(EIO on \.git\) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction\.$/.test(SR.registeredAfterErrorLine({ time: '09:41', error: 'EIO on .git' })), 'PURE: the recovery sentence names the time and the earlier error');
-  ok(/if \(!v\.ok && v\.kind === 'unknown' && !f\.pending\) _lastRootError = \{ at: t, error: f\.error \|\| v\.why \};/.test(gen) && /if \(_lastRootError && !_registeredAfterError && Object\.values\(results\)\.some\(\(x\) => x && x\.ok\)\) _registeredAfterError = \{ at: Date\.now\(\), error: _lastRootError\.error, since: _lastRootError\.at \};/.test(gen) && /function rootRecovery\(\) \{ return \{ lastError: _lastRootError, registeredAfterError: _registeredAfterError \}; \}/.test(gen) && /readRootFacts, rootRecovery,/.test(gen), 'ORCH: the last unknown is remembered, a registration after it is the recovery fact (set once), rootRecovery() exports both');
-  ok(/const due = serverRoot\.unknownNoticeDue\(memo, refused\.why \|\| refused\.line\);/.test(watchSrc) && /posted = Number\(seen\) > 0;\n\s*if \(posted\) \{ remember\(due\.memo\); if \(hold\.writable\('a write of the hooks notice record'\)\) writeMemo\(due\.memo\); \}/.test(watchSrc) && /function writeMemo\(m\) \{ try \{ writeJsonAtomic\(memoFile, m\); \}/.test(watchSrc) && /const \{ writeJsonAtomic \} = require\('\.\.\/channel-store\.js'\);/.test(watchSrc), 'the watch: the unknown notice is posted once per cause — the memo persisted through THE atomic writer, written only when a client saw the toast (B-f276: and never over a memo that could not be read)');
+  ok(d1.post === true && gateOf(d1.memo.cause.startsWith('the server root')) && SR.unknownNoticeDue(d1.memo, d1.memo.cause).post === false && SR.unknownNoticeDue(d1.memo, 'another cause').post === true && SR.unknownNoticeDue({ cause: 'x' }, '').post === false && SR.unknownNoticeDue('garbage', 'c').post === true, 'PURE: the unknown notice is due once per CAUSE — the same cause again (the next boot) posts nothing, a new cause posts, no cause posts nothing, a garbage memo is no memo');
+  ok(verdictOf(/^VibeSpace registered the agent hooks at 09:41 after an earlier read error \(EIO on \.git\) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction\.$/.test(SR.registeredAfterErrorLine({ time: '09:41', error: 'EIO on .git' }))), 'PURE: the recovery sentence names the time and the earlier error');
+  ok(gateOf(/if \(!v\.ok && v\.kind === 'unknown' && !f\.pending\) _lastRootError = \{ at: t, error: f\.error \|\| v\.why \};/.test(gen)) && gateOf(/if \(_lastRootError && !_registeredAfterError && Object\.values\(results\)\.some\(\(x\) => x && x\.ok\)\) _registeredAfterError = \{ at: Date\.now\(\), error: _lastRootError\.error, since: _lastRootError\.at \};/.test(gen)) && gateOf(/function rootRecovery\(\) \{ return \{ lastError: _lastRootError, registeredAfterError: _registeredAfterError \}; \}/.test(gen)) && verdictOf(/readRootFacts, rootRecovery,/.test(gen)), 'ORCH: the last unknown is remembered, a registration after it is the recovery fact (set once), rootRecovery() exports both');
+  ok(gateOf(/const due = serverRoot\.unknownNoticeDue\(memo, refused\.why \|\| refused\.line\);/.test(watchSrc)) && gateOf(/posted = Number\(seen\) > 0;\n\s*if \(posted\) \{ remember\(due\.memo\); if \(hold\.writable\('a write of the hooks notice record'\)\) writeMemo\(due\.memo\); \}/.test(watchSrc)) && gateOf(/function writeMemo\(m\) \{ try \{ writeJsonAtomic\(memoFile, m\); \}/.test(watchSrc)) && verdictOf(/const \{ writeJsonAtomic \} = require\('\.\.\/channel-store\.js'\);/.test(watchSrc)), 'the watch: the unknown notice is posted once per cause — the memo persisted through THE atomic writer, written only when a client saw the toast (B-f276: and never over a memo that could not be read)');
   // THE REAL LEG: the watch over fake timers + a scripted ensureAgentHooks + a recording serverNotice + a scratch data dir
   const HW = require(path.join(REPO, 'src/server/hook-root-watch.js'));
   const wdir = fs.mkdtempSync(path.join('/tmp', 'vs-srvroot-watch-')); process.on('exit', () => { try { fs.rmSync(wdir, { recursive: true, force: true }); } catch { } });
@@ -256,7 +256,7 @@ console.log('— ⑦ verify r2: the unknown verdict is RE-JUDGED with backoff, s
   const w = HW.create({ dataDir: wdir, ensureAgentHooks: () => (verdict.refused ? { skipped: true, refused: verdict.refused } : { claude: { ok: true } }), rootRecovery: () => ({ lastError: null, registeredAfterError: registered }), ownerWriteRefusal: () => verdict.refused || null, integrationEnabled: () => true, serverNotice: (key, text, o) => { notices.push({ key, text, i18n: o && o.i18n }); return clients; }, setTimer: (fn, ms) => { const h = { fn, ms, unref() { } }; timers.push(h); return h; }, now: () => 0 });
   const fire = async () => { const h = timers.shift(); if (h) h.fn(); await new Promise((r) => setImmediate(r)); };   // (B-ddf3 u2 line 1: sync() lands a moment later — a Promise)
   await w.sync();
-  ok(notices.length === 1 && notices[0].key === 'hook-root-unknown' && notices[0].i18n && notices[0].i18n.key === HW.UNKNOWN_KEY && /EIO/.test(notices[0].i18n.params.error) && fs.existsSync(w.memoFile) && JSON.parse(fs.readFileSync(w.memoFile, 'utf8')).cause === verdict.refused.why && timers.length === 1 && timers[0].ms === 30000, 'REAL: a boot unknown posts ONE notice (i18n, the error named), writes the memo (a client saw it) and arms the first re-judge at 30 s', { notices, timers: timers.map((t) => t.ms), memo: fs.existsSync(w.memoFile) });
+  ok(notices.length === 1 && notices[0].key === 'hook-root-unknown' && gateOf(notices[0].i18n) && notices[0].i18n.key === HW.UNKNOWN_KEY && gateOf(/EIO/.test(notices[0].i18n.params.error)) && gateOf(fs.existsSync(w.memoFile)) && JSON.parse(fs.readFileSync(w.memoFile, 'utf8')).cause === verdict.refused.why && timers.length === 1 && timers[0].ms === 30000, 'REAL: a boot unknown posts ONE notice (i18n, the error named), writes the memo (a client saw it) and arms the first re-judge at 30 s', { notices, timers: timers.map((t) => t.ms), memo: fs.existsSync(w.memoFile) });
   await fire(); await fire(); await fire(); await fire();
   ok(notices.length === 1 && w._state.delays.join() === '30000,60000,120000,300000,600000', 'REAL: four re-judges later the SAME cause posted nothing more and the ladder climbed 30 s → 60 s → 2 → 5 → 10 min', { notices: notices.length, delays: w._state.delays });
   const w2 = HW.create({ dataDir: wdir, ensureAgentHooks: () => ({ skipped: true, refused: verdict.refused }), rootRecovery: () => ({}), ownerWriteRefusal: () => verdict.refused, serverNotice: (key) => { notices.push({ key, boot: 2 }); return 1; }, setTimer: (fn, ms) => ({ fn, ms, unref() { } }) });
@@ -270,7 +270,7 @@ console.log('— ⑦ verify r2: the unknown verdict is RE-JUDGED with backoff, s
   ok(notices.length === 3 && !fs.existsSync(w.memoFile), 'REAL: a notice nobody saw (no client) does not burn the memo — the next judge may say it to someone', { memo: fs.existsSync(w.memoFile) });
   clients = 1; verdict = {}; registered = { at: new Date(2026, 9, 2, 9, 41).getTime(), error: '/x/.git cannot be read (EIO)', since: 0 };
   await fire();
-  ok(notices.length === 4 && notices[3].key === 'hook-root-registered' && notices[3].i18n.key === HW.REGISTERED_KEY && notices[3].i18n.params.time === '09:41' && /09:41 after an earlier read error \(\/x\/\.git cannot be read \(EIO\)\)/.test(notices[3].text) && !fs.existsSync(w.memoFile) && w._state.attempt === 0 && timers.length === 0, 'REAL: the recovery — the registration after the error said ONCE (i18n, HH:MM + the error), the memo gone, the ladder reset, no timer left', { notices: notices.slice(3), attempt: w._state.attempt, timers: timers.length });
+  ok(notices.length === 4 && notices[3].key === 'hook-root-registered' && notices[3].i18n.key === HW.REGISTERED_KEY && notices[3].i18n.params.time === '09:41' && gateOf(/09:41 after an earlier read error \(\/x\/\.git cannot be read \(EIO\)\)/.test(notices[3].text)) && !fs.existsSync(w.memoFile) && w._state.attempt === 0 && timers.length === 0, 'REAL: the recovery — the registration after the error said ONCE (i18n, HH:MM + the error), the memo gone, the ladder reset, no timer left', { notices: notices.slice(3), attempt: w._state.attempt, timers: timers.length });
   await w.sync(); w.recovered();
   ok(notices.length === 4 && w.probeMayRun() === true && w.saidRecoveryInstead({ stale: false }, false) === true && w.saidRecoveryInstead({ stale: true }, false) === false && notices.length === 4, 'REAL: said once only; the probe may run on a judged root; after a self-heal the recovery is "said instead" of repaired (unless the file was stale) — without a second toast');
   verdict = { refused: { kind: 'unknown', why: 'again', line: 'x' } };
@@ -278,18 +278,18 @@ console.log('— ⑦ verify r2: the unknown verdict is RE-JUDGED with backoff, s
   verdict = { refused: { kind: 'tmp', why: 'tmp', line: 'x' } };
   ok(w.probeMayRun() === false && timers.length === 1, 'REAL: a refusal that is not unknown stops the probe and arms nothing');
   const rl = chips.recoveredLine({ at: new Date(2026, 9, 2, 9, 41).getTime(), error: 'EIO on .git' }, { t: tt });
-  ok(rl && rl.tone === 'ok' && rl.text === 'Registered at 09:41 after an earlier read error (EIO on .git) — sessions started since then have the tools.' && chips.recoveredLine(null, { t: tt }) === null, "the chip's recovery line names the time and the error; no fact → no line", rl);
-  ok(/else if \(cc\.registeredAfterError\) addLine\(recoveredLine\(cc\.registeredAfterError, \{ t \}\)\);/.test(su) && /else if \(own && own\.cliConfig && own\.cliConfig\.registeredAfterError\) addLine\(recoveredLine\(own\.cliConfig\.registeredAfterError, \{ t \}\)\);/.test(su) && /else if \(cc\.registeredAfterError\) lines\.push\(recoveredLine\(cc\.registeredAfterError, \{ t \}\)\);/.test(ma), 'Settings (the chip + "Check machines…") and Manage Agents show the recovery line when there is no refusal');
+  ok(gateOf(rl) && rl.tone === 'ok' && rl.text === 'Registered at 09:41 after an earlier read error (EIO on .git) — sessions started since then have the tools.' && chips.recoveredLine(null, { t: tt }) === null, "the chip's recovery line names the time and the error; no fact → no line", rl);
+  ok(gateOf(/else if \(cc\.registeredAfterError\) addLine\(recoveredLine\(cc\.registeredAfterError, \{ t \}\)\);/.test(su)) && gateOf(/else if \(own && own\.cliConfig && own\.cliConfig\.registeredAfterError\) addLine\(recoveredLine\(own\.cliConfig\.registeredAfterError, \{ t \}\)\);/.test(su)) && verdictOf(/else if \(cc\.registeredAfterError\) lines\.push\(recoveredLine\(cc\.registeredAfterError, \{ t \}\)\);/.test(ma)), 'Settings (the chip + "Check machines…") and Manage Agents show the recovery line when there is no refusal');
   const K2 = ['Registered at {time} after an earlier read error ({error}) — sessions started since then have the tools.', 'VibeSpace could not tell which folder it runs from ({error}) — the agent hooks are not registered; it reads again with backoff (30 s to 30 min) and registers them as soon as it can.', 'VibeSpace registered the agent hooks at {time} after an earlier read error ({error}) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction.'];
-  ok(K2.every((k) => zh.includes(JSON.stringify(k) + ':')) && K2.every((k) => ja.includes(JSON.stringify(k) + ':')) && /i18nKey\('VibeSpace could not tell which folder it runs from \(\{error\}\)/.test(watchSrc) && /i18nKey\('VibeSpace registered the agent hooks at \{time\}/.test(watchSrc), 'the two server notices and the chip line have zh + ja entries (the watch declares the server keys through the i18nKey marker)');
+  ok(gateOf(K2.every((k) => zh.includes(JSON.stringify(k) + ':'))) && gateOf(K2.every((k) => ja.includes(JSON.stringify(k) + ':'))) && gateOf(/i18nKey\('VibeSpace could not tell which folder it runs from \(\{error\}\)/.test(watchSrc)) && verdictOf(/i18nKey\('VibeSpace registered the agent hooks at \{time\}/.test(watchSrc)), 'the two server notices and the chip line have zh + ja entries (the watch declares the server keys through the i18nKey marker)');
   const forceSites = execFileSync('git', ['grep', '-n', '-e', 'FORCE_AGENT_HOOKS', '-e', 'FORCE_ENV', '--', 'src', 'server.js', 'data/bin'], { cwd: REPO, encoding: 'utf8' }).trim().split('\n').filter((l) => !l.startsWith('src/server-root.js:') && !l.startsWith('src/hub-env-knobs.json:'));   // the knob file NAMES every name the hub's code reads (B-ba47 shape H, derived): no path forces through it
-  ok(forceSites.length === 2 && forceSites.every((l) => l.startsWith('src/server/agent-tool-generators.js:')) && forceSites.some((l) => /force: process\.env\[serverRoot\.FORCE_ENV\] === '1',/.test(l)), 'FORCE census (④): outside src/server-root.js the knob is spelled only in agent-tool-generators (the one env read + its comment) — no production path forces', forceSites);
+  ok(forceSites.length === 2 && gateOf(forceSites.every((l) => l.startsWith('src/server/agent-tool-generators.js:'))) && verdictOf(forceSites.some((l) => /force: process\.env\[serverRoot\.FORCE_ENV\] === '1',/.test(l))), 'FORCE census (④): outside src/server-root.js the knob is spelled only in agent-tool-generators (the one env read + its comment) — no production path forces', forceSites);
   const agentd = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
   const cliFile = /(\.claude\b|\.codex\b|hooks\.json|settings\.json|config\.toml|\.claude\.json)/;
   const isWrite = (l) => /\b(writeFileSync|appendFileSync|writeFile)\s*\(/.test(l) && cliFile.test(l);
   const writes = agentd.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => isWrite(l));
   ok(writes.length === 0 && (agentd.match(/\bwriteFileSync\s*\(/g) || []).length > 5, "the device daemon (⑤, src/agentd/agentd.js) has no write toward a CLI config file — the hub's verdict is the only gate a host needs", writes);
-  ok(isWrite("fs.writeFileSync(path.join(home, '.claude', 'settings.json'), x)") && !isWrite("fs.writeFileSync(path.join(dir, 'pid.json'), x)"), 'CONTROL: a planted settings.json write is caught by the census pattern, a pid file is not');
+  ok(gateOf(isWrite("fs.writeFileSync(path.join(home, '.claude', 'settings.json'), x)")) && !isWrite("fs.writeFileSync(path.join(dir, 'pid.json'), x)"), 'CONTROL: a planted settings.json write is caught by the census pattern, a pid file is not');
   const Gm = require(path.join(REPO, 'src/server/agent-tool-generators.js'));
   const R7 = fs.mkdtempSync(path.join('/tmp', 'vs-srvroot7-')); process.on('exit', () => { try { fs.rmSync(R7, { recursive: true, force: true }); } catch { } });
   const ttlRoot = path.join(R7, 'ttl'); fs.mkdirSync(path.join(ttlRoot, '.git', 'refs'), { recursive: true }); fs.mkdirSync(path.join(ttlRoot, 'data'), { recursive: true }); fs.writeFileSync(path.join(ttlRoot, '.git', 'HEAD'), 'ref: refs/heads/master\n');
@@ -332,24 +332,24 @@ console.log('— ⑥ REAL filesystem shapes through the SHIPPED reader (verify r
     const gitSays = (d) => execFileSync('git', ['-C', d, 'rev-parse', '--git-dir', '--git-common-dir'], { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim().split('\n').map((p) => real(path.resolve(d, p))).join(',');
     let r = await judge(clone); ok(r.v.kind === 'checkout' && r.f.gitDir === real(clone + '/.git') && gitSays(clone) === [r.f.gitDir, r.f.gitCommonDir].join(','), 'a. a plain clone (.git a directory) ⇒ checkout; the facts equal git rev-parse', r);
     r = await judge(path.join(S, 'wt')); ok(r.v.kind === 'worktree' && r.v.checkout === real(clone) && gitSays(path.join(S, 'wt')) === [r.f.gitDir, r.f.gitCommonDir].join(','), 'b. a linked worktree ⇒ worktree naming the clone; the facts equal git rev-parse', r);
-    r = await judge(path.join(S, 'wt-gone')); ok(r.v.kind === 'worktree' && r.f.dangling === true && /clone2$/.test(r.v.checkout), "c. a worktree whose checkout is GONE (dangling gitdir) ⇒ still a worktree, the checkout inferred from git's layout (it shipped as a checkout: every writer wrote)", r);
+    r = await judge(path.join(S, 'wt-gone')); ok(r.v.kind === 'worktree' && r.f.dangling === true && verdictOf(/clone2$/.test(r.v.checkout)), "c. a worktree whose checkout is GONE (dangling gitdir) ⇒ still a worktree, the checkout inferred from git's layout (it shipped as a checkout: every writer wrote)", r);
     r = await judge(path.join(S, 'bare-wt')); ok(r.v.kind === 'worktree' && r.v.checkout === real(bare), 'd. a worktree of a bare repo ⇒ worktree naming the bare dir', r);
-    r = await judge(path.join(sup, 'sub')); ok(r.v.kind === 'checkout' && r.f.gitDir === r.f.gitCommonDir && /\/\.git\/modules\/sub$/.test(r.f.gitDir), 'e. a submodule checkout (.git file, gitdir under .git/modules/, no commondir) ⇒ checkout', r);
+    r = await judge(path.join(sup, 'sub')); ok(r.v.kind === 'checkout' && r.f.gitDir === r.f.gitCommonDir && verdictOf(/\/\.git\/modules\/sub$/.test(r.f.gitDir)), 'e. a submodule checkout (.git file, gitdir under .git/modules/, no commondir) ⇒ checkout', r);
     r = await judge(path.join(S, 'link')); ok(r.v.kind === 'checkout' && r.f.root === real(clone), 'f. a clone reached through a symlink ⇒ checkout, the root its real path', r);
     r = await judge(nogit); ok(r.v.kind === 'checkout' && !r.f.error, 'h. a tree with no .git (ENOENT is not an error: the docker image) ⇒ checkout', r);
     if (typeof process.getuid === 'function' && process.getuid() === 0) console.log('  SKIP (LOUD): running as root — chmod 000 refuses no read, the EACCES cell did not run');
-    else { fs.chmodSync(path.join(eacces, '.git'), 0o000); r = await judge(eacces); fs.chmodSync(path.join(eacces, '.git'), 0o644); ok(r.v.kind === 'unknown' && /cannot be read \(EACCES\)/.test(r.f.error || '') && /could not be judged/.test(r.v.why), 'g. an UNREADABLE .git (EACCES stands in for an NFS hiccup) ⇒ the error fact ⇒ unknown, refused by name (it shipped as a checkout)', r); }
+    else { fs.chmodSync(path.join(eacces, '.git'), 0o000); r = await judge(eacces); fs.chmodSync(path.join(eacces, '.git'), 0o644); ok(r.v.kind === 'unknown' && gateOf(/cannot be read \(EACCES\)/.test(r.f.error || '')) && verdictOf(/could not be judged/.test(r.v.why)), 'g. an UNREADABLE .git (EACCES stands in for an NFS hiccup) ⇒ the error fact ⇒ unknown, refused by name (it shipped as a checkout)', r); }
     const gd = fs.readFileSync(path.join(eacces, '.git'), 'utf8'); fs.writeFileSync(path.join(eacces, '.git'), 'ref: nothing\n');
-    r = await judge(eacces); ok(r.v.kind === 'unknown' && /without a gitdir: line/.test(r.f.error || ''), 'a .git FILE without a gitdir: line ⇒ unknown (never "no git")', r);
+    r = await judge(eacces); ok(r.v.kind === 'unknown' && verdictOf(/without a gitdir: line/.test(r.f.error || '')), 'a .git FILE without a gitdir: line ⇒ unknown (never "no git")', r);
     fs.writeFileSync(path.join(eacces, '.git'), gd);
-    ok(SR.refusalLine(SR.rootVerdict({ root: '/x', error: 'boom', tmpRoots: TMP })).startsWith('hooks not registered: the server root could not be judged: boom — nothing is written until the root can be judged'), 'the unknown sentence: nothing is written until the root can be judged');
+    ok(verdictOf(SR.refusalLine(SR.rootVerdict({ root: '/x', error: 'boom', tmpRoots: TMP })).startsWith('hooks not registered: the server root could not be judged: boom — nothing is written until the root can be judged')), 'the unknown sentence: nothing is written until the root can be judged');
     fs.rmSync(S, { recursive: true, force: true });
   }
   // the ORCH: an erroring read is never cached (read again at the next writer), and the owner is told at boot
-  ok(/const rootStale = \(t = Date\.now\(\)\) => !_rootFacts \|\| !!_rootFacts\.error \|\| t - _rootFactsAt > serverRoot\.ROOT_FACTS_TTL_MS;/.test(gen) && /if \(rootStale\(t\)\) startRootRead\(\);/.test(gen) && /\.then\(\(f\) => \{ _rootFacts = f; _rootFactsAt = Date\.now\(\);/.test(gen), 'wiring (B-1425: the refresh runs off the loop, single-flight): the facts are cached only when read without error, and for ROOT_FACTS_TTL_MS at most — a transient error is judged again at the next writer, a changed .git within a minute (verify r2 ③)');
-  ok(/if \(e && e\.code === 'ENOENT'\) return facts; facts\.error = /.test(gen) && /facts\.dangling = true; return facts;/.test(gen) && /if \(!\(e && e\.code === 'ENOENT'\)\) \{ facts\.error = /.test(gen), 'wiring: ENOENT on .git is "no git"; any other read error is the error fact; a gone gitdir of the worktrees layout is a dangling worktree; a missing commondir is a submodule');
+  ok(gateOf(/const rootStale = \(t = Date\.now\(\)\) => !_rootFacts \|\| !!_rootFacts\.error \|\| t - _rootFactsAt > serverRoot\.ROOT_FACTS_TTL_MS;/.test(gen)) && gateOf(/if \(rootStale\(t\)\) startRootRead\(\);/.test(gen)) && verdictOf(/\.then\(\(f\) => \{ _rootFacts = f; _rootFactsAt = Date\.now\(\);/.test(gen)), 'wiring (B-1425: the refresh runs off the loop, single-flight): the facts are cached only when read without error, and for ROOT_FACTS_TTL_MS at most — a transient error is judged again at the next writer, a changed .git within a minute (verify r2 ③)');
+  ok(gateOf(/if \(e && e\.code === 'ENOENT'\) return facts; facts\.error = /.test(gen)) && gateOf(/facts\.dangling = true; return facts;/.test(gen)) && verdictOf(/if \(!\(e && e\.code === 'ENOENT'\)\) \{ facts\.error = /.test(gen)), 'wiring: ENOENT on .git is "no git"; any other read error is the error fact; a gone gitdir of the worktrees layout is a dangling worktree; a missing commondir is a submodule');
   const watchSrc = read('src/server/hook-root-watch.js');
-ok(/if \(integrationEnabled\(\)\) return hookRootWatch\.sync\(\);/.test(srv) && /if \(!hookRootWatch\.probeMayRun\(\) \|\| !integrationEnabled\(\) \|\| optOutMarkNow\(\) !== 'not'\) return;/.test(srv) && / && !hookRootWatch\.saidRecoveryInstead\(info, scriptMissing\)\) serverNotice\(`hook-health-\$\{key\}`,/.test(srv) && /require\('\.\/src\/server\/hook-root-watch\.js'\)\.create\(\{ dataDir: path\.join\(__dirname, 'data'\), ensureAgentHooks, rootRecovery, ownerWriteRefusal, factsNow: rootFactsNow, integrationEnabled: \(\) => integrationEnabled\(\), serverNotice: \(\.\.\.a\) => serverNotice\(\.\.\.a\) \}\)/.test(srv), 'server.js: the boot / toggle sync, the probe\'s gate and the probe\'s words all go through THE hook-root watch (src/server/hook-root-watch.js) — verify r2 ①');
+ok(gateOf(/if \(integrationEnabled\(\)\) return hookRootWatch\.sync\(\);/.test(srv)) && gateOf(/if \(!hookRootWatch\.probeMayRun\(\) \|\| !integrationEnabled\(\) \|\| optOutMarkNow\(\) !== 'not'\) return;/.test(srv)) && gateOf(/ && !hookRootWatch\.saidRecoveryInstead\(info, scriptMissing\)\) serverNotice\(`hook-health-\$\{key\}`,/.test(srv)) && verdictOf(/require\('\.\/src\/server\/hook-root-watch\.js'\)\.create\(\{ dataDir: path\.join\(__dirname, 'data'\), ensureAgentHooks, rootRecovery, ownerWriteRefusal, factsNow: rootFactsNow, integrationEnabled: \(\) => integrationEnabled\(\), serverNotice: \(\.\.\.a\) => serverNotice\(\.\.\.a\) \}\)/.test(srv)), 'server.js: the boot / toggle sync, the probe\'s gate and the probe\'s words all go through THE hook-root watch (src/server/hook-root-watch.js) — verify r2 ①');
 }
 
 // B-9dd0 (主开发 r321): THE «under a temp root» verdict, one spelling (the update check, the boot's runtime check)
@@ -373,9 +373,9 @@ ok(/if \(integrationEnabled\(\)\) return hookRootWatch\.sync\(\);/.test(srv) && 
   const vRoot = SR.rootVerdict({ ...ck, tmpRoots: ['/', '/tmp'], home: '/home/u' }), vCtl = SR.rootVerdict({ ...ck, tmpRoots: ['/home', '/tmp'], home: '/home/u' });   // r1278: the control's home lies under its temp root too
   console.log(`  (rootVerdict with tmpRoots [/, /tmp]: ${vRoot.kind} — ${vRoot.why || 'ok'}; with [/home, /tmp]: ${vCtl.kind})`);
   ok(vRoot.kind !== 'tmp' && vCtl.kind === 'tmp' && vCtl.tmpRoot === '/home', 'B-9dd0 r528: rootVerdict\'s rule 3 never calls a checkout «tmp» for the disk\'s root (TMPDIR=/); CONTROL: a temp root above the checkout still does');
-  ok(/const tmp = tmpRootUnder\(\{ root: r, tmpRoots: roots \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server-root.js'), 'utf8')), 'B-9dd0 r528: rule 3 IS tmpRootUnder (one rule, no second spelling)');
+  ok(verdictOf(/const tmp = tmpRootUnder\(\{ root: r, tmpRoots: roots \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server-root.js'), 'utf8'))), 'B-9dd0 r528: rule 3 IS tmpRootUnder (one rule, no second spelling)');
   const ops = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8'), rb = fs.readFileSync(path.join(REPO, 'src/server/runtime-boot.js'), 'utf8');
-  ok(/throwaway = \(\) => require\('\.\/throwaway-root\.js'\)\.throwaway\(rootDir\)/.test(ops) && /throwaway\(\) === false \? null/.test(ops) && /throwawayOf = \(r\) => require\('\.\/throwaway-root\.js'\)\.throwaway\(r\)/.test(rb) && /throwawayOf\(rootDir\) === false/.test(rb)
+  ok(gateOf(/throwaway = \(\) => require\('\.\/throwaway-root\.js'\)\.throwaway\(rootDir\)/.test(ops)) && gateOf(/throwaway\(\) === false \? null/.test(ops)) && gateOf(/throwawayOf = \(r\) => require\('\.\/throwaway-root\.js'\)\.throwaway\(r\)/.test(rb)) && gateOf(/throwawayOf\(rootDir\) === false/.test(rb))
     && !/tmpRootUnder/.test(ops) && !/tmpRootUnder/.test(rb),
     'B-9dd0 → B-ba47 shape H (主开发 r1278: rule 3 asks THE ONE TEST): the update check and the boot\'s runtime check both ask src/server/throwaway-root.js throwaway — one verdict for every gate, no second spelling; only a judged «false» is online');
 }
@@ -401,10 +401,10 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   for (let k = 0; k < 3; k++) { steps.push(G.rootVerdict().kind); steps.push((await G.rootFactsNow()).late === true); }
   const s1 = G.rootReadStats(), vLate = G.rootVerdict(), rec = G.rootRecovery();
   console.log(`  (at rest before the release: ${JSON.stringify(s0)} → ${JSON.stringify(s1)}; first verdict ${v0.kind} «${String(v0.why).slice(0, 90)}»; the waiting caller got late=${f1.late} «${String(f1.error).slice(0, 90)}»; the steps ${JSON.stringify(steps)}; .git stats asked ${asked.length})`);
-  ok(v0.kind === 'unknown' && /not judged yet/.test(v0.why) && s0.started === 1 && s0.inFlight === true, 'B-1425: the first verdict reads the cache only — it STARTS the read off the loop and answers «not judged yet» (no file call on the loop)', { v0, s0 });
-  ok(f1.late === true && /did not answer in 0\.03 s/.test(f1.error), 'B-1425: a caller that waits past the deadline gets a NAMED fact («… did not answer in N s»), never a hold', f1);
+  ok(v0.kind === 'unknown' && gateOf(/not judged yet/.test(v0.why)) && s0.started === 1 && s0.inFlight === true, 'B-1425: the first verdict reads the cache only — it STARTS the read off the loop and answers «not judged yet» (no file call on the loop)', { v0, s0 });
+  ok(f1.late === true && verdictOf(/did not answer in 0\.03 s/.test(f1.error)), 'B-1425: a caller that waits past the deadline gets a NAMED fact («… did not answer in N s»), never a hold', f1);
   ok(s1.started === 1 && s1.ended === 0 && s1.inFlight === true && asked.length === 1, 'B-1425 LAW 1: the held read still out, THREE backoff steps pass — exactly ONE read was ever started (never a second beside it: a hung mount would take every file thread)', { s1, asked: asked.length });
-  ok(vLate.kind === 'unknown' && /did not answer in/.test(vLate.why) && rec.lastError && /did not answer in/.test(rec.lastError.error), 'B-1425: the cache verdict past the deadline is the NAMED late fact (the callers\' refusal road), and it is the recorded read error (the recovery words name it)', { vLate, rec });
+  ok(vLate.kind === 'unknown' && gateOf(/did not answer in/.test(vLate.why)) && gateOf(rec.lastError) && verdictOf(/did not answer in/.test(rec.lastError.error)), 'B-1425: the cache verdict past the deadline is the NAMED late fact (the callers\' refusal road), and it is the recorded read error (the recovery words name it)', { vLate, rec });
   release();   // the held stat comes back (an answer: no .git)
   for (let i = 0; i < 500 && G.rootReadStats().ended < 1; i++) await new Promise((r) => setImmediate(r));   // the read's own end, bounded
   const s2 = G.rootReadStats(), vBack = G.rootVerdict();
@@ -439,19 +439,19 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     ['the watch\'s re-judge timer', /if \(typeof factsNow === 'function'\) Promise\.resolve\(\)\.then\(factsNow\)\.then\(run, run\);/.test(watch8) && /factsNow: rootFactsNow,/.test(srv8)],
   ];
   console.log(`  (the roads that wait: ${waits.map(([n, k]) => `${n} ${k ? '✓' : '✗'}`).join(' · ')})`);
-  ok(waits.every(([, k]) => k), 'B-1425 LAW 2: every road that can wait AWAITS the facts — the boot, the switch, the probe, the routes, both remote conversation starts, the tools install, the watch', waits.filter(([, k]) => !k).map(([n]) => n));
+  ok(verdictOf(waits.every(([, k]) => k)), 'B-1425 LAW 2: every road that can wait AWAITS the facts — the boot, the switch, the probe, the routes, both remote conversation starts, the tools install, the watch', waits.filter(([, k]) => !k).map(([n]) => n));
   const gen8 = read('src/server/agent-tool-generators.js'), body8 = gen8.slice(gen8.indexOf('const realOr = async'), gen8.indexOf('function rootRecovery()'));
-  ok(body8.length > 500 && !/fs\.(statSync|readFileSync|realpathSync|existsSync|readdirSync)\(/.test(body8) && /if \(_rootRead\) return _rootRead;/.test(body8), 'B-1425: the root reader and the verdict hold NO synchronous file call, and the read is single-flight at its one door', body8.length);
+  ok(body8.length > 500 && !/fs\.(statSync|readFileSync|realpathSync|existsSync|readdirSync)\(/.test(body8) && verdictOf(/if \(_rootRead\) return _rootRead;/.test(body8)), 'B-1425: the root reader and the verdict hold NO synchronous file call, and the read is single-flight at its one door', body8.length);
   // r827: the hosts' status and uninstall await the facts; an UNKNOWN root's uninstall is refused BY NAME (never a half uninstall)
   waits.push(['a machine\'s agent-tools status / uninstall (hosts.js)', /async agentToolsStatus\(id\) \{\n\s*if \(typeof this\.rootFactsNow === 'function'\) await this\.rootFactsNow\(\);/.test(hosts8) && /async uninstallAgentTools\(id\) \{\n\s*if \(typeof this\.rootFactsNow === 'function'\) await this\.rootFactsNow\(\);/.test(hosts8)]);
-  ok(waits[waits.length - 1][1], 'B-1425 r827: a machine\'s agent-tools status and uninstall await the facts too (the list of the roads that wait)');
+  ok(verdictOf(waits[waits.length - 1][1]), 'B-1425 r827: a machine\'s agent-tools status and uninstall await the facts too (the list of the roads that wait)');
   {
     const { HostManager: HM8 } = require(path.join(REPO, 'src/hosts.js'));
     const hm = new HM8({ dataDir: path.join(R8, 'hosts') }); let factsAsked = 0;
     hm.rootFactsNow = async () => { factsAsked++; }; hm.ownerWriteRefusal = () => ({ kind: 'unknown', why: 'the checkout\'s .git did not answer in 2 s', line: 'x' });
     let e8 = null; try { await hm.uninstallAgentTools('h-none'); } catch (e) { e8 = e; }
     console.log(`  (an unknown root's uninstall: ${e8 ? `${e8.code} «${e8.message}»` : 'not refused'}; the facts asked ${factsAsked}×)`);
-    ok(!!e8 && e8.code === 'root_unknown' && /were not removed: the checkout's \.git did not answer/.test(e8.message) && factsAsked === 1, 'B-1425 r827: an UNKNOWN root\'s uninstall is refused BY NAME before anything is removed (the facts awaited first)', e8 && e8.message);
+    ok(!!e8 && e8.code === 'root_unknown' && gateOf(/were not removed: the checkout's \.git did not answer/.test(e8.message)) && factsAsked === 1, 'B-1425 r827: an UNKNOWN root\'s uninstall is refused BY NAME before anything is removed (the facts awaited first)', e8 && e8.message);
   }
   // r827: the journal's once-a-boot line is never spent on «not judged yet»: a pending refusal is not said, the real one is, once
   {
@@ -497,7 +497,7 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
       const st3 = G3.rootReadStats();
       console.log = log0;
       console.log(`  (the boot with facts that never come: the sync ${r1 && r1.refused ? r1.refused.kind : JSON.stringify(r1)}; notices ${JSON.stringify(notes.map((x) => x.slice(0, 120)))}; timers armed ${t1} then ${timers.length} (waited at most ${rejudgeBound} ms, the first sync ${syncMs} ms); reads ${JSON.stringify(st3)})`);
-      ok(!!r1 && r1.skipped === true && r1.refused && r1.refused.kind === 'unknown' && notes.length === 1 && /did not answer in/.test(notes[0]) && t1 === 1 && timers.length === 1 && st3.started === 1 && st3.inFlight === true,
+      ok(!!r1 && r1.skipped === true && gateOf(r1.refused) && r1.refused.kind === 'unknown' && notes.length === 1 && gateOf(/did not answer in/.test(notes[0])) && t1 === 1 && timers.length === 1 && st3.started === 1 && st3.inFlight === true,
         'B-1425 r827: a BOOT whose facts never come registers nothing, posts ONE owner notice naming the late fact, and its re-judge (one timer at a time) starts NO second read', { r1, notes, t1, timers: timers.length, st3 });
     } finally { console.log = log0; rel3(); }
   }
@@ -505,10 +505,10 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   // (src/server/local-index.js: `owner.kind` ⇒ a throwaway, placed under the hub's own root, the person's CLI not installed)
   {
     const LIsrc = read('src/server/local-index.js');
-    ok(/const role = throwaway \? \(typeof throwaway === 'string' \? throwaway : 'tmp'\) : owner && owner\.kind \? String\(owner\.kind\) : false;/.test(LIsrc),
+    ok(verdictOf(/const role = throwaway \? \(typeof throwaway === 'string' \? throwaway : 'tmp'\) : owner && owner\.kind \? String\(owner\.kind\) : false;/.test(LIsrc)),
       'B-1425 r827: the index takes ANY owner kind as its role for the run (the rule the scene below reads)');
     waits.push(['the person\'s CLI index at listen (server.js)', /\n  rootFactsNow\(\)\.then\(\(\) => \{ try \{ require\('\.\/src\/server\/local-index\.js'\)\.configure\(\{[^\n]*owner: \(\(\) => \{ try \{ return ownerWriteRefusal\(\); \}/.test(srv8)]);
-    ok(waits[waits.length - 1][1], 'B-1425 r827: the index\'s configure at listen is among the roads that WAIT (rootFactsNow first, then the owner verdict)');
+    ok(verdictOf(waits[waits.length - 1][1]), 'B-1425 r827: the index\'s configure at listen is among the roads that WAIT (rootFactsNow first, then the owner verdict)');
     let rel9 = null; const held9 = new Promise((r) => { rel9 = r; });
     const G9 = Gm.create({ rootDir: R8, port: 0 });
     G9._setRootFs({ realpath: async (q) => q, stat: async () => { await held9; throw Object.assign(new Error('no .git'), { code: 'ENOENT' }); }, readFile: async () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); } });
@@ -533,14 +533,14 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     G10._setRootReadMs(30);
     const late10 = await G10.rootFactsNow().then(() => G10.ownerWriteRefusal());
     console.log(`  (a first read that never answers: the index is handed ${JSON.stringify(late10 && { kind: late10.kind, pending: !!late10.pending, why: String(late10.why).slice(0, 90) })})`);
-    ok(!!late10 && late10.kind === 'unknown' && late10.pending !== true && /did not answer in/.test(late10.why), 'B-1425 r827: a first read past the bound hands the index the NAMED late fact (a real unknown, said) — never «not judged yet»', late10);
+    ok(!!late10 && late10.kind === 'unknown' && late10.pending !== true && verdictOf(/did not answer in/.test(late10.why)), 'B-1425 r827: a first read past the bound hands the index the NAMED late fact (a real unknown, said) — never «not judged yet»', late10);
     // r872 (the gate's box zone found it: the deadline timer and Date.now() can differ by a millisecond, and the cache then answered
     // «not judged yet» right after a LATE answer). The skew PLANTED: the deadline raised after the late answer, so the clock alone says
     // «not past it yet» — the verdict must stay the named late fact (the read is marked late when a waiting caller was told so)
     G10._setRootReadMs(60000);
     const skew10 = G10.ownerWriteRefusal();
     console.log(`  (the planted skew — the clock says the read is not past its bound, a caller was already told late: ${JSON.stringify(skew10 && { kind: skew10.kind, pending: !!skew10.pending })})`);
-    ok(!!skew10 && skew10.kind === 'unknown' && skew10.pending !== true && /did not answer in/.test(skew10.why), 'B-1425 r872: once a waiting caller was told LATE, the cache says late too — never «not judged yet» after it, whatever the clock reads (a flag, not a second clock read)', skew10);
+    ok(!!skew10 && skew10.kind === 'unknown' && skew10.pending !== true && verdictOf(/did not answer in/.test(skew10.why)), 'B-1425 r872: once a waiting caller was told LATE, the cache says late too — never «not judged yet» after it, whatever the clock reads (a flag, not a second clock read)', skew10);
   }
   // r872 (narrow round wudero5nj, THE MUST): a PIN THAT READS THE PARSED TREE, NOT THE TEXT. The cure's first form put its note as a
   // `//` comment in the MIDDLE of the listen step's last line: every call after it on that line became a comment — the boot timers,
@@ -569,9 +569,9 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     const onceT = T ? LAST.map((k) => [k, T.last.filter((x) => x === k).length]) : [];
     const timersT = []; if (T) (function walk(n) { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'setTimeout' && n.arguments[0] && /Function/.test(n.arguments[0].type) && n.arguments[1] && n.arguments[1].type === 'Literal') { const inner = n.arguments[0].body.type === 'CallExpression' ? nameOfC(n.arguments[0].body.callee) : null; timersT.push(`${inner}@${n.arguments[1].value}`); } kids(n).forEach(walk); })(T.lastNode);
     console.log(`  (the last turn's calls, each counted: ${onceT.map(([k, c]) => `${k}×${c}`).join(' ')}; its timers: ${timersT.join(', ') || 'none'})`);
-    ok(onceT.length === LAST.length && onceT.every(([, c]) => c === 1) && ['initAfterListen@1500', 'afterListen@2500', 'bootEngineDistribution@4000'].every((x) => timersT.includes(x)),
+    ok(onceT.length === LAST.length && gateOf(onceT.every(([, c]) => c === 1)) && verdictOf(['initAfterListen@1500', 'afterListen@2500', 'bootEngineDistribution@4000'].every((x) => timersT.includes(x))),
       'B-1425 r980: each call of the last turn is made ONCE, and the three boot timers keep the release\'s delays (jobs 1.5 s, apps 2.5 s, the engine distribution 4 s)', { onceT, timersT });
-    ok(!!T && T.restore.includes('restoreSessions') && !lostT.length, 'B-1425 r872: the listen step\'s LAST turn CALLS, as code (the parsed tree, never the text), the index\'s configure, the three boot timers\' callees, bootRestored, the first sessions sweep (bootSessionsIndexed at its end) and bootPhase.arm — and the turn before it calls restoreSessions', lostT);
+    ok(!!T && gateOf(T.restore.includes('restoreSessions')) && !lostT.length, 'B-1425 r872: the listen step\'s LAST turn CALLS, as code (the parsed tree, never the text), the index\'s configure, the three boot timers\' callees, bootRestored, the first sessions sweep (bootSessionsIndexed at its end) and bootPhase.arm — and the turn before it calls restoreSessions', lostT);
     // RED CONTROL: the cure's first note put back where it stood (mid-line, after the index wait's catch) — the calls after it are LOST, by name
     const anchorT = "}).catch((e) => console.warn('[local-index] not started: ' + (e && e.message)));";
     const badT = srv8.replace(anchorT, anchorT + " // B-1425 (r827): the index WAITS for the root's facts (off the loop, ≤ 2 s; landed already ⇒ this very turn) — «not judged yet» is never its role for the run, a real unknown (a read error, the named late fact) is ·");   // stale-pins: kept (the OLD note, rebuilt for the pin's red control)
@@ -614,7 +614,7 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     ok(red11.roleLate === 'unknown' && red11.roleAfter === 'unknown' && red11.landed !== 'unknown', 'B-1425 r993 RED (r980\'s behaviour): an index never told of the landing keeps «unknown» for the run though the read landed with the facts', red11);
     ok(cure11.roleLate === 'unknown' && cure11.roleAfter === roleOfLI(cure11.landed === null ? null : { kind: cure11.landed }) && cure11.roleAfter !== 'unknown' && cure11.placedAgain === 1, 'B-1425 r993: when a LATER read lands with the facts, the index is configured AGAIN with them and holds the LANDED role — once per change of the verdict (a second landing with the same verdict places nothing again)', cure11);
     const LIsrc2 = read('src/server/local-index.js');
-    ok(/if \(!lastOpts \|\| shutDown\) return null;/.test(LIsrc2) && /stop: \(\) => \{ shutDown = true; return stop\(\); \}/.test(LIsrc2) && /reconfP = \(reconfP \|\| bootP \|\| Promise\.resolve\(\)\)\.then\(/.test(LIsrc2) && /ownerNow: ownerWriteRefusal, onOwnerChange: onRootLanded,/.test(srv8),
+    ok(gateOf(/if \(!lastOpts \|\| shutDown\) return null;/.test(LIsrc2)) && gateOf(/stop: \(\) => \{ shutDown = true; return stop\(\); \}/.test(LIsrc2)) && gateOf(/reconfP = \(reconfP \|\| bootP \|\| Promise\.resolve\(\)\)\.then\(/.test(LIsrc2)) && verdictOf(/ownerNow: ownerWriteRefusal, onOwnerChange: onRootLanded,/.test(srv8)),
       'B-1425 r993: the re-configure is the index\'s own (after the boot in flight, the old place marked stopped), never after the hub\'s stop; server.js hands it the verdict and the landing');
   }
   clearInterval(keep8);
@@ -666,7 +666,7 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   ];
   for (const [what, root, home, o] of LAW) {
     const r = rootsOf({ fixed: [T], home, realpath: real, ...o }), j = TR.judge(root, home, { roots: r });
-    ok(j.throwaway === false && !r.includes('/') && r.every((t) => t.startsWith('/')), `r1278 THE LAW — the production hub is never throwaway: ${what} ⇒ ${j.rootVerdict.kind}`, { roots: r, kind: j.rootVerdict.kind, why: j.rootVerdict.why });
+    ok(j.throwaway === false && !r.includes('/') && verdictOf(r.every((t) => t.startsWith('/'))), `r1278 THE LAW — the production hub is never throwaway: ${what} ⇒ ${j.rootVerdict.kind}`, { roots: r, kind: j.rootVerdict.kind, why: j.rootVerdict.why });
   }
   { // an env name a parent left: the one test reads HOME, the temp variable and VIBESPACE_REAL_INSTALL alone — nothing else it is handed
     // through the BOOT's own verdict (r1952 (2): throwaway() answers the declared hub's root alone — a bare ask about another is refused)
@@ -681,8 +681,8 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   const askers = [], RF_REQ = /require\(\s*['"](?:\.{1,2}\/)+(?:server\/)?root-facts(?:\.js)?['"]\s*\)/;
   const walkSrc = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walkSrc(r); else if (/\.c?js$/.test(e.name) && RF_REQ.test(read(r))) askers.push(r); } };
   walkSrc('src'); if (/root-facts/.test(srv)) askers.push('server.js');
-  ok(askers.join() === 'src/server/throwaway-root.js' && !/root-facts/.test(gen) && RF_REQ.test("const { readRootFacts } = require('./root-facts');") && !RF_REQ.test("require('./root-facts-x')"),
+  ok(askers.join() === 'src/server/throwaway-root.js' && !/root-facts/.test(gen) && gateOf(RF_REQ.test("const { readRootFacts } = require('./root-facts');")) && !RF_REQ.test("require('./root-facts-x')"),
     'shape H on the root: only the boot\'s one test (src/server/throwaway-root.js) asks root-facts.js — the ORCH reads every conversation\'s root with its own asynchronous reader (B-1425)', askers);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

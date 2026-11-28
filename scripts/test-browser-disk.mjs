@@ -32,7 +32,7 @@ const K = require('../src/server/browser-keeper.js');
 const PM = await import('../src/lib/browser-panel-model.js');
 const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -79,23 +79,23 @@ function walk(step, seed = 7, n = 2000) {
   ok(w.maxGap <= D.DISK_SAMPLE_EVERY_MS + 12 * MIN, `every profile is measured again on schedule (largest gap ${Math.round(w.maxGap / MIN)} min, 6 profiles, 1 per minute)`);
   // the debounce, the timeout schedule, the stale child
   let r = D.diskSampleStep(null, { type: 'tick', ids: ['a', 'b'] }, 0);
-  ok(r.sample && r.sample.id === 'a' && r.sample.why === 'due', 'a new profile is due at once (the first in order)');
+  ok(gateOf(r.sample) && r.sample.id === 'a' && r.sample.why === 'due', 'a new profile is due at once (the first in order)');
   const s0 = r.state;
   r = D.diskSampleStep(s0, { type: 'tick', ids: ['a', 'b'] }, 30e3); ok(!r.sample, 'b waits: a child runs');
   r = D.diskSampleStep(r.state, { type: 'done', id: 'a' }, 40e3); ok(!r.sample, 'b waits: the minute is a\'s');
-  r = D.diskSampleStep(r.state, { type: 'tick', ids: ['a', 'b'] }, 60e3); ok(r.sample && r.sample.id === 'b', 'b one minute later (staggered)');
+  r = D.diskSampleStep(r.state, { type: 'tick', ids: ['a', 'b'] }, 60e3); ok(gateOf(r.sample) && r.sample.id === 'b', 'b one minute later (staggered)');
   r = D.diskSampleStep(r.state, { type: 'done', id: 'b' }, 70e3);
-  let k = D.diskSampleStep(r.state, { type: 'start', id: 'a' }, 125e3); ok(k.sample && k.sample.id === 'a' && k.sample.why === 'start', 'a start samples at once when the minute is free');
+  let k = D.diskSampleStep(r.state, { type: 'start', id: 'a' }, 125e3); ok(gateOf(k.sample) && k.sample.id === 'a' && k.sample.why === 'start', 'a start samples at once when the minute is free');
   k = D.diskSampleStep(k.state, { type: 'done', id: 'a' }, 126e3);
   k = D.diskSampleStep(k.state, { type: 'stop', id: 'a' }, 150e3); ok(!k.sample && k.state.profiles.a.kickAt === null, 'a stop 25 s after the start is debounced away (one per 60 s)');
   k = D.diskSampleStep(k.state, { type: 'tick', ids: ['a', 'b'] }, 190e3); ok(!k.sample, 'and nothing is due inside 15 min');
   const t1 = D.diskSampleStep(null, { type: 'tick', ids: ['x'] }, 0); // x's child times out (done after 60 s, measured nothing)
   let t2 = D.diskSampleStep(t1.state, { type: 'done', id: 'x' }, 61e3); t2 = D.diskSampleStep(t2.state, { type: 'tick', ids: ['x'] }, 14 * MIN);
   ok(!t2.sample, 'a timed-out sample is not retried early (unknown, then the schedule)');
-  t2 = D.diskSampleStep(t2.state, { type: 'tick', ids: ['x'] }, 15 * MIN); ok(t2.sample && t2.sample.id === 'x', '…and runs again 15 min after the timed-out one began');
+  t2 = D.diskSampleStep(t2.state, { type: 'tick', ids: ['x'] }, 15 * MIN); ok(gateOf(t2.sample) && t2.sample.id === 'x', '…and runs again 15 min after the timed-out one began');
   const w1 = D.diskSampleStep(null, { type: 'tick', ids: ['y'] }, 0); // a `done` that never comes is forgotten
-  ok(!D.diskSampleStep(w1.state, { type: 'start', id: 'y' }, 2 * MIN).sample && D.diskSampleStep(w1.state, { type: 'start', id: 'y' }, 3 * MIN + 1).sample, 'a child whose done never came is forgotten after 2 × the timeout + a minute (never a wedged clock)');
-  const gone = D.diskSampleStep(s0, { type: 'tick', ids: ['b'] }, 61e3); ok(!gone.state.profiles.a && gone.state.profiles.b, 'a removed profile leaves the schedule');
+  ok(!D.diskSampleStep(w1.state, { type: 'start', id: 'y' }, 2 * MIN).sample && verdictOf(D.diskSampleStep(w1.state, { type: 'start', id: 'y' }, 3 * MIN + 1).sample), 'a child whose done never came is forgotten after 2 × the timeout + a minute (never a wedged clock)');
+  const gone = D.diskSampleStep(s0, { type: 'tick', ids: ['b'] }, 61e3); ok(!gone.state.profiles.a && verdictOf(gone.state.profiles.b), 'a removed profile leaves the schedule');
   ok(JSON.stringify(s0) === JSON.stringify(D.diskSampleStep(null, { type: 'tick', ids: ['a', 'b'] }, 0).state), 'the step never mutates its input');
 }
 
@@ -112,7 +112,7 @@ console.log('§2 parseDu / duVerdict');
   ok(D.duVerdict({ code: null, signal: 'SIGTERM', stdout: gnu }, dir).state === 'unknown', 'a signal ⇒ unknown');
   ok(D.duVerdict({ spawnError: 'ENOENT' }, dir).state === 'unknown', 'no du ⇒ unknown');
   const perm = D.duVerdict({ code: 1, stdout: gnu, stderr: `du: cannot read directory '${dir}/x': Permission denied\n` }, dir);
-  ok(perm.state === 'unknown' && /exited 1: du: cannot read/.test(perm.why), 'exit ≠ 0 ⇒ unknown (said with du\'s line)');
+  ok(perm.state === 'unknown' && verdictOf(/exited 1: du: cannot read/.test(perm.why)), 'exit ≠ 0 ⇒ unknown (said with du\'s line)');
   const vanished = D.duVerdict({ code: 1, stdout: gnu, stderr: `du: cannot access '${dir}/Default/Cache/f_01': No such file or directory\n` }, dir);
   ok(vanished.state === 'ok' && vanished.partial === true, 'exit 1 whose only complaint is a file that vanished mid-walk ⇒ the total, said partial');
   ok(D.duVerdict({ code: 0, stdout: '' }, dir).state === 'unknown', 'exit 0 with no total ⇒ unknown');
@@ -133,14 +133,14 @@ console.log('§3 growthOf / topDirs / expandNames / words');
 // ── §4 the verdict ──
 console.log('§4 diskVerdict (runaway-guard\'s own table) + diskFact');
 {
-  ok(RG.diskVerdict(2 * G + 1).over && !RG.diskVerdict(2 * G).over, 'over at 2 GiB + 1, not at 2 GiB');
-  ok(RG.diskVerdict(0.9 * 2 * G - 1).clear && !RG.diskVerdict(0.9 * 2 * G).clear, 'clear below the re-arm fraction, not at it');
+  ok(gateOf(RG.diskVerdict(2 * G + 1).over) && !RG.diskVerdict(2 * G).over, 'over at 2 GiB + 1, not at 2 GiB');
+  ok(gateOf(RG.diskVerdict(0.9 * 2 * G - 1).clear) && !RG.diskVerdict(0.9 * 2 * G).clear, 'clear below the re-arm fraction, not at it');
   const lim = { ...LIMITS, BROWSER_DISK_BYTES: 4 * MiB };
-  ok(RG.diskVerdict(4 * MiB + 1, { limits: lim }).over && RG.diskVerdict(4 * MiB + 1, { limits: lim }).limit === 4 * MiB, 'the limit comes from `limits` injection (never the constant)');
+  ok(gateOf(RG.diskVerdict(4 * MiB + 1, { limits: lim }).over) && RG.diskVerdict(4 * MiB + 1, { limits: lim }).limit === 4 * MiB, 'the limit comes from `limits` injection (never the constant)');
   ok(D.diskFact({ dir: '/d', measured: { state: 'ok', bytes: 2.4 * G, at: 5 } }).state === 'over' && D.diskFact({ dir: '/d', measured: { state: 'ok', bytes: 1.3 * G, at: 5 } }).state === 'ok', 'diskFact: ok / over');
   ok(D.diskFact({ dir: '/d' }).state === 'pending' && D.diskFact({ dir: '/d', measured: { state: 'unknown', why: 'du did not finish within 60 s', at: 9 }, last: { bytes: 7, at: 1 } }).bytes === 7, 'diskFact: pending before the first answer; unknown keeps the last measured bytes');
   const rem = D.diskFact({ dir: '/d', hostId: 'mac-1' });
-  ok(rem.state === 'not-measured' && rem.code === 'disk_not_measured' && rem.reason === 'remote' && /paired machine/.test(rem.why), 'diskFact: a paired machine\'s row answers disk_not_measured with why');
+  ok(rem.state === 'not-measured' && rem.code === 'disk_not_measured' && rem.reason === 'remote' && verdictOf(/paired machine/.test(rem.why)), 'diskFact: a paired machine\'s row answers disk_not_measured with why');
 }
 
 // ── §5 the real keeper over a scratch profile dir ──
@@ -161,7 +161,7 @@ const quiet = { log() { }, warn() { }, error() { } };
   const k = K.create({ dataDir, homeDir: HOME, env: () => ({ PATH: '/usr/bin:/bin', HOME }), broadcast: () => { }, serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3,
     log: { ...quiet, warn: (m) => warns.push(String(m)) }, userTodos: todos, limits: lim, now: () => clock, taskInfo: () => null, hostKnown: () => false });
   const p = k.createProfile({ label: 'work' }, { owner: { kind: 'instance', id: null } });
-  ok(p && p.dir && fs.existsSync(p.dir), `a named profile with its folder (${path.relative(SCR, p.dir)})`);
+  ok(gateOf(p) && gateOf(p.dir) && verdictOf(fs.existsSync(p.dir)), `a named profile with its folder (${path.relative(SCR, p.dir)})`);
   ok(k.diskOf(p.id).state === 'pending' && k.list().profiles.find((x) => x.id === p.id).disk.state === 'pending', 'before the first sample: pending, on the GET rows too');
   const cache = path.join(p.dir, 'Default', 'Cache', 'data_1');
   fill(cache, 6 * MiB); fill(path.join(p.dir, 'Default', 'Local Storage', 'leveldb.log'), 1 * MiB); fill(path.join(p.dir, 'ShaderCache', 'blob'), 0.5 * MiB);
@@ -170,14 +170,14 @@ const quiet = { log() { }, warn() { }, error() { } };
   const d1 = k.diskOf(p.id);
   ok(d1.state === 'over' && d1.bytes >= 7.5 * MiB && d1.bytes < 8 * MiB && d1.at === clock && d1.limit === 4 * MiB, `measured with real blocks: ${(d1.bytes / MiB).toFixed(2)} MiB, over the injected 4 MiB`);
   const row = k.list().profiles.find((x) => x.id === p.id).disk;
-  ok(row && row.bytes === d1.bytes && row.at === d1.at && row.state === 'over', 'GET /api/browser/profiles rows carry disk {bytes, at, state} — the same fact');
+  ok(gateOf(row) && row.bytes === d1.bytes && row.at === d1.at && row.state === 'over', 'GET /api/browser/profiles rows carry disk {bytes, at, state} — the same fact');
   ok(todos.calls.add === 1 && todos.items[0].origin === 'browser' && todos.items[0].kind === 'notice' && todos.items[0].sessionKey === 'browser', 'ONE For-you notice, origin browser, kind notice');
   const n1 = todos.items[0];
-  ok(n1.text.startsWith('The agent browser profile "work" is '), `it names the profile: ${n1.text}`);
-  ok(/ is 7\.5 MB on disk \(limit 4 MB\)/.test(n1.text), 'it names the size and the limit');
-  ok(/what grew: Default\/Cache /.test(n1.text), 'it names the top subdirectory first (Default/Cache)');
-  ok(/Delete… in the Agent browser panel frees it; New profile… copied from "work" keeps its logins/.test(n1.text), 'it names the remedy in plain words');
-  ok(/du -sk/.test(n1.detail) && /Nothing is stopped or deleted/.test(n1.detail), 'the detail says how it was measured and that nothing is stopped');
+  ok(verdictOf(n1.text.startsWith('The agent browser profile "work" is ')), `it names the profile: ${n1.text}`);
+  ok(verdictOf(/ is 7\.5 MB on disk \(limit 4 MB\)/.test(n1.text)), 'it names the size and the limit');
+  ok(verdictOf(/what grew: Default\/Cache /.test(n1.text)), 'it names the top subdirectory first (Default/Cache)');
+  ok(verdictOf(/Delete… in the Agent browser panel frees it; New profile… copied from "work" keeps its logins/.test(n1.text)), 'it names the remedy in plain words');
+  ok(gateOf(/du -sk/.test(n1.detail)) && verdictOf(/Nothing is stopped or deleted/.test(n1.detail)), 'the detail says how it was measured and that nothing is stopped');
   clock += 15 * MIN; await sample();
   ok(todos.calls.add === 1, 'still over 15 min later: no second notice');
   fs.rmSync(cache); fill(cache, 2.3 * MiB); clock += 15 * MIN; await sample();
@@ -196,7 +196,7 @@ const quiet = { log() { }, warn() { }, error() { } };
   k2._disk.pass(); await k2._disk.settled();
   ok(todos.calls.add === 2 && k2.diskOf(p.id).state === 'over', 'a restarted keeper adopts the open notice (no third)');
   // a start / stop event samples (debounced) — through the keeper's lease seam
-  ok(read('src/server/browser-keeper.js').includes("onLease((ev) => { if (ev && ev.profileId && ev.local && (ev.kind === 'browser-ready' || ev.kind === 'browser-stopped')) disk.event("), 'the keeper samples at its browser\'s start / stop (the lease seam: browser-ready / browser-stopped)');
+  ok(verdictOf(read('src/server/browser-keeper.js').includes("onLease((ev) => { if (ev && ev.profileId && ev.local && (ev.kind === 'browser-ready' || ev.kind === 'browser-stopped')) disk.event(")), 'the keeper samples at its browser\'s start / stop (the lease seam: browser-ready / browser-stopped)');
   k.shutdown?.(); k2.shutdown?.();
 }
 
@@ -212,7 +212,7 @@ console.log('§6 a paired machine\'s row, a timeout, a real kill');
   ok(r.state === 'not-measured' && r.code === 'disk_not_measured' && spawns === 0, 'sampleDir({hostId}) answers disk_not_measured — no child');
   ok(s.diskOf(rows[0]).code === 'disk_not_measured' && s.diskOf(rows[0]).reason === 'remote', 'the remote row\'s fact says why');
   s.pass(); await s.settled();
-  ok(spawns === 1 && s.diskOf(rows[1]).state === 'unknown' && /did not finish within 60 s/.test(s.diskOf(rows[1]).why), 'a timed-out child ⇒ unknown (never a verdict)');
+  ok(spawns === 1 && s.diskOf(rows[1]).state === 'unknown' && verdictOf(/did not finish within 60 s/.test(s.diskOf(rows[1]).why)), 'a timed-out child ⇒ unknown (never a verdict)');
   clock += 15 * MIN; s.pass(); await s.settled();
   ok(spawns === 2 && warns.length === 1, 'the unknown is logged once per hour (2 timeouts, 1 line)');
   clock += 60 * MIN; s.pass(); await s.settled();
@@ -223,7 +223,7 @@ console.log('§6 a paired machine\'s row, a timeout, a real kill');
   let ended = null;
   const real = RUN.createDiskSampler({ profiles: () => [], timeoutMs: 150, execFileImpl: (cmd, args, opts, cb) => execFile('sleep', ['5'], opts, (e, so, se) => { ended = { killed: !!(e && e.killed), signal: (e && e.signal) || null }; cb(e, so, se); }) });
   const t0 = Date.now(); const rr = await real.sampleDir({ dir: SCR });
-  ok(rr.state === 'unknown' && ended && ended.killed === true && ended.signal === 'SIGKILL', `a real child past its timeout is killed by the call's own timeout (${JSON.stringify(ended)}, ${Date.now() - t0} ms) ⇒ unknown`);
+  ok(rr.state === 'unknown' && gateOf(ended) && ended.killed === true && ended.signal === 'SIGKILL', `a real child past its timeout is killed by the call's own timeout (${JSON.stringify(ended)}, ${Date.now() - t0} ms) ⇒ unknown`);
 }
 
 // ── §7 the panel row ──
@@ -237,15 +237,15 @@ console.log('§7 the Agent browser row: On disk in en / zh / ja');
   ok(en.key === 'disk' && en.k === 'On disk' && en.v === '1.3 GB of 2 GB' && en.tone === '', `en: ${en.k}: ${en.v}`);
   ok(PM.diskFold(okRow, words(zh)).k === '磁盘占用' && PM.diskFold(okRow, words(zh)).v === '1.3 GB / 2 GB' && PM.diskFold(okRow, words(ja)).k === 'ディスク使用量', 'zh / ja: the label and the size');
   const over = PM.diskFold(r({ bytes: 2.4 * G, at: 1, state: 'over', limit: 2 * G }), words(null));
-  ok(over.tone === 'warn' && /said in For you/.test(over.title), 'over: the warn tone + the For-you sentence in its title');
+  ok(over.tone === 'warn' && verdictOf(/said in For you/.test(over.title)), 'over: the warn tone + the For-you sentence in its title');
   ok(PM.diskFold(r({ state: 'pending', bytes: null }), words(null)).v === 'not measured yet' && PM.diskFold(r(null), words(zh)).v === '尚未测量', 'pending / absent ⇒ not measured yet');
   const unk = PM.diskFold(r({ state: 'unknown', why: 'du did not finish within 60 s', bytes: null }), words(ja));
-  ok(unk.v === 'まだ計測していません' && /60 s/.test(unk.title), 'unknown ⇒ not measured yet (its why in the title)');
-  ok(PM.diskFold(r({ state: 'not-measured', reason: 'remote', code: 'disk_not_measured' }), words(null)).v === 'not measured — its folder is on a paired machine' && /ペアリング/.test(PM.diskFold(r({ state: 'not-measured', reason: 'remote' }), words(ja)).v), 'a remote row prints its why (en / ja)');
+  ok(unk.v === 'まだ計測していません' && verdictOf(/60 s/.test(unk.title)), 'unknown ⇒ not measured yet (its why in the title)');
+  ok(PM.diskFold(r({ state: 'not-measured', reason: 'remote', code: 'disk_not_measured' }), words(null)).v === 'not measured — its folder is on a paired machine' && verdictOf(/ペアリング/.test(PM.diskFold(r({ state: 'not-measured', reason: 'remote' }), words(ja)).v)), 'a remote row prints its why (en / ja)');
   ok(PM.usageLine(okRow, words(null)).l1 === '1.3 GB' && PM.usageLine(r(null), words(null)).l1 === '0.2 GB', 'the size cell reads the measured sample, the panel\'s own reading until then');
   const keys = PM.rowFold(okRow, words(null)).map((f) => f.key);
   ok(keys.indexOf('disk') >= 0 && keys.indexOf('disk') + 1 === keys.indexOf('records'), `the fold's On disk sits next to the records (${keys.join(' ')})`);
-  for (const [n, dict] of [['zh', zh], ['ja', ja]]) ok(['On disk', 'not measured yet', 'not measured — its folder is on a paired machine', 'not measured — VibeSpace keeps no folder for it', 'Over the profile disk budget — said in For you; Delete… in its menu frees it'].every((s2) => typeof dict[s2] === 'string' && dict[s2] !== s2), `${n}: every new word is translated`);
+  for (const [n, dict] of [['zh', zh], ['ja', ja]]) ok(verdictOf(['On disk', 'not measured yet', 'not measured — its folder is on a paired machine', 'not measured — VibeSpace keeps no folder for it', 'Over the profile disk budget — said in For you; Delete… in its menu frees it'].every((s2) => typeof dict[s2] === 'string' && dict[s2] !== s2)), `${n}: every new word is translated`);
 }
 
 // ── §8 source pins ──
@@ -261,8 +261,8 @@ const childCensus = (src) => { const calls = [...src.matchAll(/\b(?:execFileImpl
   const reqs = [...pure.matchAll(/require\(\s*'([^']+)'\s*\)/g)].map((m) => m[1]).sort();
   ok(JSON.stringify(reqs) === JSON.stringify(['./keeper-limits', './runaway-guard']) && !/\bimport\b.*from/.test(pure), `the PURE half imports only keeper-limits + runaway-guard (${reqs.join(', ')})`);
   const view = read('src/lib/browser-trace-view.js');
-  ok(/const \{ use, ageMs, disk, \.\.\.rest \} = r \|\| \{\};/.test(view) && /rowsById\.set\(r\.id, \{ row, sig \}\); \}\n\s+patchDisk\(row, r\);/.test(view), 'the row signature leaves `disk` out and a kept row is PATCHED (patchDisk), never rebuilt for a new sample');
-  ok(/r\.disk = keeper && typeof keeper\.diskOf === 'function' \? keeper\.diskOf\(r\.id\) : null;/.test(read('src/server/browser-trace.js')), 'the housekeeping rows read the keeper\'s ONE fact');
+  ok(gateOf(/const \{ use, ageMs, disk, \.\.\.rest \} = r \|\| \{\};/.test(view)) && verdictOf(/rowsById\.set\(r\.id, \{ row, sig \}\); \}\n\s+patchDisk\(row, r\);/.test(view)), 'the row signature leaves `disk` out and a kept row is PATCHED (patchDisk), never rebuilt for a new sample');
+  ok(verdictOf(/r\.disk = keeper && typeof keeper\.diskOf === 'function' \? keeper\.diskOf\(r\.id\) : null;/.test(read('src/server/browser-trace.js'))), 'the housekeeping rows read the keeper\'s ONE fact');
   ok(!/\bfsp?\.(?:rm|rmdir|unlink)\b|\bunlink(?:Sync)?\(|\.stop\(|\bkill\(/.test(run), 'report only: the sampler stops no browser and deletes no file');
 }
 
@@ -276,20 +276,20 @@ console.log('§9 patched copies — each red');
   ok(syncSrc !== run, 'the sync-walk copy is patched');
   const S = M.load('src/server/browser-disk-run.js', syncSrc, 'sync');
   const sm = await S.createDiskSampler({ profiles: () => [] }).sampleDir({ dir: SCR });
-  ok(sm.state === 'ok' && SYNC_WALK.test(syncSrc), 'RED: a copy that samples with a sync walk still measures — and the no-sync pin catches it');
+  ok(sm.state === 'ok' && verdictOf(SYNC_WALK.test(syncSrc)), 'RED: a copy that samples with a sync walk still measures — and the no-sync pin catches it');
   // (b) a notice that names no remedy
   const pure = read('src/browser-disk.js');
   const noRem = editAnchor(pure, 'remedy: `Delete… in the Agent browser panel frees it; New profile… copied from "${name}" keeps its logins`', "remedy: 'See the panel.'", "src/browser-disk.js");
   ok(noRem !== pure, 'the no-remedy copy is patched');
   const NR = M.load('src/browser-disk.js', noRem, 'noremedy');
   const remedyNamed = (Dm) => { const n = Dm.diskNotice({ label: 'work', verdict: RG.diskVerdict(3 * G), top: [{ name: 'Default/Cache', bytes: 2 * G }] }); return /Delete… in the Agent browser panel frees it/.test(n.text) && /New profile… copied from "work" keeps its logins/.test(n.text); };
-  ok(remedyNamed(D) && !remedyNamed(NR), 'RED: a copy whose notice names no remedy fails the remedy check (the real one passes)');
+  ok(gateOf(remedyNamed(D)) && !remedyNamed(NR), 'RED: a copy whose notice names no remedy fails the remedy check (the real one passes)');
   // (c) two profiles in one minute
   const twoSrc = editAnchor(pure, '  if (s.slotAt !== null && now - s.slotAt < DISK_SLOT_MS) return { state: s, sample: null };\n', '', "src/browser-disk.js");
   ok(twoSrc !== pure, 'the two-in-a-minute copy is patched');
   const TW = M.load('src/browser-disk.js', twoSrc, 'twominute');
   const tw = walk(TW.diskSampleStep);
-  ok(tw.bad.some((b) => /two samples in one minute/.test(b)), `RED: a copy that samples two profiles in one minute fails the walk (${tw.bad.filter((b) => /one minute/.test(b)).length} violations)`);
+  ok(verdictOf(tw.bad.some((b) => /two samples in one minute/.test(b))), `RED: a copy that samples two profiles in one minute fails the walk (${tw.bad.filter((b) => /one minute/.test(b)).length} violations)`);
   const cc = childCensus(run.replace("{ timeout: timeoutMs, killSignal: 'SIGKILL', ", '{ '));
   ok(cc.bad.length === 1, 'RED: a du child without its timeout / kill fails the census');
 }
@@ -314,11 +314,11 @@ console.log('B-574d browser-stores 6/8: the lineage ledger on the store writer\'
     return { size: Buffer.byteLength(txt), torn: rows.filter((x) => x === null).length, first: ns[0], last: ns[ns.length - 1], kept: ns.length, gapless: ns.every((v, i) => i === 0 || v === ns[i - 1] + 1), olds: olds.length, oldsGapless: olds.every((v, i) => i === 0 || v === olds[i - 1] + 1), whole: txt.endsWith('\n') };
   };
   const L6 = await ledScene(K, 'real');
-  ok(L6.torn === 0 && L6.whole && L6.last === 1499 && L6.first > 0 && L6.gapless && L6.size < (1 << 20) + 200 * 1024,
+  ok(L6.torn === 0 && gateOf(L6.whole) && L6.last === 1499 && L6.first > 0 && gateOf(L6.gapless) && L6.size < (1 << 20) + 200 * 1024,
     `B-574d browser-stores 6/8: 1500 lines of ~1 KB (past the 1 MiB ring many times) — the file stays bounded (${L6.size} bytes), every line whole, the kept ones the NEWEST (${L6.first}…${L6.last}) with no gap: no trim dropped a line newer than the ones it kept`);
   const OLD = (LF) => { const lines = []; for (let i = 0; i < 1300; i++) lines.push(JSON.stringify({ at: 1, boot: 'earlier', kind: 'old', n: i, pad: 'y'.repeat(900) })); fs.writeFileSync(LF, lines.join('\n') + '\n'); };
   const L6o = await ledScene(K, 'earlier', { pre: OLD });
-  ok(L6o.torn === 0 && L6o.whole && L6o.last === 1499 && L6o.oldsGapless && L6o.gapless && L6o.olds < 1300 && L6o.size < (1 << 20) + 200 * 1024, `…an earlier start's 1.3 MB file (its line starts read once, off the loop): trimmed on its own line boundaries — no torn line, the old lines kept (${L6o.olds}) gapless before the new ones`);
+  ok(L6o.torn === 0 && gateOf(L6o.whole) && L6o.last === 1499 && gateOf(L6o.oldsGapless) && gateOf(L6o.gapless) && L6o.olds < 1300 && L6o.size < (1 << 20) + 200 * 1024, `…an earlier start's 1.3 MB file (its line starts read once, off the loop): trimmed on its own line boundaries — no torn line, the old lines kept (${L6o.olds}) gapless before the new ones`);
   const KS6 = read('src/server/browser-keeper.js'), THEN = "then: text, as: 'browser-lineage-ledger.write' };";
   if (KS6.split(THEN).length === 2) {
     const M6 = mutantCopies('bdisk-bs6', REPO);
@@ -365,7 +365,7 @@ console.log('B-574d browser-stores 8/8: the lineage ledger\'s cures');
     sceneA(MA.load('src/server/browser-keeper.js', anchored(KS8, KEEP, '  L.owed = L.owed;   /* RED: the failed write\'s lines dropped */\n  if (L.owed.length > LEDGER_OWED_MAX)', 'the failed write offers its lines again'), 'bs8-lines-dropped'), 'red-drop'),
     sceneA(MA.load('src/server/browser-keeper.js', anchored(KS8, TRIM, 'Array.isArray(L.starts) && !L.noRewrite && total > LEDGER_MAX /* RED: a file with no bytes rewritten */', 'a file with no bytes is appended'), 'bs8-missing-rewritten'), 'red-rewrite')]);
   if (!A.witness) skip8('8/8 (a)+(b)', 'the folder in the ledger\'s name: the writer\'s write of it never failed');
-  else ok(A.told && A.landed === true && A.all && A.torn === 0 && A.whole, 'B-574d browser-stores 8/8 (a)+(b): 1200 lines owed while the ledger\'s name is a folder (its write refused, said) land once the name is free — every line once, in order, whole: a failed write offers its lines again, and a file not there past the ring\'s bound is appended, never rewritten', A);
+  else ok(gateOf(A.told) && A.landed === true && gateOf(A.all) && A.torn === 0 && verdictOf(A.whole), 'B-574d browser-stores 8/8 (a)+(b): 1200 lines owed while the ledger\'s name is a folder (its write refused, said) land once the name is free — every line once, in order, whole: a failed write offers its lines again, and a file not there past the ring\'s bound is appended, never rewritten', A);
   { if (!Ax.witness) skip8('8/8 (a) RED', 'the copy\'s write of the folder never failed');
     else ok(!Ax.all, 'RED (anchored copy: a failed write\'s lines dropped): the lines owed while the name was a folder never land — 8/8 (a) goes red', { kept: Ax.kept });
     if (!Ay.witness) skip8('8/8 (b) RED', 'the copy\'s write of the folder never failed');
@@ -385,7 +385,7 @@ console.log('B-574d browser-stores 8/8: the lineage ledger\'s cures');
   };
   const C = await sceneC(K, 'real');
   if (!C.witness) skip8('8/8 (c)', 'the two keepers\' own lines did not land under two boots');
-  else ok(C.all, 'B-574d browser-stores 8/8 (c): two keepers over one data folder (two boots) interleave 40 lines in one turn — every line of both lands: the ledger\'s state is the file\'s', C);
+  else ok(verdictOf(C.all), 'B-574d browser-stores 8/8 (c): two keepers over one data folder (two boots) interleave 40 lines in one turn — every line of both lands: the ledger\'s state is the file\'s', C);
   { const ST = 'const f = ledgerFile(), L = ledOf(f);', DT = 'produce: (o) => produceLedgerOf(f, o), onWritten: (ok, e) => ledgerWrittenOf(f, ok, e)';
     const per = anchored(anchored(KS8, ST, 'const f = ledgerFile(), K8 = f + \'#\' + bootId, L = ledOf(K8);   /* RED: the ledger\'s state per keeper */', 'the ledger\'s state is the file\'s'), DT, 'produce: (o) => produceLedgerOf(K8, o), onWritten: (ok, e) => ledgerWrittenOf(K8, ok, e)', 'one producer for the file');
     const Cx = await sceneC(mutantCopies('bdisk-bs8c', REPO).load('src/server/browser-keeper.js', per, 'bs8-per-keeper'), 'red');
@@ -412,19 +412,19 @@ console.log('B-574d browser-stores 8/8: the lineage ledger\'s cures');
   };
   const D1 = sceneD(K, 'landed', { landedRename: true }), D2 = sceneD(K, 'unlanded', { landedRename: false });
   if (!(D1.witness && D1.unanswered && D2.witness && D2.unanswered)) skip8('8/8 (d)', 'no write was taken, or its answer was not withheld');
-  else ok(D1.isRewrite && D2.isRewrite && D1.newAgain === 0 && D1.next && D2.newAgain === 3 && D2.next, 'B-574d browser-stores 8/8 (d): a trim never answered (its thread stopped) — its rename landed (the file holds the trimmed bytes): nothing offered again; it did not (the file as before): its three lines offered again, once', { landed: D1, unlanded: D2 });
+  else ok(gateOf(D1.isRewrite) && gateOf(D2.isRewrite) && D1.newAgain === 0 && gateOf(D1.next) && D2.newAgain === 3 && verdictOf(D2.next), 'B-574d browser-stores 8/8 (d): a trim never answered (its thread stopped) — its rename landed (the file holds the trimmed bytes): nothing offered again; it did not (the file as before): its three lines offered again, once', { landed: D1, unlanded: D2 });
   const E = sceneD(K, 'unsynced', { landedRename: true, answer: 'ERENAMEDNOSYNC' });
   if (!E.witness) skip8('8/8 (e)', 'no write was taken for the unsynced answer');
-  else ok(E.isRewrite && E.settledAtOnce && E.newAgain === 0 && E.next, 'B-574d browser-stores 8/8 (e): a trim answered ERENAMEDNOSYNC (its rename landed, its directory\'s sync did not) is landed AT ONCE — the size known, nothing owed, its lines never offered again', E);
+  else ok(gateOf(E.isRewrite) && gateOf(E.settledAtOnce) && E.newAgain === 0 && verdictOf(E.next), 'B-574d browser-stores 8/8 (e): a trim answered ERENAMEDNOSYNC (its rename landed, its directory\'s sync did not) is landed AT ONCE — the size known, nothing owed, its lines never offered again', E);
   { const MD = mutantCopies('bdisk-bs8d', REPO);
     const HOLD = '  if (t.size !== null && landed !== w.at && t.size === landed) return;   // the file holds them';
     const Dx = sceneD(MD.load('src/server/browser-keeper.js', anchored(KS8, HOLD, '  /* RED: a write not known landed always offered again */', 'a landed rename offers nothing again'), 'bs8-always-again'), 'red-again', { landedRename: true });
     if (!(Dx.witness && Dx.unanswered)) skip8('8/8 (d) RED', 'the copy took no write, or its answer was not withheld');
-    else ok(Dx.isRewrite && Dx.newAgain === 3, 'RED (anchored copy: an unanswered write always offered again): the landed trim\'s three lines written twice — 8/8 (d) goes red', Dx);
+    else ok(gateOf(Dx.isRewrite) && Dx.newAgain === 3, 'RED (anchored copy: an unanswered write always offered again): the landed trim\'s three lines written twice — 8/8 (d) goes red', Dx);
     const NOSYNC = "  if (!ok && w.rewrite && e && e.code === 'ERENAMEDNOSYNC') ok = true;";
     const Ex = sceneD(MD.load('src/server/browser-keeper.js', anchored(KS8, NOSYNC, '  /* RED: ERENAMEDNOSYNC a failed write */', 'a rewrite whose rename landed is landed'), 'bs8-nosync-failed'), 'red-nosync', { landedRename: true, answer: 'ERENAMEDNOSYNC' });
     if (!Ex.witness) skip8('8/8 (e) RED', 'the copy took no write for the unsynced answer');
-    else ok(Ex.isRewrite && !Ex.settledAtOnce, 'RED (anchored copy: ERENAMEDNOSYNC read as a failed write): the landed trim left owed, its size unknown until the file is read again — 8/8 (e) goes red', Ex); }
+    else ok(gateOf(Ex.isRewrite) && !Ex.settledAtOnce, 'RED (anchored copy: ERENAMEDNOSYNC read as a failed write): the landed trim left owed, its size unknown until the file is read again — 8/8 (e) goes red', Ex); }
   // (f) an append CUT SHORT (its thread died inside it: nothing truncated it back): THE PLANT — the file holds the write's first two
   // pieces whole and five bytes of the third, then the ETHREAD answer; only the pieces not wholly in the file are offered again, after
   // a '\n' that terminates the torn tail
@@ -444,7 +444,7 @@ console.log('B-574d browser-stores 8/8: the lineage ledger\'s cures');
   };
   const F8 = sceneF(K, 'real');
   if (!F8.witness) skip8('8/8 (f)', 'no append was taken for the cut');
-  else ok(F8.terminated && F8.ns.join() === '2,3' && F8.next, 'B-574d browser-stores 8/8 (f): an append cut short by its thread\'s death inside its third piece — only the pieces not wholly in the file are offered again (the third, the fourth), after a \'\\n\' that ends the torn tail: none written twice', F8);
+  else ok(gateOf(F8.terminated) && F8.ns.join() === '2,3' && verdictOf(F8.next), 'B-574d browser-stores 8/8 (f): an append cut short by its thread\'s death inside its third piece — only the pieces not wholly in the file are offered again (the third, the fourth), after a \'\\n\' that ends the torn tail: none written twice', F8);
   { const CUTA = '  if (!w.rewrite && w.at !== null && t.size !== null && t.size > w.at && t.size < landed) {';
     const Fx = sceneF(mutantCopies('bdisk-bs8f', REPO).load('src/server/browser-keeper.js', anchored(KS8, CUTA, '  if (false) {   /* RED: a cut-short append offered again whole */', 'a cut-short append offers only its unwritten pieces'), 'bs8-cut-whole'), 'red');
     if (!Fx.witness) skip8('8/8 (f) RED', 'the copy took no append for the cut');
@@ -472,12 +472,12 @@ console.log('B-574d browser-stores 8/8: the lineage ledger\'s cures');
   };
   const G8 = await sceneG(K, 'real');
   if (!G8.witness) skip8('8/8 (g)', 'no write was taken for the EREWRITEMAIN answer');
-  else ok(G8.isRewrite && G8.p2append && G8.newOnce === 3 && G8.indexed && G8.p3append && G8.saidOwn === 1 && G8.saidFailure === 0, 'B-574d browser-stores 8/8 (g): a trim answered EREWRITEMAIN (no writer thread) — its lines appended once, no trim tried again (also once the file is indexed again), said ONCE in its own words (the failure\'s line kept for a real failure)', G8);
+  else ok(gateOf(G8.isRewrite) && gateOf(G8.p2append) && G8.newOnce === 3 && gateOf(G8.indexed) && gateOf(G8.p3append) && G8.saidOwn === 1 && G8.saidFailure === 0, 'B-574d browser-stores 8/8 (g): a trim answered EREWRITEMAIN (no writer thread) — its lines appended once, no trim tried again (also once the file is indexed again), said ONCE in its own words (the failure\'s line kept for a real failure)', G8);
   { const MAIN = "  if (!ok && w.rewrite && e && e.code === 'EREWRITEMAIN') {";
     const Gx = await sceneG(mutantCopies('bdisk-bs8g', REPO).load('src/server/browser-keeper.js', anchored(KS8, MAIN, "  if (false) {   /* RED: EREWRITEMAIN a failed write like any other */", 'a main-only trim stops the trims'), 'bs8-main-again'), 'red');
     if (!Gx.witness) skip8('8/8 (g) RED', 'the copy took no write for the EREWRITEMAIN answer');
-    else ok(Gx.indexed && !Gx.p3append, 'RED (anchored copy: EREWRITEMAIN a failed write like any other): once the file is indexed again the next line is a trim again (and fails again) — 8/8 (g) goes red', Gx); }
+    else ok(gateOf(Gx.indexed) && !Gx.p3append, 'RED (anchored copy: EREWRITEMAIN a failed write like any other): once the file is indexed again the next line is a trim again (and fails again) — 8/8 (g) goes red', Gx); }
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

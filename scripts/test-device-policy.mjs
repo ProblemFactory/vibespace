@@ -35,7 +35,7 @@ const DA = require('../src/device-acts.js');
 const { DeviceManager } = require('../src/agentd/client.js');
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -58,15 +58,15 @@ function census(TABLE, FLAG_OF, ALWAYS) {
   return bad;
 }
 {
-  ok(JSON.stringify(DP.FLAGS) === JSON.stringify(['run', 'files', 'input', 'socks', 'lan', 'sessions', 'upgrade']) && Object.isFrozen(DP.FLAGS), 'the flags are a closed set: run, files, input, socks, lan, sessions, upgrade');
+  ok(JSON.stringify(DP.FLAGS) === JSON.stringify(['run', 'files', 'input', 'socks', 'lan', 'sessions', 'upgrade']) && verdictOf(Object.isFrozen(DP.FLAGS)), 'the flags are a closed set: run, files, input, socks, lan, sessions, upgrade');
   const bad = census(DA.TABLE, DP.FLAG_OF, DP.ALWAYS);
   const gated = Object.entries(DA.TABLE).filter(([, l]) => l !== 'read');
   ok(bad.length === 0 && gated.length >= 50, `every one of the ${gated.length} session / act / code rows has exactly one flag (${Object.keys(DP.FLAG_OF).length}) or is always (${Object.keys(DP.ALWAYS).length}: the handshake + the stops)`, bad);
-  ok(DP.FLAGS.every((f) => Object.values(DP.FLAG_OF).includes(f)), 'every flag gates at least one op (no dead flag)', DP.FLAGS.filter((f) => !Object.values(DP.FLAG_OF).includes(f)));
+  ok(verdictOf(DP.FLAGS.every((f) => Object.values(DP.FLAG_OF).includes(f))), 'every flag gates at least one op (no dead flag)', DP.FLAGS.filter((f) => !Object.values(DP.FLAG_OF).includes(f)));
   const mut = census({ ...DA.TABLE, 'shred-disk': 'act' }, DP.FLAG_OF, DP.ALWAYS);
-  ok(mut.length === 1 && /shred-disk \(act\): no flag/.test(mut[0]), 'MUTANT: an act row with no flag ⇒ RED (named)', mut);
+  ok(mut.length === 1 && verdictOf(/shred-disk \(act\): no flag/.test(mut[0])), 'MUTANT: an act row with no flag ⇒ RED (named)', mut);
   const mut2 = census(DA.TABLE, { ...DP.FLAG_OF, 'kill-session': 'sessions' }, DP.ALWAYS);
-  ok(mut2.some((b) => /kill-session.*a flag AND always/.test(b)), 'MUTANT: a row in both tables ⇒ RED', mut2);
+  ok(verdictOf(mut2.some((b) => /kill-session.*a flag AND always/.test(b))), 'MUTANT: a row in both tables ⇒ RED', mut2);
   // every op the client sends and the daemon answers (test-device-acts ① reads them the same way) is judged — never 'all'
   const client = read('src/agentd/client.js'), daemon = read('src/agentd/agentd.js');
   const ops = [...new Set([...client.matchAll(/\bop: '([a-z][a-z-]*)'/g), ...daemon.matchAll(/msg\.op === '([a-z][a-z-]*)'/g)].map((m) => m[1]))]
@@ -81,9 +81,9 @@ function census(TABLE, FLAG_OF, ALWAYS) {
 console.log('— ② the parser + the defaults');
 {
   const all = DP.parseAllow('all'), none = DP.parseAllow('none'), two = DP.parseAllow('files, run'), ses = DP.parseAllow('sessions'), bad = DP.parseAllow('run,keyboard'), empty = DP.parseAllow('');
-  ok(all.ok && all.all && all.allow.length === 7 && none.ok && none.allow.length === 0 && two.ok && two.allow.join() === 'run,files', 'all / none / a list in any order (FLAGS order kept)', { all, none, two });
-  ok(ses.ok && ses.allow.join() === 'run,files,sessions', 'sessions brings run + files (a conversation runs commands and writes its tools)', ses);
-  ok(!bad.ok && bad.unknown.join() === 'keyboard' && /unknown: keyboard — the flags are run, files, input, socks, lan, sessions, upgrade/.test(bad.error) && !empty.ok, 'an unknown word is refused BY NAME with the flags it knows; an empty list is refused', { bad, empty });
+  ok(gateOf(all.ok) && gateOf(all.all) && all.allow.length === 7 && gateOf(none.ok) && none.allow.length === 0 && gateOf(two.ok) && two.allow.join() === 'run,files', 'all / none / a list in any order (FLAGS order kept)', { all, none, two });
+  ok(gateOf(ses.ok) && ses.allow.join() === 'run,files,sessions', 'sessions brings run + files (a conversation runs commands and writes its tools)', ses);
+  ok(!bad.ok && bad.unknown.join() === 'keyboard' && gateOf(/unknown: keyboard — the flags are run, files, input, socks, lan, sessions, upgrade/.test(bad.error)) && !empty.ok, 'an unknown word is refused BY NAME with the flags it knows; an empty list is refused', { bad, empty });
   ok(DP.policyOf(['--allow', 'input']).allow.join() === 'input' && DP.policyOf(['--dial', 'x', '--allow=lan,socks']).allow.join() === 'socks,lan' && DP.policyOf(['-Allow', 'run']).allow.join() === 'run', 'policyOf reads --allow x / --allow=x / -Allow x from an install command');
   ok(DP.policyOf([]).all === true && DP.policyOf([], { cluster: true }).allow.join() === 'run,files,sessions,upgrade', 'no --allow ⇒ the instance kind\'s default: a LOCAL instance all, a CLUSTER instance run,files,sessions,upgrade (no socks / lan / input)');
   ok(DP.allowArg(DP.FLAGS) === 'all' && DP.allowArg([]) === 'none' && DP.allowArg(['upgrade', 'sessions']) === 'run,files,sessions,upgrade', 'the argument text: all / none / the normalized list');
@@ -92,7 +92,7 @@ console.log('— ② the parser + the defaults');
   ok(garbled.source === 'unreadable' && garbled.allow.length === 0 && junk.source === 'unreadable', 'a file that is not a v1 list of known flags allows only reads (unreadable) — never everything', { garbled, junk });
   ok(round.source === 'install' && round.allow.join() === 'run,files,sessions,upgrade' && round.at === 5, 'the installer\'s file reads back as written (source install)', round);
   const rep = DP.reportOf({ allow: ['run', 'evil', 'sessions'], source: '<x>', at: 'y' });
-  ok(rep && rep.allow.join() === 'run,files,sessions' && rep.source === 'install' && rep.at === 0 && DP.reportOf({ allow: 'all' }) === null && DP.reportOf(null) === null, 'a stated list is bounded on the hub (unknown flags dropped, the source a known word)', rep);
+  ok(gateOf(rep) && rep.allow.join() === 'run,files,sessions' && rep.source === 'install' && rep.at === 0 && DP.reportOf({ allow: 'all' }) === null && DP.reportOf(null) === null, 'a stated list is bounded on the hub (unknown flags dropped, the source a known word)', rep);
 }
 
 console.log('— ③ the verdicts + THE re-run sentence + the file itself');
@@ -100,23 +100,23 @@ console.log('— ③ the verdicts + THE re-run sentence + the file itself');
   const v = DP.verdict(pol(CLUSTER), { op: 'input-events', events: [] }, { machine: 'mac1' });
   ok(!v.ok && v.code === 'op-not-allowed' && v.flag === 'input' && v.remedy === 're-run the pairing command on "mac1" with --allow run,files,input,sessions,upgrade', 'input-events on a cluster device ⇒ op-not-allowed input + THE re-run (the whole new list, never the flag alone)', v);
   const s = DP.sentenceOf(v, { machine: 'mac1' });
-  ok(/^op-not-allowed: input-events needs "input" — "mac1"'s own allow list leaves it off \(it allows: run, files, sessions, upgrade\); re-run the pairing command on "mac1" with --allow run,files,input,sessions,upgrade$/.test(s), 'the sentence names the op, the flag, what it allows and the re-run', s);
+  ok(verdictOf(/^op-not-allowed: input-events needs "input" — "mac1"'s own allow list leaves it off \(it allows: run, files, sessions, upgrade\); re-run the pairing command on "mac1" with --allow run,files,input,sessions,upgrade$/.test(s)), 'the sentence names the op, the flag, what it allows and the re-run', s);
   const w = DP.verdict(pol(CLUSTER), { op: 'serve-socks' }, { machine: 'WIN-1', platform: 'win32' });
-  ok(!w.ok && w.flag === 'socks' && / with -Allow run,files,socks,sessions,upgrade$/.test(w.remedy), 'a Windows machine\'s re-run says -Allow (its installer\'s spelling)', w.remedy);
-  ok(DP.verdict(pol(CLUSTER), { op: 'tcp-connect', port: 22, host: '192.168.1.5' }).flag === 'lan' && DP.verdict(pol(CLUSTER), { op: 'run-cmd', cmd: 'ls' }).ok && DP.verdict(pol(CLUSTER), { op: 'upgrade' }).ok, 'the cluster default: LAN refused; commands and updates allowed');
-  ok(DP.verdict(pol([]), { op: 'fs-op', action: 'list', path: '/' }).ok && DP.verdict(pol([]), { op: 'kill-session', chan: 3 }).ok && !DP.verdict(pol([]), { op: 'fs-op', action: 'write', path: '/x' }).ok, '`none`: reads and stops pass; a write is refused (files)');
+  ok(!w.ok && w.flag === 'socks' && verdictOf(/ with -Allow run,files,socks,sessions,upgrade$/.test(w.remedy)), 'a Windows machine\'s re-run says -Allow (its installer\'s spelling)', w.remedy);
+  ok(DP.verdict(pol(CLUSTER), { op: 'tcp-connect', port: 22, host: '192.168.1.5' }).flag === 'lan' && gateOf(DP.verdict(pol(CLUSTER), { op: 'run-cmd', cmd: 'ls' }).ok) && verdictOf(DP.verdict(pol(CLUSTER), { op: 'upgrade' }).ok), 'the cluster default: LAN refused; commands and updates allowed');
+  ok(gateOf(DP.verdict(pol([]), { op: 'fs-op', action: 'list', path: '/' }).ok) && gateOf(DP.verdict(pol([]), { op: 'kill-session', chan: 3 }).ok) && !DP.verdict(pol([]), { op: 'fs-op', action: 'write', path: '/x' }).ok, '`none`: reads and stops pass; a write is refused (files)');
   const u = DP.verdict(pol(['run', 'files', 'input', 'socks', 'lan', 'sessions']), { op: 'brand-new-op' });
-  ok(!u.ok && u.flag === 'all' && /--allow all$/.test(u.remedy) && DP.verdict(pol(DP.FLAGS.slice()), { op: 'brand-new-op' }).ok, 'an op the table does not know runs only where EVERY flag is on (its re-run says all)', u);
-  ok(DP.verdict(null, { op: 'input-events' }).ok && DP.verdict(null, { op: 'input-events' }).unjudged, 'no list stated (an agent older than the list) = not judged by the hub');
+  ok(!u.ok && u.flag === 'all' && gateOf(/--allow all$/.test(u.remedy)) && verdictOf(DP.verdict(pol(DP.FLAGS.slice()), { op: 'brand-new-op' }).ok), 'an op the table does not know runs only where EVERY flag is on (its re-run says all)', u);
+  ok(gateOf(DP.verdict(null, { op: 'input-events' }).ok) && verdictOf(DP.verdict(null, { op: 'input-events' }).unjudged), 'no list stated (an agent older than the list) = not judged by the hub');
   // the file itself (lexical, on the device's own path module)
   const pf = '/home/u/.vibespace/device@hub/state/policy.json', H = { policyFile: pf, home: '/home/u', pathMod: path.posix };
   const T = (p) => DP.touchesPolicy(p, H);
-  ok(T({ op: 'place-secret', path: pf }) && T({ op: 'fs-op', action: 'write', path: '~/.vibespace/device@hub/state/policy.json' }) && T({ op: 'fs-op', action: 'write-stream', step: 'open', path: pf }), 'a place-secret / write / stream onto policy.json (`~` = the device\'s home) touches it');
-  ok(T({ op: 'fs-op', action: 'rm', path: '/home/u/.vibespace', recursive: true }) && T({ op: 'fs-op', action: 'rename', path: '/home/u/.vibespace/device@hub/state', to: '/tmp/x' }) && T({ op: 'fs-op', action: 'move', path: '/tmp/evil.json', to: pf }) && T({ op: 'fs-op', action: 'copy', path: '/tmp/state', to: '/home/u/.vibespace/device@hub/state' }), 'a removal / rename OF it or a folder above it, a move / copy ONTO it (or onto a folder above it) touches it');
+  ok(gateOf(T({ op: 'place-secret', path: pf })) && gateOf(T({ op: 'fs-op', action: 'write', path: '~/.vibespace/device@hub/state/policy.json' })) && verdictOf(T({ op: 'fs-op', action: 'write-stream', step: 'open', path: pf })), 'a place-secret / write / stream onto policy.json (`~` = the device\'s home) touches it');
+  ok(gateOf(T({ op: 'fs-op', action: 'rm', path: '/home/u/.vibespace', recursive: true })) && gateOf(T({ op: 'fs-op', action: 'rename', path: '/home/u/.vibespace/device@hub/state', to: '/tmp/x' })) && gateOf(T({ op: 'fs-op', action: 'move', path: '/tmp/evil.json', to: pf })) && verdictOf(T({ op: 'fs-op', action: 'copy', path: '/tmp/state', to: '/home/u/.vibespace/device@hub/state' })), 'a removal / rename OF it or a folder above it, a move / copy ONTO it (or onto a folder above it) touches it');
   ok(!T({ op: 'fs-op', action: 'mkdir', path: '/home/u/.vibespace' }) && !T({ op: 'fs-op', action: 'write', path: '/home/u/.vibespace/device@hub/state/dial.json' }) && !T({ op: 'fs-op', action: 'read-range', path: pf }) && !T({ op: 'place-secret', path: '/home/u/.vibespace/k.key' }) && !T({ op: 'fs-op', action: 'rm', path: '/home/u/.vibespace/device@hub/state/policy.json.bak' }), 'NOT: a mkdir above it (a session\'s setup), another file of the folder (dial.json), a read, a sibling name');
   const WH = { policyFile: 'C:\\Users\\U\\.vibespace\\device@hub\\state\\policy.json', home: 'C:\\Users\\U', pathMod: path.win32 };
-  ok(DP.touchesPolicy({ op: 'fs-op', action: 'write', path: 'c:\\users\\u\\.VIBESPACE\\device@hub\\state\\POLICY.json' }, WH) && DP.touchesPolicy({ op: 'fs-op', action: 'rm', path: '~\\.vibespace', recursive: true }, WH), 'Windows: case-insensitive, `~\\` = its home');
-  ok(/^policy_is_the_devices: \/x\/state\/policy.json is the machine's own allow list — only the pairing command, run on the machine, changes it$/.test(DP.sentenceOf(DP.ownRefusal('/x/state/policy.json'))), 'the device says policy_is_the_devices, and how it changes');
+  ok(gateOf(DP.touchesPolicy({ op: 'fs-op', action: 'write', path: 'c:\\users\\u\\.VIBESPACE\\device@hub\\state\\POLICY.json' }, WH)) && verdictOf(DP.touchesPolicy({ op: 'fs-op', action: 'rm', path: '~\\.vibespace', recursive: true }, WH)), 'Windows: case-insensitive, `~\\` = its home');
+  ok(verdictOf(/^policy_is_the_devices: \/x\/state\/policy.json is the machine's own allow list — only the pairing command, run on the machine, changes it$/.test(DP.sentenceOf(DP.ownRefusal('/x/state/policy.json')))), 'the device says policy_is_the_devices, and how it changes');
 }
 
 console.log('— ④ THE ONE SEND POINT (a fake daemon link)');
@@ -146,33 +146,33 @@ const codeOf = async (p) => { try { await p; return 'sent'; } catch (e) { return
 {
   const F = fakeDm(pol(CLUSTER));
   const e = await codeOf(F.dm.inputEvents([{ t: 'key', key: 'a' }], { by: BY }));
-  ok(e && e.code === 'op-not-allowed' && e.flag === 'input' && /re-run the pairing command on "mac1" with --allow run,files,input,sessions,upgrade/.test(e.message) && /"mac1"'s own allow list/.test(e.message), 'inputEvents on a list without input ⇒ op-not-allowed input, the sentence names the machine and THE re-run', e && e.message);
+  ok(gateOf(e) && e.code === 'op-not-allowed' && e.flag === 'input' && gateOf(/re-run the pairing command on "mac1" with --allow run,files,input,sessions,upgrade/.test(e.message)) && verdictOf(/"mac1"'s own allow list/.test(e.message)), 'inputEvents on a list without input ⇒ op-not-allowed input, the sentence names the machine and THE re-run', e && e.message);
   ok(!F.sent.some((m) => m.op === 'input-events'), 'NOTHING was sent (the refused act never travels)', F.sent.map((m) => m.op));
-  ok(F.lines.length === 1 && F.lines[0].op === 'input-events' && F.lines[0].code === 'op-not-allowed' && F.lines[0].ok === false && F.lines[0].by === BY && /--allow run,files,input,sessions,upgrade/.test(F.lines[0].outHead), 'ONE audit line: op-not-allowed, who asked, its head = the re-run', F.lines);
-  ok(F.logs.some((l) => /\[device-policy\] REFUSED input-events/.test(l)), 'said in the journal');
+  ok(F.lines.length === 1 && F.lines[0].op === 'input-events' && F.lines[0].code === 'op-not-allowed' && F.lines[0].ok === false && F.lines[0].by === BY && verdictOf(/--allow run,files,input,sessions,upgrade/.test(F.lines[0].outHead)), 'ONE audit line: op-not-allowed, who asked, its head = the re-run', F.lines);
+  ok(verdictOf(F.logs.some((l) => /\[device-policy\] REFUSED input-events/.test(l))), 'said in the journal');
   const s1 = await codeOf(F.dm.serveSocks({ by: BY })), s2 = await codeOf(F.dm.tcpForward(22, '10.1.2.3', { by: BY }));
   ok(s1.code === 'op-not-allowed' && s1.flag === 'socks' && s2.code === 'op-not-allowed' && s2.flag === 'lan' && F.conn.sessions.size === 0, 'serve-socks ⇒ socks; a socket to another LAN host ⇒ lan, refused BEFORE a channel is held', { s1: s1.message, s2: s2.message, chans: F.conn.sessions.size });
   const r = await F.dm.runCmd('sh', ['-c', 'echo hi'], { by: BY });
   const lo = await codeOf(F.dm.tcpForward(5900, null, { by: BY }));
-  ok(String(r.stdout).includes('hi') && F.sent.some((m) => m.op === 'run-cmd') && lo === 'sent', 'what the list allows is sent (a command; a port on the device\'s own loopback is a read)');
+  ok(gateOf(String(r.stdout).includes('hi')) && gateOf(F.sent.some((m) => m.op === 'run-cmd')) && lo === 'sent', 'what the list allows is sent (a command; a port on the device\'s own loopback is a read)');
   // sessions off: the opens refuse before anything is sent; a stream before its channel opens
   const G = fakeDm(pol(['run', 'files', 'upgrade']));
   const o1 = await codeOf(G.dm.openPipeSession({ sid: 's1', cmd: 'an-agent-cli', args: [], env: { ANTHROPIC_API_KEY: 'k' } }));
   const o2 = await codeOf(G.dm.openSession({ cmd: 'bash', args: [], cols: 80, rows: 24 }));
   const o3 = await codeOf(G.dm.openPipeSession({ sid: 's1' }));
   const o4 = await G.dm.refusalOf({ op: 'open-pipe-session' });
-  ok([o1, o2, o3, o4].every((x) => x && x.code === 'op-not-allowed' && x.flag === 'sessions') && !G.sent.some((m) => /session/.test(m.op)), 'sessions off: open-pipe-session (its account env), open-session, an attach and refusalOf all ⇒ op-not-allowed sessions; no session frame sent', G.sent.map((m) => m.op));
+  ok(gateOf([o1, o2, o3, o4].every((x) => x && x.code === 'op-not-allowed' && x.flag === 'sessions')) && !G.sent.some((m) => /session/.test(m.op)), 'sessions off: open-pipe-session (its account env), open-session, an attach and refusalOf all ⇒ op-not-allowed sessions; no session frame sent', G.sent.map((m) => m.op));
   const H = fakeDm(pol(['files']));
   const st = await codeOf(H.dm.runStream('sh', ['-c', 'yes'], { by: BY }));
   ok(st.code === 'op-not-allowed' && st.flag === 'run' && H.sent.length === 0 && H.conn.sessions.size === 0 && H.lines.length === 1, 'a stream is refused before its channel opens (nothing sent, ONE line)', { sent: H.sent, lines: H.lines.length });
   // an agent that states no list: not judged by the hub (the device has none either)
   const O = fakeDm(null);
-  ok(await codeOf(O.dm.inputEvents([], { by: BY })) === 'sent' && O.sent.some((m) => m.op === 'input-events'), 'no list stated (an older agent) ⇒ not judged, sent as before');
+  ok(await codeOf(O.dm.inputEvents([], { by: BY })) === 'sent' && verdictOf(O.sent.some((m) => m.op === 'input-events')), 'no list stated (an older agent) ⇒ not judged, sent as before');
   // the DEVICE's own refusal answers the id that asked, by name (a hub that did not ask first)
   const D = fakeDm(null, { answerWith: (m) => ({ op: 'op-refused', error: 'op-not-allowed: input-events needs "input" — x', code: 'op-not-allowed', flag: 'input', remedy: 're-run …' }) });
   const de = await codeOf(D.dm.inputEvents([], { by: BY }));
-  ok(de.code === 'op-not-allowed' && de.flag === 'input' && de.remedy === 're-run …' && /needs "input"/.test(de.message), 'the device\'s op-refused answer rejects with its code, flag and remedy', de);
-  ok(/m\.op === 'serve-socks-result' \|\| m\.op === 'op-refused'\)/.test(read('src/agentd/client.js')), 'the reply router hands op-refused to the id that asked');
+  ok(de.code === 'op-not-allowed' && de.flag === 'input' && de.remedy === 're-run …' && verdictOf(/needs "input"/.test(de.message)), 'the device\'s op-refused answer rejects with its code, flag and remedy', de);
+  ok(verdictOf(/m\.op === 'serve-socks-result' \|\| m\.op === 'op-refused'\)/.test(read('src/agentd/client.js'))), 'the reply router hands op-refused to the id that asked');
   ok(JSON.stringify(F.dm.policy()) === JSON.stringify(DP.reportOf(pol(CLUSTER))) && O.dm.policy() === null, 'dm.policy() = the list the connected agent states (null = none)');
 }
 
@@ -206,7 +206,7 @@ console.log('— ⑤ the hello-ack: never push an upgrade the device\'s list lea
   };
   const off = await run(pol(CLUSTER.filter((f) => f !== 'upgrade')));
   ok(off.out === 'connected' && off.upgrades === 0, 'a list without upgrade: the version drift pushes NOTHING, the link is kept', off);
-  ok(off.lines.length === 1 && off.lines[0].op === 'upgrade' && off.lines[0].code === 'op-not-allowed' && /--allow run,files,sessions,upgrade/.test(off.lines[0].outHead) && off.logs.some((l) => /leaves "upgrade" off; using it as-is/.test(l)), 'said once in the journal + ONE refused audit line (its re-run)', { lines: off.lines, logs: off.logs });
+  ok(off.lines.length === 1 && off.lines[0].op === 'upgrade' && off.lines[0].code === 'op-not-allowed' && gateOf(/--allow run,files,sessions,upgrade/.test(off.lines[0].outHead)) && verdictOf(off.logs.some((l) => /leaves "upgrade" off; using it as-is/.test(l))), 'said once in the journal + ONE refused audit line (its re-run)', { lines: off.lines, logs: off.logs });
   ok(off.seen.length === 1 && off.seen[0].allow.join() === 'run,files,sessions', 'onPolicy hears the list the hello-ack states (the machine record keeps it)', off.seen);
   const on = await run(pol(CLUSTER));
   ok(on.upgrades === 1, 'CONTROL: the same drift with upgrade on ⇒ the push is sent', on.upgrades);
@@ -232,7 +232,7 @@ console.log('— ⑤b the greeting is judged before it is believed (lane lg-remo
   // this tree's own agent says a greeting the verdict passes (its literal capability list, measured from the source)
   const capsLine = (read('src/agentd/agentd.js').match(/capabilities: \[([^\]]*)\]/) || [])[1] || '';
   const ownCaps = [...capsLine.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/'([^']+)'/g)].map((m) => m[1]); // a comment in the list (B-beaf's «a pipe session's channel…») is no capability: its apostrophe would pair the quotes wrong
-  ok(ownCaps.length >= 20 && ownCaps.length <= CL.HELLO_BOUNDS.capabilities / 2 && CL.helloAckVerdict({ ...good, capabilities: ownCaps }).ok, `this tree's agent names ${ownCaps.length} capabilities — the verdict passes them, with room to grow (≤ half the bound)`, ownCaps.length);
+  ok(ownCaps.length >= 20 && ownCaps.length <= CL.HELLO_BOUNDS.capabilities / 2 && verdictOf(CL.helloAckVerdict({ ...good, capabilities: ownCaps }).ok), `this tree's agent names ${ownCaps.length} capabilities — the verdict passes them, with room to grow (≤ half the bound)`, ownCaps.length);
   const connectWith = async (DM, ack) => {
     const srv = net.createServer((sock) => { const mux = new Mux(sock, { onControl: (m) => { if (m.op === 'hello') mux.control(ack); }, onData: (chan, buf) => mux.credit(chan, buf.length), onDead: () => { } }); });
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
@@ -246,15 +246,15 @@ console.log('— ⑤b the greeting is judged before it is believed (lane lg-remo
   };
   const huge = { ...good, capabilities: Array.from({ length: 300 }, (_, i) => 'cap' + i) };
   const r1 = await connectWith(DeviceManager, good), r2 = await connectWith(DeviceManager, huge), r2b = await connectWith(DeviceManager, { ...good, platform: 'plan 9' });
-  ok(r1.out === 'connected' && r1.info && r1.info.platform === 'linux', 'over the REAL Mux + DeviceManager: a well-formed greeting opens the link', r1.out instanceof Error ? r1.out.message : r1.out);
-  ok(r2.out instanceof Error && r2.out.code === 'hello-ack-shape' && /capabilities are not a list of at most 256 words/.test(r2.out.message) && !r2.info && r2.logs.some((l) => /the device's greeting was refused/.test(l)) && r2b.out instanceof Error && r2b.out.code === 'hello-ack-shape' && /platform/.test(r2b.out.message) && r2.kept && r2.logs.filter((l) => /greeting was refused/.test(l)).length === 1,
+  ok(r1.out === 'connected' && gateOf(r1.info) && r1.info.platform === 'linux', 'over the REAL Mux + DeviceManager: a well-formed greeting opens the link', r1.out instanceof Error ? r1.out.message : r1.out);
+  ok(r2.out instanceof Error && r2.out.code === 'hello-ack-shape' && gateOf(/capabilities are not a list of at most 256 words/.test(r2.out.message)) && !r2.info && gateOf(r2.logs.some((l) => /the device's greeting was refused/.test(l))) && r2b.out instanceof Error && r2b.out.code === 'hello-ack-shape' && gateOf(/platform/.test(r2b.out.message)) && gateOf(r2.kept) && r2.logs.filter((l) => /greeting was refused/.test(l)).length === 1,
     'a greeting with 300 capabilities / a platform that is no word: the link is refused BY NAME at once (hello-ack-shape — no retry loses the name), nothing of it kept, ONE journal line, the dialed stream KEPT (no re-dial storm)', [r2, r2b].map((r) => (r.out instanceof Error ? `${r.out.code}: ${r.out.message}` : r.out)));
   const SRC = read('src/agentd/client.js');
   const anchor = '            if (!shape.ok) {';
-  ok(SRC.includes(anchor), 'control: the verdict guards the hello-ack in client.js (the anchor)', anchor);
+  ok(verdictOf(SRC.includes(anchor)), 'control: the verdict guards the hello-ack in client.js (the anchor)', anchor);
   const Mut = mutantCopies('device-policy-hello', REPO).load('src/agentd/client.js', SRC.replace(anchor, '            if (false) {'), 'no-shape');
   const r3 = await connectWith(Mut.DeviceManager, huge);
-  ok(r3.out === 'connected' && r3.info && Array.isArray(r3.info.capabilities) && r3.info.capabilities.length === 300, 'RED CONTROL: a copy without the verdict opens the link on that greeting and keeps all 300 capabilities as the link\'s info — the leg above refuses that', r3.out instanceof Error ? r3.out.message : r3.out);
+  ok(r3.out === 'connected' && gateOf(r3.info) && gateOf(Array.isArray(r3.info.capabilities)) && r3.info.capabilities.length === 300, 'RED CONTROL: a copy without the verdict opens the link on that greeting and keeps all 300 capabilities as the link\'s info — the leg above refuses that', r3.out instanceof Error ? r3.out.message : r3.out);
 }
 
 console.log('— ⑥ the DEVICE (a REAL local daemon)');
@@ -268,12 +268,12 @@ console.log('— ⑥ the DEVICE (a REAL local daemon)');
   const mutSrc = src.replace(CHECK, '');
   const mutBundle = path.join(tmp, 'agentd-mutant.js');
   esbuild.buildSync({ stdin: { contents: mutSrc, resolveDir: path.join(REPO, 'src/agentd'), sourcefile: 'agentd.js', loader: 'js' }, bundle: true, platform: 'node', outfile: mutBundle, logLevel: 'silent', external: ['node-pty'] });
-  ok(src.includes(CHECK) && mutSrc !== src, 'the mutant copy drops exactly the device\'s check line');
+  ok(gateOf(src.includes(CHECK)) && mutSrc !== src, 'the mutant copy drops exactly the device\'s check line');
   // the installer's writer: the agent's own --write-policy
   const wp = (root, val) => spawnSync(process.execPath, [bundle, '--write-policy', val], { env: { ...process.env, VIBESPACE_DEVICE_ROOT: root, VIBESPACE_AGENTD_ROOT: root }, encoding: 'utf8', timeout: 20000 });
   const badRoot = path.join(tmp, 'bad-root');
   const bad = wp(badRoot, 'run,keyboard');
-  ok(bad.status === 2 && /unknown: keyboard/.test(bad.stderr) && !fs.existsSync(path.join(badRoot, 'state', 'policy.json')), '--write-policy with an unknown flag: exit 2 by name, nothing written', { status: bad.status, err: bad.stderr });
+  ok(bad.status === 2 && gateOf(/unknown: keyboard/.test(bad.stderr)) && !fs.existsSync(path.join(badRoot, 'state', 'policy.json')), '--write-policy with an unknown flag: exit 2 by name, nothing written', { status: bad.status, err: bad.stderr });
   const notRefused = (x) => x === 'sent' || x === 'opened' || (x instanceof Error && !/op-not-allowed|policy_is_the_devices/.test(String(x.code) + ' ' + x.message));
   const leg = async (tag, bundlePath, { rmFolder = true } = {}) => {
     const root = path.join(tmp, 'root-' + tag);
@@ -309,16 +309,16 @@ console.log('— ⑥ the DEVICE (a REAL local daemon)');
     return out;
   };
   const R = await leg('real', bundle);
-  ok(!R.threw && R.w.status === 0 && /allow list: run,files,upgrade/.test(R.w.stdout) && R.mode === 0o600 && JSON.parse(R.before).allow.join() === 'run,files,upgrade', '--write-policy run,files,upgrade: state/policy.json at 0600, said', R.threw || { w: R.w.stdout, mode: R.mode });
-  ok(R.stated && R.stated.allow.join() === 'run,files,upgrade' && R.stated.source === 'install', 'the hello-ack states the list (source install)', R.stated);
-  ok(/allowed/.test(R.run) && R.hubInput.code === 'op-not-allowed' && R.hubInput.flag === 'input', 'a command runs; the hub refuses input-events itself (its re-run named)', R.hubInput && R.hubInput.message);
-  ok(R.input.code === 'op-not-allowed' && R.input.flag === 'input' && /re-run the pairing command on this machine with --allow run,files,input,upgrade/.test(R.input.message), 'a hub that skips its check: the DEVICE refuses input-events — op-not-allowed input + its re-run', R.input && R.input.message);
+  ok(!R.threw && R.w.status === 0 && gateOf(/allow list: run,files,upgrade/.test(R.w.stdout)) && R.mode === 0o600 && JSON.parse(R.before).allow.join() === 'run,files,upgrade', '--write-policy run,files,upgrade: state/policy.json at 0600, said', R.threw || { w: R.w.stdout, mode: R.mode });
+  ok(gateOf(R.stated) && R.stated.allow.join() === 'run,files,upgrade' && R.stated.source === 'install', 'the hello-ack states the list (source install)', R.stated);
+  ok(gateOf(/allowed/.test(R.run)) && R.hubInput.code === 'op-not-allowed' && R.hubInput.flag === 'input', 'a command runs; the hub refuses input-events itself (its re-run named)', R.hubInput && R.hubInput.message);
+  ok(R.input.code === 'op-not-allowed' && R.input.flag === 'input' && verdictOf(/re-run the pairing command on this machine with --allow run,files,input,upgrade/.test(R.input.message)), 'a hub that skips its check: the DEVICE refuses input-events — op-not-allowed input + its re-run', R.input && R.input.message);
   ok(R.placed.code === 'policy_is_the_devices' && R.write.code === 'policy_is_the_devices' && R.rm.code === 'policy_is_the_devices' && R.after === R.before, 'place-secret / fs-op write onto policy.json and rm -r of its folder ⇒ policy_is_the_devices (files ON) — the file unchanged', { placed: R.placed.message, write: R.write.message, rm: R.rm.message });
-  ok(R.session instanceof Error && /needs "sessions"/.test(R.session.message) && !R.sessionFile, 'a session open carrying an account env ⇒ refused (sessions); nothing spawned, no session record', R.session && (R.session.message || R.session));
+  ok(R.session instanceof Error && gateOf(/needs "sessions"/.test(R.session.message)) && !R.sessionFile, 'a session open carrying an account env ⇒ refused (sessions); nothing spawned, no session record', R.session && (R.session.message || R.session));
   const refusedOps = R.acts.filter((l) => l.ok === false).map((l) => `${l.op} → ${l.code}`);
-  ok(refusedOps.includes('input-events → op-not-allowed') && refusedOps.includes('place-secret → policy_is_the_devices') && refusedOps.includes('open-pipe-session → op-not-allowed'), 'the device\'s own acts.log says each refusal (who asked, the code)', refusedOps);
+  ok(gateOf(refusedOps.includes('input-events → op-not-allowed')) && gateOf(refusedOps.includes('place-secret → policy_is_the_devices')) && verdictOf(refusedOps.includes('open-pipe-session → op-not-allowed')), 'the device\'s own acts.log says each refusal (who asked, the code)', refusedOps);
   const M = await leg('mutant', mutBundle, { rmFolder: false });
-  ok(!M.threw && notRefused(M.input) && notRefused(M.write) && M.session === 'opened' && M.after !== M.before, 'MUTANT (agentd without the check): the same requests RUN — input-events dispatched, policy.json overwritten, the session opened ⇒ the legs above are RED', M.threw || { input: String(M.input && (M.input.message || M.input)), write: String(M.write && (M.write.message || M.write)), session: String(M.session && (M.session.message || M.session)), after: M.after });
+  ok(!M.threw && gateOf(notRefused(M.input)) && gateOf(notRefused(M.write)) && M.session === 'opened' && M.after !== M.before, 'MUTANT (agentd without the check): the same requests RUN — input-events dispatched, policy.json overwritten, the session opened ⇒ the legs above are RED', M.threw || { input: String(M.input && (M.input.message || M.input)), write: String(M.write && (M.write.message || M.write)), session: String(M.session && (M.session.message || M.session)), after: M.after });
 }
 
 console.log('— ⑦ the hub\'s record, the session setup, the pairing default, the installers, the exit refusal');
@@ -338,20 +338,20 @@ console.log('— ⑦ the hub\'s record, the session setup, the pairing default, 
   const mutDial = setup.replace("{ const off = await dm.refusalOf({ op: 'open-pipe-session', sid }); if (off) throw off; }", '');
   ok(mutDial !== setup && mutDial.indexOf("refusalOf({ op: 'open-pipe-session'") < 0, 'MUTANT: the setup without its ask ⇒ the pin above is RED');
   const wiring = read('src/server/mounts-plugins-wiring.js');
-  ok(/allowDefault: require\('\.\.\/device-policy\.js'\)\.defaultAllow\(\{ cluster: !!process\.env\.VIBESPACE_INSTANCE_NAME \}\), clusterInstance: !!process\.env\.VIBESPACE_INSTANCE_NAME,/.test(wiring) && /--host-token \$\{pair\.hostToken\} --allow \$\{require\('\.\.\/device-policy\.js'\)\.allowArg\(allowDefault\)\}/.test(wiring), 'the pairing route answers the instance kind\'s default (VIBESPACE_INSTANCE_NAME = a cluster); an ssh graduation installs with it');
+  ok(gateOf(/allowDefault: require\('\.\.\/device-policy\.js'\)\.defaultAllow\(\{ cluster: !!process\.env\.VIBESPACE_INSTANCE_NAME \}\), clusterInstance: !!process\.env\.VIBESPACE_INSTANCE_NAME,/.test(wiring)) && verdictOf(/--host-token \$\{pair\.hostToken\} --allow \$\{require\('\.\.\/device-policy\.js'\)\.allowArg\(allowDefault\)\}/.test(wiring)), 'the pairing route answers the instance kind\'s default (VIBESPACE_INSTANCE_NAME = a cluster); an ssh graduation installs with it');
   const sh = read('scripts/vibespace-agentd-install.sh'), ps = read('scripts/vibespace-agentd-install.ps1');
   const shWrite = sh.indexOf('--write-policy "$ALLOW"'), shTok = sh.indexOf('# host token: provided (from pairing) or minted locally'), shCheck = sh.indexOf('--dial-check "$DIAL_URL"');
-  ok(/--allow\) ALLOW="\$2"; shift 2;;/.test(sh) && /--allow=\*\) ALLOW="\$\{1#--allow=\}"; shift;;/.test(sh) && shCheck > 0 && shCheck < shWrite && shWrite < shTok && /nothing was installed — the --allow list was refused/.test(sh), 'the bash installer: --allow x / --allow=x, written by the agent\'s own --write-policy AFTER the dial check and BEFORE the host token (refused ⇒ nothing installed)');
+  ok(gateOf(/--allow\) ALLOW="\$2"; shift 2;;/.test(sh)) && gateOf(/--allow=\*\) ALLOW="\$\{1#--allow=\}"; shift;;/.test(sh)) && shCheck > 0 && shCheck < shWrite && shWrite < shTok && verdictOf(/nothing was installed — the --allow list was refused/.test(sh)), 'the bash installer: --allow x / --allow=x, written by the agent\'s own --write-policy AFTER the dial check and BEFORE the host token (refused ⇒ nothing installed)');
   const psWrite = ps.indexOf('--write-policy $Allow'), psTok = ps.indexOf("Set-Content -NoNewline -Path (Join-Path $root 'state\\token')");
-  ok(/\[string\]\$Allow,/.test(ps) && psWrite > 0 && psWrite < psTok && /exit 2 \}/.test(ps.slice(psWrite, psTok)), 'the PowerShell installer: -Allow, written BEFORE the token (refused ⇒ exit 2)');
+  ok(gateOf(/\[string\]\$Allow,/.test(ps)) && psWrite > 0 && psWrite < psTok && verdictOf(/exit 2 \}/.test(ps.slice(psWrite, psTok))), 'the PowerShell installer: -Allow, written BEFORE the token (refused ⇒ exit 2)');
   const bashN = spawnSync('bash', ['-n', path.join(REPO, 'scripts/vibespace-agentd-install.sh')], { encoding: 'utf8' });
   ok(bashN.status === 0, 'the bash installer parses (bash -n)', bashN.stderr);
   const E = require('../src/exit-reach.js');
   const xr = read('src/server/exit-routes.js'), xp = read('src/exit-proxy.js');
-  ok(E.REFUSALS.includes('op_not_allowed') && E.refusalText('op_not_allowed', { machine: 'mac1', error: 'op-not-allowed: run-cmd needs "run" — x; re-run the pairing command on "mac1" with --allow run' }).startsWith('op-not-allowed: run-cmd needs "run"') && /op_not_allowed: 403/.test(xr), 'an agent\'s exit run / use / push on a list without it: 403 op_not_allowed, the device\'s sentence (never "the link failed")');
-  ok(/if \(e && e\.code === 'op-not-allowed'\) \{ card\(\{ outcome: 'not_granted', cmd \}\); throw this\._refused\(session, sessionId, \{ code: 'op_not_allowed'/.test(xp) && /e && e\.code === 'op-not-allowed' \? Object\.assign\(e, \{ code: 'op_not_allowed' \}\)/.test(xp) && /throw fail\('op_not_allowed', \{ error: e\.message \}, 'not_granted'\)/.test(xp), 'exit-proxy names it on all three roads (run, use, push)');
+  ok(gateOf(E.REFUSALS.includes('op_not_allowed')) && gateOf(E.refusalText('op_not_allowed', { machine: 'mac1', error: 'op-not-allowed: run-cmd needs "run" — x; re-run the pairing command on "mac1" with --allow run' }).startsWith('op-not-allowed: run-cmd needs "run"')) && verdictOf(/op_not_allowed: 403/.test(xr)), 'an agent\'s exit run / use / push on a list without it: 403 op_not_allowed, the device\'s sentence (never "the link failed")');
+  ok(gateOf(/if \(e && e\.code === 'op-not-allowed'\) \{ card\(\{ outcome: 'not_granted', cmd \}\); throw this\._refused\(session, sessionId, \{ code: 'op_not_allowed'/.test(xp)) && gateOf(/e && e\.code === 'op-not-allowed' \? Object\.assign\(e, \{ code: 'op_not_allowed' \}\)/.test(xp)) && verdictOf(/throw fail\('op_not_allowed', \{ error: e\.message \}, 'not_granted'\)/.test(xp)), 'exit-proxy names it on all three roads (run, use, push)');
 }
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

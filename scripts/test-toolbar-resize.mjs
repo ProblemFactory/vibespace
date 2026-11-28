@@ -26,7 +26,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const root = mintRoot('tbresize-smoke'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -100,14 +100,14 @@ try {
   const scaleVar = () => evalJs(`document.documentElement.style.getPropertyValue('--toolbar-scale')`);
 
   const h0 = await rendered(); const ws0 = await workspaceH();
-  check('handle exists', await evalJs(`!!document.getElementById('toolbar-resize-handle')`));
+  check('handle exists', verdictOf(await evalJs(`!!document.getElementById('toolbar-resize-handle')`)));
 
   // drag DOWN → scale up → toolbar renders taller, workspace shrinks
   await dragHandle(80);
   const h1 = await rendered(); const ws1 = await workspaceH();
   check(`drag down scales the toolbar UP and it sticks (${h0} → ${h1})`, h1 > h0 + 5);
   check('workspace shrank by the toolbar delta', ws0 - ws1 >= (h1 - h0) - 3);
-  check('scale persisted to localStorage', await evalJs(`parseFloat(localStorage.getItem('toolbarScale')) > 1.05`));
+  check('scale persisted to localStorage', verdictOf(await evalJs(`parseFloat(localStorage.getItem('toolbarScale')) > 1.05`)));
   const s1 = await evalJs(`parseFloat(localStorage.getItem('toolbarScale'))`);
 
   // same-value re-apply is a no-op (restore/sync path)
@@ -138,7 +138,7 @@ try {
   await sleep(150);
   check('legacy default (40) echo does NOT erase the scale', parseFloat(await scaleVar()) > 1.1);
   // companion legacy field rides captureState so old bundles can track + round-trip
-  check('captureState emits the companion legacy toolbarHeight', await evalJs(`(() => { const st = app.layoutManager.captureState(); return typeof st.toolbarHeight === 'number' && Math.abs(st.toolbarHeight - Math.round(40 * (st.toolbarScale || 1))) <= 1; })()`));
+  check('captureState emits the companion legacy toolbarHeight', verdictOf(await evalJs(`(() => { const st = app.layoutManager.captureState(); return typeof st.toolbarHeight === 'number' && Math.abs(st.toolbarHeight - Math.round(40 * (st.toolbarScale || 1))) <= 1; })()`)));
   // absurd values clamp
   await evalJs(`app.layoutManager._applyToolbarScale(500)`);
   await sleep(100);
@@ -168,12 +168,12 @@ try {
   await evalJs(`document.getElementById('toolbar-resize-handle').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
   await sleep(200);
   check(`dblclick resets to default (${h0})`, Math.abs((await rendered()) - h0) <= 1);
-  check('reset cleared localStorage', await evalJs(`localStorage.getItem('toolbarScale') === null`));
+  check('reset cleared localStorage', verdictOf(await evalJs(`localStorage.getItem('toolbarScale') === null`)));
 
   // drag away then back to ~default clears the override
   await dragHandle(60);
   await dragHandle(-60);
-  check('drag back to default clears the override', await evalJs(`localStorage.getItem('toolbarScale') === null && document.documentElement.style.getPropertyValue('--toolbar-scale') === ''`));
+  check('drag back to default clears the override', verdictOf(await evalJs(`localStorage.getItem('toolbarScale') === null && document.documentElement.style.getPropertyValue('--toolbar-scale') === ''`)));
 
   // BOOT DIVERGENCE (review catch): the server state carries the reset
   // (toolbarScale null after the resets above, persisted by the autosaves);
@@ -201,4 +201,4 @@ try {
 
 ws.close();
 console.log(failed ? `${failed} FAILED` : 'ALL PASS (18)');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

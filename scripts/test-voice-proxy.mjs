@@ -22,7 +22,7 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
@@ -120,13 +120,13 @@ console.log('① a dictation through the hub');
   ok('the answer = {text, rewrite, language, request_id}', r.status === 200 && r.body.text === 'Hello there.' && r.body.rewrite.status === 'used' && r.body.language === 'en' && r.body.request_id === 'dct_ok1', r);
   const s = seen[0];
   const parts = partsOf(s);
-  ok('POST /v1/dictate with the key as the Bearer token', s && s.method === 'POST' && s.url === '/v1/dictate' && s.auth === `Bearer ${KEY}` && /^multipart\/form-data; boundary=/.test(s.type), s && { url: s.url, auth: s.auth });
-  ok('parts in the documented ORDER request → context → audio; request + context are JSON fields, audio the one file', parts.map((p) => p.name).join() === 'request,context,audio' && !parts[0].file && !parts[1].file && parts[2].file && parts[0].type === 'application/json' && /^audio\/webm/.test(parts[2].type), parts);
+  ok('POST /v1/dictate with the key as the Bearer token', gateOf(s) && s.method === 'POST' && s.url === '/v1/dictate' && s.auth === `Bearer ${KEY}` && verdictOf(/^multipart\/form-data; boundary=/.test(s.type)), s && { url: s.url, auth: s.auth });
+  ok('parts in the documented ORDER request → context → audio; request + context are JSON fields, audio the one file', parts.map((p) => p.name).join() === 'request,context,audio' && !parts[0].file && !parts[1].file && gateOf(parts[2].file) && parts[0].type === 'application/json' && verdictOf(/^audio\/webm/.test(parts[2].type)), parts);
   const rq = JSON.parse(fieldOf(s, 'request'));
   ok('request: dictate, language from the plugin preference, locale from the UI language, single_line:false', rq.mode === 'dictate' && rq.language === 'en' && rq.locale === 'zh-CN' && rq.single_line === false, rq);
   const cx = JSON.parse(fieldOf(s, 'context'));
   ok('context: the browser\'s ctx, re-cut by the hub (app VibeSpace, its fields kept)', cx.app === 'VibeSpace' && cx.title === 'Chat' && cx.before === 'Hi ' && cx.text === 'agent: see voice-model.js', cx);
-  ok('the audio bytes reach Dropline intact', s.body.includes(audio()));
+  ok('the audio bytes reach Dropline intact', verdictOf(s.body.includes(audio())));
   ok('the key never comes back to the browser', !JSON.stringify(r.body).includes(KEY));
 }
 console.log('② the hub re-cut of a hostile ctx');
@@ -172,7 +172,7 @@ console.log('④ 20 dictations a minute per instance');
   const codes = [];
   for (let i = 0; i < 21; i++) codes.push((await dictate(H, { bytes: audio(64) })).status);
   const last = await dictate(H, { bytes: audio(64) });
-  ok('the 21st inside one minute is refused locally (429 rate-limited + Retry-After), Dropline saw 20', codes.slice(0, 20).every((c) => c === 200) && codes[20] === 429 && last.body.error === 'rate-limited' && Number(last.retryAfter) > 0 && seen.length === 20, { codes, calls: seen.length });
+  ok('the 21st inside one minute is refused locally (429 rate-limited + Retry-After), Dropline saw 20', gateOf(codes.slice(0, 20).every((c) => c === 200)) && codes[20] === 429 && last.body.error === 'rate-limited' && Number(last.retryAfter) > 0 && seen.length === 20, { codes, calls: seen.length });
   clock += 61e3;
   ok('a minute later it dictates again', (await dictate(H, { bytes: audio(64) })).status === 200);
 }
@@ -198,19 +198,19 @@ console.log('⑤ the registry Test = GET /v1/me');
   ok('a key saved beside the sign-in still outranks it: the Test sends the key', t4.ok === true && t4.detail === 'Anika Reyes · Personal' && seen.length === 1 && seen[0].auth === `Bearer ${KEY}`, { t4, seen });
   seen.length = 0;
   const t5 = await mk(null, noKey).testRunner({ resolved: { values: {} } });
-  ok('no key and no sign-in ⇒ a named refusal (sign in above, or paste a key); Dropline never called', t5.ok === false && /no Dropline key and no Fish Audio sign-in/.test(t5.error) && seen.length === 0, { t5, seen });
+  ok('no key and no sign-in ⇒ a named refusal (sign in above, or paste a key); Dropline never called', t5.ok === false && gateOf(/no Dropline key and no Fish Audio sign-in/.test(t5.error)) && seen.length === 0, { t5, seen });
   seen.length = 0; seen.push(...kept);
 }
 console.log('⑥ AUDIO + KEY NEVER IN A LOG, AUDIO NEVER ON DISK (and their RED controls — voice-verify F3)');
 {
   const holds = (needle) => logs.filter((l) => l.includes(needle)).length;
   ok('no captured line (console.*, stdout/stderr, the injected log) holds the audio bytes', logs.length > 0 && holds(MARK) === 0, { lines: logs.length, leaked: holds(MARK) });
-  ok('… nor the key (the dictations above sent it as the Bearer)', holds(KEY) === 0 && seen.some((s) => s.auth === `Bearer ${KEY}`), holds(KEY));
-  ok('… the log does say what happened (request id, sizes) — the check is not vacuous', logs.some((l) => /dct_ok1/.test(l)), logs.slice(0, 3));
+  ok('… nor the key (the dictations above sent it as the Bearer)', holds(KEY) === 0 && verdictOf(seen.some((s) => s.auth === `Bearer ${KEY}`)), holds(KEY));
+  ok('… the log does say what happened (request id, sizes) — the check is not vacuous', verdictOf(logs.some((l) => /dct_ok1/.test(l))), logs.slice(0, 3));
   ok('no fs writer (write / append / stream / copy / rename / mkdir / open-for-write) ran during any dictation', dictations > 5 && fsWrites.length === 0, fsWrites);
   const reqs = (rel) => [...fs.readFileSync(path.join(REPO, rel), 'utf8').matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
   const used = [...reqs('src/server/dropline-client.js'), ...reqs('src/routes/voice.js')];
-  ok('the route + the client reach no other sink: they require only express, multer, crypto, voice-model (a journal / trace / fs import is a new sink ⇒ spy it here)', used.every((r) => ['crypto', 'express', 'multer', '../voice-model.js'].includes(r)), used);
+  ok('the route + the client reach no other sink: they require only express, multer, crypto, voice-model (a journal / trace / fs import is a new sink ⇒ spy it here)', verdictOf(used.every((r) => ['crypto', 'express', 'multer', '../voice-model.js'].includes(r))), used);
   // the RED controls: each plant in a scratch copy of the route + the client (+ a node_modules link) goes RED on its check
   const plantLeg = async (rel, anchor, replacement) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-proxy-'));
@@ -233,13 +233,13 @@ console.log('⑥ AUDIO + KEY NEVER IN A LOG, AUDIO NEVER ON DISK (and their RED 
   };
   const a1 = "    if (!pluginOn()) throw new DroplineError('plugin-off'";
   const m1 = await plantLeg('src/server/dropline-client.js', a1, '    console.log(String(audio));\n' + a1);
-  ok('CONTROL: a planted console.log(audio) leaks the audio into the log ⇒ the audio check is RED on it', m1.once && m1.audio > 0, m1);
+  ok('CONTROL: a planted console.log(audio) leaks the audio into the log ⇒ the audio check is RED on it', gateOf(m1.once) && m1.audio > 0, m1);
   const a3 = '    let res = await send(bearer.token);\n';
   const m3 = await plantLeg('src/server/dropline-client.js', a3, '    log.log?.(`[voice] auth Bearer ${bearer.token}`);\n' + a3);
-  ok('CONTROL: a planted log line of the Bearer leaks the key ⇒ the key check is RED on it', m3.once && m3.key > 0, m3);
+  ok('CONTROL: a planted log line of the Bearer leaks the key ⇒ the key check is RED on it', gateOf(m3.once) && m3.key > 0, m3);
   const a4 = '      const f = req.file;\n';
   const m4 = await plantLeg('src/routes/voice.js', a4, a4 + "      try { require('fs').writeFileSync(require('path').join(require('os').tmpdir(), 'vs-last-dictation.webm'), f.buffer); } catch { }\n");
-  ok('CONTROL: a planted write of the audio to disk is caught by the spy (and refused — nothing lands) ⇒ the disk check is RED on it', m4.once && m4.writes.some((w) => /^writeFileSync .*vs-last-dictation\.webm$/.test(w)) && !fs.existsSync(path.join(os.tmpdir(), 'vs-last-dictation.webm')), m4);
+  ok('CONTROL: a planted write of the audio to disk is caught by the spy (and refused — nothing lands) ⇒ the disk check is RED on it', gateOf(m4.once) && gateOf(m4.writes.some((w) => /^writeFileSync .*vs-last-dictation\.webm$/.test(w))) && !fs.existsSync(path.join(os.tmpdir(), 'vs-last-dictation.webm')), m4);
 }
 console.log('⑦ THE TEACH CALLS\' SHAPES (lane voice-teach-skips — https://dropline.fish.audio/docs §5.2 / §6.2): the body, every skipped entry with its reason, the log line; RED: the base\'s parse');
 {
@@ -252,7 +252,7 @@ console.log('⑦ THE TEACH CALLS\' SHAPES (lane voice-teach-skips — https://dr
   ok('POST /v1/terms carries the documented body {terms: [{term}]}, the key as the Bearer only', !!sent && sent.method === 'POST' && JSON.stringify(JSON.parse(sent.body.toString())) === JSON.stringify({ terms: [{ term: 'Zephyr' }, { term: '青松' }, { term: 'Ostrevia' }, { term: 'Bare' }] }) && sent.auth === `Bearer ${KEY}`, sent && sent.body.toString());
   ok('the documented answer: added + EVERY skipped entry with its reason (review / refused), the vendor\'s other fields kept (note), a bare string = a term with no reason', out.added.join() === 'Zephyr' && out.skipped.join() === '青松,Ostrevia,Bare' && out.skips[0].reason === 'review' && out.skips[1].reason === 'refused' && out.skips[1].fields.note === 'deleted 2026-10-01' && out.skips[2].reason === null && out.requestId === 'tr_doc', out);
   const line = logs.filter((l) => l.includes('/v1/terms'));
-  ok('ONE server log line: the counts, each skipped word with its reason, the request id — never the key', line.length === 1 && /added 1 · skipped 3/.test(line[0]) && line[0].includes('"reason":"refused"') && line[0].includes('tr_doc') && !line[0].includes(KEY), line);
+  ok('ONE server log line: the counts, each skipped word with its reason, the request id — never the key', line.length === 1 && gateOf(/added 1 · skipped 3/.test(line[0])) && gateOf(line[0].includes('"reason":"refused"')) && gateOf(line[0].includes('tr_doc')) && !line[0].includes(KEY), line);
   script = [{ status: 200, json: { terms: [{ term: 'Zephyr', aliases: ['zefir'], section: 'manual' }, { term: 'Anika', aliases: [], section: 'auto' }, 'BareRow'], version: 1791420000123 } }];
   const voc = await mkT().vocabulary();
   ok('GET /v1/vocabulary: the documented rows (manual and auto) read as their terms; a bare string row too', voc.join() === 'Zephyr,Anika,BareRow', voc);
@@ -267,4 +267,4 @@ console.log('⑦ THE TEACH CALLS\' SHAPES (lane voice-teach-skips — https://dr
 }
 H.close(); vendor.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

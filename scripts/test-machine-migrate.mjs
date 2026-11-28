@@ -15,7 +15,7 @@ const { HostManager } = require('../src/hosts.js');
 const { MachineMounts } = require('../src/machine-mounts.js');
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-migrate-'));
 process.on('exit', () => { try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { } });
@@ -49,22 +49,22 @@ const mm = new MachineMounts({ dataDir, hosts, mountTokens: { mint: () => ({ raw
 check('existing dial record gained its hash', hosts.dialTokenHash('mac1') === HASH_A);
 check('record-less pairing got a record + hash', hosts.dialTokenHash('frps-server') === HASH_B);
 check('created record has the deterministic id', !!hosts.list().find((h) => h.id === 'host-dial-frps-server'));
-check('legacy token file renamed .migrated', !fs.existsSync(path.join(dataDir, 'agentd', 'dial-tokens.json')) && fs.existsSync(path.join(dataDir, 'agentd', 'dial-tokens.json.migrated')));
-check('list() exposes online, never the hash', (() => {
+check('legacy token file renamed .migrated', !fs.existsSync(path.join(dataDir, 'agentd', 'dial-tokens.json')) && verdictOf(fs.existsSync(path.join(dataDir, 'agentd', 'dial-tokens.json.migrated'))));
+check('list() exposes online, never the hash', verdictOf((() => {
   const h = hosts.list().find((x) => x.deviceId === 'mac1');
   return h && !('dialTokenHash' in JSON.parse(JSON.stringify(h))) && h.online === false;
-})());
-check('ssh record untouched', (() => { const h = hosts.get('host-11223344'); return h.name === 'gpu-01' && !h.transport; })());
+})()));
+check('ssh record untouched', verdictOf((() => { const h = hosts.get('host-11223344'); return h.name === 'gpu-01' && !h.transport; })()));
 
 // mount migration
 const recs = mm.list();
 check('machine-mounts.json created with both records', recs.length === 2, JSON.stringify(recs));
 const push = recs.find((m) => m.dir === 'push');
-check('push record intact (hostId/folder/tunnelPort)', push && push.id === 'hm-1111' && push.hostId === 'host-11223344' && push.folder === '/srv/x' && push.via === 'tunnel', JSON.stringify(push));
+check('push record intact (hostId/folder/tunnelPort)', gateOf(push) && push.id === 'hm-1111' && push.hostId === 'host-11223344' && push.folder === '/srv/x' && push.via === 'tunnel', JSON.stringify(push));
 const pull = recs.find((m) => m.dir === 'pull');
-check('pull record rekeyed deviceId → hostId', pull && pull.id === 'dvm-2222' && pull.hostId === 'host-dial-mac1' && pull.remotePath === '/Users/me/docs', JSON.stringify(pull));
+check('pull record rekeyed deviceId → hostId', gateOf(pull) && pull.id === 'dvm-2222' && pull.hostId === 'host-dial-mac1' && pull.remotePath === '/Users/me/docs', JSON.stringify(pull));
 check('legacy mount stores renamed .migrated', !fs.existsSync(path.join(dataDir, 'host-mounts.json')) && !fs.existsSync(path.join(dataDir, 'device-mounts.json'))
-  && fs.existsSync(path.join(dataDir, 'host-mounts.json.migrated')) && fs.existsSync(path.join(dataDir, 'device-mounts.json.migrated')));
+  && gateOf(fs.existsSync(path.join(dataDir, 'host-mounts.json.migrated'))) && verdictOf(fs.existsSync(path.join(dataDir, 'device-mounts.json.migrated'))));
 
 // idempotence: constructing again must not duplicate or lose anything
 const hosts2 = new HostManager({ dataDir });
@@ -103,17 +103,17 @@ check('unpair (record removal) revokes the pairing', hosts2.dialTokenHash('frps-
 {
   const fs = await import('node:fs');
   const src = fs.readFileSync(new URL('../src/machine-mounts.js', import.meta.url), 'utf8');
-  const pin = (n, c) => { if (!c) { console.error('  ✗ ' + n); process.exitCode = 1; } else console.log('  ✓ ' + n); };
-  pin("a typed '~/…' or '$HOME/…' mountpoint resolves against the MACHINE's home, trailing slash dropped", /replace\(\/\^~\(\?=\\\/\|\$\)\/, home\)/.test(src) && /replace\(\/\(\.\)\\\/\+\$\/, '\$1'\)/.test(src));
+  const pin = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`pin: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!c) { console.error('  ✗ ' + n); process.exitCode = 1; } else console.log('  ✓ ' + n); };
+  pin("a typed '~/…' or '$HOME/…' mountpoint resolves against the MACHINE's home, trailing slash dropped", gateOf(/replace\(\/\^~\(\?=\\\/\|\$\)\/, home\)/.test(src)) && verdictOf(/replace\(\/\(\.\)\\\/\+\$\/, '\$1'\)/.test(src)));
   // B-069b (lane mount-argv-vsdav-twin): the argv is THE builder's (src/mount-argv.js SSH_HOST_WEBDAV_ROW) — the
   // log-file cell is asked of the builder, the caller only hands it the file it tails
   const { rcloneMountArgs, SSH_HOST_WEBDAV_ROW } = require('../src/mount-argv.js');
   const hostArgv = rcloneMountArgs({ row: SSH_HOST_WEBDAV_ROW, remote: 'vsdav:', mountpoint: '/m', logFile: '/L' }).join(' ');
-  pin('the rclone daemon child logs to the SAME file the dialog tails (--log-file) — the real failure reason is never lost again', hostArgv.includes('--daemon --log-file /L --log-level NOTICE') && /logFile: logf,/.test(src) && /tail -c 500 '\$\{logf\}'/.test(src));
-  pin('macOS ladder: nfsmount (FUSE-less, rclone ≥1.66) → FUSE mount when macFUSE present → native mount_webdav; every rung failure is kept', /method: 'rclone-nfs', run: \(\) => runRclone\('nfs'\)/.test(src) && SSH_HOST_WEBDAV_ROW.subs.nfs === 'nfsmount' && /method: 'mount_webdav', run: async/.test(src) && /errs\.join\('\\n'\)/.test(src));
-  pin('device rclone pin ≥1.66 (nfsmount) and an owned pre-1.66 install is re-installed, a system rclone is never touched', /RCLONE_PIN = 'v1\.69\.3'/.test(src) && /rclone !== 'rclone'\) \{[\s\S]{0,400}force: true/.test(src));
-  pin('unmount + liveness treat rclone-nfs like the other umount-family methods', /rec\.method === 'rclone-nfs'/.test(src));
+  pin('the rclone daemon child logs to the SAME file the dialog tails (--log-file) — the real failure reason is never lost again', gateOf(hostArgv.includes('--daemon --log-file /L --log-level NOTICE')) && gateOf(/logFile: logf,/.test(src)) && verdictOf(/tail -c 500 '\$\{logf\}'/.test(src)));
+  pin('macOS ladder: nfsmount (FUSE-less, rclone ≥1.66) → FUSE mount when macFUSE present → native mount_webdav; every rung failure is kept', gateOf(/method: 'rclone-nfs', run: \(\) => runRclone\('nfs'\)/.test(src)) && SSH_HOST_WEBDAV_ROW.subs.nfs === 'nfsmount' && gateOf(/method: 'mount_webdav', run: async/.test(src)) && verdictOf(/errs\.join\('\\n'\)/.test(src)));
+  pin('device rclone pin ≥1.66 (nfsmount) and an owned pre-1.66 install is re-installed, a system rclone is never touched', gateOf(/RCLONE_PIN = 'v1\.69\.3'/.test(src)) && verdictOf(/rclone !== 'rclone'\) \{[\s\S]{0,400}force: true/.test(src)));
+  pin('unmount + liveness treat rclone-nfs like the other umount-family methods', verdictOf(/rec\.method === 'rclone-nfs'/.test(src)));
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nmigration guard passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

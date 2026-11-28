@@ -28,7 +28,7 @@ const require = createRequire(import.meta.url);
 const acorn = require('acorn');
 const { UsageHistory } = require('../src/usage-history.js');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } };
 const tmp = scratchDir('ledger-rebuild');
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
 const UH_REL = 'src/usage-history.js', uhSrc = fs.readFileSync(path.join(REPO, UH_REL), 'utf8');
@@ -99,7 +99,7 @@ console.log('① the census: every ledger re-parse is the worker job or a declar
   for (const r of C.rows) console.log(`   ${String(r.line).padStart(5)} ${r.kind.padEnd(7)} ${r.fn}${r.why ? ' — ' + r.why : ''}${r.kind === 'restart' ? (r.guarded ? ' (after the door)' : ' UNGUARDED') : ''}${DECLARED[`${r.kind} ${r.fn}`] ? ' — DECLARED: ' + DECLARED[`${r.kind} ${r.fn}`] : ''}`);
   ok(C.bad.length === 0, `① ${UH_REL}: ${C.bad.join(' · ')}`);
   const workers = C.rows.filter((r) => r.kind === 'worker'), byFn = new Set(workers.map((r) => r.fn));
-  ok(['reloadEvents', '_loadSteps', '_aggregateWalk'].every((f) => byFn.has(f)) && workers.filter((r) => r.fn === '_loadSteps').length === 2 && workers.filter((r) => r.fn === '_aggregateWalk').length === 2 && workers.length >= 6,
+  ok(gateOf(['reloadEvents', '_loadSteps', '_aggregateWalk'].every((f) => byFn.has(f))) && workers.filter((r) => r.fn === '_loadSteps').length === 2 && workers.filter((r) => r.fn === '_aggregateWalk').length === 2 && workers.length >= 6,
     `① every trigger names the worker job: the reload, the vanished shard + the rewrite rules, a walk's STALE + vanished shard, the re-attribution (${workers.length} rows: ${[...byFn].join(', ')})`);
   ok(C.rows.filter((r) => r.kind === 'restart').length === 2 && C.rows.filter((r) => r.kind === 'onloop').length === 2, '① two guarded restarts (the first load), the declared on-loop rebuild asked by aggregate + _allRows only');
   const files = execFileSync('git', ['-C', REPO, 'ls-files', 'src', 'server.js', 'data/bin'], { encoding: 'utf8' }).split('\n').filter((f) => /\.(c|m)?js$/.test(f));
@@ -159,17 +159,17 @@ console.log(`② the rebuild in the worker, swapped whole (a real-shape ledger: 
   const old = u._evCache, w0 = u._rebuildWorkers || 0, g0 = u.ledgerGen;
   repair(u);
   const served = read(u);
-  ok(served === old.events && u._evCache === old && old.stale && /was rewritten \(another file\)/.test(old.stale), `② the reader is served the PREVIOUS cache (stale but whole: "${old.stale}") — no parse in its call`);
+  ok(served === old.events && u._evCache === old && gateOf(old.stale) && verdictOf(/was rewritten \(another file\)/.test(old.stale)), `② the reader is served the PREVIOUS cache (stale but whole: "${old.stale}") — no parse in its call`);
   const { said } = await quiet(() => u.rebuildSettled());
   const fresh = u._evCache, ref = onLoopBuild(u.dir, fresh.cutoff, u._ledgerWindowMs());
-  ok(fresh !== old && fresh.whole && !fresh.stale && (u._rebuildWorkers || 0) - w0 === 1 && u.ledgerGen === g0 + 1, `② ONE worker built it, the swap brought a new generation (${(u._rebuildWorkers || 0) - w0} worker, gen ${g0}→${u.ledgerGen})`);
+  ok(fresh !== old && gateOf(fresh.whole) && !fresh.stale && (u._rebuildWorkers || 0) - w0 === 1 && u.ledgerGen === g0 + 1, `② ONE worker built it, the swap brought a new generation (${(u._rebuildWorkers || 0) - w0} worker, gen ${g0}→${u.ledgerGen})`);
   ok(digest(fresh) === digest(ref._evCache) && fresh.events.length + fresh.cold.n === small.rows && fresh.cold.n > 1000 && fresh.events.length > 2 * 2048, `② byte for byte the on-loop build: ${digest(fresh)} = ${digest(ref._evCache)} (hot ${fresh.events.length}, cold ${fresh.cold.n})`);
-  ok(said.length === 1 && /rebuilt in the fold worker \(.*was rewritten.*\): \d+ rows/.test(said[0]), `② one line says it: ${said[0]}`);
+  ok(said.length === 1 && verdictOf(/rebuilt in the fold worker \(.*was rewritten.*\): \d+ rows/.test(said[0])), `② one line says it: ${said[0]}`);
   // the swapped cache is a working cache: an append is read by the next pass, a cold lookup answers, a sync fold matches
   const f = path.join(u.dir, shards(u).at(-1)); fs.appendFileSync(f, JSON.stringify({ rid: 'req_after_swap', mid: 'msg_after_swap', ts: NOW - 1000, sid: 's', be: 'claude', model: 'claude-fable-5-1', i: 7, o: 7, cw5: 0, cw1: 0, cr: 0 }) + '\n');
   read(u);
   const coldRid = (() => { const l = fs.readFileSync(path.join(u.dir, shards(u)[1]), 'utf8').split('\n')[3]; return JSON.parse(l).rid; })();
-  ok(u.ledgerKnowsId('req_after_swap') && u.ledgerKnowsId(coldRid) && u._evCache === fresh && !fresh.stale, '② after the swap the cache reads the appended tail and finds a cold row by id (the moved indexes)');
+  ok(gateOf(u.ledgerKnowsId('req_after_swap')) && gateOf(u.ledgerKnowsId(coldRid)) && u._evCache === fresh && !fresh.stale, '② after the swap the cache reads the appended tail and finds a cold row by id (the moved indexes)');
   const aRef = new UsageHistory({ dataDir: path.dirname(u.dir), homeDir: tmp }); aRef.ledgerWindowMs = u._ledgerWindowMs();
   const COST12 = (k, v) => (k === 'cost' && typeof v === 'number' ? Number(v.toPrecision(12)) : v);   // B-360d unit 1: a cost to 12 significant digits (law 2's 1e-9)
   ok(JSON.stringify((await u.aggregateAsync({ to: NOW })).totals, COST12) === JSON.stringify(aRef.aggregate({ to: NOW }).totals, COST12), '② the route\'s fold over the swapped cache = a fresh instance\'s sync fold (its cost to 12 significant digits)');
@@ -205,7 +205,7 @@ async function readers(UH, tag) {
 }
 {
   const r = await readers(UsageHistory, 'a');
-  ok(r.before !== r.after && r.odd.length === 0 && r.seen.filter((x) => x === r.before).length >= 3 && r.seen.includes(r.after), `④ ${r.seen.length} reads across the rebuild: ${r.seen.filter((x) => x === r.before).length} the previous cache (${r.before}), the rest the rebuilt one (${r.after}), ${r.odd.length} anything else`);
+  ok(r.before !== r.after && r.odd.length === 0 && r.seen.filter((x) => x === r.before).length >= 3 && verdictOf(r.seen.includes(r.after)), `④ ${r.seen.length} reads across the rebuild: ${r.seen.filter((x) => x === r.before).length} the previous cache (${r.before}), the rest the rebuilt one (${r.after}), ${r.odd.length} anything else`);
   const live = uhSrc.replace('const events = [], sizes = [], locs = [], hrh = [], rids = new Set(), mids = new Set();', 'const events = [], sizes = [], locs = [], hrh = [], rids = new Set(), mids = new Set(); this._evCache = Object.assign(Object.create(null), this._evCache, { events, sizes, locs, hrh, sorted: null });');
   const R = await readers(M.load(UH_REL, live, 'live').UsageHistory, 'b');
   ok(live !== uhSrc && R.odd.length > 0, `control (staged INTO the live cache): ${R.odd.length} reads saw a half-built cache (${R.odd[0]}) ⇒ RED`);
@@ -232,9 +232,9 @@ async function failing(UH, tag) {
 }
 {
   const r = await failing(UsageHistory, 'a');
-  ok(r.kept && r.workers === 1 && r.warns.length === 1 && /rebuild failed \(.*was rewritten.*\): planted: the shard could not be read — the previous cache keeps serving; next try in 60 s/.test(r.warns[0]), `⑤ the previous cache kept (whole, the same rows), ONE worker, ONE line: ${r.warns[0]}`);
-  ok(r.e && r.e.code === 'REBUILD' && /could not be rebuilt after .* \(planted: the shard could not be read\) — the previous figures keep serving; it tries again in \d+ s/.test(r.e.message), `⑤ a cold-range request inside the wait is told: "${r.e && r.e.message}"`);
-  ok(r.recovered, '⑤ after the wait the next ask rebuilds and swaps');
+  ok(gateOf(r.kept) && r.workers === 1 && r.warns.length === 1 && verdictOf(/rebuild failed \(.*was rewritten.*\): planted: the shard could not be read — the previous cache keeps serving; next try in 60 s/.test(r.warns[0])), `⑤ the previous cache kept (whole, the same rows), ONE worker, ONE line: ${r.warns[0]}`);
+  ok(gateOf(r.e) && r.e.code === 'REBUILD' && verdictOf(/could not be rebuilt after .* \(planted: the shard could not be read\) — the previous figures keep serving; it tries again in \d+ s/.test(r.e.message)), `⑤ a cold-range request inside the wait is told: "${r.e && r.e.message}"`);
+  ok(verdictOf(r.recovered), '⑤ after the wait the next ask rebuilds and swaps');
   const noWait = uhSrc.replace('if (this._rbFail && Date.now() < this._rbFail.retryAt) return Promise.reject(this._rbFail.err);', '');
   const R = await failing(M.load(UH_REL, noWait, 'nowait').UsageHistory, 'b');
   ok(noWait !== uhSrc && R.workers >= 3, `control (no retry wait): ${R.workers} failing workers for one repair, ${R.warns.length} lines ⇒ RED`);
@@ -250,7 +250,7 @@ console.log('⑥ a walk over a stale cache folds the rebuilt one');
   const old = u._evCache, w0 = u._coldWalks || 0;
   const { v: a } = await quiet(() => u.aggregateAsync({ to: NOW }));
   const ref = new UsageHistory({ dataDir: path.dirname(u.dir), homeDir: tmp });
-  ok(old.stale && u._evCache !== old && JSON.stringify(a.totals) === JSON.stringify(ref.aggregate({ to: NOW }).totals) && (u._coldWalks || 0) - w0 === 1, `⑥ the walk waited for the rebuild and folded it ONCE (${(u._coldWalks || 0) - w0} fold, ${a.totals.requests} requests = a fresh sync fold)`);
+  ok(gateOf(old.stale) && u._evCache !== old && JSON.stringify(a.totals) === JSON.stringify(ref.aggregate({ to: NOW }).totals) && (u._coldWalks || 0) - w0 === 1, `⑥ the walk waited for the rebuild and folded it ONCE (${(u._coldWalks || 0) - w0} fold, ${a.totals.requests} requests = a fresh sync fold)`);
 }
 
 // ── §T THE TWIN HOLDS THE MEASUREMENT (B-7e49, 主开发 r2460: a leg cannot fall between the two files) ─────────────────────────
@@ -266,11 +266,11 @@ console.log('⑥ a walk over a stale cache folds the rebuilt one');
   // ⑦'s own texts stand here only in this list, and nothing here meters a loop turn. The base-rule copy (MOVED's last) is not
   // counted: ①'s census control plants the same rule
   const runsNone = (t) => MOVED.slice(0, 6).every((h) => t.split(h).length === 2) && !/loopMeter\(|await measure\(/.test(t);
-  ok(holds(twin) && runsNone(here), `§T the heavy twin holds ⑦ — its heading, its real-shape ledger, its control's rule and bound, its three bounds — and this file runs none of it`);
-  ok(/\{ name: 'test-ledger-rebuild-measure', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8')), '§T the twin is a HEAVY row of the tier');
+  ok(gateOf(holds(twin)) && verdictOf(runsNone(here)), `§T the heavy twin holds ⑦ — its heading, its real-shape ledger, its control's rule and bound, its three bounds — and this file runs none of it`);
+  ok(verdictOf(/\{ name: 'test-ledger-rebuild-measure', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8'))), '§T the twin is a HEAVY row of the tier');
   ok(!holds(twin.replace('ctl.longest >= 400', 'ctl.longest >= 100')), 'RED CONTROL — a twin whose control bound was loosened (≥ 400 → ≥ 100) is no longer the moved ⑦: §T goes red');
   ok(!runsNone(here + '\n' + twin.slice(Math.max(0, twin.indexOf(MOVED[0])))), 'RED CONTROL — this file with the twin\'s ⑦ planted back runs the measure again: §T goes red');
 }
 
 console.log(fail ? `✗ ${fail} failed, ${pass} passed` : `ALL PASS ${pass} passed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

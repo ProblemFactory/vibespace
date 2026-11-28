@@ -38,7 +38,7 @@ const require = createRequire(import.meta.url);
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : ''}`); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -109,7 +109,7 @@ console.log('— ① counts, pluralisation, age granularity, live vs frozen');
   // The two that are read INSIDE the thing they count stay bare; the one that
   // floats free above the composer must say which scope it means.
   check('the free-floating spinner NAMES its scope ("this turn"); the card head and the run segment do not (they are read inside their own container)',
-    / this turn/.test(CR.subAgentStreamLabel(many, { now: T0, t }))
+    gateOf(/ this turn/.test(CR.subAgentStreamLabel(many, { now: T0, t })))
     && !/this turn/.test(CR.collabHeadText(many, { live: true, now: T0, t }))
     && !/this turn/.test(CR.collabRunPart(many, { live: true, now: T0, t })),
     [CR.subAgentStreamLabel(many, { now: T0, t }), CR.collabHeadText(many, { live: true, now: T0, t })].join(' | '));
@@ -125,27 +125,27 @@ console.log('— ② the head is a rendered element, escaped, and never replaces
   const frozen = CR.collabRowsHtml({ rows }, { esc: escHtml, t, icons: {} });
   const live = CR.collabRowsHtml({ rows }, { esc: escHtml, t, icons: {}, live: true, now: T0 + 252000 + 3000 });
   check('the head text lives in its OWN .chat-collab-head element (the ticker rewrites only that, never the card)',
-    /<span class="chat-collab-head">Sub-agent traffic · 2 messages · 2 agents · over 4 min 12 s<\/span>/.test(frozen)
-    && /<span class="chat-collab-head">Sub-agent traffic · 2 messages · 2 agents · last 3s ago<\/span>/.test(live),
+    gateOf(/<span class="chat-collab-head">Sub-agent traffic · 2 messages · 2 agents · over 4 min 12 s<\/span>/.test(frozen))
+    && verdictOf(/<span class="chat-collab-head">Sub-agent traffic · 2 messages · 2 agents · last 3s ago<\/span>/.test(live)),
     frozen.slice(0, 220));
   check('…and the clickable agent chips survive next to it (one per agent)', (live.match(/class="chat-collab-name"/g) || []).length === 2);
   const lone = CR.collabRowsHtml({ rows: [rows[0]] }, { esc: escHtml, t, icons: {}, live: true, now: T0 + 3000 });
   check('a LONE row keeps its full label (agent · TYPE) — summarising one event would only lose information',
-    !/chat-collab-head/.test(lone) && /water/.test(lone) && /MESSAGE/.test(lone), lone.slice(0, 160));
+    !/chat-collab-head/.test(lone) && gateOf(/water/.test(lone)) && verdictOf(/MESSAGE/.test(lone)), lone.slice(0, 160));
   // XSS: the head is composed from model-controlled agent names ⇒ marker proof
   const marks = [];
   const markerEsc = (s) => { marks.push(String(s ?? '')); return '' + String(s ?? '') + ''; };
   const hostile = rows.map((r, i) => ({ ...r, agentPath: '/root/<img src=x onerror=alert(1)>' + i, agentName: '<img src=x onerror=alert(1)>' + i }));
   const marked = CR.collabRowsHtml({ rows: hostile }, { esc: markerEsc, t, icons: {}, live: true, now: T0 });
   check('every string in the head leaves through the INJECTED escaper (marker proof)',
-    !/<img|onerror/.test(marked.replace(/[^]*/g, '')) && marks.some((m) => m.includes('Sub-agent traffic')),
+    !/<img|onerror/.test(marked.replace(/[^]*/g, '')) && verdictOf(marks.some((m) => m.includes('Sub-agent traffic'))),
     marked.replace(/[^]*/g, '').slice(0, 160));
   const real = CR.collabRowsHtml({ rows: hostile }, { esc: escHtml, t, icons: {}, live: true, now: T0 });
   check('…and with the real escaper no tag opening survives (an ESCAPED onerror= inside a value is inert)',
-    !/<img|<script|<svg\//.test(real) && /&lt;img src=x onerror=alert\(1\)&gt;/.test(real), real.slice(0, 200));
+    !/<img|<script|<svg\//.test(real) && verdictOf(/&lt;img src=x onerror=alert\(1\)&gt;/.test(real)), real.slice(0, 200));
   // provenance: the title says WHICH clock
   check('the row title names the time AND where the clock came from (a rebuilt burst must not read as "just now")',
-    /\(record timestamp\)/.test(CR.collabRowTitle(rows[0], t)) && /\(arrival time\)/.test(CR.collabRowTitle({ ...rows[0], tsKind: 'arrival' }, t))
+    gateOf(/\(record timestamp\)/.test(CR.collabRowTitle(rows[0], t))) && gateOf(/\(arrival time\)/.test(CR.collabRowTitle({ ...rows[0], tsKind: 'arrival' }, t)))
     && !/Time:/.test(CR.collabRowTitle({ dir: 'in', agentName: 'x' }, t)),
     CR.collabRowTitle(rows[0], t));
 }
@@ -179,14 +179,14 @@ console.log('— ③ the normalizer stamps every row from the RECORD (shapes fro
   const cards = mm.messages.filter((m) => m.collab && !m.collab.report);
   check('the whole burst coalesces into ONE card', cards.length === 1, cards.map((c) => c.content[0].output));
   const rows = cards[0].collab.rows;
-  check('every row carries the RECORD\'s own timestamp, marked as such', rows.length === 5 && rows.every((r) => r.tsKind === 'record' && r.ts > 0)
+  check('every row carries the RECORD\'s own timestamp, marked as such', rows.length === 5 && gateOf(rows.every((r) => r.tsKind === 'record' && r.ts > 0))
     && rows[0].ts === T0 && rows[4].ts === T0 + 252000, JSON.stringify(rows.map((r) => [r.dir, r.ts - T0, r.tsKind])));
   const stats = CR.collabTrafficStats(cards[0].collab);
   check('stats over the real rows: 5 events, 2 agents, a 4 min 12 s span',
     stats.count === 5 && stats.agents === 2 && stats.lastTs - stats.firstTs === 252000, JSON.stringify(stats));
   check('the stored plain-text output IS the frozen head + the names (search previews read what the screen reads)',
-    cards[0].content[0].output.startsWith('Sub-agent traffic · 5 sub-agent events · 2 agents · over 4 min 12 s · ')
-    && /water_research/.test(cards[0].content[0].output),
+    gateOf(cards[0].content[0].output.startsWith('Sub-agent traffic · 5 sub-agent events · 2 agents · over 4 min 12 s · '))
+    && verdictOf(/water_research/.test(cards[0].content[0].output)),
     cards[0].content[0].output);
   check('NO encrypted blob reaches any rendered string (spawn arguments + three encrypted messages)', !JSON.stringify(mm.messages).includes(BLOB));
   // (4) DEDUP TWINS ARE NOT COUNTED TWICE — the 2.369.49 rules, measured
@@ -411,13 +411,13 @@ console.log('— ⑤ a stopped transcript shows FROZEN totals (read-only reload)
     const header = list.querySelector(':scope > .chat-run-header');
     return { ok: true, head: head.textContent, header: header ? header.textContent.trim() : '', html: list.innerHTML.length };
   })()`);
-  check('the read-only view rendered the coalesced burst with its head', opened?.ok, JSON.stringify(opened));
+  check('the read-only view rendered the coalesced burst with its head', verdictOf(opened?.ok), JSON.stringify(opened));
   check('the head reads the FROZEN totals — count, agents, and the absolute span',
     opened?.head === 'Sub-agent traffic · 5 sub-agent events · 2 agents · over 4 min 12 s', opened?.head);
   check('the run header carries the same traffic (this is what a folded reader sees) and NO live age',
-    /2 sub-agents · 5 sub-agent events/.test(opened?.header || '') && !/last \d+[sm] ago/.test(opened?.header || ''), opened?.header);
+    gateOf(/2 sub-agents · 5 sub-agent events/.test(opened?.header || '')) && !/last \d+[sm] ago/.test(opened?.header || ''), opened?.header);
   check('…and the clickable agent chips are a SEPARATE segment, not glued to the count (r2)',
-    /sub-agent events · water_research/.test(opened?.header || ''), opened?.header);
+    verdictOf(/sub-agent events · water_research/.test(opened?.header || '')), opened?.header);
   const after = await (async () => { await sleep(2600); return evaljs(`window.__frozen.querySelector('.chat-collab-head').textContent`); })();
   check('…and NOTHING ticks on a stopped transcript (same text 2.6s later)', after === opened?.head, `${opened?.head} → ${after}`);
   const blobHit = await evaljs(`(() => { const h = document.body.innerHTML; return h.indexOf(${JSON.stringify(BLOB)}); })()`);
@@ -451,10 +451,10 @@ console.log('— ⑤ a stopped transcript shows FROZEN totals (read-only reload)
   })()`);
   const [t2, t3, tSame] = roView?.ticks || [];
   check('⑤b the read-only stream line keeps ONE label element and ONE spinner element across ticks (real _showTyping, real read-only view)',
-    roView?.ok && roView.built && [t2, t3, tSame].every((x) => x && x.sameLabel && x.sameSpin), JSON.stringify(roView));
+    gateOf(roView?.ok) && gateOf(roView.built) && verdictOf([t2, t3, tSame].every((x) => x && x.sameLabel && x.sameSpin)), JSON.stringify(roView));
   check('…a changed label is ONE text write inside that element, an unchanged label writes NOTHING',
-    t2?.writes === 1 && t2.allInLabel && /last 2s ago$/.test(t2.text) && t3?.writes === 1 && t3.allInLabel && /last 3s ago$/.test(t3.text)
-    && tSame?.writes === 0 && roView?.restored, JSON.stringify(roView?.ticks));
+    t2?.writes === 1 && gateOf(t2.allInLabel) && gateOf(/last 2s ago$/.test(t2.text)) && t3?.writes === 1 && gateOf(t3.allInLabel) && gateOf(/last 3s ago$/.test(t3.text))
+    && tSame?.writes === 0 && verdictOf(roView?.restored), JSON.stringify(roView?.ticks));
 }
 
 // ── LIVE: a real codex chat session driven by the stub app-server ───────────
@@ -513,12 +513,12 @@ console.log('— ⑥ a LIVE turn: the head grows, the age ticks, the label switc
     await sleep(300);
   }
   const grew = counts.length > 1 && counts[counts.length - 1] > counts[0];
-  check('the coalesced card GREW as rows arrived (the head count is derived, never a stored counter)', grew && counts[counts.length - 1] === 4,
+  check('the coalesced card GREW as rows arrived (the head count is derived, never a stored counter)', gateOf(grew) && counts[counts.length - 1] === 4,
     JSON.stringify(counts));
   const p1 = await probe();
-  check('the head names the traffic with a LIVE age while the turn streams', /^Sub-agent traffic · 4 sub-agent events · 2 agents · last \d+s ago$/.test(p1.head || ''), p1.head);
-  check('the run header carries the same live traffic (what a folded reader sees)', /2 sub-agents · 4 sub-agent events · last \d+s ago/.test(p1.header || ''), p1.header);
-  check('the spinner line switched to the sub-agents form (naming its TURN scope)', /^Sub-agents working — 4 sub-agent events this turn, last \d+s ago$/.test(p1.label || ''), p1.label);
+  check('the head names the traffic with a LIVE age while the turn streams', verdictOf(/^Sub-agent traffic · 4 sub-agent events · 2 agents · last \d+s ago$/.test(p1.head || '')), p1.head);
+  check('the run header carries the same live traffic (what a folded reader sees)', verdictOf(/2 sub-agents · 4 sub-agent events · last \d+s ago/.test(p1.header || '')), p1.header);
+  check('the spinner line switched to the sub-agents form (naming its TURN scope)', verdictOf(/^Sub-agents working — 4 sub-agent events this turn, last \d+s ago$/.test(p1.label || '')), p1.label);
   check('one ticker is running for this view', p1.ticking === true && !!p1.liveId);
 
   // ── the AGE ticks with no new rows ──
@@ -547,7 +547,7 @@ console.log('— ⑥ a LIVE turn: the head grows, the age ticks, the label switc
     return { head: list.querySelector('.chat-collab-head').textContent, ticking: !!v._collabTimer };
   })()`);
   check('a mid-burst attach paints the LIVE age immediately and re-arms the one ticker',
-    /^Sub-agent traffic · 4 sub-agent events · 2 agents · last \d+s ago$/.test(rearmed?.head || '') && rearmed?.ticking === true, JSON.stringify(rearmed));
+    gateOf(/^Sub-agent traffic · 4 sub-agent events · 2 agents · last \d+s ago$/.test(rearmed?.head || '')) && rearmed?.ticking === true, JSON.stringify(rearmed));
   check('…and the server label it carried is what the spinner shows (the collab override yields only what it took)',
     (await probe()).label === 'thinking...', (await probe()).label);
 
@@ -566,7 +566,7 @@ console.log('— ⑥ a LIVE turn: the head grows, the age ticks, the label switc
     if (/Sub-agents working/.test(p.label || '')) { back = p; break; }
     await sleep(300);
   }
-  check('…and switches BACK when the next collab record lands', !!back && /Sub-agents working — 5 sub-agent events this turn/.test(back.label || ''), JSON.stringify(back));
+  check('…and switches BACK when the next collab record lands', !!back && verdictOf(/Sub-agents working — 5 sub-agent events this turn/.test(back.label || '')), JSON.stringify(back));
 
   // ── ⑧ r2 BLOCKER: the Stop button must SURVIVE the ticking label ─────────
   // The label changes every second (the age), so the old "unchanged label"
@@ -597,10 +597,10 @@ console.log('— ⑥ a LIVE turn: the head grows, the age ticks, the label switc
     return { ok: true, same, labels, focused: document.activeElement === btn0 };
   })()`);
   check('the age advanced across the sampled ticks (the label really is being repainted)',
-    !!btnWatch?.ok && /Sub-agents working/.test(btnWatch.labels[0] || '') && btnWatch.labels[0] !== btnWatch.labels[btnWatch.labels.length - 1],
+    !!btnWatch?.ok && gateOf(/Sub-agents working/.test(btnWatch.labels[0] || '')) && btnWatch.labels[0] !== btnWatch.labels[btnWatch.labels.length - 1],
     JSON.stringify(btnWatch));
   check('…and the .chat-interrupt-btn NODE is unchanged across every tick (a text change never rebuilds the button)',
-    !!btnWatch?.ok && btnWatch.same.length === 4 && btnWatch.same.every(Boolean), JSON.stringify(btnWatch?.same));
+    !!btnWatch?.ok && btnWatch.same.length === 4 && verdictOf(btnWatch.same.every(Boolean)), JSON.stringify(btnWatch?.same));
   check('…so keyboard focus on Stop survives the ticks (it used to be destroyed once a second)',
     btnWatch?.focused === true, JSON.stringify(btnWatch?.focused));
   await evaljs(`(() => { window.__stops = 0; window.__live._chatInput._onInterrupt = () => { window.__stops++; }; return true; })()`);
@@ -627,7 +627,7 @@ console.log('— ⑥ a LIVE turn: the head grows, the age ticks, the label switc
   check('all ten TRUSTED Stop clicks reached the handler while the label ticked (a swallowed interrupt is a silent failure)',
     stops === 10, `${stops}/10 delivered`);
   check('…and the first click left the button in the 2.369.55 pending state (disabled, "Stopping…") — single-flight, not a rebuilt button',
-    pendingAfterFirst?.disabled === true && /Stopping/.test(pendingAfterFirst?.text || ''), JSON.stringify(pendingAfterFirst));
+    pendingAfterFirst?.disabled === true && verdictOf(/Stopping/.test(pendingAfterFirst?.text || '')), JSON.stringify(pendingAfterFirst));
 
   // ── turn end: everything FREEZES to the absolute span ──
   let frozen = null;
@@ -640,7 +640,7 @@ console.log('— ⑥ a LIVE turn: the head grows, the age ticks, the label switc
   // between ended that card's coalescing, so the 5th row opened a new one —
   // which is exactly the "card stops growing ⇒ freeze" rule
   check('turn end freezes the head to the absolute span and stops the ticker',
-    !!frozen && /^Sub-agent traffic · 4 sub-agent events · 2 agents · over \d+ s$/.test(frozen.head || '') && frozen.ticking === false && frozen.liveId === null,
+    !!frozen && gateOf(/^Sub-agent traffic · 4 sub-agent events · 2 agents · over \d+ s$/.test(frozen.head || '')) && frozen.ticking === false && frozen.liveId === null,
     JSON.stringify(frozen));
   check('…and the run header froze with it (no live age left anywhere)', !!frozen && !/last \d+[sm] ago/.test(frozen.header || ''), frozen?.header);
   const still = await (async () => { await sleep(2600); return probe(); })();
@@ -695,7 +695,7 @@ console.log('— ⑥ a LIVE turn: the head grows, the age ticks, the label switc
     hidden?.suspended === true && hidden?.found === 1 && hidden?.streaming === false && hidden?.sawLive === true && hidden?.ticked === false,
     JSON.stringify(hidden));
   check('…and it FROZE anyway: the absolute span, never a live age left on a finished turn',
-    /^Sub-agent traffic · 4 messages · 3 agents · over \d+ s$/.test(hidden?.last || ''), JSON.stringify(hidden?.last));
+    verdictOf(/^Sub-agent traffic · 4 messages · 3 agents · over \d+ s$/.test(hidden?.last || '')), JSON.stringify(hidden?.last));
   const resumed = await evaljs(`(async () => {
     window.__live.setSuspended(false);
     await new Promise((r) => setTimeout(r, 1400));
@@ -703,11 +703,11 @@ console.log('— ⑥ a LIVE turn: the head grows, the age ticks, the label switc
     return { last: own.length ? own[own.length - 1].textContent : null, ticking: !!window.__live._collabTimer };
   })()`);
   check('…and it is still frozen after the desktop comes back (no ticker re-armed on a finished turn)',
-    /over \d+ s$/.test(resumed?.last || '') && resumed?.ticking === false, JSON.stringify(resumed));
+    gateOf(/over \d+ s$/.test(resumed?.last || '')) && resumed?.ticking === false, JSON.stringify(resumed));
 
   liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid }));
   await sleep(500);
 }
 
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -33,7 +33,7 @@ const BUNDLE = path.join(REPO, 'data/bin/vibespace-agentd.js');
 const NOVNC = path.join(REPO, 'public/novnc.js');
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 for (const f of [BUNDLE, NOVNC]) if (!fs.existsSync(f)) { ok(false, `${path.relative(REPO, f)} exists (npm run build first)`); process.exit(1); }
 
@@ -95,7 +95,7 @@ const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const OPPLAT = /platform: process\.platform,(\s+)(params: msg|hwnd: a\.hwnd|hwnd: rec\.last\.hwnd)/g; // esbuild may break the object over lines
 const CAP_LIST = /capabilities: \[([^\]]*)\]/;
 const opHits = bundleText.match(OPPLAT) || [];
-ok(HELLO.test(bundleText) && opHits.length === 3 && /"window-track", "window-pin"/.test((CAP_LIST.exec(bundleText) || [])[1] || ''), 'the bundle carries the hello-ack platform, the 3 window-op platform reads and the two capabilities (the copies patch exactly those)', opHits);
+ok(gateOf(HELLO.test(bundleText)) && opHits.length === 3 && verdictOf(/"window-track", "window-pin"/.test((CAP_LIST.exec(bundleText) || [])[1] || '')), 'the bundle carries the hello-ack platform, the 3 window-op platform reads and the two capabilities (the copies patch exactly those)', opHits);
 const asWin = bundleText.replace(HELLO, (all, pre) => `${pre}platform: "win32",`).replace(OPPLAT, (all, ws, rest) => `platform: "win32",${ws}${rest}`);
 const dropCaps = (txt) => txt.replace(CAP_LIST, (all, inner) => `capabilities: [${inner.split(',').map((x) => x.trim()).filter((x) => x && x !== '"window-track"' && x !== '"window-pin"').join(', ')}]`);
 for (const [n, txt] of Object.entries({ win: asWin, old: dropCaps(asWin) })) { fs.mkdirSync(path.join(root, 'bundle-' + n), { recursive: true }); fs.writeFileSync(path.join(root, 'bundle-' + n, 'vibespace-agentd.js'), txt); }
@@ -111,7 +111,7 @@ async function deviceOn(name) {
 }
 const dms = { 'win-a': await deviceOn('win'), 'win-old': await deviceOn('old') };
 const info = (id) => dms[id].status().info || {};
-ok(info('win-a').platform === 'win32' && info('win-a').capabilities.includes('window-track') && info('win-a').capabilities.includes('window-pin') && !info('win-old').capabilities.includes('window-track'), 'two real agents: a Windows-shaped one with window-track + window-pin, an old one without');
+ok(info('win-a').platform === 'win32' && gateOf(info('win-a').capabilities.includes('window-track')) && gateOf(info('win-a').capabilities.includes('window-pin')) && !info('win-old').capabilities.includes('window-track'), 'two real agents: a Windows-shaped one with window-track + window-pin, an old one without');
 
 // ── the machine's VNC server: a stub RFB 3.8 (no sign-in), 1280×800, the app painted at the state's rectangle ───────────
 const FW = 1280, FH = 800;
@@ -273,15 +273,15 @@ console.log('① – ⑤ desk 1100 px');
   const p = await page(1100, 800, 'position:fixed;left:40px;top:30px;width:900px;height:620px;display:flex;flex-direction:column;background:var(--bg-primary);border:1px solid var(--border);box-shadow:0 6px 24px rgba(0,0,0,.25);border-radius:8px;overflow:hidden;z-index:5');
   const cls = await runAsWindow(p);
   ok(cls.join(' | ') === '作为独立窗口运行…=btn-create | 运行…=file-tool-btn', '① `start "" blender` names a GUI app: "Run as its own window…" is the default (the filled button)', cls);
-  ok(await p.until(`(() => { const g = ${GEO}; return g && g.shown && g.fb && g.fb[0] === ${FW}; })()`), '① the run → the launch report → the app\'s window found → the picture cropped to it');
+  ok(verdictOf(await p.until(`(() => { const g = ${GEO}; return g && g.shown && g.fb && g.fb[0] === ${FW}; })()`)), '① the run → the launch report → the app\'s window found → the picture cropped to it');
   const runs = fs.readFileSync(RUNS, 'utf8');
-  ok(/^window \d+$/m.test(runs) && !/^plain/m.test(runs), 'the machine ran the reporting plan (Start-Process -PassThru)', runs);
+  ok(gateOf(/^window \d+$/m.test(runs)) && !/^plain/m.test(runs), 'the machine ran the reporting plan (Start-Process -PassThru)', runs);
   let g = await p.ev(GEO);
   const s = g.box[2] / 800;
   ok(Math.abs(g.box[2] / g.box[3] - 1.6) < 0.01 && g.box[2] <= g.pane[2] + 0.5 && g.box[3] <= g.pane[3] + 0.5 && (Math.abs(g.box[2] - g.pane[2]) < 1 || Math.abs(g.box[3] - g.pane[3]) < 1), `② the crop is the app's 800×500 fitted into the pane (${g.box[2].toFixed(1)}×${g.box[3].toFixed(1)} in ${g.pane[2]}×${g.pane[3]})`, g);
   ok(Math.abs(g.stage[0] + 300 * s) < 0.6 && Math.abs(g.stage[1] + 200 * s) < 0.6 && Math.abs(g.stage[2] - FW * s) < 0.6, '② the whole picture is laid out shifted by the app\'s origin (only the app shows)', g);
-  ok(g.title === 'WIN-DESK1上的Blender 4.2' && /只显示WIN-DESK1上的这个应用/.test(await p.ev(`document.querySelector('.vs-win[data-type="machine-app"]').textContent`)), '② the title = the app\'s window title; the pane says what it shows (zh)', g.title);
-  ok(await p.until(`true`) && pins().join() === 'on 131330', '② the app is pinned on top of the machine\'s other windows (HWND_TOPMOST)', pins());
+  ok(g.title === 'WIN-DESK1上的Blender 4.2' && verdictOf(/只显示WIN-DESK1上的这个应用/.test(await p.ev(`document.querySelector('.vs-win[data-type="machine-app"]').textContent`))), '② the title = the app\'s window title; the pane says what it shows (zh)', g.title);
+  ok(gateOf(await p.until(`true`)) && pins().join() === 'on 131330', '② the app is pinned on top of the machine\'s other windows (HWND_TOPMOST)', pins());
   await sleep(600);
   await p.shot('desk.png');
   await p.click(5, 5); // the page's own first press (outside the window)
@@ -299,8 +299,8 @@ console.log('① – ⑤ desk 1100 px');
   const gL = await sizeTo('600px'), sL = gL.box[2] / 800, low = await pressAt(gL);
   const gW = await sizeTo('680px'), sW = gW.box[2] / 800, whole = await pressAt(gW);
   console.log(`    · measured (the press at (700, 450)): s ${sNow.toFixed(4)} → off ${off(here, 700, 450)} in (−${quant(sNow).toFixed(3)}, 0]; s ${sL.toFixed(4)} → off ${off(low, 700, 450)} in (−${quant(sL).toFixed(3)}, 0]; s ${sW.toFixed(4)} → off ${off(whole, 700, 450)} in (−${quant(sW).toFixed(3)}, 0]`);
-  ok(near(here, 700, 450, sNow), `② a click at the pane's centre arrives at the app's centre on the machine (700, 450) within this crop's pointer quantization (s ${sNow.toFixed(4)}: off in (−${quant(sNow).toFixed(3)}, 0]) — got ${JSON.stringify(here)}`, { here, sNow, g });
-  ok(sL < 1 && sW >= 1 && near(low, 700, 450, sL) && near(whole, 700, 450, sW), `② the same press with the window SHORTER (s ${sL.toFixed(4)}) and TALLER (the whole scale, s ${sW.toFixed(4)}) — each within its own quantization; got ${off(low, 700, 450)} and ${off(whole, 700, 450)}`, { low, sL, whole, sW });
+  ok(verdictOf(near(here, 700, 450, sNow)), `② a click at the pane's centre arrives at the app's centre on the machine (700, 450) within this crop's pointer quantization (s ${sNow.toFixed(4)}: off in (−${quant(sNow).toFixed(3)}, 0]) — got ${JSON.stringify(here)}`, { here, sNow, g });
+  ok(sL < 1 && sW >= 1 && gateOf(near(low, 700, 450, sL)) && verdictOf(near(whole, 700, 450, sW)), `② the same press with the window SHORTER (s ${sL.toFixed(4)}) and TALLER (the whole scale, s ${sW.toFixed(4)}) — each within its own quantization; got ${off(low, 700, 450)} and ${off(whole, 700, 450)}`, { low, sL, whole, sW });
   // RED CONTROL, a REAL press: the picture nudged 2 CSS px right inside its crop (what is drawn no longer under the crop's centre — a
   // drift) — the same press at the crop's centre lands at least 3 machine px left: outside the bound
   const gD = await sizeTo(h0), sD = gD.box[2] / 800;
@@ -326,20 +326,20 @@ console.log('① – ⑤ desk 1100 px');
   for (const dx of [100, 250, 400, 520]) { await p.mouse('mouseMoved', cx + dx, cy, 1); await sleep(30); }
   await p.mouse('mouseReleased', cx + 520, cy, 0); await sleep(400);
   const drag = vnc.seen.pointers.slice(n);
-  ok(drag.length >= 3 && Math.max(...drag.map((e) => e.x)) <= 300 + 800 - 1 && Math.max(...drag.map((e) => e.x)) >= 300 + 800 - 3 && drag.some((e) => !(e.mask & 1)), `② a drag out of the crop is held at the app's right edge (max x ${Math.max(...drag.map((e) => e.x))} ≤ 1099; the release arrives)`, drag);
+  ok(drag.length >= 3 && Math.max(...drag.map((e) => e.x)) <= 300 + 800 - 1 && Math.max(...drag.map((e) => e.x)) >= 300 + 800 - 3 && verdictOf(drag.some((e) => !(e.mask & 1))), `② a drag out of the crop is held at the app's right edge (max x ${Math.max(...drag.map((e) => e.x))} ≤ 1099; the release arrives)`, drag);
 
   console.log('③ the app moves: the crop follows');
   setApp([450, 250, 800, 500]); vnc.repaint();
-  ok(await p.until(`(() => { const g = ${GEO}; return g && Math.abs(g.stage[0] + 450 * ${s}) < 0.6; })()`, 5000), '③ the pane follows the new rectangle (pushed by the device watch, long-polled by the page)');
+  ok(verdictOf(await p.until(`(() => { const g = ${GEO}; return g && Math.abs(g.stage[0] + 450 * ${s}) < 0.6; })()`, 5000)), '③ the pane follows the new rectangle (pushed by the device watch, long-polled by the page)');
   g = await p.ev(GEO);
   n = vnc.seen.pointers.length;
   await p.click(g.box[0] + g.box[2] / 2, g.box[1] + g.box[3] / 2);
   got = await pointerAfter(n);
-  ok(near(got.find((e) => e.mask & 1), 850, 500, s), `③ the next click lands at the app's NEW centre (850, 500) within this crop's pointer quantization (s ${s.toFixed(4)}: |off| < ${quant(s).toFixed(3)}) — got ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
+  ok(verdictOf(near(got.find((e) => e.mask & 1), 850, 500, s)), `③ the next click lands at the app's NEW centre (850, 500) within this crop's pointer quantization (s ${s.toFixed(4)}: |off| < ${quant(s).toFixed(3)}) — got ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
 
   console.log('④ the app closes on the machine');
   setApp(null); vnc.repaint();
-  ok(await p.until(`(() => { const g = ${GEO}; return g && /已在WIN-DESK1上关闭/.test(g.say); })()`, 5000), '④ gone ⇒ the pane says "“Blender 4.2”已在WIN-DESK1上关闭"');
+  ok(verdictOf(await p.until(`(() => { const g = ${GEO}; return g && /已在WIN-DESK1上关闭/.test(g.say); })()`, 5000)), '④ gone ⇒ the pane says "“Blender 4.2”已在WIN-DESK1上关闭"');
   const acts = await p.ev(`[...document.querySelectorAll('.vs-win[data-type="machine-app"] .machine-app-say button')].map((b) => b.textContent)`);
   ok(acts.join() === '打开它的整个桌面,再次运行', '④ with "Open its whole desktop" and "Run again"', acts);
   await p.shot('gone.png');
@@ -349,7 +349,7 @@ console.log('① – ⑤ desk 1100 px');
   await p.ev(`[...document.querySelectorAll('.vs-win[data-type="machine-app"] .machine-app-say button')].find((b) => b.textContent === '再次运行').click()`);
   await p.until(`!!document.querySelector('#machine-desktop-confirm .btn-create')`, 5000);
   await p.ev(`document.querySelector('#machine-desktop-confirm .btn-create').click()`);
-  ok(await p.until(`(() => { const g = ${GEO}; return ${appWins} === 1 && g && g.shown && !g.say; })()`), '⑤ Run again: the gone window closed, a new one follows the app again');
+  ok(verdictOf(await p.until(`(() => { const g = ${GEO}; return ${appWins} === 1 && g && g.shown && !g.say; })()`)), '⑤ Run again: the gone window closed, a new one follows the app again');
   await p.until('true');
   for (let i = 0; i < 30 && pins().length < 2; i++) await sleep(100);
   await p.ev(`(() => { const w = [...window.__wm.windows.values()].find((x) => x.type === 'machine-app'); window.__wm.closeWindow(w.id); })()`);
@@ -363,7 +363,7 @@ console.log('⑥ the phone: 390 px');
   fs.writeFileSync(PINS, '');
   const p = await page(390, 844, 'position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg-primary);z-index:5');
   await runAsWindow(p);
-  ok(await p.until(`(() => { const g = ${GEO}; return g && g.shown && g.fb && g.fb[0] === ${FW}; })()`), '⑥ the phone opens the app\'s window too');
+  ok(verdictOf(await p.until(`(() => { const g = ${GEO}; return g && g.shown && g.fb && g.fb[0] === ${FW}; })()`)), '⑥ the phone opens the app\'s window too');
   const g = await p.ev(GEO);
   ok(Math.abs(g.box[2] - g.pane[2]) < 1 && g.box[2] <= 390 && Math.abs(g.box[2] / g.box[3] - 1.6) < 0.01 && (await p.ev('document.documentElement.scrollWidth')) <= 390, `⑥ the crop fits the phone's width (${g.box[2].toFixed(1)}×${g.box[3].toFixed(1)}), no sideways scroll`, g);
   await sleep(600);
@@ -373,7 +373,7 @@ console.log('⑥ the phone: 390 px');
   const n = vnc.seen.pointers.length;
   await p.click(g2.box[0] + g2.box[2] / 2, g2.box[1] + g2.box[3] / 2);
   const got = await pointerAfter(n);
-  ok(near(got.find((e) => e.mask & 1), 700, 450, g2.box[2] / 800), `⑥ a click at the crop's centre lands at the app's centre within the pointer's quantization of the ${(g2.box[2] / 800).toFixed(3)}× crop (off in (−${quant(g2.box[2] / 800).toFixed(3)}, 0]) — ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
+  ok(verdictOf(near(got.find((e) => e.mask & 1), 700, 450, g2.box[2] / 800)), `⑥ a click at the crop's centre lands at the app's centre within the pointer's quantization of the ${(g2.box[2] / 800).toFixed(3)}× crop (off in (−${quant(g2.box[2] / 800).toFixed(3)}, 0]) — ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
   await p.ev(`(() => { const w = [...window.__wm.windows.values()].find((x) => x.type === 'machine-app'); window.__wm.closeWindow(w.id); })()`);
   p.close();
 }
@@ -403,4 +403,4 @@ console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? '
 for (const dm of Object.values(dms)) { try { dm.stop(); } catch { /* gone */ } }
 try { chrome.kill('SIGTERM'); } catch { /* gone */ }
 await sleep(300);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

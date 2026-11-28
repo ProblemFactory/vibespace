@@ -34,7 +34,7 @@ const REPO = new URL('..', import.meta.url).pathname;
 const TB = require('../src/browser-tabs.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -67,7 +67,7 @@ const HU = 'hu-0000c001', KA = 'bk-0000c0a1', KB = 'bk-0000c0a2';
 console.log('— ① PURE: ownership, the agent\'s words / view / verdict, the user\'s verdict, the row, the handback sentence');
 function pureLegs(TT, tag = '') {
   const legs = [];
-  const leg = (c, n, extra) => legs.push({ c: !!c, n: tag + n, extra });
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (legs.push({ c: !!c, n: tag + n, extra })); };
   // THE BROWSER: the keeper's launch tab (nobody's), his tab + its popup, A's tab + its popup + a `tab new` of A's, B's tab,
   // a tab nobody roots that B's session is on (its bootstrap), a stray
   const targets = [
@@ -97,7 +97,7 @@ function pureLegs(TT, tag = '') {
   leg(o3.get(T(4)) === HU && o3.get(T(5)) === HU, 'the holders are ORDERED — the user first: a tab both name is his (and what it opened)');
   // a conversation's own browser: every page is its
   const oe = TT.tabOwners({ targets, holders, ephemeralKey: KA });
-  leg([...oe.values()].every((k) => k === KA) && oe.size === 10, 'a conversation\'s OWN browser (ephemeralKey): every page is its (10 pages)');
+  leg(gateOf([...oe.values()].every((k) => k === KA)) && oe.size === 10, 'a conversation\'s OWN browser (ephemeralKey): every page is its (10 pages)');
   leg(TT.ownSetOf(own, KA).size === 4 && TT.ownSetOf(null, KA) === null, 'ownSetOf: A holds 4; unreadable owners ⇒ null (fail closed)');
   leg(TT.ownerWord(KA, { me: KA }) === 'agent' && TT.ownerWord(HU, { me: KA }) === 'you' && TT.ownerWord(KB, { me: KA }) === 'other' && TT.ownerWord('orphan', { me: KA }) === 'orphan' && TT.ownerWord('', {}) === 'orphan', 'the view\'s word: the viewed conversation\'s = agent, his = you, another = other, nobody\'s = orphan');
   leg(J(TT.cleanRoots(['x', T(1), T(1).toLowerCase(), ...Array.from({ length: 40 }, (_, i) => T(100 + i))])) === J(Array.from({ length: 40 }, (_, i) => T(100 + i)).slice(-32)) && TT.addRoot([T(1), T(2)], T(1).toLowerCase()).join() === [T(2), T(1)].join(), 'roots: cleaned, deduplicated, bounded to 32 (the newest kept); addRoot moves a known one to the end');
@@ -115,14 +115,14 @@ function pureLegs(TT, tag = '') {
   leg(!badW.length, `the agent's \`tab\` words → one act (${WORDS.length} forms, the measured operations only)`, badW);
   const rows = [{ tabId: 't1', targetId: T(1), label: null }, { tabId: 't3', targetId: T(4), label: 'docs' }];
   leg(TT.resolveTabRef('t3', rows) === T(4) && TT.resolveTabRef('docs', rows) === T(4) && TT.resolveTabRef(T(4).toLowerCase(), rows) === T(4) && TT.resolveTabRef('t9', rows) === null && TT.resolveTabRef(T(9), rows) === null && TT.resolveTabRef('', rows) === null, 'a ref: t<N>, a label or a target id (any case) → the target id; unknown ⇒ null');
-  leg(TT.newTabUrlVerdict('https://a.example/x').ok && TT.newTabUrlVerdict(null).ok && TT.newTabUrlVerdict('about:blank').url === 'about:blank' && ['file:///etc/passwd', 'chrome://settings', 'javascript:alert(1)', 'data:text/html,x', 'x'].every((u) => TT.newTabUrlVerdict(u).code === 'not_web'), '`tab new <url>`: the web only (the server\'s belt beside the CLI\'s)');
+  leg(gateOf(TT.newTabUrlVerdict('https://a.example/x').ok) && gateOf(TT.newTabUrlVerdict(null).ok) && TT.newTabUrlVerdict('about:blank').url === 'about:blank' && verdictOf(['file:///etc/passwd', 'chrome://settings', 'javascript:alert(1)', 'data:text/html,x', 'x'].every((u) => TT.newTabUrlVerdict(u).code === 'not_web')), '`tab new <url>`: the web only (the server\'s belt beside the CLI\'s)');
   // the agent's view
   const listed = [{ tabId: 't1', targetId: T(1), title: 'keeper', url: 'about:blank', active: false }, { tabId: 't2', targetId: T(2), title: 'His bank', url: 'https://bank.example/acct', active: false }, { tabId: 't3', targetId: T(4), title: 'A page', url: 'https://a.example/', active: true }, { tabId: 't4', targetId: T(7), title: 'A new', url: 'https://a.example/2', active: false }, { tabId: 't5', targetId: T(8), title: 'B page', url: 'https://b.example/', active: false }];
   const v = TT.agentTabView({ tabs: listed, owners: own, me: KA });
-  leg(v && v.tabs.length === 2 && v.others === 3 && v.tabs[0].id === 't3' && v.tabs[0].current && !J(v).includes('bank') && !J(v).includes('B page') && !J(v).includes(HU) && TT.agentTabView({ tabs: listed, owners: null, me: KA }) === null,
+  leg(gateOf(v) && v.tabs.length === 2 && v.others === 3 && v.tabs[0].id === 't3' && gateOf(v.tabs[0].current) && !J(v).includes('bank') && !J(v).includes('B page') && !J(v).includes(HU) && TT.agentTabView({ tabs: listed, owners: null, me: KA }) === null,
     'the AGENT\'S VIEW: its own rows (t3 current, t4) + a COUNT of the rest (3) — his bank tab\'s title/url and B\'s page never in it; unreadable ⇒ null', v);
   const lines = TT.agentTabLines(v);
-  leg(lines.length === 3 && /^t3  A page — https:\/\/a\.example\/  \[current\]$/.test(lines[0]) && /3 other tabs in this browser are not yours/.test(lines[2]), 'the CLI lines: `t3  Title — url  [current]`, then the count', lines);
+  leg(lines.length === 3 && gateOf(/^t3  A page — https:\/\/a\.example\/  \[current\]$/.test(lines[0])) && verdictOf(/3 other tabs in this browser are not yours/.test(lines[2])), 'the CLI lines: `t3  Title — url  [current]`, then the count', lines);
   // the agent's verdict
   const aset = TT.ownSetOf(own, KA);
   const AV = (x) => { const r = TT.agentTabVerdict({ own: aset, current: T(4), ...x }); return r.ok ? 'ok' + (r.closesCurrent ? '+cur' : '') : r.code; };
@@ -167,7 +167,7 @@ function pureLegs(TT, tag = '') {
   leg(!walk.length, 'THE ROW MODEL draws exactly what the verdict allows — 16 viewer states × every tab (never a control on another conversation\'s tab)', walk);
   const m0 = TT.tabRowModel({ tabs: rowTabs, owners: owWords, viewer: { human: false }, driving: true });
   const rA = m0.rows.find((r) => r.targetId === T(4));
-  leg(rA.mark === 'The agent’s' && rA.canClose && !rA.canSwitch && m0.rows.find((r) => r.targetId === T(7)).canSwitch && m0.rows.find((r) => r.targetId === T(8)).markTip === 'Another conversation’s — open its live view to use it' && TT.chipTitle('x'.repeat(40), '') === 'x'.repeat(23) + '…' && TT.chipTitle('', 'https://www.shop.example/a') === 'shop.example' && TT.tabRowModel({ tabs: [{ targetId: T(99), title: 'x', url: 'https://x.example/' }], owners: {} }).rows[0].owner === 'orphan',
+  leg(rA.mark === 'The agent’s' && gateOf(rA.canClose) && !rA.canSwitch && gateOf(m0.rows.find((r) => r.targetId === T(7)).canSwitch) && m0.rows.find((r) => r.targetId === T(8)).markTip === 'Another conversation’s — open its live view to use it' && TT.chipTitle('x'.repeat(40), '') === 'x'.repeat(23) + '…' && TT.chipTitle('', 'https://www.shop.example/a') === 'shop.example' && TT.tabRowModel({ tabs: [{ targetId: T(99), title: 'x', url: 'https://x.example/' }], owners: {} }).rows[0].owner === 'orphan',
     'the row: marks + tooltips in words, the chip title ≤ 24 (the host when the page has none), a tab not judged yet is nobody\'s (nothing drawn on it)');
   // accept-fixes F4 + F9 (the owner's acceptance of 2.369.202: two chips "en.wikipedia.org/wiki/T… · agent 的", no telling
   // which one the agent works on): the agent's current tab says so ON its chip; chips that would read the same keep their tails
@@ -175,7 +175,7 @@ function pureLegs(TT, tag = '') {
     const tw = [{ targetId: T(1), title: 'en.wikipedia.org/wiki/Tide', url: 'https://en.wikipedia.org/wiki/Tide', active: true }, { targetId: T(2), title: 'en.wikipedia.org/wiki/Tide_pool', url: 'https://en.wikipedia.org/wiki/Tide_pool' }, { targetId: T(3), title: 'Tide - Wikipedia', url: 'https://en.wikipedia.org/wiki/Tide' }];
     const mm = TT.tabRowModel({ tabs: tw, owners: { [T(1)]: 'agent', [T(2)]: 'agent', [T(3)]: 'other' }, viewer: { human: false } });
     const [a, b, c] = mm.rows;
-    leg(a.here === true && a.hereText === 'The agent is here' && b.here === false && b.hereText === '' && c.here === false && /Tide$/.test(a.title) && /Tide_pool$/.test(b.title) && a.title !== b.title && Array.from(a.title).length <= 24 && Array.from(b.title).length <= 24 && c.title === 'Tide - Wikipedia',
+    leg(a.here === true && a.hereText === 'The agent is here' && b.here === false && b.hereText === '' && c.here === false && gateOf(/Tide$/.test(a.title)) && gateOf(/Tide_pool$/.test(b.title)) && a.title !== b.title && Array.from(a.title).length <= 24 && Array.from(b.title).length <= 24 && c.title === 'Tide - Wikipedia',
       'accept-fixes F4/F9: the agent\'s current tab carries "The agent is here" on its chip (no other chip does); two chips that cut to the same words keep their tails (≤ 24); a short title stays whole', mm.rows.map((r) => ({ title: r.title, here: r.here })));
   }
   // accept-fixes-strip F7 (the owner: "en.wikipedia.org/wiki/Tide" where `open` printed "Tide - Wikipedia") — the REAL
@@ -185,9 +185,9 @@ function pureLegs(TT, tag = '') {
     const rows = fx.tabList.data.tabs;
     const mm = TT.tabRowModel({ tabs: rows, owners: Object.fromEntries(rows.map((x) => [x.targetId, 'agent'])), viewer: { human: false }, titles: fx.cdpTitles });
     const bare = TT.tabRowModel({ tabs: rows, owners: Object.fromEntries(rows.map((x) => [x.targetId, 'agent'])), viewer: { human: false } });
-    leg(rows.every((x) => TT.isUrlTitle(x.title, x.url)) && mm.rows.map((r) => r.title).join('|') === 'Tide - Wikipedia|Late title' && mm.rows.every((r) => !/127\.0\.0\.1/.test(r.title)) && /^Tide - Wikipedia — http/.test(mm.rows[0].tip)
-      && bare.rows.every((r) => /^127\.0\.0\.1/.test(r.title)) && bare.rows[0].title !== bare.rows[1].title && TT.pageTitleOf({ title: 'Docs', url: 'https://d.example/x' }, '') === 'Docs' && TT.pageTitleOf({ title: 'en.wikipedia.org/wiki/Tide', url: 'https://en.wikipedia.org/wiki/Tide' }, 'en.wikipedia.org/wiki/Tide') === ''
-      && !TT.isUrlTitle('Tide - Wikipedia', 'https://en.wikipedia.org/wiki/Tide') && TT.isUrlTitle('www.shop.example/a', 'https://www.shop.example/a') && JSON.stringify(TT.titlesOf([{ targetId: rows[0].targetId, type: 'page', title: 'T' }, { targetId: 'F'.repeat(32), type: 'iframe', title: 'no' }])) === JSON.stringify({ [rows[0].targetId]: 'T' }) && TT.pageRows([{ targetId: rows[1].targetId, title: ' Late title ', url: 'http://x/late' }])[0].title === 'Late title',
+    leg(gateOf(rows.every((x) => TT.isUrlTitle(x.title, x.url))) && mm.rows.map((r) => r.title).join('|') === 'Tide - Wikipedia|Late title' && gateOf(mm.rows.every((r) => !/127\.0\.0\.1/.test(r.title))) && gateOf(/^Tide - Wikipedia — http/.test(mm.rows[0].tip))
+      && gateOf(bare.rows.every((r) => /^127\.0\.0\.1/.test(r.title))) && bare.rows[0].title !== bare.rows[1].title && TT.pageTitleOf({ title: 'Docs', url: 'https://d.example/x' }, '') === 'Docs' && TT.pageTitleOf({ title: 'en.wikipedia.org/wiki/Tide', url: 'https://en.wikipedia.org/wiki/Tide' }, 'en.wikipedia.org/wiki/Tide') === ''
+      && !TT.isUrlTitle('Tide - Wikipedia', 'https://en.wikipedia.org/wiki/Tide') && gateOf(TT.isUrlTitle('www.shop.example/a', 'https://www.shop.example/a')) && JSON.stringify(TT.titlesOf([{ targetId: rows[0].targetId, type: 'page', title: 'T' }, { targetId: 'F'.repeat(32), type: 'iframe', title: 'no' }])) === JSON.stringify({ [rows[0].targetId]: 'T' }) && TT.pageRows([{ targetId: rows[1].targetId, title: ' Late title ', url: 'http://x/late' }])[0].title === 'Late title',
       'accept-fixes-strip F7: the REAL 0.38.1 rows (captured) name each tab by its address; the chip takes the PAGE\'s title (CDP\'s); without one it says the host (two on one host keep their tails, F9) — never an address dressed as a title', mm.rows.map((r) => r.title).concat(bare.rows.map((r) => r.title)));
   }
   // accept-fixes-strip F8 (the owner: 「中间俩不能点，有俩能点的也让人困惑」): another holder's tab names its holder by NAME;
@@ -197,8 +197,8 @@ function pureLegs(TT, tag = '') {
     const mm = TT.tabRowModel({ tabs: tb, owners: { [T(1)]: 'agent', [T(2)]: 'orphan', [T(3)]: 'other', [T(4)]: 'other', [T(5)]: 'agent' }, viewer: { human: false }, names: { [T(3)]: 'office-devices', [T(4)]: 'a very long conversation name that goes on' } });
     const by = Object.fromEntries(mm.rows.map((r) => [r.targetId, r]));
     const anon = TT.tabRowModel({ tabs: tb, owners: { [T(3)]: 'other' }, viewer: { human: false } });
-    leg(!by[T(2)] && !!by[T(5)] && by[T(3)].mark === 'office-devices' && /^office-devices’s tab — watch it here \(view only\)/.test(by[T(3)].markTip) && Array.from(by[T(4)].mark).length === 24 && /…$/.test(by[T(4)].mark)
-      && TT.tabRowModel({ tabs: tb, owners: { [T(3)]: 'other' }, viewer: { human: false } }).rows.find((r) => r.targetId === T(3)).mark === 'Another conversation’s' && anon.rows.some((r) => r.targetId === T(1)) && !anon.rows.some((r) => r.targetId === T(2)) && TT.BLANK_URL_RE.test('chrome://newtab/') && !TT.BLANK_URL_RE.test('https://x.example/'),
+    leg(!by[T(2)] && !!by[T(5)] && by[T(3)].mark === 'office-devices' && gateOf(/^office-devices’s tab — watch it here \(view only\)/.test(by[T(3)].markTip)) && Array.from(by[T(4)].mark).length === 24 && gateOf(/…$/.test(by[T(4)].mark))
+      && TT.tabRowModel({ tabs: tb, owners: { [T(3)]: 'other' }, viewer: { human: false } }).rows.find((r) => r.targetId === T(3)).mark === 'Another conversation’s' && gateOf(anon.rows.some((r) => r.targetId === T(1))) && !anon.rows.some((r) => r.targetId === T(2)) && gateOf(TT.BLANK_URL_RE.test('chrome://newtab/')) && !TT.BLANK_URL_RE.test('https://x.example/'),
       'accept-fixes-strip F8: another conversation\'s tab says WHOSE by name (≤ 24, the full words in its tip), "Another conversation’s" only when no name is known; a blank tab nobody holds is not drawn — the agent\'s blank tab and the tab on show are', mm.rows.map((r) => r.targetId.slice(0, 2) + ':' + r.mark));
   }
   // the handback sentence
@@ -206,7 +206,7 @@ function pureLegs(TT, tag = '') {
   leg(s1 === 'While driving, the user closed 2 of your tabs (“Cart — https://shop.example/cart”, “https://x.example/”) and switched your current tab to “Docs — https://d.example/”.' && TT.userActsSentence([]) === '' && TT.userActsSentence([{ kind: 'x' }]) === '', 'the handback sentence names what the user closed and where he left the agent', s1);
   const many = Array.from({ length: 30 }, (_, i) => ({ kind: 'tab-close', title: 't' + i, url: 'https://x.example/' + i }));
   const kept = many.reduce((a, x) => TT.noteUserActIn(a, x), []);
-  leg(kept.length === 16 && kept[0].title === 't14' && /closed 16 of your tabs .*and 10 more/.test(TT.userActsSentence(kept)), 'the cycle keeps 16 acts (the newest), the sentence names 6 and counts the rest');
+  leg(kept.length === 16 && kept[0].title === 't14' && verdictOf(/closed 16 of your tabs .*and 10 more/.test(TT.userActsSentence(kept))), 'the cycle keeps 16 acts (the newest), the sentence names 6 and counts the rest');
   // lane browser-tabs-by-window (the owner, 2026-10-08): THE TABS BY WINDOW — the owner's instance as the fixture (profile
   // hanabi-work: this conversation's window 896114259, 企业助手's window 896114295, each with its blank anchor)
   {
@@ -214,7 +214,7 @@ function pureLegs(TT, tag = '') {
     const tabs = [{ targetId: A, url: 'https://enterprise.example/', active: true, windowId: WA }, { targetId: B, url: 'https://read.example/r', windowId: WB }, { targetId: C, url: 'about:blank', windowId: WA }, { targetId: D, url: 'about:blank', windowId: WB }];
     const leases = [{ windowId: WA, holder: { word: 'agent' } }, { windowId: WB, holder: { word: 'other', name: '企业助手' } }];
     const g = TT.tabGroups({ tabs, leases });
-    leg(g.grouped && g.groups.map((x) => x.kind).join() === 'own,holder' && g.groups[0].label === 'This window' && g.groups[1].label === '企业助手’s window' && JSON.stringify(g.order) === JSON.stringify([A, B]), 'BY WINDOW: this window first, then 企业助手’s window by name (the owner\'s two leases)', g);
+    leg(gateOf(g.grouped) && g.groups.map((x) => x.kind).join() === 'own,holder' && g.groups[0].label === 'This window' && g.groups[1].label === '企业助手’s window' && JSON.stringify(g.order) === JSON.stringify([A, B]), 'BY WINDOW: this window first, then 企业助手’s window by name (the owner\'s two leases)', g);
     leg(JSON.stringify(g.groups.map((x) => x.blanks)) === JSON.stringify([[C], [D]]) && g.blanks === 2 && g.groups[0].blankText === '+1 blank' && TT.tabsCountText(g) === '2 · +2 blank', 'BY WINDOW anchors: each window\'s blank folds into its own head ("+1 blank"); the pane count "2 · +2 blank"', g);
     // the holders' order (the user first, then the conversations by age) — never re-sorted; unknown + unclaimed last
     const g2 = TT.tabGroups({ tabs: [{ targetId: T(51), url: 'https://x.example/', windowId: 7 }, { targetId: T(52), url: 'https://y.example/', windowId: 9 }, { targetId: T(53), url: 'https://z.example/', windowId: 8 }, { targetId: T(54), url: 'https://q.example/', windowId: null }, { targetId: T(55), url: 'https://w.example/', windowId: 11 }, { targetId: T(56), url: 'https://me.example/', active: true, windowId: 5 }],
@@ -225,21 +225,21 @@ function pureLegs(TT, tag = '') {
     leg(g3.groups.map((x) => x.kind).join() === 'own,elsewhere' && !JSON.stringify(g3).includes('Yan'), 'BY WINDOW never guessed: a lease without a window id names no group — its tab is "Elsewhere in this browser"', g3);
     // the anchor rule's edges: alone ⇒ kept; all blank ⇒ the first kept; the tab on show never folded (never "here"); unread window ⇒ kept
     const g4 = TT.tabGroups({ tabs: [{ targetId: T(61), url: 'about:blank', windowId: 3 }, { targetId: T(62), url: 'about:blank', windowId: 4 }, { targetId: T(63), url: 'about:blank', windowId: 4 }, { targetId: T(64), url: 'about:blank', active: true, windowId: 6 }, { targetId: T(65), url: 'https://p.example/', windowId: 6 }, { targetId: T(66), url: 'about:blank', windowId: null }, { targetId: T(67), url: 'https://u.example/', windowId: null }], leases: [{ windowId: 6, holder: { word: 'agent' } }] });
-    leg(JSON.stringify(g4.order.slice().sort()) === JSON.stringify([T(61), T(62), T(64), T(65), T(66), T(67)].sort()) && g4.blanks === 1 && g4.groups.some((x) => x.blanks.includes(T(63))), 'BY WINDOW anchors kept: a window\'s only tab, the first of an all-blank window, the blank on show, a blank whose window is unread', g4);
+    leg(JSON.stringify(g4.order.slice().sort()) === JSON.stringify([T(61), T(62), T(64), T(65), T(66), T(67)].sort()) && g4.blanks === 1 && verdictOf(g4.groups.some((x) => x.blanks.includes(T(63)))), 'BY WINDOW anchors kept: a window\'s only tab, the first of an all-blank window, the blank on show, a blank whose window is unread', g4);
     const m4 = TT.tabRowModel({ tabs: [{ targetId: T(71), url: 'about:blank', active: true }, { targetId: T(72), url: 'https://p.example/' }, { targetId: T(73), url: 'about:blank' }], owners: { [T(71)]: 'agent', [T(72)]: 'agent', [T(73)]: 'agent' }, windows: { [T(71)]: 6, [T(72)]: 6, [T(73)]: 6 }, leases: [{ windowId: 6, holder: { word: 'agent' } }] });
-    leg(m4.rows.length === 2 && m4.rows.find((x) => x.targetId === T(71)).here && !m4.rows.some((x) => x.targetId === T(73)) && m4.blanks === 1 && m4.counts.agent === 3, 'BY WINDOW the row: the blank on show stays "the agent is here", a spare blank of its window folds (never counted out of the last-tab rule)', m4);
+    leg(m4.rows.length === 2 && gateOf(m4.rows.find((x) => x.targetId === T(71)).here) && !m4.rows.some((x) => x.targetId === T(73)) && m4.blanks === 1 && m4.counts.agent === 3, 'BY WINDOW the row: the blank on show stays "the agent is here", a spare blank of its window folds (never counted out of the last-tab rule)', m4);
     // the row model draws in GROUP order (own window first even when the browser lists it last), each row knows its group
     const m5 = TT.tabRowModel({ tabs: [{ targetId: B, title: 'Read', url: 'https://read.example/r' }, { targetId: A, title: 'Ent', url: 'https://enterprise.example/', active: true }], owners: { [A]: 'agent', [B]: 'other' }, names: { [B]: '企业助手' }, windows: { [A]: WA, [B]: WB }, leases });
-    leg(m5.grouped && m5.rows.map((x) => x.targetId).join() === [A, B].join() && m5.rows[0].group === m5.groups[0].key && m5.rows[1].group === m5.groups[1].key && m5.rows[1].mark === '企业助手', 'BY WINDOW the row model: this window\'s chip first, then 企业助手’s (its mark names it), each row knows its group', m5.rows);
+    leg(gateOf(m5.grouped) && m5.rows.map((x) => x.targetId).join() === [A, B].join() && m5.rows[0].group === m5.groups[0].key && m5.rows[1].group === m5.groups[1].key && m5.rows[1].mark === '企业助手', 'BY WINDOW the row model: this window\'s chip first, then 企业助手’s (its mark names it), each row knows its group', m5.rows);
     // an old record (no windows, no leases) = the flat row as before
     const m6 = TT.tabRowModel({ tabs: [{ targetId: B, url: 'https://read.example/r' }, { targetId: A, url: 'https://e.example/', active: true }], owners: { [A]: 'agent', [B]: 'agent' } });
     leg(!m6.grouped && m6.rows.map((x) => x.targetId).join() === [B, A].join() && m6.blanks === 0, 'BY WINDOW absent: a record without windows keeps the browser\'s order, one group, nothing folded', m6);
     const words = [g, g2, g3, g4, m5].flatMap((x) => x.groups).map((x) => `${x.label} ${x.tip} ${x.blankText}`).join(' | ');
-    leg(!/\d{6,}/.test(words) && /This window/.test(words), 'BY WINDOW ids never in words: no digit run of 6+ in any head, tip or count (Chrome\'s window ids are 9 digits)', words);
+    leg(!/\d{6,}/.test(words) && verdictOf(/This window/.test(words)), 'BY WINDOW ids never in words: no digit run of 6+ in any head, tip or count (Chrome\'s window ids are 9 digits)', words);
   }
   return legs;
 }
-for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
+for (const l of pureLegs(TB)) ok(verdictOf(l.c), l.n, l.extra);
 // verify r2 (F4, bound before parse): the readers of a browser's page list (Chrome's own, unbounded) are LINEAR, and a
 // page-chosen title / url is cut before it is walked — measured, not trusted (the peer-parser census carries the rows)
 {
@@ -249,39 +249,39 @@ for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
   const chain = (n) => Array.from({ length: n }, (_, i) => ({ targetId: hex(i), type: 'page', openerId: i + 1 < n ? hex(i + 1) : undefined }));
   const own = judgeInChild({ module: TBF, run: '(M, x) => M.tabOwners(x)', mk: `(n) => { ${HEX} return { targets: Array.from({ length: n }, (_, i) => ({ targetId: hex(i), type: 'page', openerId: i + 1 < n ? hex(i + 1) : undefined })), holders: [{ key: 'k', roots: n ? [hex(n - 1)] : [] }] }; }`, n: 4000, kind: 'linear' });
   const o8 = TB.tabOwners({ targets: chain(8000), holders: [{ key: KA, roots: [hex(7999)] }] });
-  ok(own.ok && o8.size === 8000 && [...o8.values()].every((k) => k === KA), `tabOwners is LINEAR in WORK on a chain of 4 000 → 8 000 popups (×${(own.r || 0).toFixed(2)} ≤ ${LINEAR_BOUND}; the fixpoint it replaced took 1.2 s) and still owns the whole chain`, own);
+  ok(gateOf(own.ok) && o8.size === 8000 && verdictOf([...o8.values()].every((k) => k === KA)), `tabOwners is LINEAR in WORK on a chain of 4 000 → 8 000 popups (×${(own.r || 0).toFixed(2)} ≤ ${LINEAR_BOUND}; the fixpoint it replaced took 1.2 s) and still owns the whole chain`, own);
   const cr = judgeInChild({ module: TBF, run: '(M, x) => M.cleanRoots(x)', mk: `(n) => { ${HEX} return Array.from({ length: n }, (_, i) => hex(i)); }`, n: 4000, kind: 'linear' });
-  ok(cr.ok && TB.cleanRoots([hex(1), hex(1).toLowerCase(), hex(2)]).join() === [hex(1), hex(2)].join(), `cleanRoots dedupes 4 000 → 8 000 ids linearly in WORK (×${(cr.r || 0).toFixed(2)}: a Set, never includes-per-item)`, cr);
+  ok(gateOf(cr.ok) && TB.cleanRoots([hex(1), hex(1).toLowerCase(), hex(2)]).join() === [hex(1), hex(2)].join(), `cleanRoots dedupes 4 000 → 8 000 ids linearly in WORK (×${(cr.r || 0).toFixed(2)}: a Set, never includes-per-item)`, cr);
   const big = 'T'.repeat(1024 * 1024);
   const ct = judgeInChild({ module: TBF, run: "(M, x) => M.chipTitle(x, 'https://x.example/')", mk: "(n) => 'T'.repeat(n)", n: 1024 * 1024, kind: 'bounded' });
   const rm = TB.tabRowModel({ tabs: [{ targetId: hex(1), title: big, url: 'https://x.example/' + 'a'.repeat(100000), active: true }], owners: { [hex(1)]: 'agent' }, viewer: {}, driving: true });
-  ok(ct.ok && TB.chipTitle(big, '').length === 24 && rm.rows[0].tip.length <= 300 + 3 + 2048 && rm.rows[0].url.length === 2048, `a 1 MiB page title is cut before the code-point walk (WORK at 1 / 2 MiB: ${ct.w1} / ${ct.w2}); the row's tip / url are bounded (300 / 2048)`, { ct, tip: rm.rows[0].tip.length, url: rm.rows[0].url.length });
+  ok(gateOf(ct.ok) && TB.chipTitle(big, '').length === 24 && rm.rows[0].tip.length <= 300 + 3 + 2048 && rm.rows[0].url.length === 2048, `a 1 MiB page title is cut before the code-point walk (WORK at 1 / 2 MiB: ${ct.w1} / ${ct.w2}); the row's tip / url are bounded (300 / 2048)`, { ct, tip: rm.rows[0].tip.length, url: rm.rows[0].url.length });
 }
 {
   // CONTROLS (patched copies, scripts/mutant-copy.mjs): each must turn a leg above red
   const src = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8');
   const redOf = (needle, repl, tag) => { if (!src.includes(needle)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(needle).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const C = M.load('src/browser-tabs.js', editAnchor(src, needle, repl, "src/browser-tabs.js"), tag); return pureLegs(C, '[' + tag + '] ').filter((l) => !l.c).map((l) => l.n); };
   const c1 = redOf("  if (owner === 'other' || human) return no('not_your_tab');\n", "  if (human) return no('not_your_tab');\n", 'other-closable');
-  ok(Array.isArray(c1) && c1.some((n) => /USER'S VERDICT/.test(n)) && c1.some((n) => /ROW MODEL/.test(n) || /USER/.test(n)), 'CONTROL: a verdict that lets the user switch / close ANOTHER conversation\'s tab from a view he drives — the verdict + row legs go red', c1);
+  ok(gateOf(Array.isArray(c1)) && gateOf(c1.some((n) => /USER'S VERDICT/.test(n))) && verdictOf(c1.some((n) => /ROW MODEL/.test(n) || /USER/.test(n))), 'CONTROL: a verdict that lets the user switch / close ANOTHER conversation\'s tab from a view he drives — the verdict + row legs go red', c1);
   const c2 = redOf("  const own = rows.filter((x) => owners.get(idKey(x.targetId)) === str(me)).map(tabRow);", '  const own = rows.map(tabRow);', 'view-leaks');
-  ok(Array.isArray(c2) && c2.some((n) => /AGENT'S VIEW/.test(n)), 'CONTROL: an agent view that lists every tab (another holder\'s title and url) — red', c2);
+  ok(gateOf(Array.isArray(c2)) && verdictOf(c2.some((n) => /AGENT'S VIEW/.test(n))), 'CONTROL: an agent view that lists every tab (another holder\'s title and url) — red', c2);
   const c3 = redOf("  for (const h of hs) for (const r of cleanRoots(h.roots)) if (present.has(r) && !out.has(r)) out.set(r, str(h.key));\n  spread();\n  for (const h of hs) { const a = idKey(h.active); if (isTargetId(a) && present.has(a) && !out.has(a)) out.set(a, str(h.key)); }\n",
     "  for (const h of hs) { const a = idKey(h.active); if (isTargetId(a) && present.has(a) && !out.has(a)) out.set(a, str(h.key)); }\n  for (const h of hs) for (const r of cleanRoots(h.roots)) if (present.has(r) && !out.has(r)) out.set(r, str(h.key));\n  spread();\n", 'active-first');
-  ok(Array.isArray(c3) && c3.some((n) => /ACTIVE never outranks/.test(n)), 'CONTROL: an ownership rule where a session\'s ACTIVE tab outranks the user\'s root — red', c3);
+  ok(gateOf(Array.isArray(c3)) && verdictOf(c3.some((n) => /ACTIVE never outranks/.test(n))), 'CONTROL: an ownership rule where a session\'s ACTIVE tab outranks the user\'s root — red', c3);
   // accept-fixes-strip: the F7 / F8 rules each turn their leg red when taken out
   const c4 = redOf("    .map((x) => ({ ...x, title: pageTitleOf(x, tt[idKey(x.targetId)]) }))\n", "    .map((x) => ({ ...x }))\n", 'binary-titles');
-  ok(Array.isArray(c4) && c4.some((n) => /F7/.test(n)), 'CONTROL F7: a row model that keeps the binary\'s titles (the 2.369.202 shape) — the F7 leg goes red', c4);
+  ok(gateOf(Array.isArray(c4)) && verdictOf(c4.some((n) => /F7/.test(n))), 'CONTROL F7: a row model that keeps the binary\'s titles (the 2.369.202 shape) — the F7 leg goes red', c4);
   const c5 = redOf("  for (const v of [cdpTitle, row && row.title]) { const t = str(v).trim().slice(0, 300); if (t && !isUrlTitle(t, url)) return t; }\n", "  for (const v of [cdpTitle, row && row.title]) { const t = str(v).trim().slice(0, 300); if (t) return t; }\n", 'address-as-title');
-  ok(Array.isArray(c5) && c5.some((n) => /F7/.test(n)), 'CONTROL F7: a title rule that accepts an address dressed as a title — red', c5);
+  ok(gateOf(Array.isArray(c5)) && verdictOf(c5.some((n) => /F7/.test(n))), 'CONTROL F7: a title rule that accepts an address dressed as a title — red', c5);
   const c6 = redOf("  if (owner === 'other') return name ? str(name) : t('Another conversation’s');\n", "  if (owner === 'other') return t('Another conversation’s');\n", 'no-names');
-  ok(Array.isArray(c6) && c6.some((n) => /F8/.test(n)), 'CONTROL F8: a mark that never names the holder ("Another conversation’s", the 2.369.202 words) — red', c6);
+  ok(gateOf(Array.isArray(c6)) && verdictOf(c6.some((n) => /F8/.test(n))), 'CONTROL F8: a mark that never names the holder ("Another conversation’s", the 2.369.202 words) — red', c6);
   const c7 = redOf("    .filter((x) => x.active || idKey(x.targetId) === frontId || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));\n", "    .filter(Boolean);\n", 'blank-orphans'); // B-e674 unit 1: the line also keeps a foreign front tab
-  ok(Array.isArray(c7) && c7.some((n) => /F8/.test(n)), 'CONTROL F8: a row that draws a blank tab nobody holds ("about:blank · Nobody’s") — red', c7);
+  ok(gateOf(Array.isArray(c7)) && verdictOf(c7.some((n) => /F8/.test(n))), 'CONTROL F8: a row that draws a blank tab nobody holds ("about:blank · Nobody’s") — red', c7);
   // lane browser-tabs-by-window: a copy that FLATTENS the groups, a copy that prints the window id — each red
   const c8 = redOf("  for (const x of list) (at.get(x.win) || groups[groups.length - 1]).members.push(x);\n", "  for (const x of list) groups[groups.length - 1].members.push(x);\n", 'flat-tabs');
-  ok(Array.isArray(c8) && c8.some((n) => /BY WINDOW: this window first/.test(n)), 'CONTROL: a copy that lists the browser\'s tabs flat (the owner\'s "two agents in one window") — the BY WINDOW legs go red', c8);
+  ok(gateOf(Array.isArray(c8)) && verdictOf(c8.some((n) => /BY WINDOW: this window first/.test(n))), 'CONTROL: a copy that lists the browser\'s tabs flat (the owner\'s "two agents in one window") — the BY WINDOW legs go red', c8);
   const c9 = redOf("heads.push({ kind: 'holder', win: l.win, label: windowLabelText('holder', l, tIn) });", "heads.push({ kind: 'holder', win: l.win, label: windowLabelText('holder', l, tIn) + ' #' + l.win });", 'window-id-words');
-  ok(Array.isArray(c9) && c9.some((n) => /ids never in words/.test(n)), 'CONTROL: a copy that prints Chrome\'s window id in a head — the ids-never-in-words leg goes red', c9);
+  ok(gateOf(Array.isArray(c9)) && verdictOf(c9.some((n) => /ids never in words/.test(n))), 'CONTROL: a copy that prints Chrome\'s window id in a head — the ids-never-in-words leg goes red', c9);
 }
 
 // ═══ the fake agent-browser: ONE shared Chrome per namespace (the measured 0.38.1 shapes) ═══════════════════════
@@ -376,7 +376,7 @@ let work, NS, HUK, hisTab, aTab, bTab, aNew;
   work = (await j('POST', '/api/browser/profiles', { label: 'Work' })).json.profile;
   NS = B.sessionNameFor(work.id); HUK = require('../src/browser-human.js').humanKeyFor(work.id);
   let r = await j('POST', `/api/browser/profiles/${work.id}/browse`, {});
-  ok(r.status === 200 && r.json.ok, 'the user browses "Work" himself (the keeper launches it; his own tab)', r.json);
+  ok(r.status === 200 && verdictOf(r.json.ok), 'the user browses "Work" himself (the keeper launches it; his own tab)', r.json);
   hisTab = nsState(NS).sessions['vs-' + HUK];
   // the two conversations attach and open a page each — under their OWN lease sessions (what the CLI's binary run does)
   for (const s of [sA, sB]) { r = await j('POST', '/api/agent/browser/use', { profile: 'Work' }, as(s)); if (r.status !== 200) break; }
@@ -389,18 +389,18 @@ let work, NS, HUK, hisTab, aTab, bTab, aNew;
   const rootsOf = (bk) => (k._reg().leases.find((l) => l.profileId === work.id && l.browserKey === bk) || {}).tabRoots || [];
   ok(J(rootsOf(KA)) === J([aTab]) && J(rootsOf(KB)) === J([bTab]), 'the AUDIT after each conversation\'s first command records ITS tab as its first root (its session bound a new tab of its own — measured)', { a: rootsOf(KA), b: rootsOf(KB) });
   const st0 = nsState(NS);
-  ok(st0.tabs.length === 4 && aTab && bTab && aTab !== bTab, 'ONE Chrome: the keeper\'s launch tab, his tab, A\'s tab, B\'s tab (each session bound its own at its first command)', st0.tabs.map((t) => t.tabId + ' ' + t.url));
+  ok(st0.tabs.length === 4 && gateOf(aTab) && gateOf(bTab) && aTab !== bTab, 'ONE Chrome: the keeper\'s launch tab, his tab, A\'s tab, B\'s tab (each session bound its own at its first command)', st0.tabs.map((t) => t.tabId + ' ' + t.url));
   // ── the agent's list: its own + a count
   const n0 = cmds().length;
   r = await tabCmd(sA, ['tab', 'list', '--json']);
-  ok(r.status === 200 && r.json.ok && r.json.view && r.json.view.tabs.length === 1 && r.json.view.tabs[0].targetId === aTab && r.json.view.tabs[0].current && r.json.view.others === 3 && !J(r.json).includes('secret-report') && !J(r.json).includes(bTab) && !J(r.json).includes(HUK),
+  ok(r.status === 200 && gateOf(r.json.ok) && gateOf(r.json.view) && r.json.view.tabs.length === 1 && r.json.view.tabs[0].targetId === aTab && gateOf(r.json.view.tabs[0].current) && r.json.view.others === 3 && !J(r.json).includes('secret-report') && !J(r.json).includes(bTab) && !J(r.json).includes(HUK),
     'the agent\'s `tab list`: ITS tab (current) + "3 other tabs" — B\'s page (title, url, id) and the user\'s key never in the answer', r.json);
-  ok(cmds().slice(n0).every((c) => c.sess === 'vs-' + KA && /^tab list --json$/.test(c.argv.join(' '))), 'the list is ONE `tab list` under ITS OWN session (nothing under another\'s)', cmds().slice(n0));
+  ok(verdictOf(cmds().slice(n0).every((c) => c.sess === 'vs-' + KA && /^tab list --json$/.test(c.argv.join(' ')))), 'the list is ONE `tab list` under ITS OWN session (nothing under another\'s)', cmds().slice(n0));
   // ── tab new ⇒ a ROOT
   r = await tabCmd(sA, ['tab', 'new', 'https://a.example/2']);
   aNew = r.json && r.json.opened ? r.json.opened.targetId : null;
   const lease = () => k._reg().leases.find((l) => l.profileId === work.id && l.browserKey === KA);
-  ok(r.status === 200 && aNew && lease().tabRoots.includes(aNew) && r.json.view.tabs.length === 2 && cmdsOf('vs-' + KA).some((c) => c === '--pin-tab tab new https://a.example/2 --json'), '`tab new <url>` runs under its session (--pin-tab, --json), its tab is a ROOT of its lease (persisted), the view names 2', { r: r.json, roots: lease().tabRoots });
+  ok(r.status === 200 && gateOf(aNew) && gateOf(lease().tabRoots.includes(aNew)) && r.json.view.tabs.length === 2 && verdictOf(cmdsOf('vs-' + KA).some((c) => c === '--pin-tab tab new https://a.example/2 --json')), '`tab new <url>` runs under its session (--pin-tab, --json), its tab is a ROOT of its lease (persisted), the view names 2', { r: r.json, roots: lease().tabRoots });
   ok(!J(k.leasesOn(work.id)).includes('tabRoots') && !J(k.list()).includes(aNew), 'the roots never reach a view (the digest, a lease row) — target ids of a conversation\'s tabs are the keeper\'s own bookkeeping');
   // ── a FOREIGN close / switch is refused BEFORE any exec (the command log is the spy)
   const bRow = nsState(NS).tabs.find((t) => t.targetId === bTab);
@@ -410,13 +410,13 @@ let work, NS, HUK, hisTab, aTab, bTab, aNew;
   const rc3 = await tabCmd(sA, ['tab', hisTab]);
   const rc4 = await tabCmd(sA, ['tab', 't1']);
   const after = cmds().slice(n1).map((c) => c.argv.join(' '));
-  ok([rc1, rc2, rc3, rc4].every((x) => x.status === 403 && x.json.code === 'not_your_tab') && after.every((c) => c === 'tab list --json') && nsState(NS).tabs.some((t) => t.targetId === bTab),
+  ok(gateOf([rc1, rc2, rc3, rc4].every((x) => x.status === 403 && x.json.code === 'not_your_tab')) && gateOf(after.every((c) => c === 'tab list --json')) && verdictOf(nsState(NS).tabs.some((t) => t.targetId === bTab)),
     'another conversation\'s tab (by target id or t<N>), the user\'s tab, the keeper\'s launch tab — refused `not_your_tab`, NOTHING but a read ran (B\'s page is still there)', { codes: [rc1, rc2, rc3, rc4].map((x) => x.json && x.json.code), after });
   // ── its own: switch, then close its current (said)
   r = await tabCmd(sA, ['tab', aTab]);
-  ok(r.status === 200 && r.json.switched && r.json.switched.targetId === aTab && nsState(NS).sessions['vs-' + KA] === aTab && cmdsOf('vs-' + KA).includes(`--pin-tab tab ${aTab} --json`), '`tab <own id>` switches under its session (by target id)', r.json);
+  ok(r.status === 200 && gateOf(r.json.switched) && r.json.switched.targetId === aTab && nsState(NS).sessions['vs-' + KA] === aTab && verdictOf(cmdsOf('vs-' + KA).includes(`--pin-tab tab ${aTab} --json`)), '`tab <own id>` switches under its session (by target id)', r.json);
   r = await tabCmd(sA, ['tab', 'close']);
-  ok(r.status === 200 && r.json.closed && r.json.closed.targetId === aTab && r.json.closed.current && /tab_gone/.test(r.json.note) && !nsState(NS).tabs.some((t) => t.targetId === aTab) && !lease().tabRoots.includes(aTab), '`tab close` (no ref) closes ITS current tab — said: the next page verb answers tab_gone until it switches / opens one; the root is dropped', r.json);
+  ok(r.status === 200 && gateOf(r.json.closed) && r.json.closed.targetId === aTab && gateOf(r.json.closed.current) && gateOf(/tab_gone/.test(r.json.note)) && !nsState(NS).tabs.some((t) => t.targetId === aTab) && !lease().tabRoots.includes(aTab), '`tab close` (no ref) closes ITS current tab — said: the next page verb answers tab_gone until it switches / opens one; the root is dropped', r.json);
   r = await tabCmd(sA, ['tab', 'list']);
   ok(r.status === 200 && r.json.view.tabs.length === 1 && r.json.view.tabs[0].targetId === aNew && !r.json.view.tabs[0].current, 'its list after: the other own tab (not current — its session is on a closed tab, the binary\'s own rule)', r.json.view);
   r = await tabCmd(sA, ['tab', aNew]);
@@ -424,7 +424,7 @@ let work, NS, HUK, hisTab, aTab, bTab, aNew;
   // a popup its page opens stays its own (the opener rule) — and a popup of B's is not
   await run(KA, ['popup', 'https://a.example/pop']); await run(KB, ['popup', 'https://b.example/pop']);
   r = await tabCmd(sA, ['tab', 'list']);
-  ok(r.status === 200 && r.json.view.tabs.length === 2 && r.json.view.tabs.some((x) => /a\.example\/pop/.test(x.url)) && !J(r.json).includes('b.example'), 'a popup ITS page opened is its own (Chrome\'s openerId); B\'s popup is counted, never named', r.json.view);
+  ok(r.status === 200 && r.json.view.tabs.length === 2 && gateOf(r.json.view.tabs.some((x) => /a\.example\/pop/.test(x.url))) && !J(r.json).includes('b.example'), 'a popup ITS page opened is its own (Chrome\'s openerId); B\'s popup is counted, never named', r.json.view);
   // ── the words refused by the parser / the url belt
   const rw = await tabCmd(sA, ['tab', 'new', 'file:///etc/passwd']); const rp = await tabCmd(sA, ['tab', 'close', 't1', 't2']);
   ok(rw.status === 400 && rw.json.code === 'not_web' && rp.status === 400 && rp.json.code === 'bad-request', 'the server\'s belt: `tab new file://…` refused not_web; two refs refused bad-request');
@@ -432,12 +432,12 @@ let work, NS, HUK, hisTab, aTab, bTab, aNew;
   readFail = true; const n2 = cmds().length;
   r = await tabCmd(sA, ['tab', 'close', aNew]);
   readFail = false;
-  ok(r.status === 503 && r.json.code === 'tabs_unreadable' && cmds().slice(n2).every((c) => c.argv.join(' ') === 'tab list --json') && nsState(NS).tabs.some((t) => t.targetId === aNew), 'the CDP read fails ⇒ `tabs_unreadable`, nothing closed (fail closed)', r.json);
+  ok(r.status === 503 && r.json.code === 'tabs_unreadable' && gateOf(cmds().slice(n2).every((c) => c.argv.join(' ') === 'tab list --json')) && verdictOf(nsState(NS).tabs.some((t) => t.targetId === aNew)), 'the CDP read fails ⇒ `tabs_unreadable`, nothing closed (fail closed)', r.json);
   // ── the one admission first: while the user drives it, browser_paused and nothing ran
   const tk = k.takeover({ browserKey: KA, profileId: work.id, viewerId: 7, sessionId: 'sess-a' });
   const n3 = cmds().length;
   r = await tabCmd(sA, ['tab', 'list']);
-  ok(tk.ok && r.status === 409 && r.json.code === 'browser_paused' && cmds().length === n3, 'resolveFor FIRST: while the user drives it, the agent\'s `tab list` is refused browser_paused — nothing ran', r.json);
+  ok(gateOf(tk.ok) && r.status === 409 && r.json.code === 'browser_paused' && cmds().length === n3, 'resolveFor FIRST: while the user drives it, the agent\'s `tab list` is refused browser_paused — nothing ran', r.json);
   // a conversation's own browser / an unattached one ⇒ passthrough (the binary runs as before: its browser holds only its tabs)
   const sC = { agentToken: tok('c'), _browserKey: 'bk-0000c0a3', name: 'C', webuiName: 'C', mode: 'chat', claudeSessionId: 'conv-c' }; active.set('sess-c', sC); live.add('bk-0000c0a3');
   r = await tabCmd(sC, ['tab', 'list']);
@@ -448,37 +448,37 @@ let work, NS, HUK, hisTab, aTab, bTab, aNew;
   const own0 = await k.tabOwnersFor(T_A, { activeTarget: aNew });
   const aPop = nsState(NS).tabs.find((t) => /a\.example\/pop/.test(t.url)).targetId, bPop = nsState(NS).tabs.find((t) => /b\.example\/pop/.test(t.url)).targetId;
   const W = own0.owners || {};
-  ok(own0.ok && W[aNew] === 'agent' && W[aPop] === 'agent' && W[bTab] === 'other' && W[bPop] === 'other' && W[hisTab] === 'you' && W[nsState(NS).tabs[0].targetId] === 'orphan' && !own0.adoptable, 'the view\'s words for A\'s live view: A\'s tabs `agent`, B\'s (and its popup) `other`, his `you`, the launch tab `orphan`', { W, hisTab });
+  ok(gateOf(own0.ok) && W[aNew] === 'agent' && W[aPop] === 'agent' && W[bTab] === 'other' && W[bPop] === 'other' && W[hisTab] === 'you' && W[nsState(NS).tabs[0].targetId] === 'orphan' && !own0.adoptable, 'the view\'s words for A\'s live view: A\'s tabs `agent`, B\'s (and its popup) `other`, his `you`, the launch tab `orphan`', { W, hisTab });
   const own1 = await k.tabOwnersFor({ kind: 'human', key: HUK, profileId: work.id });
-  ok(own1.ok && own1.owners[hisTab] === 'you' && own1.owners[aNew] === 'other' && own1.owners[bTab] === 'other' && own1.adoptable === false, 'his browsing window\'s words: his `you`, every conversation\'s `other`, nothing adoptable while conversations lease the browser', own1);
+  ok(gateOf(own1.ok) && own1.owners[hisTab] === 'you' && own1.owners[aNew] === 'other' && own1.owners[bTab] === 'other' && own1.adoptable === false, 'his browsing window\'s words: his `you`, every conversation\'s `other`, nothing adoptable while conversations lease the browser', own1);
   const n4 = cmds().length;
   const refusedCode = async (x) => { try { await k.userTabAct(x); return 'ran'; } catch (e) { return e.code; } };
   const c1 = await refusedCode({ target: T_A, viewerId: 8, act: 'close', targetId: aPop }); // not the holder
   const c2 = await refusedCode({ target: T_A, viewerId: 7, act: 'close', targetId: bTab }); // another conversation's
   const c3 = await refusedCode({ target: T_A, viewerId: 7, act: 'switch', targetId: bPop });
   const c4 = await refusedCode({ target: T_A, viewerId: 7, act: 'switch', targetId: hisTab }); // his own tab is never the agent's current
-  ok(c1 === 'take_over_first' && c2 === 'not_your_tab' && c3 === 'not_your_tab' && c4 === 'not_your_tab' && cmds().slice(n4).every((c) => c.argv.join(' ') === 'tab list --json'),
+  ok(c1 === 'take_over_first' && c2 === 'not_your_tab' && c3 === 'not_your_tab' && c4 === 'not_your_tab' && verdictOf(cmds().slice(n4).every((c) => c.argv.join(' ') === 'tab list --json')),
     'the user\'s row: a viewer that does not hold the takeover ⇒ take_over_first; B\'s tab / popup ⇒ not_your_tab; his own tab is never switched INTO the agent\'s session — nothing but reads ran', { c1, c2, c3, c4 });
   // he closes A's popup and switches A to … its only other tab, then tries its last
   let u = await k.userTabAct({ target: T_A, viewerId: 7, act: 'close', targetId: aPop });
-  ok(u.ok && !nsState(NS).tabs.some((t) => t.targetId === aPop) && cmdsOf('vs-' + KA).includes(`tab close ${aPop} --json`), 'while he drives A\'s view: his ✕ on A\'s popup closes it under A\'s OWN session', u);
+  ok(gateOf(u.ok) && !nsState(NS).tabs.some((t) => t.targetId === aPop) && verdictOf(cmdsOf('vs-' + KA).includes(`tab close ${aPop} --json`)), 'while he drives A\'s view: his ✕ on A\'s popup closes it under A\'s OWN session', u);
   const c5 = await refusedCode({ target: T_A, viewerId: 7, act: 'close', targetId: aNew });
-  ok(c5 === 'last_tab' && nsState(NS).tabs.some((t) => t.targetId === aNew), 'A\'s LAST tab is never closed from the row (`last_tab` — Close all tabs quits the browser)', c5);
+  ok(c5 === 'last_tab' && verdictOf(nsState(NS).tabs.some((t) => t.targetId === aNew)), 'A\'s LAST tab is never closed from the row (`last_tab` — Close all tabs quits the browser)', c5);
   // a second tab of A's, made current by the agent (before the takeover), then he closes the CURRENT one ⇒ A moves to a neighbour first
   const hb1 = k.handback({ browserKey: KA, profileId: work.id, viewerId: 7, cause: 'explicit' });
-  ok(hb1.ok && /While driving, the user closed one of your tabs \(“Page a\.example\/pop — https:\/\/a\.example\/pop”\)\./.test(TK.handbackText({ cause: 'explicit', userActs: hb1.userActs })), 'the first handback says the popup he closed', hb1.userActs);
+  ok(gateOf(hb1.ok) && verdictOf(/While driving, the user closed one of your tabs \(“Page a\.example\/pop — https:\/\/a\.example\/pop”\)\./.test(TK.handbackText({ cause: 'explicit', userActs: hb1.userActs }))), 'the first handback says the popup he closed', hb1.userActs);
   r = await tabCmd(sA, ['tab', 'new', 'https://a.example/3']); const a3 = r.json.opened.targetId;
   k.takeover({ browserKey: KA, profileId: work.id, viewerId: 7, sessionId: 'sess-a' });
   u = await k.userTabAct({ target: T_A, viewerId: 7, act: 'close', targetId: a3 });
-  ok(u.ok && u.switchedTo === aNew && nsState(NS).sessions['vs-' + KA] === aNew && !nsState(NS).tabs.some((t) => t.targetId === a3), 'his ✕ on A\'s CURRENT tab: A\'s session moves to a neighbour of its own FIRST (the view keeps a picture), then the tab closes', u);
+  ok(gateOf(u.ok) && u.switchedTo === aNew && nsState(NS).sessions['vs-' + KA] === aNew && !nsState(NS).tabs.some((t) => t.targetId === a3), 'his ✕ on A\'s CURRENT tab: A\'s session moves to a neighbour of its own FIRST (the view keeps a picture), then the tab closes', u);
   r = await tabCmd(sA, ['tab', 'new', 'https://a.example/4']); // refused: he drives
   ok(r.status === 409 && r.json.code === 'browser_paused', '(the agent still paused meanwhile)');
   const hb = k.handback({ browserKey: KA, profileId: work.id, viewerId: 7, cause: 'explicit' });
   const words = TK.handbackText({ cause: 'explicit', label: 'Work', url: 'https://a.example/2', heldMs: 5000, rerun: hb.rerun, userActs: hb.userActs });
-  ok(hb.ok && hb.userActs.length === 2 && /While driving, the user closed one of your tabs \(“Page a\.example\/3 — https:\/\/a\.example\/3”\) and switched your current tab to “Page a\.example\/2 — https:\/\/a\.example\/2”\./.test(words) && /Re-run what was interrupted: tab/.test(words),
+  ok(gateOf(hb.ok) && hb.userActs.length === 2 && gateOf(/While driving, the user closed one of your tabs \(“Page a\.example\/3 — https:\/\/a\.example\/3”\) and switched your current tab to “Page a\.example\/2 — https:\/\/a\.example\/2”\./.test(words)) && verdictOf(/Re-run what was interrupted: tab/.test(words)),
     'the HANDBACK SAYS what he did to its tabs (what he closed, where he left it) — one sentence in the handback\'s own words, before the re-run list (its refused `tab new`)', words);
   const nt = TK.handbackNotice({ cause: 'explicit', userActs: hb.userActs });
-  ok(nt.userActs && nt.userActs.length === 2 && /closed one of your tabs/.test(TK.renderHandbackNotice(nt)), 'the zero-spend notice carries them too (a handback that is not delivered still says it)');
+  ok(gateOf(nt.userActs) && nt.userActs.length === 2 && verdictOf(/closed one of your tabs/.test(TK.renderHandbackNotice(nt))), 'the zero-spend notice carries them too (a handback that is not delivered still says it)');
   // his own tab, from HIS window: never his last; a popup of his, then his own tab while it is on show
   const H = { kind: 'human', key: HUK, profileId: work.id };
   const c6 = await refusedCode({ target: H, act: 'close', targetId: hisTab });
@@ -488,15 +488,15 @@ let work, NS, HUK, hisTab, aTab, bTab, aNew;
   const hPop = nsState(NS).tabs.find((t) => /h\.example/.test(t.url)).targetId;
   u = await k.userTabAct({ target: H, act: 'close', targetId: hisTab });
   const h2 = k._reg().humans[work.id];
-  ok(u.ok && u.switchedTo === hPop && !nsState(NS).tabs.some((t) => t.targetId === hisTab) && h2.ownTab === hPop && nsState(NS).sessions['vs-' + HUK] === hPop, 'his ✕ on HIS tab while it is on show: his session moves to his popup first, the tab closes, and the popup becomes his own tab (his set stays his)', { u, own: h2.ownTab });
+  ok(gateOf(u.ok) && u.switchedTo === hPop && !nsState(NS).tabs.some((t) => t.targetId === hisTab) && h2.ownTab === hPop && nsState(NS).sessions['vs-' + HUK] === hPop, 'his ✕ on HIS tab while it is on show: his session moves to his popup first, the tab closes, and the popup becomes his own tab (his set stays his)', { u, own: h2.ownTab });
   // the orphan / adoptable facts in his window once no conversation leases the browser
   for (const s of [sA, sB]) await j('POST', '/api/agent/browser/detach', { profile: work.id }, as(s));
   const own2 = await k.tabOwnersFor(H);
-  ok(own2.ok && own2.adoptable === true, 'no conversation leases it any more ⇒ his window\'s orphans are adoptable (the orphan rule, unchanged)', own2);
+  ok(gateOf(own2.ok) && own2.adoptable === true, 'no conversation leases it any more ⇒ his window\'s orphans are adoptable (the orphan rule, unchanged)', own2);
   // CONTROL: a keeper copy whose agent act skips the verdict closes B's page from A's command
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = "    const av = TBS.agentTabVerdict({ act: w.act, ref: w.ref, targetId, own: s0.own, current: s0.active });\n";
-  ok(src.includes(needle), 'the agent verdict needle (the control removes it)');
+  ok(verdictOf(src.includes(needle)), 'the agent verdict needle (the control removes it)');
   const Kc = M.load('src/server/browser-keeper.js', editAnchor(src, needle, "    const av = { ok: true, targetId: targetId || s0.active, closesCurrent: false };\n", "src/server/browser-keeper.js"), 'no-agent-verdict');
   const kc = mkKeeper(Kc, { dataDir: path.join(ROOT, 'data-c') });
   await kc._facts.probeVersion();
@@ -566,19 +566,19 @@ async function userActRaceLeg(Kmod, tag) {
 }
 {
   const X = await userActRaceLeg(K, 'product');
-  ok(X.read.code === 'take_over_first' && !X.read.execs.length && X.read.a3Stays && X.read.hbActs === 0, 'a handback landing INSIDE the tab reads (the user\'s ✕ on the agent\'s current tab in flight): refused take_over_first — neither the move to a neighbour nor the close ran, the tab is still there (verify F3)', X.read);
-  ok(X.exec.ok && X.exec.a2Gone && X.exec.hbActs.length === 1 && /^tab-close https:\/\/a\.example\/2/.test(X.exec.hbActs[0]) && /While driving, the user closed one of your tabs/.test(X.exec.words), 'a handback landing while the close RUNS: the close was recorded at its check, so the handback carries it — the agent is told (never a close after control returned, told to nobody)', X.exec);
+  ok(X.read.code === 'take_over_first' && !X.read.execs.length && gateOf(X.read.a3Stays) && X.read.hbActs === 0, 'a handback landing INSIDE the tab reads (the user\'s ✕ on the agent\'s current tab in flight): refused take_over_first — neither the move to a neighbour nor the close ran, the tab is still there (verify F3)', X.read);
+  ok(gateOf(X.exec.ok) && gateOf(X.exec.a2Gone) && X.exec.hbActs.length === 1 && gateOf(/^tab-close https:\/\/a\.example\/2/.test(X.exec.hbActs[0])) && verdictOf(/While driving, the user closed one of your tabs/.test(X.exec.words)), 'a handback landing while the close RUNS: the close was recorded at its check, so the handback carries it — the agent is told (never a close after control returned, told to nobody)', X.exec);
   ok(X.fail.code === 'tab_failed' && X.fail.hbActs === 0, 'an exec that FAILS takes its record back — the handback never tells the agent of a close that did not happen', X.fail);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const reask = "      if (!stillDriving()) refuse(TBS.userTabVerdict({ act, owner: 'agent', human: false, driving: false, mediated: false, counts }), `the takeover ended while the tabs were read — ${step} not run`);\n";
   const order = "      const rec = noteUserTabAct(bk, profileId, told);\n      const r = await rt.exec(ns, argv, { ...opts, timeout: 30000 });\n";
-  ok(src.includes(reask) && src.includes(order), 'control setup: the re-ask and the record-at-the-check are where the controls cut');
+  ok(gateOf(src.includes(reask)) && verdictOf(src.includes(order)), 'control setup: the re-ask and the record-at-the-check are where the controls cut');
   const Kn = M.load('src/server/browser-keeper.js', editAnchor(src, reask, '\n', "src/server/browser-keeper.js"), 'no-reask');
   const Xn = await userActRaceLeg(Kn, 'no-reask');
   ok(Xn.read.code !== 'take_over_first' && !Xn.read.a3Stays && Xn.read.hbActs === 0, 'CONTROL: a keeper that trusts `driving` read before the awaits closes the agent\'s tab AFTER the handback, told to nobody — the (1) leg catches it (the verifier\'s repro)', Xn.read);
   const Ko = M.load('src/server/browser-keeper.js', editAnchor(src, order, "      const r = await rt.exec(ns, argv, { ...opts, timeout: 30000 });\n      const rec = noteUserTabAct(bk, profileId, told);\n", "src/server/browser-keeper.js"), 'note-after');
   const Xo = await userActRaceLeg(Ko, 'note-after');
-  ok(Xo.exec.a2Gone && Xo.exec.hbActs.length === 0, 'CONTROL: a keeper that records the act only AFTER its exec loses it to a handback landing mid-exec — the (2) leg catches it', Xo.exec);
+  ok(gateOf(Xo.exec.a2Gone) && Xo.exec.hbActs.length === 0, 'CONTROL: a keeper that records the act only AFTER its exec loses it to a handback landing mid-exec — the (2) leg catches it', Xo.exec);
 }
 
 // ═══ ③ THE BRIDGE ═════════════════════════════════════════════════════════════
@@ -608,15 +608,15 @@ console.log('— ③ the real bridge over a fake upstream: tab-owners after a ta
   const v1 = await open();
   const gotOwners = await until(() => v1.got.some((m) => m.type === 'tab-owners'), 3000);
   const ow = v1.got.find((m) => m.type === 'tab-owners');
-  ok(gotOwners && ow.owners[T(1)] === 'agent' && ow.owners[T(2)] === 'other' && calls.some((c) => c.what === 'owners' && c.activeTarget === T(1)), 'after the `tabs` record the bridge asks the keeper (with the active tab it names) and sends ONE `tab-owners` record', ow);
+  ok(gateOf(gotOwners) && ow.owners[T(1)] === 'agent' && ow.owners[T(2)] === 'other' && verdictOf(calls.some((c) => c.what === 'owners' && c.activeTarget === T(1))), 'after the `tabs` record the bridge asks the keeper (with the active tab it names) and sends ONE `tab-owners` record', ow);
   const v2 = await open();
   const replayed = await until(() => v2.got.some((m) => m.type === 'tab-owners'), 2000);
-  ok(replayed, 'a late viewer is replayed the last `tab-owners` (like the tabs record)');
+  ok(verdictOf(replayed), 'a late viewer is replayed the last `tab-owners` (like the tabs record)');
   v1.ws.send(JSON.stringify({ type: 'tab-act', act: 'close', targetId: T(2), rid: 5 }));
   v1.ws.send(JSON.stringify({ type: 'tab-act', act: 'drop', targetId: 'x', rid: 6 }));
   await until(() => v1.got.filter((m) => m.type === 'tab-ack').length >= 2, 3000);
   const acks = v1.got.filter((m) => m.type === 'tab-ack');
-  ok(acks.some((a) => a.rid === 5 && !a.ok && a.code === 'not_your_tab' && /another conversation/i.test(a.error)) && acks.some((a) => a.rid === 6 && !a.ok && a.code === 'bad-request') && calls.filter((c) => c.what === 'act').length === 1, 'a refused act answers ONE typed `tab-ack` (never silence); a malformed one is refused by the bridge without asking the keeper', acks);
+  ok(gateOf(acks.some((a) => a.rid === 5 && !a.ok && a.code === 'not_your_tab' && /another conversation/i.test(a.error))) && gateOf(acks.some((a) => a.rid === 6 && !a.ok && a.code === 'bad-request')) && calls.filter((c) => c.what === 'act').length === 1, 'a refused act answers ONE typed `tab-ack` (never silence); a malformed one is refused by the bridge without asking the keeper', acks);
   // the anchor: he takes over, switches to the other tab through the ROW — his input still goes through (never tab_switched)
   v1.ws.send(JSON.stringify({ type: 'takeover' }));
   await until(() => v1.got.some((m) => m.type === 'mode-ack'), 2000);
@@ -628,14 +628,14 @@ console.log('— ③ the real bridge over a fake upstream: tab-owners after a ta
   v1.ws.send(JSON.stringify({ type: 'input_mouse', eventType: 'mousePressed', x: 5, y: 5, button: 'left', clickCount: 1, rid: 9 }));
   const rec = await until(() => v1.got.some((m) => m.type === 'input-receipt' && m.rid === 9), 2000);
   const rc = v1.got.find((m) => m.type === 'input-receipt' && m.rid === 9);
-  ok(rec && rc.ok && upIn.some((m) => m.type === 'input_mouse'), 'his OWN switch through the row moves the takeover\'s anchor — his next click is forwarded (an agent\'s switch would be `tab_switched`)', rc);
+  ok(gateOf(rec) && gateOf(rc.ok) && verdictOf(upIn.some((m) => m.type === 'input_mouse')), 'his OWN switch through the row moves the takeover\'s anchor — his next click is forwarded (an agent\'s switch would be `tab_switched`)', rc);
   // CONTROL: the same switch made by somebody else (no row act) ⇒ tab_switched
   upWs.send(JSON.stringify({ type: 'tabs', tabs: [{ tabId: 't1', targetId: T(1), title: 'A', url: 'https://a.example/', active: true }] }));
   await sleep(150);
   v1.ws.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseReleased', x: 5, y: 5, button: 'left', clickCount: 1, rid: 10 }));
   await until(() => v1.got.some((m) => m.type === 'input-receipt' && m.rid === 10), 2000);
   const rc2 = v1.got.find((m) => m.type === 'input-receipt' && m.rid === 10);
-  ok(rc2 && !rc2.ok && rc2.code === 'tab_switched', 'CONTROL: a switch the ROW did not make (the agent\'s) still refuses his input tab_switched — the anchor rule stands', rc2);
+  ok(gateOf(rc2) && !rc2.ok && rc2.code === 'tab_switched', 'CONTROL: a switch the ROW did not make (the agent\'s) still refuses his input tab_switched — the anchor rule stands', rc2);
   for (const v of [v1, v2]) v.ws.close();
   bridge.shutdown?.(); upWss.close();
 }
@@ -683,10 +683,10 @@ console.log('— ③b B-1626: the viewer\'s thaw is asked again with the tab the
   const Bc = bsrc.includes(ANCH) ? M.load('src/server/browser-stream.js', editAnchor(bsrc, ANCH, '      // (no re-ask)', "src/server/browser-stream.js"), 'b1626-no-reask') : null;
   const [r, c] = await Promise.all([viewersLeg(Bmod, 'now'), Bc ? viewersLeg(Bc, 'control') : Promise.resolve(null)]); // the leg beside its control
   const first = r.seen.find((x) => x.n >= 1);
-  ok(first && first.tabs.length === 0 && r.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `B-1626: the viewer's join is reported before its relay knows its tab (the thaw's scope then: ${JSON.stringify(first && first.tabs)}); once the stream's tabs record names the tab on show, the viewers are reported AGAIN with that tab in scope — the thaw shows the view's own front`, r.seen);
+  ok(gateOf(first) && first.tabs.length === 0 && verdictOf(r.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1)))), `B-1626: the viewer's join is reported before its relay knows its tab (the thaw's scope then: ${JSON.stringify(first && first.tabs)}); once the stream's tabs record names the tab on show, the viewers are reported AGAIN with that tab in scope — the thaw shows the view's own front`, r.seen);
   ok(r.gotTabs >= 2 && r.seen.filter((x) => x.n >= 1 && x.tabs.includes(T(1))).length === 1, `B-1626: …once per tab (a later tabs record for the same tab asks nothing more) — ${r.seen.length} report(s) over ${r.gotTabs} tabs record(s) forwarded`, r.seen);
   if (c) {
-    ok(c.gotTabs >= 2 && c.tabsRecordSeen && !c.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `CONTROL (B-1626, the release's bridge): the viewer is reported only at its join, with an EMPTY scope (${JSON.stringify(c.seen)}) — on a frozen browser two conversations hold, the view's own front stays hidden: RED`, c.seen);
+    ok(c.gotTabs >= 2 && gateOf(c.tabsRecordSeen) && !c.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `CONTROL (B-1626, the release's bridge): the viewer is reported only at its join, with an EMPTY scope (${JSON.stringify(c.seen)}) — on a frozen browser two conversations hold, the view's own front stays hidden: RED`, c.seen);
   }
 }
 
@@ -713,7 +713,7 @@ console.log('— ③c B-26bb: no stale chip after a reconnect from a stop');
   const roads = { resume: ['stopped', 'resume-press', 'hello', 'upstream-open'], rejoin: ['stopped', 'rejoin', 'hello', 'upstream-open'], reconnect: ['stopped', 'upstream-closed', 'upstream-open'] };
   const lit = Object.fromEntries(Object.entries(roads).map(([k, ev]) => [k, road(BTx, ev)]));
   const cleared = road(BTx, [...roads.resume, 'tabs']), switched = road(BTx, ['stopped', 'switch']);
-  ok(lit.resume && lit.rejoin && lit.reconnect && !cleared && !switched && BTx.tabRowModel({ tabs: kept, owners, stale: lit.resume }).rows.length === 0,
+  ok(gateOf(lit.resume) && gateOf(lit.rejoin) && gateOf(lit.reconnect) && !cleared && !switched && BTx.tabRowModel({ tabs: kept, owners, stale: lit.resume }).rows.length === 0,
     `B-26bb (its verdict): the Resume press's own road, a rejoin and a reconnect — each still stale when the new run connects (${JSON.stringify(lit)}), so no stopped-run chip is drawn; the new run's tabs record (${cleared}) or a pane switch (${switched}) ends it`, lit);
   const stepSrc = tsrc;
   const SANCH = "  if (event === 'stopped') return true;";
@@ -727,7 +727,7 @@ console.log('— ③c B-26bb: no stale chip after a reconnect from a stop');
   const w = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
   const stopSites = (src) => src.split('\n').filter((l) => /\bst\.stopped = (?!false\b)/.test(l));
   const bare = (src) => stopSites(src).filter((l) => !l.includes('noteStop()'));
-  ok(stopSites(w).length >= 3 && bare(w).length === 0 && w.includes("const noteStop = () => { st.tabsStale = tabsStaleStep(st.tabsStale, 'stopped'); renderTabs(); };") && w.includes("st.tabsStale = tabsStaleStep(st.tabsStale, 'tabs');") && w.includes("st.tabsStale = tabsStaleStep(st.tabsStale, 'switch');") && w.includes('tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale,') && w.includes('const tabsNow = st.tabsStale ? [] : st.tabs;'),
+  ok(stopSites(w).length >= 3 && bare(w).length === 0 && gateOf(w.includes("const noteStop = () => { st.tabsStale = tabsStaleStep(st.tabsStale, 'stopped'); renderTabs(); };")) && gateOf(w.includes("st.tabsStale = tabsStaleStep(st.tabsStale, 'tabs');")) && gateOf(w.includes("st.tabsStale = tabsStaleStep(st.tabsStale, 'switch');")) && gateOf(w.includes('tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale,')) && verdictOf(w.includes('const tabsNow = st.tabsStale ? [] : st.tabs;')),
     `B-26bb wiring: every one of the view's ${stopSites(w).length} stop records calls the ONE rule (noteStop: the stale step + the pane redrawn); the tabs record and a pane switch end it; the row model AND the tabs pane draw by it`, bare(w));
   const planted = w + "\n          st.stopped = 'closed'; renderMode(); // a planted new road";
   ok(bare(planted).length === 1, 'CONTROL (the census): a NEW stop site without the step is named (a rule per road would miss it)', bare(planted));
@@ -751,7 +751,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   const olderOk = stampWin(KB, 2, false); const hB0 = await holderOf(KB);
   k.setPaintWatch(null);
   for (const s of [sA, sB]) await j('POST', '/api/agent/browser/detach', { profile: work.id }, as(s));
-  ok(stamped && olderOk && hA && hA.windowId === 1 && hB && hB.windowId === 2 && hB0 && hB0.windowId === null,
+  ok(gateOf(stamped) && gateOf(olderOk) && gateOf(hA) && hA.windowId === 1 && gateOf(hB) && hB.windowId === 2 && gateOf(hB0) && hB0.windowId === null,
     'the KEEPER hands a viewer\'s thaw its conversation\'s own window (the lease\'s, this browser run) — never asked of the bridge; a lease still in the shared window of an older run hands none', { hA, hB, hB0 });
   // (2) THE WATCH'S HALF, the real watch over a stand-in browser: A's blank root + A's page in window 1, B's page in window 2. THE
   //     STALL: the bridge's answer is HELD (the viewer's relay has read no tabs record yet) and the keeper names only each one's
@@ -831,14 +831,14 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     watchLeg(DD, Hs), DDs ? watchLeg(DDs, Hs) : Promise.resolve(null),
     // B-1626 cure 4 (its verdict's must): Chrome says nothing of A's page's window at the freeze (a busy Chrome) and answers at the thaw
     watchLeg(DD, H, { blindAtFreeze: [TA] }), DDu ? watchLeg(DDu, H, { blindAtFreeze: [TA] }) : Promise.resolve(null)]);
-  ok(r.fz && r.fz.ok && r.fz.fronts === 2 && J(r.a) === J([TA]) && r.hiddenA === 1 && J(r.b) === J([TB]) && r.hiddenB === 0,
+  ok(gateOf(r.fz) && gateOf(r.fz.ok) && r.fz.fronts === 2 && J(r.a) === J([TA]) && r.hiddenA === 1 && J(r.b) === J([TB]) && r.hiddenB === 0,
     'B-1626 / K23 (its cure 2): a viewer attaching to A — the bridge\'s answer held, A\'s page named by no witness and no grant — shows A\'s frozen front (in A\'s own window) and only it; B\'s front stays owed until B\'s own viewer shows it', r);
-  ok(c1 && c1.fz && c1.fz.ok && J(c1.a) === J([]) && c1.hiddenA === 2, 'CONTROL (the release\'s keeper: the viewer\'s holder carries no window): A\'s front stays owed — a hidden page draws no frame, the live view stays blank (K23) — RED', c1);
-  if (DDc) ok(c2 && c2.fz && c2.fz.ok && J(c2.a) === J([]) && c2.hiddenA === 2, 'CONTROL (the release\'s watch: no window rule): A\'s front stays owed — RED', c2);
-  ok(st && st.fz && st.fz.ok && J(st.a) === J([]) && st.hiddenA === 2 && J(st.b) === J([TB]), 'B-1626 cure 3: A\'s viewer with a STALE window id (a previous run\'s, naming B\'s window now) shows nothing — B\'s front is shown only by B\'s own viewer', st);
-  if (DDs) ok(c3 && c3.fz && c3.fz.ok && J(c3.a) === J([TB]), 'CONTROL (the stamp trusted alone): A\'s viewer shows B\'s page in B\'s window — the cell heavy hidden-paint e guards — RED', c3);
-  ok(un && un.fz && un.fz.ok && J(un.a) === J([TA]) && un.hiddenA === 1, 'B-1626 cure 4: a window Chrome did not report at the freeze is UNKNOWN — read again at the thaw, A\'s viewer shows A\'s page (never a blank on every later visit)', un);
-  if (DDu) ok(c4 && c4.fz && c4.fz.ok && J(c4.a) === J([]) && c4.hiddenA === 2, 'CONTROL (cure 3\'s rule: an unread window is «not yours»): A\'s front stays owed — the live view blank on this visit and every later one — RED', c4);
+  ok(gateOf(c1) && gateOf(c1.fz) && gateOf(c1.fz.ok) && J(c1.a) === J([]) && c1.hiddenA === 2, 'CONTROL (the release\'s keeper: the viewer\'s holder carries no window): A\'s front stays owed — a hidden page draws no frame, the live view stays blank (K23) — RED', c1);
+  if (DDc) ok(gateOf(c2) && gateOf(c2.fz) && gateOf(c2.fz.ok) && J(c2.a) === J([]) && c2.hiddenA === 2, 'CONTROL (the release\'s watch: no window rule): A\'s front stays owed — RED', c2);
+  ok(gateOf(st) && gateOf(st.fz) && gateOf(st.fz.ok) && J(st.a) === J([]) && st.hiddenA === 2 && J(st.b) === J([TB]), 'B-1626 cure 3: A\'s viewer with a STALE window id (a previous run\'s, naming B\'s window now) shows nothing — B\'s front is shown only by B\'s own viewer', st);
+  if (DDs) ok(gateOf(c3) && gateOf(c3.fz) && gateOf(c3.fz.ok) && J(c3.a) === J([TB]), 'CONTROL (the stamp trusted alone): A\'s viewer shows B\'s page in B\'s window — the cell heavy hidden-paint e guards — RED', c3);
+  ok(gateOf(un) && gateOf(un.fz) && gateOf(un.fz.ok) && J(un.a) === J([TA]) && un.hiddenA === 1, 'B-1626 cure 4: a window Chrome did not report at the freeze is UNKNOWN — read again at the thaw, A\'s viewer shows A\'s page (never a blank on every later visit)', un);
+  if (DDu) ok(gateOf(c4) && gateOf(c4.fz) && gateOf(c4.fz.ok) && J(c4.a) === J([]) && c4.hiddenA === 2, 'CONTROL (cure 3\'s rule: an unread window is «not yours»): A\'s front stays owed — the live view blank on this visit and every later one — RED', c4);
   // ═══ ROWS B-98f5 / B-bcf8 — THE THAW'S FLIP TAB IS ONE NO DRIVER TAKES (box rows 715-725; src/browser-idle.js FLIP_TAB_URL): the
   //     flip tab is born at chrome://version/ (Chromium's kChromeUIVersionURL at 154.0.8037.57), which the driver's own filter never
   //     takes (agent-browser v0.38.2 should_track_target); the hub reads the birth address Chrome reports, and a browser whose flip
@@ -869,14 +869,14 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const [g0, gc, g1, g2, g3] = await Promise.all([guardLeg(DD, null), DDf ? guardLeg(DDf, null) : Promise.resolve(null),
       guardLeg(DD, () => 'about:blank'), guardLeg(DD, () => ''), guardLeg(DD, (url, n) => (n === 1 ? url : 'about:blank'))]);
     const thawOf = (g) => (g ? g.creates.filter((c) => !c.newWindow) : []), checkOf = (g) => (g ? g.creates.filter((c) => c.newWindow) : []);
-    ok(g0.fz && g0.fz.ok && g0.th && g0.th.thawed && g0.th.shown === 1 && thawOf(g0).length >= 1 && thawOf(g0).every((c) => c.url === FLIP) && checkOf(g0).length === 1 && checkOf(g0)[0].url === FLIP && checkOf(g0)[0].focus === false && g0.fz2 && g0.fz2.ok && !g0.flipTaken && g0.said.length === 0,
+    ok(gateOf(g0.fz) && gateOf(g0.fz.ok) && gateOf(g0.th) && gateOf(g0.th.thawed) && g0.th.shown === 1 && thawOf(g0).length >= 1 && gateOf(thawOf(g0).every((c) => c.url === FLIP)) && checkOf(g0).length === 1 && checkOf(g0)[0].url === FLIP && checkOf(g0)[0].focus === false && gateOf(g0.fz2) && gateOf(g0.fz2.ok) && !g0.flipTaken && g0.said.length === 0,
       `B-98f5 / B-bcf8: the thaw's flip tab is born at ${FLIP} — Chromium's kChromeUIVersionURL, an address the driver's own filter never takes — and so is the ONE check before the browser's first freeze, in a window of its own, unfocused (no window's front moves)`, g0);
-    if (DDf) ok(gc && gc.fz && gc.fz.ok && thawOf(gc).some((c) => c.url === 'about:blank'), 'CONTROL (the release\'s flip: about:blank — the tab a driver takes, prepares and loses mid-prepare: the 30 s hold, the moved tab) — RED', gc);
-    ok(g1.fz && g1.fz.ok === false && g1.fz.why === 'flip_tab_taken' && g1.fz2 && g1.fz2.ok === false && g1.fz2.why === 'flip_tab_taken' && !g1.th && thawOf(g1).length === 0 && g1.flipTaken === 'taken' && g1.said.length === 1,
+    if (DDf) ok(gateOf(gc) && gateOf(gc.fz) && gateOf(gc.fz.ok) && verdictOf(thawOf(gc).some((c) => c.url === 'about:blank')), 'CONTROL (the release\'s flip: about:blank — the tab a driver takes, prepares and loses mid-prepare: the 30 s hold, the moved tab) — RED', gc);
+    ok(gateOf(g1.fz) && g1.fz.ok === false && g1.fz.why === 'flip_tab_taken' && gateOf(g1.fz2) && g1.fz2.ok === false && g1.fz2.why === 'flip_tab_taken' && !g1.th && thawOf(g1).length === 0 && g1.flipTaken === 'taken' && g1.said.length === 1,
       'B-98f5 / B-bcf8 THE GUARD ON THE FACT: Chrome reports the check\'s tab born at an address a driver takes (another browser family, a policy, a later build) ⇒ that browser is NEVER frozen (it keeps drawing), no flip made, said ONCE in the journal by its code', g1);
-    ok(g2.fz && g2.fz.ok === false && g2.fz.why === 'flip_tab_taken' && g2.flipTaken === 'empty' && thawOf(g2).length === 0 && g2.said.length === 1,
+    ok(gateOf(g2.fz) && g2.fz.ok === false && g2.fz.why === 'flip_tab_taken' && g2.flipTaken === 'empty' && thawOf(g2).length === 0 && g2.said.length === 1,
       'B-98f5 / B-bcf8 THE GUARD: an EMPTY birth address (the driver\'s filter TAKES an empty one) ⇒ never frozen, said once', g2);
-    ok(g3.fz && g3.fz.ok && g3.th && g3.th.thawed && g3.fz2 && g3.fz2.ok === false && g3.fz2.why === 'flip_tab_taken' && g3.flipTaken === 'taken' && g3.said.length === 1,
+    ok(gateOf(g3.fz) && gateOf(g3.fz.ok) && gateOf(g3.th) && gateOf(g3.th.thawed) && gateOf(g3.fz2) && g3.fz2.ok === false && g3.fz2.why === 'flip_tab_taken' && g3.flipTaken === 'taken' && g3.said.length === 1,
       'B-98f5 / B-bcf8 THE GUARD AT EVERY FLIP: the check passed, then a thaw\'s own flip tab is born at an address a driver takes ⇒ the browser is not frozen again, said once', g3);
     // ── r4088 (B-98f5): THE FREEZE REMEMBERS EVERY FRONT OR FREEZES NOTHING — A's front whose visibility read does not answer is
     //    UNKNOWN: that freeze refuses by its reason (front_unread) and the next one freezes and shows it; RED: the tip before it
@@ -905,7 +905,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const [fv, fvc] = await Promise.all([frontLeg(DD), DDv ? frontLeg(DDv) : Promise.resolve(null)]);
     ok(!!fv.fz && fv.fz.ok === false && fv.fz.why === 'front_unread' && fv.fz.unread === 1 && !fv.frozenAfter && !!fv.fz2 && fv.fz2.ok === true && J(fv.th2) === J([TA]),
       'r4088 (B-98f5): a front whose visibility read does not answer is UNKNOWN — that freeze freezes nothing, by its reason (front_unread); the next freeze remembers it and the thaw shows it', fv);
-    if (DDv) ok(!!fvc && !!fvc.fz && fvc.fz.ok === true && fvc.frozenAfter && J(fvc.th) === J([]), 'CONTROL (the tip before it, ab1696c4c: an unanswered read is «not in front»): the page is frozen unremembered and the thaw shows nothing — the live view blank — RED', fvc);
+    if (DDv) ok(!!fvc && !!fvc.fz && fvc.fz.ok === true && gateOf(fvc.frozenAfter) && J(fvc.th) === J([]), 'CONTROL (the tip before it, ab1696c4c: an unanswered read is «not in front»): the page is frozen unremembered and the thaw shows nothing — the live view blank — RED', fvc);
     // ── r4058, the follow: (1) a flip create answered AFTER the watch's bound left its tab open — the hub's own late flip tab is closed by
     //    its id (its birth seen during the flip, or arriving after it); RED: the unit as lined (363e3ae01), which drops it. An UNREAD
     //    verdict is asked again at a later freeze. (3) two first freezes at once share ONE check; a new watch after a restart measures
@@ -922,10 +922,10 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const DDm = dsrc.includes(MANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, MANCH, '    // 3ae970836: the births cleared, a late one never closed', 'src/server/browser-dialogs.js'), 'r4176-late-in-flip') : null;
     const [l1, l2, lc, u1, l3, l3c] = await Promise.all([lateLeg(DD, false), lateLeg(DD, true), DDl ? lateLeg(DDl, true) : Promise.resolve(null),
       guardLeg(DD, null, { stand: { silent: (n) => n === 1 }, clock: { t: 1795000000000 } }), lateLeg(DD, true, true), DDm ? lateLeg(DDm, true, true) : Promise.resolve(null)]);
-    ok(l3.held >= 1 && l3.closed.includes('BLANK2') && l3.said.length === 0,
+    ok(l3.held >= 1 && gateOf(l3.closed.includes('BLANK2')) && l3.said.length === 0,
       'r4176 (its must): a late flip tab whose birth arrives WHILE the flip still runs (the «back» activation answered after it, as Chrome answers in order) is closed by its id at the flip\'s end, before the births are cleared', { held: l3.held, closed: l3.closed, made: l3.made });
     if (DDm) ok(!!l3c && l3c.held >= 1 && !l3c.closed.includes('BLANK2'), 'CONTROL (3ae970836: the births cleared at the flip\'s end, a late one never closed): the tab stays open for the browser\'s life — RED', l3c && { held: l3c.held, closed: l3c.closed, made: l3c.made });
-    ok(l1.closed.includes('BLANK2') && l2.closed.includes('BLANK2') && l1.said.length === 0 && l2.said.length === 0,
+    ok(gateOf(l1.closed.includes('BLANK2')) && gateOf(l2.closed.includes('BLANK2')) && l1.said.length === 0 && l2.said.length === 0,
       'r4058 (1): a flip create Chrome answers AFTER the watch\'s bound leaves no tab open — the hub\'s own late flip tab is closed by its id, its birth seen during the flip or arriving after it', { l1: { closed: l1.closed, made: l1.made }, l2: { closed: l2.closed, made: l2.made } });
     if (DDl) ok(!!lc && !lc.closed.includes('BLANK2'), 'CONTROL (the unit as lined, 363e3ae01: a create with no reply is dropped): the late flip tab stays open — RED', lc && { closed: lc.closed, made: lc.made });
     ok(!!u1.fz && u1.fz.ok === false && !!u1.fz2 && u1.fz2.ok === true && u1.creates.filter((c) => c.newWindow).length === 2 && u1.said.length === 1,
@@ -1104,21 +1104,21 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       capLeg(DD, { failCreate: (n) => n >= 2 && n <= 5 }, 5, 'bp-0000c242'), capLeg(DD, { flipWin: (n) => (n >= 2 ? 9 : null) }, 4, 'bp-0000c245'), DDn2 ? capLeg(DDn2, { flipWin: (n) => (n >= 2 ? 9 : null) }, 4, 'bp-0000c246') : Promise.resolve(null),
       retryLeg(DD), alreadyLeg(DD)]);
     const plain = (x) => !/example|https?:/.test(x);
-    ok(!!sv.fz1 && sv.fz1.why === 'front_unread' && sv.fz1.unread === 2 && !!sv.fz2 && sv.fz2.why === 'front_unread' && sv.passes1 === 2 && sv.said1.length === 1 && sv.said1[0].includes('bp-0000c23f') && sv.said1[0].includes('2 tab(s)') && sv.said1.every(plain)
+    ok(!!sv.fz1 && sv.fz1.why === 'front_unread' && sv.fz1.unread === 2 && !!sv.fz2 && sv.fz2.why === 'front_unread' && sv.passes1 === 2 && sv.said1.length === 1 && gateOf(sv.said1[0].includes('bp-0000c23f')) && gateOf(sv.said1[0].includes('2 tab(s)')) && gateOf(sv.said1.every(plain))
       && !!sv.fz3 && sv.fz3.ok === true && sv.passes2 === 0 && !!sv.fz4 && sv.fz4.why === 'front_unread' && sv.said2.length === 2,
       'r4095 (2): a browser not frozen because two tabs never answer is SAID once a stretch — its id and the count, never an address or a title — the passes counted; the stretch ends at a freeze, the next one is said again', sv);
     ok(sv.reads1 === 4 && sv.spanMs != null && sv.spanMs < 250, `r4095 (2): the freeze's visibility reads run at once, each its own bound — all 4 asked within ${sv.spanMs} ms, two never answering (one after another: a bound each, 300 ms here)`, { reads: sv.reads1, spanMs: sv.spanMs });
     if (DDv2) ok(!!sv2 && sv2.reads1 === 4 && sv2.spanMs >= 500, 'CONTROL (3623606d5: the reads one after another): the reads span two bounds — a tab that never replies costs every keeper tick a second — RED', sv2 && { reads: sv2.reads1, spanMs: sv2.spanMs });
-    if (DDs2) ok(!!ss2 && ss2.fz1 && ss2.fz1.why === 'front_unread' && ss2.said2.length === 0, 'CONTROL (3623606d5: never said): the browser keeps drawing for good and nothing says so — RED', ss2 && { said: ss2.said2.length });
-    ok(!!av.th1 && av.th1.unthawed === 1 && av.frozen1 === true && av.thawUnread1 === 1 && av.life1 === 'frozen' && J(av.th1.shown) === J([TA]) && av.said.length === 1 && av.said[0].includes('1 tab(s)') && av.said.every(plain)
+    if (DDs2) ok(!!ss2 && gateOf(ss2.fz1) && ss2.fz1.why === 'front_unread' && ss2.said2.length === 0, 'CONTROL (3623606d5: never said): the browser keeps drawing for good and nothing says so — RED', ss2 && { said: ss2.said2.length });
+    ok(!!av.th1 && av.th1.unthawed === 1 && av.frozen1 === true && av.thawUnread1 === 1 && av.life1 === 'frozen' && J(av.th1.shown) === J([TA]) && av.said.length === 1 && gateOf(av.said[0].includes('1 tab(s)')) && gateOf(av.said.every(plain))
       && !!av.th2 && av.th2.thawed === true && !av.th2.unthawed && av.frozen2 === false && av.life2 === 'active' && J(av.asks) === J({ [TA0]: 1, [TA]: 2, [TB]: 1, [TB0]: 1 }),
       'r4095 (3) / r4176 (a): a tab whose activation did not answer is UNKNOWN — the watch stays «frozen» (said once, the fronts still shown) and the next thaw asks again ONLY that tab: it is active', av);
     if (DDa2) ok(!!ac2 && ac2.frozen1 === false && !!ac2.th2 && ac2.th2.thawed === false && ac2.life2 === 'frozen', 'CONTROL (3623606d5: «active» whatever the replies): the watch says active, the next thaw finds nothing to do — the tab stays frozen — RED', ac2);
-    ok(!!ov.fz && ov.fz.ok && J(ov.th1) === J([]) && J(ov.failed1) === J([[TA, 'no flip tab']]) && ov.hidden1 === 2 && J(ov.th2) === J([TA]) && ov.hidden2 === 1,
+    ok(!!ov.fz && gateOf(ov.fz.ok) && J(ov.th1) === J([]) && J(ov.failed1) === J([[TA, 'no flip tab']]) && ov.hidden1 === 2 && J(ov.th2) === J([TA]) && ov.hidden2 === 1,
       'r4095 (3): a show that failed (Chrome made no flip tab) leaves A\'s front owed — the next thaw shows it (B\'s stays owed to B)', ov);
     ok(slow5.fz === true && J(slow5.hidden) === J([2, 2, 2, 2, 1]) && J(slow5.failed) === J(['no flip tab', 'no flip tab', 'no flip tab', 'no flip tab', '']) && J(slow5.shown) === J([0, 0, 0, 0, 1]) && slow5.said.length === 0,
       'r4176 (the ruling): a front whose flip tab Chrome did not make, four thaws in a row (a loaded Chrome), is NEVER given up — owed until the fifth thaw shows it, nothing said', slow5);
-    ok(other4.fz === true && J(other4.hidden) === J([2, 2, 1, 1]) && J(other4.failed) === J(['another window', 'another window', 'another window', '']) && other4.flips === 3 && other4.said.length === 1 && other4.said[0].includes('another window') && other4.said.every(plain),
+    ok(other4.fz === true && J(other4.hidden) === J([2, 2, 1, 1]) && J(other4.failed) === J(['another window', 'another window', 'another window', '']) && other4.flips === 3 && other4.said.length === 1 && gateOf(other4.said[0].includes('another window')) && verdictOf(other4.said.every(plain)),
       'r4176 (the ruling): three shows in a row whose flip tab landed in ANOTHER window than the front\'s (both known — the measure, as a popup window\'s front shows it) leave the front as it is, said once; never a flip at every verb', other4);
     if (DDn2) ok(!!otherC && J(otherC.hidden) === J([2, 2, 2, 2]) && otherC.flips === 4 && otherC.said.length === 0, 'CONTROL (no cap): a front whose flip always lands in another window is flipped at every thaw for good — RED', otherC);
     ok(J(rt.th1) === J([]) && rt.owed1 === 1 && rt.hidden1 === 2 && rt.retried === 1 && J(rt.shown) === J([TA]) && rt.owed2 === 0 && rt.hidden2 === 1,
@@ -1183,7 +1183,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
     };
     const [fr, frNo] = await Promise.all([frontKeptLeg(DD, true, '0'), frontKeptLeg(DD, false, '1')]);
-    ok(!!fr.fz && fr.fz.ok && J(fr.shown) === J([TA]) && fr.pageHidden === false && !!frNo.fz && frNo.fz.ok && J(frNo.shown) === J([TA0]),
+    ok(!!fr.fz && gateOf(fr.fz.ok) && J(fr.shown) === J([TA]) && fr.pageHidden === false && !!frNo.fz && gateOf(frNo.fz.ok) && J(frNo.shown) === J([TA0]),
       'B-bcf8 r4412 (3): the tab the person brings forward is the front the freeze remembers — after the idle freeze, the thaw for A shows THAT page (drawing again), never the blank it sat behind; without the press the thaw shows the blank', { pressed: fr, contrast: frNo });
     const judgeStill = (x) => !!x && !!x.thaw && x.thaw.fz && J(x.thaw.s0) === J({}) && J(x.thaw.s1) === J({ [TA]: 'thaw-unread' }) && J(x.thaw.s2) === J({})
       && !!x.owed && x.owed.fz && J(x.owed.s1) === J({ [TA]: 'show-owed' }) && J(x.owed.s2) === J({});
@@ -1196,8 +1196,8 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const DDnl = dsrc.includes(NLANCH) ? M.load('src/server/browser-dialogs.js', anchored(dsrc, NLANCH, '    /* B-bcf8 control: the tab left is not kept */', 'B-bcf8: the left tab kept by id'), 'bcf8-left-not-kept') : null;
     const DDany = dsrc.includes(ANYANCH) ? M.load('src/server/browser-dialogs.js', anchored(dsrc, ANYANCH, "if (vis[i] !== undefined && w.showLeft", 'B-bcf8: a left tab dropped only when it reads visible'), 'bcf8-left-any-answer') : null;
     const [stl, stlNl, stlAny] = await Promise.all([stillLeg(DD, '0'), DDnl ? stillLeg(DDnl, '1') : Promise.resolve(null), DDany ? stillLeg(DDany, '2') : Promise.resolve(null)]);
-    ok(judgeStill(stl), 'B-bcf8 (r4256): the watch\'s still tabs by code — a thaw that got no reply from A\'s front: «thaw-unread» while it stands, gone at the thaw that answers; a failed show: «show-owed», gone when it is shown', { thaw: stl.thaw, owed: stl.owed });
-    ok(judgeLeft(stl), 'B-bcf8 (r4256): a front whose flip landed in another window three thaws in a row is «show-left» (owed before it; three flips, as the watch decides) — kept while hidden and when its read does not answer (unknown is never «not»), dropped when it comes forward', stl.left);
+    ok(verdictOf(judgeStill(stl)), 'B-bcf8 (r4256): the watch\'s still tabs by code — a thaw that got no reply from A\'s front: «thaw-unread» while it stands, gone at the thaw that answers; a failed show: «show-owed», gone when it is shown', { thaw: stl.thaw, owed: stl.owed });
+    ok(verdictOf(judgeLeft(stl)), 'B-bcf8 (r4256): a front whose flip landed in another window three thaws in a row is «show-left» (owed before it; three flips, as the watch decides) — kept while hidden and when its read does not answer (unknown is never «not»), dropped when it comes forward', stl.left);
     if (DDnl) ok(!judgeLeft(stlNl) && !(stlNl.left.seq || []).includes('show-left'), 'CONTROL (the watch as it was: the tab left is not kept by id): the page left hidden for good is said to nobody — RED', stlNl.left && stlNl.left.seq);
     if (DDany) ok(!judgeLeft(stlAny) && stlAny.left.r1.cleared === 1, 'CONTROL (a recheck that drops a left tab on ANY answer): a page still hidden is called come forward — RED', stlAny.left && stlAny.left.r1);
   }
@@ -1209,7 +1209,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const TBS0 = require('../src/browser-tabs.js'), VPm = require('../src/server/browser-viewport.js');
     const MARK = 'a1b2c3d4e5f6a7b8c9d0e1f2', OTHER = 'ffeeddccbbaa998877665544';
     const U0 = TBS0.ownMarkUrl(MARK);
-    ok(U0 === `about:blank#vs-own-${MARK}` && TBS0.ownMarkUrl('about:blank') === null && TBS0.ownMarkUrl('ZZ' + MARK.slice(2)) === null && TBS0.OWN_MARK_RE.test(MARK),
+    ok(U0 === `about:blank#vs-own-${MARK}` && TBS0.ownMarkUrl('about:blank') === null && TBS0.ownMarkUrl('ZZ' + MARK.slice(2)) === null && verdictOf(TBS0.OWN_MARK_RE.test(MARK)),
       'B-0e4a PURE: the lease\'s own birth address is about:blank with its random mark (24 hex) — anything else is no mark', U0);
     const P1 = T(0xa1), P2 = T(0xa2), P3 = T(0xa3);
     const mv = (pairs) => TBS0.markVerdict({ candidates: pairs.map(([id]) => id), carries: new Map(pairs) });
@@ -1217,7 +1217,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     ok(cases.one.take === P1 && cases.none.why === 'none' && cases.two.why === 'many' && cases.unread.why === 'unknown' && cases.empty.why === 'none' && !cases.two.take && !cases.unread.take,
       'B-0e4a PURE: EXACTLY ONE carrier is taken back; none ⇒ none; two (a person duplicated the tab) ⇒ none taken; any page unread in time ⇒ unknown (never «not the lease\'s») — the last three keep today\'s behaviour', cases);
     const note = TBS0.reboundNoteText({ how: 'back', url: `${U0} https://secret.example/` });
-    ok(/came back/.test(note) && !note.includes('about:blank') && !note.includes(MARK) && !note.includes('example'), 'B-0e4a PURE: the agent\'s note says its own tab came back — never an address (nor the mark)', note);
+    ok(gateOf(/came back/.test(note)) && !note.includes('about:blank') && !note.includes(MARK) && !note.includes('example'), 'B-0e4a PURE: the agent\'s note says its own tab came back — never an address (nor the mark)', note);
     const tsrc = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8'), MANCH0 = '  if (yes.length === 1) return { take: yes[0] };';
     if (!tsrc.includes(MANCH0)) ok(false, 'the anchor of the control «at least one carrier» is not in the source (src/browser-tabs.js)');
     const TBSr = tsrc.includes(MANCH0) ? M.load('src/browser-tabs.js', editAnchor(tsrc, MANCH0, '  if (yes.length >= 1) return { take: yes[0] };', 'src/browser-tabs.js'), 'b0e4a-at-least-one') : null;
@@ -1293,15 +1293,15 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       takeLeg(K, 'unread', new Map([[R1, 11]])), Ksw ? takeLeg(Ksw, 'sw-ctl', new Map([[R1, 11], [R2, 11]])) : Promise.resolve(null),
       takeLeg(K, 'many', new Map(), { carries: many }), takeLeg(K, 'unknown', new Map(), { carries: unknown }), takeLeg(K, 'none', new Map(), { carries: none, reopen: true }),
       takeLeg(K, 'root', new Map(), { liveRoot: true, reopen: true }), Kl ? takeLeg(Kl, 'ctl-l', new Map(), { liveRoot: true, reopen: true }) : Promise.resolve(null)]);
-    ok(tAlone.back === R1 && tAlone.own && tAlone.windowId === 11 && tAlone.toCarrier.length === 1 && /\btab\b/.test(tAlone.toCarrier[0]) && tAlone.facts && tAlone.facts.verdict === 'take' && tAlone.facts.ownWindow === true && tAlone.facts.orphans === 2 && tAlone.facts.unread === 0 && tAlone.facts.winUnread === 0,
+    ok(tAlone.back === R1 && gateOf(tAlone.own) && tAlone.windowId === 11 && tAlone.toCarrier.length === 1 && gateOf(/\btab\b/.test(tAlone.toCarrier[0])) && gateOf(tAlone.facts) && tAlone.facts.verdict === 'take' && tAlone.facts.ownWindow === true && tAlone.facts.orphans === 2 && tAlone.facts.unread === 0 && tAlone.facts.winUnread === 0,
       'LAW A: a carrier ALONE in its window — ONE act (the switch to it), then its root and that window are the lease\'s (its next tab lands there)', tAlone);
-    ok(!tShared.back && tShared.toCarrier.length === 0 && tShared.facts && tShared.facts.verdict === 'shared' && tShared.remarked && tShared.markOk && tShared.facts.remint === true && !!tShared.second && tShared.second.remint === false && tShared.second.same,
+    ok(!tShared.back && tShared.toCarrier.length === 0 && gateOf(tShared.facts) && tShared.facts.verdict === 'shared' && gateOf(tShared.remarked) && gateOf(tShared.markOk) && tShared.facts.remint === true && !!tShared.second && tShared.second.remint === false && verdictOf(tShared.second.same),
       'LAW A: a carrier with a SECOND page in its window — NOT taken back: nothing sent to it (no switch, no stamp), the verdict «shared», a new mark — and at most ONE new mark a browser run (a second take-back in the run keeps it)', { shared: tShared.facts, toCarrier: tShared.toCarrier, second: tShared.second });
-    ok(!tUnread.back && tUnread.toCarrier.length === 0 && tUnread.facts && tUnread.facts.verdict === 'unknown' && tUnread.facts.winUnread === 1 && tUnread.remarked,
+    ok(!tUnread.back && tUnread.toCarrier.length === 0 && gateOf(tUnread.facts) && tUnread.facts.verdict === 'unknown' && tUnread.facts.winUnread === 1 && verdictOf(tUnread.remarked),
       'LAW A: a page whose window was not read inside its bound — NOT taken back, nothing sent to the carrier, the verdict «unknown», a new mark', { facts: tUnread.facts, toCarrier: tUnread.toCarrier });
-    if (Ksw) ok(!!tSwCtl && tSwCtl.toCarrier.some((c) => /\btab\b/.test(c)) && !tSwCtl.back, 'CONTROL (the switch as built: sent before the windows were read): in the shared scene the carrier is switched to — in a person\'s window their own tab hidden — RED', tSwCtl && { toCarrier: tSwCtl.toCarrier, facts: tSwCtl.facts });
+    if (Ksw) ok(!!tSwCtl && gateOf(tSwCtl.toCarrier.some((c) => /\btab\b/.test(c))) && !tSwCtl.back, 'CONTROL (the switch as built: sent before the windows were read): in the shared scene the carrier is switched to — in a person\'s window their own tab hidden — RED', tSwCtl && { toCarrier: tSwCtl.toCarrier, facts: tSwCtl.facts });
     // ═══ r4282's FOLLOW (its finds, taken by the round): the take-back leaves ONE carrier for the next start, never two ═══
-    ok(!tMany.back && tMany.facts && tMany.facts.verdict === 'many' && tMany.remarked && tMany.markOk && tMany.facts.remint === true && tMany.toCarrier.length === 0 && !tUnknown.back && tUnknown.facts && tUnknown.facts.verdict === 'unknown' && tUnknown.remarked && tUnknown.markOk && !tNone.back && tNone.facts && tNone.facts.verdict === 'none' && !tNone.remarked,
+    ok(!tMany.back && gateOf(tMany.facts) && tMany.facts.verdict === 'many' && gateOf(tMany.remarked) && gateOf(tMany.markOk) && tMany.facts.remint === true && tMany.toCarrier.length === 0 && !tUnknown.back && gateOf(tUnknown.facts) && tUnknown.facts.verdict === 'unknown' && gateOf(tUnknown.remarked) && gateOf(tUnknown.markOk) && !tNone.back && gateOf(tNone.facts) && tNone.facts.verdict === 'none' && !tNone.remarked,
       'r4282 follow: «many» (a copy) and «unknown» (a page unread) give the lease a NEW mark — the birth that follows is the ONE carrier of it, so the next start is not «many» again; «none» keeps its mark', { many: tMany.facts, unknown: tUnknown.facts, none: tNone.facts });
     ok(J(tRoot.reopenAt) === J(['about:blank']) && J(tNone.reopenAt) === J(['its mark']),
       'r4282 follow: a re-open (openInLease) beside the lease\'s LIVE root with no window of its own births its window at a plain blank — no second carrier; with no live root it is the root, born at its mark', { root: tRoot.reopenAt, none: tNone.reopenAt });
@@ -1315,7 +1315,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       upper: TBS0.markOutText(U0.toUpperCase().replace('ABOUT:BLANK', 'about:blank')), // a page could make it so: any case reads as the blank
     };
     const clean = { n: 1, s: 'https://a.example/#vs-other', a: [1, 2], o: { x: 'y' } };
-    ok(!/vs-own-/i.test(J(door)) && J(door.deep).includes('about:blank') && TBS0.markOut(clean) === clean && TBS0.markOut(clean.a) === clean.a && TBS0.markOutText('about:blank') === 'about:blank',
+    ok(!/vs-own-/i.test(J(door)) && gateOf(J(door.deep).includes('about:blank')) && TBS0.markOut(clean) === clean && TBS0.markOut(clean.a) === clean.a && TBS0.markOutText('about:blank') === 'about:blank',
       'L2 PURE: the door turns every marked blank — whole, cut short, any case, deep in a reply, inside a note — into the plain blank; a reply with no mark comes back AS IT IS (the same object)', door);
     const pk = TBS0.markOut({ pick: TBS0.rebindPick({ targets: [{ targetId: P1, type: 'page', url: U0, title: U0 }], holders: [], key: KA }) });
     const mDrawn = TBS0.tabRowModel({ tabs: TBS0.markOut([{ targetId: P1, url: U0, title: U0, active: true }]), owners: { [P1]: 'agent' } });
@@ -1368,7 +1368,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const planted = { ...exitSrc, stream: exitSrc.stream.replace('  const broadcast = (relay, obj) =>', '  const rawSend = (ws, t) => ws.send(t); // planted\n  const broadcast = (relay, obj) =>') };
     ok(planted.stream !== exitSrc.stream && exitsCensus(planted).length > 0, 'CONTROL (one raw site planted: a viewer send past the door): the census is RED by name', exitsCensus(planted));
     const plantedF = { ...exitSrc, stream: exitSrc.stream.replace('  const broadcast = (relay, obj) =>', "  const leak = (ws, rec) => sendFrame(ws, JSON.stringify(rec)); // planted\n  const broadcast = (relay, obj) =>") };
-    ok(plantedF.stream !== exitSrc.stream && exitsCensus(plantedF).some((b) => /frame send/.test(b)), 'CONTROL (a record that is no picture planted on the frame send — past the door): the census is RED by name', exitsCensus(plantedF));
+    ok(plantedF.stream !== exitSrc.stream && verdictOf(exitsCensus(plantedF).some((b) => /frame send/.test(b))), 'CONTROL (a record that is no picture planted on the frame send — past the door): the census is RED by name', exitsCensus(plantedF));
     // ═══ 主开发 r4339 FOLLOW: the mark is kept out at the WRITE too — the kept tabs (their ONE row normalizer: the relay's record
     //     and a CDP read alike), the rebind's pick (the lease's stored rebound note, the journal line), a takeover request's page;
     //     the trace's only input is the relay's tap, which takes the masked record. The door's match is anchored ═══
@@ -1379,7 +1379,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const keptRow = (ksT.latestOf(KA) || { tabs: [] }).tabs[0] || null;
     try { ksT.shutdown(); } catch { /* none */ }
     const anchoredDoor = { query: TBS0.markOutText('https://x.example/?q=about:blank#vs-own-zz'), wholeLetter: TBS0.markOutText(`${U0}x`), wholeDigit: TBS0.markOutText(`${U0}0`), shortLetter: TBS0.markOutText(`about:blank#vs-own-${MARK.slice(0, 7)}z`), cut: TBS0.markOutText(`about:blank#vs-own-${MARK.slice(0, 7)}`) };
-    ok(!!pick0 && pick0.url === 'about:blank' && !note0.includes('vs-own') && !!keptRow && keptRow.url === 'about:blank' && !/vs-own/i.test(keptRow.title) && !!tAlone.ask && tAlone.ask.ok && tAlone.ask.url === 'about:blank' && !/vs-own/i.test(String(tAlone.ask.title))
+    ok(!!pick0 && pick0.url === 'about:blank' && !note0.includes('vs-own') && !!keptRow && keptRow.url === 'about:blank' && !/vs-own/i.test(keptRow.title) && !!tAlone.ask && gateOf(tAlone.ask.ok) && tAlone.ask.url === 'about:blank' && !/vs-own/i.test(String(tAlone.ask.title))
       && anchoredDoor.query === 'https://x.example/?q=about:blank#vs-own-zz' && anchoredDoor.wholeLetter === 'about:blankx' && anchoredDoor.wholeDigit === 'about:blank0' && anchoredDoor.shortLetter === `about:blank#vs-own-${MARK.slice(0, 7)}z` && anchoredDoor.cut === 'about:blank',
       'r4339 FOLLOW: kept out at the WRITE — the kept tabs\' row (a CDP read\'s), the rebind\'s pick and its note, a takeover request\'s page hold the plain blank; the door\'s match (r4421): the WHOLE mark masked whatever follows it (a letter, a digit); a cut-short one only at a word\'s end (a page\'s own «?q=…#vs-own-zz» and a short run followed by a letter stay as they are)', { pick: pick0, keptRow, ask: tAlone.ask, anchoredDoor });
     // ═══ 主开发 r4421 (2): THE FRAME ROAD — a stand-in DRIVER whose frame record carries an address field holding the mark, beside
@@ -1409,16 +1409,16 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const BfCtl = exitSrc.stream.includes(FR_ANCH) ? M.load('src/server/browser-stream.js', editAnchor(exitSrc.stream, FR_ANCH, "    const outText = cls === 'frame' ? text : TBS.markOutText(text);\n", 'src/server/browser-stream.js'), 'b0e4a-frame-no-scan') : null;
     const [frNow, frCtl] = await Promise.all([frameLeg(BmodF), BfCtl ? frameLeg(BfCtl) : Promise.resolve(null)]);
     if (!frNow.arrived) ok(false, 'the frame leg: no frame reached the viewer within 3 s — the stand-in\'s frame never came, so the leg cannot judge', frNow);
-    else ok(frNow.marked === 0 && frNow.url === 'about:blank' && frNow.metaUrl === 'about:blank' && frNow.pixels,
+    else ok(frNow.marked === 0 && frNow.url === 'about:blank' && frNow.metaUrl === 'about:blank' && verdictOf(frNow.pixels),
       'r4421 (2): a stand-in DRIVER\'s frame record carrying a marked address beside its pixels — the viewer receives the frame with that address as the plain blank (the head scanned, the pixels untouched); the hub\'s own two builders write numbers only', frNow);
-    if (BfCtl) ok(!!frCtl && frCtl.arrived && frCtl.marked > 0, 'CONTROL (the frame road with no scan, as at 6e10ade3d): the mark reaches the viewer in the frame record — RED', frCtl);
+    if (BfCtl) ok(!!frCtl && gateOf(frCtl.arrived) && frCtl.marked > 0, 'CONTROL (the frame road with no scan, as at 6e10ade3d): the mark reaches the viewer in the frame record — RED', frCtl);
     const stSrc = exitSrc.stream;
-    ok(/function lastUrlOf\(relay\) \{[\s\S]{0,400}relay\.lastRaw\.url[\s\S]{0,300}relay\.lastRaw\.tabs/.test(stSrc) && stSrc.includes("relay.last[msg.type] = outText; if (msg.type === 'url' || msg.type === 'tabs') relay.lastRaw[msg.type] = text;"),
+    ok(gateOf(/function lastUrlOf\(relay\) \{[\s\S]{0,400}relay\.lastRaw\.url[\s\S]{0,300}relay\.lastRaw\.tabs/.test(stSrc)) && verdictOf(stSrc.includes("relay.last[msg.type] = outText; if (msg.type === 'url' || msg.type === 'tabs') relay.lastRaw[msg.type] = text;")),
       'r4339 FOLLOW: the replay store holds the masked record; the url fallback that feeds the viewport lookup reads the RAW copy (never sent)', null);
     // the HUB's own reads of a blank (the keeper's settling read, the spare-blank fold) know the marked one: ONE shape, any case
     const blank = { re: TBS0.BLANK_URL_RE.test(U0), tab: TBS0.isBlankTab({ url: U0 }), own: TBS0.isOwnBlank(U0), upper: TBS0.isOwnBlank(U0.replace(MARK, MARK.toUpperCase())) && TBS0.BLANK_URL_RE.test(U0.replace(MARK, MARK.toUpperCase())), plain: TBS0.BLANK_URL_RE.test('about:blank') && TBS0.BLANK_URL_RE.test('chrome://newtab/') && TBS0.BLANK_URL_RE.test(''),
       notOwn: [`about:blank#vs-own-${'g'.repeat(24)}`, `https://a.example/#vs-own-${MARK}`, `${U0}x`, 'about:blank'].map((u) => TBS0.isOwnBlank(u)), page: TBS0.BLANK_URL_RE.test('https://a.example/') };
-    ok(blank.re && blank.tab && blank.own && blank.upper && blank.plain && blank.notOwn.every((x) => x === false) && !blank.page,
+    ok(gateOf(blank.re) && gateOf(blank.tab) && gateOf(blank.own) && gateOf(blank.upper) && gateOf(blank.plain) && gateOf(blank.notOwn.every((x) => x === false)) && !blank.page,
       'the hub\'s own reads: the marked blank is a blank (BLANK_URL_RE, isBlankTab, isOwnBlank — one shape, any case: 24 hex after about:blank#vs-own-, nothing else)', blank);
     const BANCH = "const BLANK_URL_RE = new RegExp(`^(?:about:blank|${OWN_BLANK_RE.source.slice(1, -1)}|chrome:\\\\/\\\\/(?:newtab|new-tab-page)\\\\/?|)$`, 'i');";
     if (!tsrc.includes(BANCH)) ok(false, 'the anchor of the control «the blank shape without the mark» is not in the source (src/browser-tabs.js)');
@@ -1455,13 +1455,13 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const DDr = M.load('src/server/browser-dialogs.js', anchored(dsrc, RUNANCH, ' || !!w.thawing, frozenAt:', 'idle paint: a running verb is busy'), 'ip-release-busy'); // stale-pins: kept — the release's busy, planted back as this control's mutant
     const DDe = M.load('src/server/browser-dialogs.js', anchored(dsrc, ENDANCH, '{ if (!browserKey) return;', 'idle paint: the clock restarts at a verb\'s end'), 'ip-no-end-stamp');
     const [ip, ipRel, ipEnd] = await Promise.all([ipLeg(DD), ipLeg(DDr), ipLeg(DDe)]);
-    ok(ip.opened && ip.underVerb && ip.underVerb.act === null && ip.underVerb.why === 'busy',
+    ok(gateOf(ip.opened) && gateOf(ip.underVerb) && ip.underVerb.act === null && ip.underVerb.why === 'busy',
       'the idle paint stop: a page with a verb STILL RUNNING on its browser (31 s after the verb started, its page loaded) is never frozen under it — the verdict reads «busy»', ip.underVerb);
-    ok(ip.tenAfter && ip.tenAfter.act === null && ip.tenAfter.why === 'recent' && ip.pastEnd && ip.pastEnd.act === 'freeze',
+    ok(gateOf(ip.tenAfter) && ip.tenAfter.act === null && ip.tenAfter.why === 'recent' && gateOf(ip.pastEnd) && ip.pastEnd.act === 'freeze',
       '…and the idle clock restarts when the verb ENDS: 10 s after its end it is «recent», the idle bound after its end it stops drawing (nobody watches, nobody drives)', { tenAfter: ip.tenAfter, pastEnd: ip.pastEnd });
-    ok(ip.crashed && ip.crashed.act === 'freeze', 'a verb whose CLI crashed (a /resolve with no audit) holds the stop off no longer than the watch\'s own bound on it (5 min)', ip.crashed);
-    ok(ipRel.underVerb && ipRel.underVerb.act === 'freeze', 'CONTROL (the release\'s busy: a running verb not counted): the page is FROZEN under the agent\'s own verb 31 s after it started — the reported two-minute busy tab — RED', ipRel.underVerb);
-    ok(ipEnd.tenAfter && ipEnd.tenAfter.act === 'freeze', 'CONTROL (the clock stamped only at a verb\'s start): 10 s after a long verb ENDED the page is frozen as if idle since its start — RED', ipEnd.tenAfter);
+    ok(gateOf(ip.crashed) && ip.crashed.act === 'freeze', 'a verb whose CLI crashed (a /resolve with no audit) holds the stop off no longer than the watch\'s own bound on it (5 min)', ip.crashed);
+    ok(gateOf(ipRel.underVerb) && ipRel.underVerb.act === 'freeze', 'CONTROL (the release\'s busy: a running verb not counted): the page is FROZEN under the agent\'s own verb 31 s after it started — the reported two-minute busy tab — RED', ipRel.underVerb);
+    ok(gateOf(ipEnd.tenAfter) && ipEnd.tenAfter.act === 'freeze', 'CONTROL (the clock stamped only at a verb\'s start): 10 s after a long verb ENDED the page is frozen as if idle since its start — RED', ipEnd.tenAfter);
   }
 }
 
@@ -1514,7 +1514,7 @@ console.log('— ③b B-21cc (r2849): the routes tell the dialog watch every tab
     }
     const listForms = agree.filter((x) => /^tab( --json)?$|^tab list( --json)?$/.test(x.form));
     const routeJson = await movesOf(() => tabCmd(sA, ['tab', '--json']));
-    ok(agree.every((x) => x.atResolve === x.atAudit) && listForms.length === 4 && listForms.every((x) => !x.atResolve) && agree.filter((x) => !listForms.includes(x)).every((x) => x.atResolve) && J(routeJson) === '[]',
+    ok(gateOf(agree.every((x) => x.atResolve === x.atAudit)) && listForms.length === 4 && gateOf(listForms.every((x) => !x.atResolve)) && gateOf(agree.filter((x) => !listForms.includes(x)).every((x) => x.atResolve)) && J(routeJson) === '[]',
       'B-21cc (r2992 (7)): the roads AGREE on whether a tab command moves the tab — /resolve, /audit (the command as typed) and the server\'s tab road judge each form by ONE verdict: a listing (with or without --json) moves nothing, every other form moves it', agree);
     const V = `tab-verb:${KA}`, RT = `tab-route:${KA}`;
     ok(J(got.resolveTab) === J([V]) && J(got.resolveBatch) === J([V]) && J(got.auditClose) === J([V]) && J(got.auditNoWord) === J([V]) && J(got.auditBatch) === J([V]),
@@ -1533,7 +1533,7 @@ console.log('— ③b B-21cc (r2849): the routes tell the dialog watch every tab
     const asked = rec.find((x) => x[0] === 'otherSiteFramesFor');
     ok(!!(noted && noted[1] && noted[1].since === 1234567 && !('targetId' in noted[1]) && Array.isArray(noted[1].parsedRefs) && noted[1].parsedRefs.length === 1),
       'B-21cc (r2849): the route\'s own snapshot note passes the verb\'s /resolve instant and NO tab (the driver\'s answer names none; the note reads nothing)', { noted });
-    ok(recNone.includes('rememberedTabOf') && !recNone.includes('otherSiteFramesFor') && !!(asked && asked[1] && asked[1].targetId === String(aTab || 'T1')),
+    ok(gateOf(recNone.includes('rememberedTabOf')) && !recNone.includes('otherSiteFramesFor') && !!(asked && asked[1] && asked[1].targetId === String(aTab || 'T1')),
       'B-21cc (r2849 (5)): the snapshot\'s frame note is asked of the tab the watch knows WITHOUT a read; when it knows none, nothing is asked — silent rather than wrong', { recNone, asked });
   } finally {
     R.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [] });
@@ -1564,9 +1564,9 @@ console.log('— ④ the words: every new key in zh + ja');
 // «it belongs to another holder» (its own agent opened it before the scope road, which recorded nothing); the plain words stay as they were
 {
   const un = TB.tabRefusalText('not_your_tab', { agent: true, unrecorded: true }), plain = TB.tabRefusalText('not_your_tab', { agent: true });
-  ok(/no holder's on record/.test(un) && /before this update/.test(un) && /`vibespace-browser tab new <url>`/.test(un) && !/belongs to another holder/.test(un) && /belongs to another holder/.test(plain) && un !== plain,
+  ok(gateOf(/no holder's on record/.test(un)) && gateOf(/before this update/.test(un)) && gateOf(/`vibespace-browser tab new <url>`/.test(un)) && !/belongs to another holder/.test(un) && gateOf(/belongs to another holder/.test(plain)) && un !== plain,
     'B-19a9: an unrecorded tab on a paired machine is refused in its own words (no holder on record, opened before this update — `tab new`), never «another holder\'s»; the plain agent words unchanged');
 }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: '① ' })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: '① ' })) ok(verdictOf(r.pass), r.name, r.detail);
 console.log(`\n${fail ? '✗' : '✓'} test-browser-tabs: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

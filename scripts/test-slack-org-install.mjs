@@ -29,7 +29,7 @@ import { blank } from './vendor-response-census.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -170,27 +170,27 @@ async function paste(token, { held = null, set = {} } = {}) {
 {
   const ms = (q) => q.map((x) => x.method).join();
   const p1 = await paste(ORG_TOKEN, { set: { authTeam: WS1 } });
-  ok(p1.tok && p1.tok.isEnterpriseInstall === true && p1.tok.enterprise === ORG && p1.tok.team === WS1 && p1.tok.teamFrom === 'auth.test' && p1.tok.userId === `${ORG}/${WS1}/U0SELF001` && ms(p1.reqs) === 'auth.test',
+  ok(gateOf(p1.tok) && p1.tok.isEnterpriseInstall === true && p1.tok.enterprise === ORG && p1.tok.team === WS1 && p1.tok.teamFrom === 'auth.test' && p1.tok.userId === `${ORG}/${WS1}/U0SELF001` && ms(p1.reqs) === 'auth.test',
     `auth.test is_enterprise_install + a workspace team_id ⇒ the record: isEnterpriseInstall, enterprise ${ORG}, team ${WS1} from auth.test — ONE request (${ms(p1.reqs)})`, JSON.stringify(p1.tok && { ...p1.tok, access_token: '…' }));
   for (const [what, set] of [['the org itself', { authTeam: ORG }], ['null', { authTeam: null }], ['the org, with no is_enterprise_install', { authTeam: ORG, flag: false }]]) {
     const p = await paste(ORG_TOKEN, { set });
     const tl = p.reqs.filter((q) => q.method === 'auth.teams.list');
-    ok(p.tok && p.tok.isEnterpriseInstall === true && p.tok.team === WS1 && p.tok.teamFrom === 'auth.teams.list' && p.tok.teamName === 'Workspace 1' && p.tok.label === 'Workspace 1 · @mart' && ms(p.reqs) === 'auth.test,auth.teams.list' && tl.length === 1 && tl[0].teamId === null && tl[0].raw === 'limit=100',
+    ok(gateOf(p.tok) && p.tok.isEnterpriseInstall === true && p.tok.team === WS1 && p.tok.teamFrom === 'auth.teams.list' && p.tok.teamName === 'Workspace 1' && p.tok.label === 'Workspace 1 · @mart' && ms(p.reqs) === 'auth.test,auth.teams.list' && tl.length === 1 && tl[0].teamId === null && tl[0].raw === 'limit=100',
       `auth.test's team_id = ${what} ⇒ the workspace is the first auth.teams.list names (${WS1}, "Workspace 1"); requests ${ms(p.reqs)}`, JSON.stringify(p.tok && { ...p.tok, access_token: '…' }));
   }
   const p5 = await paste(ORG_TOKEN, { set: { authTeam: null, granted: [] } });
   const e5 = p5.err || (p5.r && p5.r.ok === false ? p5.r : null);
   const m5 = String((e5 && (e5.message || e5.error)) || '');
-  ok(e5 && !p5.tok && p5.writes === 0 && /no workspace is granted/.test(m5) && /Re-authorize/.test(m5) && /nothing was connected/.test(m5),
+  ok(gateOf(e5) && !p5.tok && p5.writes === 0 && gateOf(/no workspace is granted/.test(m5)) && gateOf(/Re-authorize/.test(m5)) && verdictOf(/nothing was connected/.test(m5)),
     `an org install no workspace is granted to ⇒ refused by name, nothing written ("${m5.slice(0, 120)}")`);
   const p6 = await paste(TOKEN);
-  ok(p6.tok && p6.tok.isEnterpriseInstall === false && !('teamFrom' in p6.tok) && p6.tok.team === 'T0ACME001' && p6.tok.userId === 'T0ACME001/U0SELF001' && ms(p6.reqs) === 'auth.test',
+  ok(gateOf(p6.tok) && p6.tok.isEnterpriseInstall === false && !('teamFrom' in p6.tok) && p6.tok.team === 'T0ACME001' && p6.tok.userId === 'T0ACME001/U0SELF001' && ms(p6.reqs) === 'auth.test',
     `a workspace-level token ⇒ isEnterpriseInstall false, no teamFrom, ONE auth.test and no auth.teams.list (${ms(p6.reqs)})`);
   // a re-authorize rewrites the stored record — it learns the later fact, both ways
   const p7 = await paste(ORG_TOKEN, { held: { ...WS_HELD, access_token: ORG_TOKEN }, set: { authTeam: null } });
-  ok(p7.tok && p7.tok.isEnterpriseInstall === true && p7.tok.team === WS1 && p7.writes === 1, 'a record stored without the field, re-authorized after the app went org-wide ⇒ the stored record now says org-wide + its workspace');
+  ok(gateOf(p7.tok) && p7.tok.isEnterpriseInstall === true && p7.tok.team === WS1 && p7.writes === 1, 'a record stored without the field, re-authorized after the app went org-wide ⇒ the stored record now says org-wide + its workspace');
   const p8 = await paste(TOKEN, { held: ORG_HELD });
-  ok(p8.tok && p8.tok.isEnterpriseInstall === false && !('teamFrom' in p8.tok) && p8.tok.team === 'T0ACME001', 'an org record re-authorized with a workspace-level token ⇒ the whole record rewritten (false, no teamFrom)');
+  ok(gateOf(p8.tok) && p8.tok.isEnterpriseInstall === false && !('teamFrom' in p8.tok) && p8.tok.team === 'T0ACME001', 'an org record re-authorized with a workspace-level token ⇒ the whole record rewritten (false, no teamFrom)');
   // the consent path: oauth.v2.access answers is_enterprise_install + team null; auth.test here names a workspace and no flag
   Object.assign(fake, { granted: [WS1, WS2], authTeam: WS2, flag: false, orgConsent: true });
   freshVendor();
@@ -201,7 +201,7 @@ async function paste(token, { held = null, set = {} } = {}) {
   const from = fake.log.length;
   const cr = await ca.auth.finish(cf.flowId, back);
   const creqs = fake.log.slice(from);
-  ok(cr && cr.ok === true && ct.st.token && ct.st.token.isEnterpriseInstall === true && ct.st.token.team === WS2 && ct.st.token.teamFrom === 'auth.test' && creqs.map((q) => q.method).join() === 'oauth.v2.access,auth.test',
+  ok(gateOf(cr) && cr.ok === true && gateOf(ct.st.token) && ct.st.token.isEnterpriseInstall === true && ct.st.token.team === WS2 && ct.st.token.teamFrom === 'auth.test' && creqs.map((q) => q.method).join() === 'oauth.v2.access,auth.test',
     `the consent path: oauth.v2.access says is_enterprise_install (team null) while auth.test says neither ⇒ the record is org-wide, its workspace auth.test's ${WS2} (${creqs.map((q) => q.method).join()})`, JSON.stringify(cr && cr.error));
   fake.orgConsent = false;
 }
@@ -217,11 +217,11 @@ const orgCopy = NOSEAM ? await sweep(NOSEAM, ORG_HELD) : null;
   const wsSeen = seen.filter((m) => scopeOf(m) === 'workspace');
   const bad = orgLane.reqs.filter((q) => (scopeOf(q.method) === 'workspace' ? q.teamId !== WS1 : q.teamId !== null));
   ok(bad.length === 0 && wsSeen.length === Object.values(slack.METHOD_SCOPE).filter((v) => v === 'workspace').length, `the org record's ${orgLane.reqs.length} requests: every workspace method (${wsSeen.length}: ${wsSeen.join(', ')}) carries team_id=${WS1}; the org ones (${seen.filter((m) => scopeOf(m) === 'org').join(', ') || 'none'}) carry none`, JSON.stringify(bad.map((q) => [q.method, q.teamId])));
-  for (const m of ['users.conversations', 'users.list', 'bots.info', 'search.messages']) ok(orgLane.reqs.some((q) => q.method === m && q.teamId === WS1), `${m} — on Slack's list of methods that REQUIRE team_id for an org-ready app — carries it`);
+  for (const m of ['users.conversations', 'users.list', 'bots.info', 'search.messages']) ok(verdictOf(orgLane.reqs.some((q) => q.method === m && q.teamId === WS1)), `${m} — on Slack's list of methods that REQUIRE team_id for an org-ready app — carries it`);
   const differ = orgLane.steps.filter((s, i) => s.out.ok !== wsLane.steps[i].out.ok);
   ok(differ.length === 0 && orgLane.steps.filter((s) => s.out.ok).length >= 14, `every step answers on the org record as on the workspace record (${orgLane.steps.filter((s) => s.out.ok).length}/${SWEEP.length} ok each; on both: ${orgLane.steps.filter((s) => !s.out.ok).map((s) => `${s.name} = ${s.out.code}/${s.out.why}`).join(', ') || 'none refused'})`, JSON.stringify(differ.map((s) => [s.name, s.out])));
   const refused = orgCopy ? orgCopy.steps.filter((s) => !s.out.ok && s.out.error === 'missing_argument') : [];
-  ok(orgCopy && refused.length >= 8 && orgCopy.reqs.filter((q) => scopeOf(q.method) === 'workspace').every((q) => q.teamId === null),
+  ok(gateOf(orgCopy) && refused.length >= 8 && verdictOf(orgCopy.reqs.filter((q) => scopeOf(q.method) === 'workspace').every((q) => q.teamId === null)),
     `CONTROL — the copy without the seam, same org record: no team_id, and the fake refuses missing_argument (${refused.length} steps: ${refused.map((s) => s.name).join(', ')})`);
   // the table the report carries: per method, the workspace record's request vs the org record's
   console.log('    method | scope | workspace record | org record | org record, no seam');
@@ -237,7 +237,7 @@ console.log('ⓒ a workspace-level record: byte-identical to the copy without th
   const wsCopy = await sweep(NOSEAM || slack, WS_HELD);
   const wsFalse = await sweep(slack, { ...WS_HELD, isEnterpriseInstall: false });
   const wsCopyF = await sweep(NOSEAM || slack, { ...WS_HELD, isEnterpriseInstall: false });
-  ok(wsLane.reqs.length >= 18 && wire(wsLane.reqs) === wire(wsCopy.reqs) && wsLane.reqs.every((q) => q.teamId === null),
+  ok(wsLane.reqs.length >= 18 && wire(wsLane.reqs) === wire(wsCopy.reqs) && verdictOf(wsLane.reqs.every((q) => q.teamId === null)),
     `a record from before the lane (no field): ${wsLane.reqs.length} requests, method + content type + body byte-identical to the copy's, none with team_id`, `${wsLane.reqs.length} vs ${wsCopy.reqs.length}`);
   ok(wire(wsFalse.reqs) === wire(wsCopyF.reqs) && wire(wsFalse.reqs) === wire(wsLane.reqs), 'a new record saying isEnterpriseInstall: false — the same bytes');
   const stringy = await sweep(slack, { ...WS_HELD, isEnterpriseInstall: 'true' });
@@ -247,7 +247,7 @@ console.log('ⓒ a workspace-level record: byte-identical to the copy without th
     const BASESRC = fs.readFileSync(process.env.SLACK_ORG_BASE, 'utf8');
     const B = require(MC.write('src/channels/slack.js', BASESRC, 'base', { same: true }));
     const wsBase = await sweep(B, WS_HELD);
-    ok(wire(wsBase.reqs) === wire(wsLane.reqs) && wsBase.steps.every((s, i) => s.out.ok === wsLane.steps[i].out.ok), `SLACK_ORG_BASE (${path.basename(process.env.SLACK_ORG_BASE)}): the base file's ${wsBase.reqs.length} requests for the same record are byte-identical to this tree's`);
+    ok(wire(wsBase.reqs) === wire(wsLane.reqs) && verdictOf(wsBase.steps.every((s, i) => s.out.ok === wsLane.steps[i].out.ok)), `SLACK_ORG_BASE (${path.basename(process.env.SLACK_ORG_BASE)}): the base file's ${wsBase.reqs.length} requests for the same record are byte-identical to this tree's`);
   }
 }
 
@@ -257,25 +257,25 @@ console.log('ⓓ the refusal names the door');
   freshVendor();
   const { a } = mkAdapter({ held: { ...ORG_HELD, team: WS_GONE } });
   const e1 = await threw(() => a.listConversations({}));
-  ok(e1 && e1.code === 'forbidden' && e1.retryable === false && e1.detail.why === 'org-team-not-granted' && e1.detail.error === 'team_access_not_granted' && e1.detail.team === WS_GONE && /whole organization/.test(e1.message) && e1.message.includes(WS_GONE) && /Re-authorize from a workspace the app is added to/.test(e1.message) && e1.message !== 'slack users.conversations: team_access_not_granted',
+  ok(gateOf(e1) && e1.code === 'forbidden' && e1.retryable === false && e1.detail.why === 'org-team-not-granted' && e1.detail.error === 'team_access_not_granted' && e1.detail.team === WS_GONE && gateOf(/whole organization/.test(e1.message)) && gateOf(e1.message.includes(WS_GONE)) && gateOf(/Re-authorize from a workspace the app is added to/.test(e1.message)) && e1.message !== 'slack users.conversations: team_access_not_granted',
     `a workspace the org install is not granted (${WS_GONE}) ⇒ forbidden org-team-not-granted: "${e1 && e1.message}"`);
   const cc = await a.convCaps('C0GENERAL');
-  ok(cc && cc.read === 'no' && cc.why === 'org-team-not-granted' && cc.threads.why === 'org-team-not-granted', 'convCaps on that record ⇒ read no, why org-team-not-granted (the conversation\'s card says the door)');
+  ok(gateOf(cc) && cc.read === 'no' && cc.why === 'org-team-not-granted' && cc.threads.why === 'org-team-not-granted', 'convCaps on that record ⇒ read no, why org-team-not-granted (the conversation\'s card says the door)');
   const miss = orgCopy ? orgCopy.steps.find((s) => s.name === 'list') : null;
-  ok(miss && miss.out.code === 'forbidden' && miss.out.why === 'org-team-not-granted' && miss.out.error === 'missing_argument' && /Re-authorize/.test(miss.out.message), `missing_argument on an org record (the copy without the seam) ⇒ the same words: "${miss && miss.out.message}"`);
+  ok(gateOf(miss) && miss.out.code === 'forbidden' && miss.out.why === 'org-team-not-granted' && miss.out.error === 'missing_argument' && verdictOf(/Re-authorize/.test(miss.out.message)), `missing_argument on an org record (the copy without the seam) ⇒ the same words: "${miss && miss.out.message}"`);
   const en = Caps.sendWhyText('org-team-not-granted');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const tr = (src) => { const i = src.indexOf(`${JSON.stringify(en)}: "`); return i < 0 ? null : JSON.parse(src.slice(i + JSON.stringify(en).length + 2, src.indexOf('\n', i)).replace(/,\s*$/, '')); };
-  ok(/whole organization/.test(en) && /Re-authorize/.test(en) && Words.WHYS.includes('org-team-not-granted') && Caps.threadWhyText('org-team-not-granted') === en,
+  ok(gateOf(/whole organization/.test(en)) && gateOf(/Re-authorize/.test(en)) && gateOf(Words.WHYS.includes('org-team-not-granted')) && Caps.threadWhyText('org-team-not-granted') === en,
     `the client's words: "${en}" (WHYS closed list; threads fall through to it)`);
-  ok(/重新授权/.test(tr(zh) || '') && /再認可/.test(tr(ja) || ''), `zh 「${tr(zh)}」 · ja 「${tr(ja)}」`);
+  ok(gateOf(/重新授权/.test(tr(zh) || '')) && verdictOf(/再認可/.test(tr(ja) || '')), `zh 「${tr(zh)}」 · ja 「${tr(ja)}」`);
   // the same codes on a workspace-level record keep the base words
   fake.failWs = { 'users.conversations': 'team_access_not_granted' };
   const w1 = await threw(() => mkAdapter({ held: WS_HELD }).a.listConversations({}));
   fake.failWs = { 'users.conversations': 'missing_argument' };
   const w2 = await threw(() => mkAdapter({ held: WS_HELD }).a.listConversations({}));
   fake.failWs = {};
-  ok(w1 && w1.code === 'forbidden' && w1.detail.why === 'team-access-not-granted' && w1.message === 'slack users.conversations: team_access_not_granted' && w2 && w2.code === 'vendor-error' && w2.detail.why === 'vendor' && w2.message === 'slack users.conversations: missing_argument',
+  ok(gateOf(w1) && w1.code === 'forbidden' && w1.detail.why === 'team-access-not-granted' && w1.message === 'slack users.conversations: team_access_not_granted' && gateOf(w2) && w2.code === 'vendor-error' && w2.detail.why === 'vendor' && w2.message === 'slack users.conversations: missing_argument',
     'a workspace-level record: team_access_not_granted / missing_argument keep the base words (team-access-not-granted, vendor)', JSON.stringify([w1 && w1.message, w2 && w2.message]));
 }
 
@@ -313,9 +313,9 @@ const judge = (src, table) => { const c = census(src); return { ...c, missing: [
 {
   const T = slack.METHOD_SCOPE;
   const j = judge(SRC, T);
-  ok(j.unread.length === 0 && j.missing.length === 0 && j.dead.length === 0 && j.sent.size === Object.keys(T).length && j.sent.has('auth.teams.list') && j.sent.has(Manifest.CREATE_METHOD),
+  ok(j.unread.length === 0 && j.missing.length === 0 && j.dead.length === 0 && j.sent.size === Object.keys(T).length && gateOf(j.sent.has('auth.teams.list')) && verdictOf(j.sent.has(Manifest.CREATE_METHOD)),
     `slack.js sends ${j.sent.size} Web API methods, every one a METHOD_SCOPE row and every row sent`, JSON.stringify({ unread: j.unread, missing: j.missing, dead: j.dead }));
-  ok(Object.isFrozen(T) && Object.values(T).every((v) => v === 'workspace' || v === 'org') && ['auth.test', 'auth.teams.list', 'team.info', Manifest.EXCHANGE_METHOD, Manifest.CREATE_METHOD].every((m) => T[m] === 'org') && Object.values(T).filter((v) => v === 'workspace').length === 16,
+  ok(gateOf(Object.isFrozen(T)) && gateOf(Object.values(T).every((v) => v === 'workspace' || v === 'org')) && gateOf(['auth.test', 'auth.teams.list', 'team.info', Manifest.EXCHANGE_METHOD, Manifest.CREATE_METHOD].every((m) => T[m] === 'org')) && Object.values(T).filter((v) => v === 'workspace').length === 16,
     'the table is frozen, two words only; the sign-in, the org\'s own and team.info {team} are org — the other 16 workspace');
   // every Slack-method-shaped literal in the file is a row, or one of the two non-Web-API names (the upload POST, a file GET)
   const LIT = /'((?:auth|users|conversations|chat|reactions|bots|team|emoji|files|search|pins|stars|usergroups|dnd|apps|oauth)\.[A-Za-z]+(?:\.[A-Za-z]+)*)'/g;
@@ -323,13 +323,13 @@ const judge = (src, table) => { const c = census(src); return { ...c, missing: [
   const outside = lits.filter((m) => !(m in T));
   ok(outside.sort().join() === 'files.download,files.upload', `every method-shaped literal of slack.js is a row but the two that are no Web API method (${outside.join(', ')})`);
   const keys = (blank(SRC).match(/[{,]\s*team_id\s*:/g) || []).length;
-  ok(keys === 1 && /function withTeam\(method, params, held\) \{[\s\S]{0,400}team_id: t\.team/.test(SRC), `team_id is WRITTEN in one place in slack.js — withTeam (${keys} object key)`);
+  ok(keys === 1 && verdictOf(/function withTeam\(method, params, held\) \{[\s\S]{0,400}team_id: t\.team/.test(SRC)), `team_id is WRITTEN in one place in slack.js — withTeam (${keys} object key)`);
   // RED controls
   const ANCHOR = "      await api('reactions.add', { channel: convId, timestamp: ts, name: String(key) }, { convId });\n";
   const planted = SRC.includes(ANCHOR) ? judge(SRC.replace(ANCHOR, ANCHOR + "      await api('pins.add', { channel: convId, timestamp: ts }, { convId });\n"), T) : null;
-  ok(planted && planted.missing.join() === 'pins.add', `CONTROL — a planted api('pins.add', …): red (${planted ? planted.missing.join() || 'GREEN — the census missed it' : 'the anchor is gone'})`);
+  ok(gateOf(planted) && planted.missing.join() === 'pins.add', `CONTROL — a planted api('pins.add', …): red (${planted ? planted.missing.join() || 'GREEN — the census missed it' : 'the anchor is gone'})`);
   const hidden = SRC.includes(ANCHOR) ? judge(SRC.replace(ANCHOR, ANCHOR + "      const pinMethod = 'pins.add';\n      await api(pinMethod, { channel: convId, timestamp: ts }, { convId });\n"), T) : null;
-  ok(hidden && hidden.unread.join() === 'api(pinMethod)', `CONTROL — a call whose method is a variable: red as unread (${hidden ? hidden.unread.join() || 'GREEN' : 'the anchor is gone'})`);
+  ok(gateOf(hidden) && hidden.unread.join() === 'api(pinMethod)', `CONTROL — a call whose method is a variable: red as unread (${hidden ? hidden.unread.join() || 'GREEN' : 'the anchor is gone'})`);
   const { 'bots.info': _gone, ...lessT } = T;
   const short = judge(SRC, lessT);
   ok(short.missing.join() === 'bots.info', `CONTROL — the table without bots.info: red (${short.missing.join() || 'GREEN'})`);
@@ -339,7 +339,7 @@ const judge = (src, table) => { const c = census(src); return { ...c, missing: [
   ok(twice === 2, `CONTROL — a second team_id written beside chat.postMessage's params: counted (${twice})`);
 }
 
-for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'slack-org-install: ' })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'slack-org-install: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 server.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

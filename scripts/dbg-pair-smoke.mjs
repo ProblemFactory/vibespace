@@ -13,7 +13,7 @@ const wt = process.argv[2] || '/tmp/vs-fixtest';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].find((p) => fs.existsSync(p));
 const PORT = 3989, CDP_PORT = 9339;
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
@@ -49,37 +49,37 @@ try {
   await evalJs('window.app ? app.ready : Promise.reject(new Error("no app"))');
   await evalJs('(app.sidebar._showDevicePairDialog(), true)');
   await sleep(300);
-  check('dialog opens with name input + create button', await evalJs(`!!(document.querySelector('#device-pair-dialog input') && [...document.querySelectorAll('#device-pair-dialog button')].some((b) => b.textContent.includes('pairing')))`));
+  check('dialog opens with name input + create button', verdictOf(await evalJs(`!!(document.querySelector('#device-pair-dialog input') && [...document.querySelectorAll('#device-pair-dialog button')].some((b) => b.textContent.includes('pairing')))`)));
   await evalJs(`(() => { const i = document.querySelector('#device-pair-dialog input'); i.value = 'smoke-mac'; return true; })()`);
   await evalJs(`([...document.querySelectorAll('#device-pair-dialog button')].find((b) => b.textContent.includes('pairing')).click(), true)`);
   await sleep(1200);
   const cmd = await evalJs(`document.querySelector('#device-pair-dialog textarea')?.value || ''`);
   check('command rendered after pairing', cmd.length > 100, cmd.slice(0, 120));
-  check('command carries the install script + bundle', /vibespace-device-install\.sh/.test(cmd) && /--bundle-url/.test(cmd));
-  check('command carries dial URL with the device id', cmd.includes('/api/device-dial?device=smoke-mac'));
-  check('command carries BOTH tokens', /--dial-token vsdt_/.test(cmd) && /--host-token vsht_/.test(cmd), cmd);
+  check('command carries the install script + bundle', gateOf(/vibespace-device-install\.sh/.test(cmd)) && verdictOf(/--bundle-url/.test(cmd)));
+  check('command carries dial URL with the device id', verdictOf(cmd.includes('/api/device-dial?device=smoke-mac')));
+  check('command carries BOTH tokens', gateOf(/--dial-token vsdt_/.test(cmd)) && verdictOf(/--host-token vsht_/.test(cmd)), cmd);
   // server actually recorded the pairing — the credential lives ON the dial
   // host record since B-f3e8 (dial-tokens.json is gone)
   const hostsJson = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'hosts.json'), 'utf-8'));
   const dialRec = (hostsJson.hosts || []).find((h) => h.transport === 'dial' && h.deviceId === 'smoke-mac');
   check('server persisted the dial token hash ON the host record', !!dialRec && typeof dialRec.dialTokenHash === 'string' && dialRec.dialTokenHash.length === 64, JSON.stringify(dialRec));
-  check('the hash is NOT exposed over /api/hosts', await (async () => {
+  check('the hash is NOT exposed over /api/hosts', verdictOf(await (async () => {
     const hl = (await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || [];
     const h = hl.find((x) => x.deviceId === 'smoke-mac');
     return h && !('dialTokenHash' in h) && h.online === false;
-  })());
+  })()));
 
   // ── the machine rows (B-f3e8: ONE list — /api/hosts) — REAL daemon dial ──
   const dialHosts = async () => ((await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || []).filter((h) => h.transport === 'dial');
   let devs = await dialHosts();
-  check('machine list shows the pairing (offline)', devs.some((d) => d.deviceId === 'smoke-mac' && d.online === false), JSON.stringify(devs));
+  check('machine list shows the pairing (offline)', verdictOf(devs.some((d) => d.deviceId === 'smoke-mac' && d.online === false)), JSON.stringify(devs));
   // offline-device operations FAIL FAST (2.161.3): deviceForDial used to
   // back off and retry forever, hanging create/mount/test on a dead device
   const tOff = Date.now();
   const off = await (await fetch(`http://127.0.0.1:${PORT}/api/machine-mounts/host-dial-smoke-mac`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dir: 'pull', remotePath: '/tmp' }) })).json();
-  check('offline pull-mount fails FAST with a clear error', (Date.now() - tOff) < 5000 && /offline|not dialed/i.test(off.error || ''), JSON.stringify(off).slice(0, 150));
+  check('offline pull-mount fails FAST with a clear error', (Date.now() - tOff) < 5000 && verdictOf(/offline|not dialed/i.test(off.error || '')), JSON.stringify(off).slice(0, 150));
   // start a REAL agentd with --dial (the actual daemon, not a fake ws client)
   const dialTok = /--dial-token (vsdt_\w+)/.exec(cmd)[1];
   const hostTok = /--host-token (vsht_\w+)/.exec(cmd)[1];
@@ -100,7 +100,7 @@ try {
     if (devs.some((d) => d.deviceId === 'smoke-mac' && d.online)) break;
     await sleep(400);
   }
-  check('REAL daemon dial flips the machine ONLINE', devs.some((d) => d.deviceId === 'smoke-mac' && d.online === true), JSON.stringify(devs));
+  check('REAL daemon dial flips the machine ONLINE', verdictOf(devs.some((d) => d.deviceId === 'smoke-mac' && d.online === true)), JSON.stringify(devs));
   // ⚡ test action — the UNIFIED endpoint (dial branch of hosts.test)
   const t = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts/host-dial-smoke-mac/test`, { method: 'POST' })).json();
   check('machine test returns daemon identity over the dial link', t.ok === true && t.dial === true && !!t.info, JSON.stringify(t));
@@ -114,7 +114,7 @@ try {
     // the prefix → every FILE 403'd ("couldn't list files: 403"). The
     // hello.txt read below is the guard — it 403s without the normalization fix.
     body: JSON.stringify({ dir: 'pull', remotePath: share + '/', mountpoint: path.join(droot, 'mnt') }) })).json();
-  check('machine pull-mount API succeeds', !mres.error && mres.mountpoint, JSON.stringify(mres));
+  check('machine pull-mount API succeeds', !mres.error && verdictOf(mres.mountpoint), JSON.stringify(mres));
   if (mres.mountpoint) {
     let content = '';
     for (let i = 0; i < 20; i++) {
@@ -125,12 +125,12 @@ try {
   // the Remote tab renders the device as a MACHINE row + the mount child row
   await evalJs(`(app.sidebar._activeTab = 'mounts', app.sidebar._renderMounts(), true)`);
   await sleep(900);
-  check('Remote tab renders device as a machine row (mounts-row + name)', await evalJs(`(() => {
+  check('Remote tab renders device as a machine row (mounts-row + name)', verdictOf(await evalJs(`(() => {
     const rows = [...document.querySelectorAll('.mounts-panel .mounts-row')];
-    return rows.some((r) => r.textContent.includes('smoke-mac') && r.querySelector('.mounts-dot')); })()`));
-  check('mount child row rendered (indented child + folder basename)', await evalJs(`(() => {
+    return rows.some((r) => r.textContent.includes('smoke-mac') && r.querySelector('.mounts-dot')); })()`)));
+  check('mount child row rendered (indented child + folder basename)', verdictOf(await evalJs(`(() => {
     const rows = [...document.querySelectorAll('.mounts-panel .mounts-row-child')];
-    return rows.some((r) => r.textContent.includes('share') && (r.querySelector('.mounts-name')?.title || '').includes('/mnt')); })()`));
+    return rows.some((r) => r.textContent.includes('share') && (r.querySelector('.mounts-name')?.title || '').includes('/mnt')); })()`)));
   // OS chips: Windows flips the command to PowerShell (re-open the dialog)
   await evalJs('(app.sidebar._showDevicePairDialog(), true)');
   await sleep(200);
@@ -139,7 +139,7 @@ try {
   await sleep(900);
   await evalJs(`([...document.querySelectorAll('#device-pair-dialog button')].find((b) => b.textContent === 'Windows').click(), true)`);
   const winCmd = await evalJs(`document.querySelector('#device-pair-dialog textarea')?.value || ''`);
-  check('Windows chip flips to the PowerShell installer', /vibespace-device-install\.ps1/.test(winCmd) && /-DialToken vsdt_/.test(winCmd) && /-HostToken vsht_/.test(winCmd), winCmd.slice(0, 120));
+  check('Windows chip flips to the PowerShell installer', gateOf(/vibespace-device-install\.ps1/.test(winCmd)) && gateOf(/-DialToken vsdt_/.test(winCmd)) && verdictOf(/-HostToken vsht_/.test(winCmd)), winCmd.slice(0, 120));
   // Notes must not promise prerequisites the installer no longer has (2.246.0)
   const note = await evalJs(`[...document.querySelectorAll('#device-pair-dialog .agents-note')].map((p) => p.textContent).join(' | ')`);
   check('per-OS notes no longer demand a preinstalled Node', !/Node 18\+|Node ≥18/.test(note), note.slice(0, 160));
@@ -158,7 +158,7 @@ try {
   for (const [os, c] of Object.entries(relayCmds || {})) {
     check(`relay pairing: every URL uses the relay base (${os})`,
       !c.includes(String(PORT)) && !/127\.0\.0\.1|localhost/.test(c) && (c.match(/https:\/\/relay\.example\.test/g) || []).length >= 2
-      && /wss:\/\/relay\.example\.test\/api\/device-dial\?device=relay-dev/.test(c), c.slice(0, 200));
+      && verdictOf(/wss:\/\/relay\.example\.test\/api\/device-dial\?device=relay-dev/.test(c)), c.slice(0, 200));
   }
   // ── slice B: the pairing IS a machine (hosts model) ──
   const hostsList = (await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || [];
@@ -167,10 +167,10 @@ try {
   if (dialHost) {
     // files on the device through the ?host= dispatch (RemoteFs → device fs ops)
     const fl = await (await fetch(`http://127.0.0.1:${PORT}/api/files?path=${encodeURIComponent(share)}&host=${encodeURIComponent(dialHost.id)}`)).json();
-    check('device files listable via ?host= (device fs path)', Array.isArray(fl.items) && fl.items.some((f) => f.name === 'hello.txt'), JSON.stringify(fl).slice(0, 200));
+    check('device files listable via ?host= (device fs path)', gateOf(Array.isArray(fl.items)) && verdictOf(fl.items.some((f) => f.name === 'hello.txt')), JSON.stringify(fl).slice(0, 200));
     // discovery answers (empty session list is fine — the path must not throw)
     const ds = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts/${encodeURIComponent(dialHost.id)}/sessions?fresh=1`)).json();
-    check('device discovery answers via the dial link', Array.isArray(ds.sessions), JSON.stringify(ds).slice(0, 200));
+    check('device discovery answers via the dial link', verdictOf(Array.isArray(ds.sessions)), JSON.stringify(ds).slice(0, 200));
   }
   // RE-PAIR (no unpair): minting for the existing deviceId rotates in place —
   // record kept, and the CONNECTED device gets the new dial.json pushed over
@@ -183,13 +183,13 @@ try {
     check('re-pair of an existing device reports repair:true', rp.repair === true, JSON.stringify(rp).slice(0, 160));
     check('re-pair pushed the rotated dial.json to the CONNECTED device in place', rp.updatedInPlace === true, JSON.stringify(rp).slice(0, 160));
     const stillThere = (await dialHosts()).some((d) => d.deviceId === 'smoke-mac');
-    check('re-pair kept the machine row (no unpair)', stillThere);
+    check('re-pair kept the machine row (no unpair)', verdictOf(stillThere));
   }
   // unmount + unpair cleanup path
   const um = await fetch(`http://127.0.0.1:${PORT}/api/machine-mounts/${mres.id}`, { method: 'DELETE' });
-  check('machine mount unmounts', um.ok);
+  check('machine mount unmounts', verdictOf(um.ok));
   const del = await fetch(`http://127.0.0.1:${PORT}/api/hosts/host-dial-smoke-mac`, { method: 'DELETE' });
-  check('unpair (DELETE /api/hosts/:id) succeeds', del.ok);
+  check('unpair (DELETE /api/hosts/:id) succeeds', verdictOf(del.ok));
   devs = await dialHosts();
   check('unpaired machine gone from the list', !devs.some((d) => d.deviceId === 'smoke-mac'), JSON.stringify(devs));
   const hostsAfter = (await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || [];
@@ -200,4 +200,4 @@ try {
   failed++; console.error('  ✗ harness threw:', e.message);
 } finally { try { ws.close(); } catch {} }
 console.log(failed ? `\n${failed} FAILED` : '\npair smoke passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

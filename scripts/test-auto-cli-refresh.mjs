@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { decideCliRefresh } = require('../src/account-pool-auto.js');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 
 const NOW = 1_800_000_000_000;
 const MIN = 60e3;
@@ -85,15 +85,15 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   const strip = (t) => t.split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
   const srv = strip(fs.readFileSync(new URL('../src/server/auto-cli-loop.js', import.meta.url), 'utf8'));
   const boot = strip(fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8'));
-  ok(/require\('\.\/src\/server\/auto-cli-loop\.js'\)\.createAutoCliLoop\(\{[^\n]*projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path\.join\(__dirname, 'data'\) \}\); autoCliLoop\.start\(\);/.test(boot), 'WIRING PIN: server.js starts the ONE auto-cli loop with the engine\'s projection (+ its once-per-tick billing index, prod-stall-202), the attempt clock, the rung and the data dir');
+  ok(verdictOf(/require\('\.\/src\/server\/auto-cli-loop\.js'\)\.createAutoCliLoop\(\{[^\n]*projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path\.join\(__dirname, 'data'\) \}\); autoCliLoop\.start\(\);/.test(boot)), 'WIRING PIN: server.js starts the ONE auto-cli loop with the engine\'s projection (+ its once-per-tick billing index, prod-stall-202), the attempt clock, the rung and the data dir');
   { const WIRE = fs.readFileSync(new URL('../src/server/mounts-plugins-wiring.js', import.meta.url), 'utf8');   // r5143: the loop's row on the family's one notice
-    ok(/^let autoCliLoop = null;/m.test(boot) && boot.includes('  autoCliRow: () => (autoCliLoop ? autoCliLoop.heldRow : null),') && WIRE.includes("  autoCliRow = () => null,")
-      && WIRE.includes("    { key: 'auto-cli-state.json', facts: () => { const r = autoCliRow(); return r ? r.facts() : null; }, onLift: (fn) => { const r = autoCliRow(); return r ? r.onLift(fn) : false; } },"),
+    ok(gateOf(/^let autoCliLoop = null;/m.test(boot)) && gateOf(boot.includes('  autoCliRow: () => (autoCliLoop ? autoCliLoop.heldRow : null),')) && gateOf(WIRE.includes("  autoCliRow = () => null,"))
+      && verdictOf(WIRE.includes("    { key: 'auto-cli-state.json', facts: () => { const r = autoCliRow(); return r ? r.facts() : null; }, onLift: (fn) => { const r = autoCliRow(); return r ? r.onLift(fn) : false; } },")),
       'WIRING PIN (主开发 r5143): server.js keeps the loop it makes and hands its held row LAZILY to the wiring, whose held-lists older row has facts and one lift — no read-again (no press, no new road)'); }
-  ok(boot.includes('    try { if (autoCliLoop) autoCliLoop.noteSettingsWrite(next, prev); } catch { }') && /noteSettingsWrite,/.test(srv), 'WIRING PIN (主开发 r5213): server.js\'s settings write tells the loop\'s row when the automatic reads are switched on or off (the list told once)');
-  ok(/const pj = d\.projectionRereadFor\(a\.id, now, billingIndex\(\)\)[^\n]*\n[\s\S]{0,40}?list\.push\(\{[^\n]*projCrossInMs: pj \? pj\.inMs : null, estBurnPtPerMin: pj \? pj\.burnPtPerMin : 0/.test(srv), 'WIRING PIN: the auto-cli loop hands projectionRereadFor\'s crossing + burn to decideCliRefresh');
-  ok(/const picks = decideCliRefresh\(list, now,[^\n]*\n\s*for \(const key of picks\) \{\n[^\n]*\n\s*attempts\.set\(key, now\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(\(await saveState\(d\.dataDir, st, warn, d\.storeWriter, landingMs\)\) !== true\) \{\n[^\n]*\n[^\n]*\n\s*continue;\n\s*\}\n\s*stampUnlanded = false;\n\s*let ok = false; try \{ ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\);/.test(srv), 'WIRING PIN: a pick is spent on usage.refreshViaCliPanel — the same rung, behind the same attempt clock, stamped on disk BEFORE the spawn (quota r3)');
-  ok(/if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \} catch/.test(srv), 'WIRING PIN: the fresh reading takes the new-member wake — the pool re-decides on the READING (its own try, after the bookkeeping — quota r3)');
+  ok(gateOf(boot.includes('    try { if (autoCliLoop) autoCliLoop.noteSettingsWrite(next, prev); } catch { }')) && verdictOf(/noteSettingsWrite,/.test(srv)), 'WIRING PIN (主开发 r5213): server.js\'s settings write tells the loop\'s row when the automatic reads are switched on or off (the list told once)');
+  ok(verdictOf(/const pj = d\.projectionRereadFor\(a\.id, now, billingIndex\(\)\)[^\n]*\n[\s\S]{0,40}?list\.push\(\{[^\n]*projCrossInMs: pj \? pj\.inMs : null, estBurnPtPerMin: pj \? pj\.burnPtPerMin : 0/.test(srv)), 'WIRING PIN: the auto-cli loop hands projectionRereadFor\'s crossing + burn to decideCliRefresh');
+  ok(verdictOf(/const picks = decideCliRefresh\(list, now,[^\n]*\n\s*for \(const key of picks\) \{\n[^\n]*\n\s*attempts\.set\(key, now\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(\(await saveState\(d\.dataDir, st, warn, d\.storeWriter, landingMs\)\) !== true\) \{\n[^\n]*\n[^\n]*\n\s*continue;\n\s*\}\n\s*stampUnlanded = false;\n\s*let ok = false; try \{ ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\);/.test(srv)), 'WIRING PIN: a pick is spent on usage.refreshViaCliPanel — the same rung, behind the same attempt clock, stamped on disk BEFORE the spawn (quota r3)');
+  ok(verdictOf(/if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \} catch/.test(srv)), 'WIRING PIN: the fresh reading takes the new-member wake — the pool re-decides on the READING (its own try, after the bookkeeping — quota r3)');
   // THE PROJECTION'S OWN MEMORY (quota r1, the B-f69c ③ verifier): a crossing
   // is bought ONE reading. The floor was never the drift rung's limiter (it
   // needs 4 pt of movement between reads) and the projection had no such
@@ -122,18 +122,18 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
       const proj = reads.filter((r) => r.why === 'projection');
       ok(proj.length === 1 && proj[0].min < 40, `ONE projection read per crossing on a slow approach — ${w.label} (red on quota 3: 7 reads at min 5,10,…,35)`, reads);
     }
-    ok(approach({ startRemaining: 20, burnPctPerMin: 1.2 }).every((r) => r.why === 'drift'), '…a fast burst is still the drift rung\'s (the memory changes nothing there)');
+    ok(verdictOf(approach({ startRemaining: 20, burnPctPerMin: 1.2 }).every((r) => r.why === 'drift')), '…a fast burst is still the drift rung\'s (the memory changes nothing there)');
     const stamped = { ...blind, projReadCrossAt: NOW + 8 * MIN };
     ok(cliRefreshWhy(stamped, NOW) === null, 'a crossing already bought a reading (same instant) is not asked again');
     ok(cliRefreshWhy({ ...stamped, projReadCrossAt: NOW + 8 * MIN + 4 * MIN }, NOW) === null, '…nor one that drifted by less than projMoveMs (5 min — the estimate\'s own wobble)');
     ok(cliRefreshWhy({ ...stamped, projReadCrossAt: NOW + 20 * MIN }, NOW) === 'projection', 'a crossing that MOVED (12 min earlier: the burn rose) is a new crossing ⇒ asked');
     ok(cliRefreshWhy({ ...stamped, estDriftPct: 5 }, NOW) === 'drift' && cliRefreshWhy({ ...stamped, fetchedAt: NOW - 50 * MIN }, NOW) === 'stale-active', '…and the memory silences only the projection — the drift and age rungs still read a stamped account');
-    ok(/why = cliRefreshWhy\(it && \{ \.\.\.it, lastAttemptAt: 0 \}, now,/.test(srv) && /if \(ok && it && it\.pj && \(why === 'projection' \|\| \(Number\(it\.pj\.inMs\) > 0 && Number\(it\.pj\.inMs\) <= PROJECTION_WINDOW_MS\)\)\) \{\n\s*for \(const k of \(it\.mem \|\| \[key\]\)\) projReads\.set\(k, projectionReadsAfter\(projReads\.get\(k\), it\.pj, now\)\);/.test(srv), 'WIRING PIN: the loop stamps the BUCKET a SUCCESSFUL projection read — or any read inside the projection window (quota r3) — was spent on, under every id of the identity');
-    ok(/const pj = d\.projectionRereadFor\(a\.id, now, billingIndex\(\)\), reads = mergedReads\(mem\);/.test(srv) && /list\.push\(\{[^\n]*projLabel: pj \? pj\.label : null, projResetsAt: pj \? \(pj\.resetsAt \|\| 0\) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant\(reads\)/.test(srv), 'WIRING PIN: …and hands the bucket memory (+ the r1 instant as the secondary guard) back to the rule on every tick');
+    ok(gateOf(/why = cliRefreshWhy\(it && \{ \.\.\.it, lastAttemptAt: 0 \}, now,/.test(srv)) && verdictOf(/if \(ok && it && it\.pj && \(why === 'projection' \|\| \(Number\(it\.pj\.inMs\) > 0 && Number\(it\.pj\.inMs\) <= PROJECTION_WINDOW_MS\)\)\) \{\n\s*for \(const k of \(it\.mem \|\| \[key\]\)\) projReads\.set\(k, projectionReadsAfter\(projReads\.get\(k\), it\.pj, now\)\);/.test(srv)), 'WIRING PIN: the loop stamps the BUCKET a SUCCESSFUL projection read — or any read inside the projection window (quota r3) — was spent on, under every id of the identity');
+    ok(gateOf(/const pj = d\.projectionRereadFor\(a\.id, now, billingIndex\(\)\), reads = mergedReads\(mem\);/.test(srv)) && verdictOf(/list\.push\(\{[^\n]*projLabel: pj \? pj\.label : null, projResetsAt: pj \? \(pj\.resetsAt \|\| 0\) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant\(reads\)/.test(srv)), 'WIRING PIN: …and hands the bucket memory (+ the r1 instant as the secondary guard) back to the rule on every tick');
   }
   const eng = fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8');
-  ok(/function projectionRereadFor\(memberId, nowMs = Date\.now\(\), billing = null\)/.test(eng) && /projectionRereadFor, projectionBillingIndex,/.test(eng) && /projectionRereadFor, projectionBillingIndex,/.test(boot), 'WIRING PIN: the engine exports projectionRereadFor and server.js destructures it');
-  ok(/return \{ inMs: best\.inSec \* 1000, label: best\.label,[^\n]*resetsAt: best\.resetsAt \|\| 0,/.test(eng), 'WIRING PIN: the engine\'s projection names the crossing bucket\'s WINDOW (`resetsAt`) — the memory\'s key half (§9 mirrors this return)');
+  ok(gateOf(/function projectionRereadFor\(memberId, nowMs = Date\.now\(\), billing = null\)/.test(eng)) && gateOf(/projectionRereadFor, projectionBillingIndex,/.test(eng)) && verdictOf(/projectionRereadFor, projectionBillingIndex,/.test(boot)), 'WIRING PIN: the engine exports projectionRereadFor and server.js destructures it');
+  ok(verdictOf(/return \{ inMs: best\.inSec \* 1000, label: best\.label,[^\n]*resetsAt: best\.resetsAt \|\| 0,/.test(eng)), 'WIRING PIN: the engine\'s projection names the crossing bucket\'s WINDOW (`resetsAt`) — the memory\'s key half (§9 mirrors this return)');
 }
 
 
@@ -295,7 +295,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     for (const seed of [5, 11]) {
       const rel = await after(REAL_LOOP, 'written', seed), cure = await after(REAL_LOOP, 'refused', seed), red = await after(PRESSLESS, 'refused', seed);
       console.log(`    r5516 (1) seed ${seed}: the automatic asks after a person's press (min from it) — the release ${J(rel)}, the refused press ${J(cure)}, the press ignored (red) ${J(red)}`);
-      ok(rel.length >= 1 && cure.length <= rel.length && cure.every((t, i) => t >= rel[i]), `r5516 (1) A REFUSED PRESS, seed ${seed}: each automatic ask after it comes no sooner than the release's of the same rank, and no more of them (${J(cure)} against ${J(rel)})`);
+      ok(rel.length >= 1 && cure.length <= rel.length && verdictOf(cure.every((t, i) => t >= rel[i])), `r5516 (1) A REFUSED PRESS, seed ${seed}: each automatic ask after it comes no sooner than the release's of the same rank, and no more of them (${J(cure)} against ${J(rel)})`);
       ok(red.length >= 1 && rel.length >= 1 && red[0] < rel[0], `r5516 (1) RED CONTROL, seed ${seed} (the press's refusal ignored, in a copy): its first automatic ask at ${red[0]} min, sooner than the release's at ${rel[0]} — the leg above can fail`);
     }
     // r5516 (2) — THE PACING COUNTS FROM THE SAME MOMENT THE RELEASE's DID (the refusal's own, a probe's length after the attempt): a
@@ -336,7 +336,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const fam = () => makeWorld({ members: [slowMember({ fable: true })], sessions: [{ on: 'm1', model: 'claude-opus-5-5' }, { on: 'm1', model: 'claude-fable-5-1' }] });
     const w = await run(fam(), 60);
     const bought = purchases(w).map((x) => x.label);
-    ok(bought.length === 2 && new Set(bought).size === 2 && bought.includes('5h') && bought.includes('Fable'), '① two families on one member ⇒ each BUCKET bought exactly once (a projection read, or any read inside its window) — the second bucket is its own question (red on quota r2: Fable bought at min 42 by the idle rung, then re-bought by a projection at min 47)', w.reads());
+    ok(bought.length === 2 && new Set(bought).size === 2 && gateOf(bought.includes('5h')) && verdictOf(bought.includes('Fable')), '① two families on one member ⇒ each BUCKET bought exactly once (a projection read, or any read inside its window) — the second bucket is its own question (red on quota r2: Fable bought at min 42 by the idle rung, then re-bought by a projection at min 47)', w.reads());
     const NO_ANYREAD = patched('loop-no-anyread.js', REAL_LOOP, [["why === 'projection' || (Number(it.pj.inMs) > 0 && Number(it.pj.inMs) <= PROJECTION_WINDOW_MS)", "why === 'projection'"]]);
     const wc = makeWorld({ members: [slowMember({ fable: true })], sessions: [{ on: 'm1', model: 'claude-opus-5-5' }, { on: 'm1', model: 'claude-fable-5-1' }], loopFile: NO_ANYREAD });
     await run(wc, 60);
@@ -365,12 +365,12 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const R = NOW / 1000 + 3600;
     const reads = projectionReadsAfter(null, { label: '5h', inMs: 20 * MIN, resetsAt: R }, NOW);
     const b = { key: 'b', fetchedAt: NOW - 10 * MIN, lastAttemptAt: 0, estDriftPct: 0, activeBurn: true, projCrossInMs: 8 * MIN, estBurnPtPerMin: 0, projLabel: '5h', projResetsAt: R, projReads: reads };
-    ok(reads['5h'] && reads['5h'].at === NOW + 20 * MIN && reads['5h'].resetsAt === R && reads['5h'].boughtAt === NOW, '① projectionReadsAfter stamps {at, resetsAt, boughtAt} under the bucket\'s label', reads);
+    ok(gateOf(reads['5h']) && reads['5h'].at === NOW + 20 * MIN && reads['5h'].resetsAt === R && reads['5h'].boughtAt === NOW, '① projectionReadsAfter stamps {at, resetsAt, boughtAt} under the bucket\'s label', reads);
     ok(cliRefreshWhy(b, NOW) === null, '① a bucket that bought its reading is NOT asked again — even when the crossing moved 10 min (the burn window\'s own noise)');
     ok(cliRefreshWhy({ ...b, fetchedAt: R * 1000 - 5 * MIN }, R * 1000 + 1000) === 'projection', '…after its window RESET the same bucket is a new question');
     ok(cliRefreshWhy({ ...b, projLabel: 'Fable' }, NOW) === 'projection', '…and another bucket is its own question');
     const unk = projectionReadsAfter(null, { label: '7d', inMs: 20 * MIN, resetsAt: 0 }, NOW);
-    ok(projectionBucketBought({ projLabel: '7d', projReads: unk }, NOW + PROJECTION_MEMORY_MS - 1) && !projectionBucketBought({ projLabel: '7d', projReads: unk }, NOW + PROJECTION_MEMORY_MS), '…a bucket with an UNKNOWN reset is remembered PROJECTION_MEMORY_MS (5 h) after the purchase');
+    ok(gateOf(projectionBucketBought({ projLabel: '7d', projReads: unk }, NOW + PROJECTION_MEMORY_MS - 1)) && !projectionBucketBought({ projLabel: '7d', projReads: unk }, NOW + PROJECTION_MEMORY_MS), '…a bucket with an UNKNOWN reset is remembered PROJECTION_MEMORY_MS (5 h) after the purchase');
     ok(Object.keys(projectionReadsAfter({ '5h': { at: 1, resetsAt: NOW / 1000 - 10, boughtAt: 1 }, x: 'garbage' }, null, NOW)).length === 0, '…and an expired or garbage record is pruned');
     ok(cliRefreshWhy({ ...b, projReads: { '5h': 'x' } }, NOW) === 'projection' && cliRefreshWhy({ ...b, projReads: null }, NOW) === 'projection', '…hostile memory never silences the rule (and never throws)');
   }
@@ -399,7 +399,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const w = await run(makeWorld({ members: [slowMember()], sessions: [{ on: 'm1', model: 'claude-opus-5-5' }], loopFile: NO_PERSIST }), 40, (x, i) => { if (i % 2 === 0) x.restart(); });
     ok(w.proj().length > 1, '③ NEGATIVE CONTROL (patched copy that keeps its pacing state in memory only): the same crash loop re-buys the bucket after a restart', w.reads());
     const st = JSON.parse(fs.readFileSync(path.join(ctl.dataDir, 'auto-cli-state.json'), 'utf8'));
-    ok(st.v === 1 && st.attempts.m1 > 0 && st.projReads.m1 && st.projReads.m1['5h'] && st.projReads.m1['5h'].resetsAt === T0 / 1000 + 4 * 3600, '③ data/auto-cli-state.json carries the attempt clock and the bought bucket (its window)', st);
+    ok(st.v === 1 && st.attempts.m1 > 0 && gateOf(st.projReads.m1) && gateOf(st.projReads.m1['5h']) && st.projReads.m1['5h'].resetsAt === T0 / 1000 + 4 * 3600, '③ data/auto-cli-state.json carries the attempt clock and the bought bucket (its window)', st);
     ok(!fs.readdirSync(ctl.dataDir).some((f) => f.endsWith('.tmp')), '③ …written atomically (tmp + rename, nothing left behind)');
     fs.writeFileSync(path.join(ctl.dataDir, 'auto-cli-state.json'), '{not json');
     const { loadState } = require(REAL_LOOP);
@@ -409,7 +409,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     for (const [label, content] of [['corrupt JSON', '{not json'], ['a JSON array', '[1,2,3]'], ['a bare number', '42']]) {
       fs.writeFileSync(path.join(ctl.dataDir, 'auto-cli-state.json'), content);
       const warns = []; const st2 = loadState(ctl.dataDir, T0, (l) => warns.push(l));
-      ok(st2.attempts.size === 0 && st2.unknownAt === T0 && warns.length === 1 && /pacing state unreadable, unknown: .* — every account waits the longest backoff \(320 min\)/.test(warns[0]), `③ an unreadable state file (${label}) starts UNKNOWN with ONE warn line naming it and the wait (red on quota r2: silent)`, warns);
+      ok(st2.attempts.size === 0 && st2.unknownAt === T0 && warns.length === 1 && verdictOf(/pacing state unreadable, unknown: .* — every account waits the longest backoff \(320 min\)/.test(warns[0])), `③ an unreadable state file (${label}) starts UNKNOWN with ONE warn line naming it and the wait (red on quota r2: silent)`, warns);
     }
     fs.rmSync(path.join(ctl.dataDir, 'auto-cli-state.json'));
     { const warns = []; const st3 = loadState(ctl.dataDir, T0, (l) => warns.push(l)); ok(warns.length === 0 && st3.unknownAt == null, '③ …a MISSING file (first boot) starts empty silently — never unknown', warns); }
@@ -422,7 +422,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const ctl = await run(makeWorld({ members: [mem()], sessions: S, stateFile: { v: 1, attempts: { m1: T0 - 10 * MIN }, fails: {}, projReads: {} } }), 240);
     for (const [label, file] of [['720 h', futureFile(720 * H)], ['6 h with a failure backoff', futureFile(6 * H, 1)], ['2 h', futureFile(2 * H)]]) {
       const w = await run(makeWorld({ members: [mem()], sessions: S, stateFile: file }), 240);
-      ok(w.spawns.length >= ctl.spawns.length - 2 && w.spawns[0] && w.spawns[0].t - T0 <= 15 * MIN && w.logs.some((l) => /clock stepped back/.test(l)), `③ a state file stamped ${label} in the future (the clock stepped back) costs at most one floor (attempts clamped, a future purchase dropped): first spawn at min ${w.spawns[0] ? (w.spawns[0].t - T0) / MIN : '—'}, ${w.spawns.length} spawns in 4 h vs the past-stamp control's ${ctl.spawns.length}, one warn line (red on quota r2: 0 spawns for the 720 h and 6 h files)`, { spawns: w.spawns.map((x) => (x.t - T0) / MIN), logs: w.logs.filter((l) => l.startsWith('WARN')) });
+      ok(w.spawns.length >= ctl.spawns.length - 2 && gateOf(w.spawns[0]) && w.spawns[0].t - T0 <= 15 * MIN && verdictOf(w.logs.some((l) => /clock stepped back/.test(l))), `③ a state file stamped ${label} in the future (the clock stepped back) costs at most one floor (attempts clamped, a future purchase dropped): first spawn at min ${w.spawns[0] ? (w.spawns[0].t - T0) / MIN : '—'}, ${w.spawns.length} spawns in 4 h vs the past-stamp control's ${ctl.spawns.length}, one warn line (red on quota r2: 0 spawns for the 720 h and 6 h files)`, { spawns: w.spawns.map((x) => (x.t - T0) / MIN), logs: w.logs.filter((l) => l.startsWith('WARN')) });
     }
     const wc = await run(makeWorld({ members: [mem()], sessions: S, stateFile: futureFile(720 * H), loopFile: NO_CLAMP }), 240);
     ok(wc.spawns.length === 0, '③ NEGATIVE CONTROL (patched copy without the clamp): the 720 h file silences every rung for the whole 4 h', wc.spawns.length);
@@ -443,7 +443,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     // (the stand-in writer lands at once here, so this leg cannot tell a missing WAIT from a present one: its red is NO_PRESAVE, no stamp save
     //  at all; leg (2) below — the landing a turn later, red NO_WAIT — carries the wait: the two legs together are the proof)
     const r = await midSpawn(REAL_LOOP);
-    ok(r.hung === r.before + 1 && r.after === r.hung && r.disk && r.disk.attempts && r.disk.attempts.m1 > 0, '③ a restart 30 s into a hung spawn does NOT spawn again — the attempt stamp was on disk before the spawn (red on quota r2: re-spawned inside the floor)', r);
+    ok(r.hung === r.before + 1 && r.after === r.hung && gateOf(r.disk) && gateOf(r.disk.attempts) && r.disk.attempts.m1 > 0, '③ a restart 30 s into a hung spawn does NOT spawn again — the attempt stamp was on disk before the spawn (red on quota r2: re-spawned inside the floor)', r);
     const c = await midSpawn(NO_PRESAVE);
     ok(c.after === c.hung + 1, '③ NEGATIVE CONTROL (patched copy that saves only after the spawn): the restart re-spawns inside the floor', c);
   }
@@ -455,9 +455,9 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     //     (placed); RED: the stamp saved, its landing not waited for — the spawn starts before its stamp is on disk
     const direct = async (loopFile) => { const w = makeWorld({ members: [slowMember()], sessions: S, loopFile }); w.writer.later = true; await run(w, 60); return w.spawns; };
     const d0 = await direct(REAL_LOOP);
-    ok(d0.length >= 1 && d0.every((x) => x.stampOnDisk), `(2) every spawn stand-in, at its start, reads THIS ask's stamp on disk (${d0.map((x) => x.stampOnDisk).join(', ')}) — the landing came a turn after the call`, d0);
+    ok(d0.length >= 1 && verdictOf(d0.every((x) => x.stampOnDisk)), `(2) every spawn stand-in, at its start, reads THIS ask's stamp on disk (${d0.map((x) => x.stampOnDisk).join(', ')}) — the landing came a turn after the call`, d0);
     const d1 = await direct(NO_WAIT);
-    ok(d1.length >= 1 && d1.some((x) => !x.stampOnDisk), `(2) RED CONTROL (the landing not waited for): a spawn starts with its stamp NOT on disk (${d1.map((x) => x.stampOnDisk).join(', ')})`, d1);
+    ok(d1.length >= 1 && verdictOf(d1.some((x) => !x.stampOnDisk)), `(2) RED CONTROL (the landing not waited for): a spawn starts with its stamp NOT on disk (${d1.map((x) => x.stampOnDisk).join(', ')})`, d1);
     // (4) NOTHING ABOUT WHEN OR HOW OFTEN CHANGES: several ticks of failed landings (placed) ask nothing and say it once; the FIRST tick whose
     //     stamp lands asks exactly once — the ask the release would have made, never an extra one
     // the member DUE at every tick (its reading three hours old) until a read lands — so the first tick whose stamp lands is the one that asks
@@ -466,7 +466,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     await run(w4, 30); const during = w4.spawns.length, said4 = w4.logs.filter((l) => /its attempt stamp did not reach the disk/.test(l)).length;
     const wsaid4 = w4.logs.filter((l) => /pacing state write failed/.test(l)).length;   // r4786: the save's own failed-write line, latched too
     w4.writer.refuse = false; await run(w4, 3);
-    ok(during === 0 && said4 === 1 && wsaid4 === 1 && w4.spawns.length === 1 && w4.spawns[0].stampOnDisk && w4.state() && w4.state().attempts.m1 === w4.spawns[0].t,
+    ok(during === 0 && said4 === 1 && wsaid4 === 1 && w4.spawns.length === 1 && gateOf(w4.spawns[0].stampOnDisk) && gateOf(w4.state()) && w4.state().attempts.m1 === w4.spawns[0].t,
       `(4) 30 ticks of failed landings: no ask (${during}), said ONCE (${said4}), the failed write said ONCE (${wsaid4}); then a landing: exactly ONE ask (${w4.spawns.length}), its stamp on disk at its start`, { during, said4, wsaid4, spawns: w4.spawns });
     const l4 = makeWorld({ members: [slowMember()], sessions: S, loopFile: NO_WLATCH }); dueNow(l4); l4.writer.refuse = true; await run(l4, 30);
     const lsaid4 = l4.logs.filter((l) => /pacing state write failed/.test(l)).length;
@@ -490,7 +490,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     w3.writer.hang = false; w3.advance(MIN); await w3.tick();
     ok(!h3 && require(REAL_LOOP).STAMP_LANDING_MS === 30e3 && w3.spawns.length === 1 && said3 === 1, `(3) a landing that NEVER comes: each of 5 ticks RETURNED past its bound (under the suite's harness timer, never by the wall clock), no spawn, said once (${said3}); the next landing asks once (${w3.spawns.length}) — the bound STAMP_LANDING_MS = 30 s`, { said3, spawns: w3.spawns.length });
     const c3 = await hungTicks(NO_BOUND, 1500);
-    ok(!!c3.harness && /did not return/.test(c3.harness) && c3.w.spawns.length === 0, `(3) RED CONTROL (the loop's own bound cut: only the writer's answer ends the wait): a landing that never comes holds the tick — ${c3.harness}`, { harness: c3.harness });
+    ok(!!c3.harness && gateOf(/did not return/.test(c3.harness)) && c3.w.spawns.length === 0, `(3) RED CONTROL (the loop's own bound cut: only the writer's answer ends the wait): a landing that never comes holds the tick — ${c3.harness}`, { harness: c3.harness });
     // (1) THE LANDING OF THESE BYTES, by the REAL store writer: an EARLIER write of the same file in flight on the writer's thread (gated) lands
     //     while the stamp's write is still held — the spawn stand-in is NOT started; it starts when the stamp's own write lands, and reads it
     const GATED = path.join(scratchDir, 'gated-writer.cjs'), gates = fs.mkdtempSync(path.join(scratchDir, 'gates-'));
@@ -534,7 +534,7 @@ parentPort.on('message', (m) => {
     const spawnedEarly = w1.spawns.length;   // write 1 landed, the stamp's write held: the spawn must NOT have started
     for (let n = 2; n <= 12; n++) open(n);   // the stamp's write, then any later one (the after-write) — let through
     await ticks;
-    ok(oneHeld && handed && oneLanded && twoHeld && spawnedEarly === 0 && w1.spawns.length >= 1 && w1.spawns[0].stampOnDisk,
+    ok(gateOf(oneHeld) && gateOf(handed) && gateOf(oneLanded) && gateOf(twoHeld) && spawnedEarly === 0 && w1.spawns.length >= 1 && verdictOf(w1.spawns[0].stampOnDisk),
       `(1) the REAL writer: an earlier write of the file LANDED while the stamp's write was held at its gate — the spawn NOT started (${spawnedEarly}); it started once THAT write landed, and read its stamp (${w1.spawns[0] && w1.spawns[0].stampOnDisk})`, { oneHeld, handed, oneLanded, twoHeld, spawnedEarly, spawns: w1.spawns, tickDone });
     RW.stop();
   }
@@ -543,7 +543,7 @@ parentPort.on('message', (m) => {
   {
     const S = [{ on: 'm1', model: 'claude-opus-5-5' }];
     const w = await run(makeWorld({ members: [slowMember()], sessions: S, wakeThrows: true }), 16);
-    ok(w.proj().length === 1 && w.state() && w.state().projReads.m1 && w.logs.some((l) => /reading wake failed/.test(l)), '③ a wake that throws on every read: the bucket is still bought ONCE, the state written, the failure named', { reads: w.reads(), logs: w.logs });
+    ok(w.proj().length === 1 && gateOf(w.state()) && gateOf(w.state().projReads.m1) && verdictOf(w.logs.some((l) => /reading wake failed/.test(l))), '③ a wake that throws on every read: the bucket is still bought ONCE, the state written, the failure named', { reads: w.reads(), logs: w.logs });
     const wc = await run(makeWorld({ members: [slowMember()], sessions: S, wakeThrows: true, loopFile: R2_ORDER }), 16);
     ok(wc.spawns.length >= 2 && !(wc.state() && wc.state().projReads && wc.state().projReads.m1), '③ NEGATIVE CONTROL (patched copy with the r2 order: the wake unguarded before the bookkeeping): the bucket is re-bought, no purchase reaches disk', { spawns: wc.spawns.map((x) => (x.t - T0) / MIN), logs: wc.logs });
   }
@@ -554,7 +554,7 @@ parentPort.on('message', (m) => {
     const S2 = [{ on: 'm1', model: 'claude-opus-5-5' }, { on: 'm2', model: 'claude-opus-5-5' }];
     const w = await run(makeWorld({ members: [slowMember({ id: 'm1' }), slowMember({ id: 'm2' })], sessions: S2, groups: [['m1', 'm2']] }), 60);
     const st = w.state();
-    ok(w.proj().length === 1 && st && st.projReads.m1 && st.projReads.m2 && st.projReads.m1['5h'].boughtAt === st.projReads.m2['5h'].boughtAt, '⑤ two account ids over ONE org-merged identity buy ONE projection read, recorded under both ids (red on quota r2: m1 at min 5, m2 again at min 10)', { reads: w.reads(), st });
+    ok(w.proj().length === 1 && gateOf(st) && gateOf(st.projReads.m1) && gateOf(st.projReads.m2) && st.projReads.m1['5h'].boughtAt === st.projReads.m2['5h'].boughtAt, '⑤ two account ids over ONE org-merged identity buy ONE projection read, recorded under both ids (red on quota r2: m1 at min 5, m2 again at min 10)', { reads: w.reads(), st });
     const wc = await run(makeWorld({ members: [slowMember({ id: 'm1' }), slowMember({ id: 'm2' })], sessions: S2, groups: [['m1', 'm2']], loopFile: NO_GROUP }), 60);
     ok(wc.proj().length === 2, '⑤ NEGATIVE CONTROL (patched copy keyed by account id): the same identity buys its bucket twice', wc.reads());
   }
@@ -563,10 +563,10 @@ parentPort.on('message', (m) => {
     const R = NOW / 1000 + 3600;
     const reads = { '5h': { at: NOW + 8 * MIN, resetsAt: R, boughtAt: NOW } };
     const b = { key: 'b', fetchedAt: NOW - 10 * MIN, lastAttemptAt: 0, estDriftPct: 0, activeBurn: true, projCrossInMs: 8 * MIN, estBurnPtPerMin: 0, projLabel: '5h', projResetsAt: R, projReads: reads };
-    ok(projectionBucketBought(b, NOW) && cliRefreshWhy(b, NOW) === null, '⑤ the crossing in the record\'s own window: bought (control)');
+    ok(gateOf(projectionBucketBought(b, NOW)) && cliRefreshWhy(b, NOW) === null, '⑤ the crossing in the record\'s own window: bought (control)');
     ok(!projectionBucketBought({ ...b, projResetsAt: R - 1800 }, NOW + 20 * MIN) && cliRefreshWhy({ ...b, projResetsAt: R - 1800 }, NOW + 20 * MIN) === 'projection', '⑤ the crossing names an EARLIER window (a panel estimate corrected by an exact reading, 30 min earlier) ⇒ a new question (red on quota r2: bought until the record\'s reset)');
     ok(!projectionBucketBought({ ...b, projResetsAt: R + 5 * 3600 }, NOW + 10 * MIN), '⑤ …the NEXT window (R + 5 h) ⇒ a new question');
-    ok(projectionBucketBought({ ...b, projResetsAt: R + 60 }, NOW) && projectionBucketBought({ ...b, projResetsAt: 0 }, NOW), '⑤ …a minute of disagreement (the estimate\'s rounding) or an unknown crossing window is the same window');
+    ok(gateOf(projectionBucketBought({ ...b, projResetsAt: R + 60 }, NOW)) && verdictOf(projectionBucketBought({ ...b, projResetsAt: 0 }, NOW)), '⑤ …a minute of disagreement (the estimate\'s rounding) or an unknown crossing window is the same window');
     ok(PROJECTION_RECORD_MAX_MS === 8 * 86400e3, '⑤ PROJECTION_RECORD_MAX_MS = 8 d (no vendor window exceeds 7 d)');
     const ms = { '5h': { at: NOW - 2 * 3600e3 + 20 * MIN, resetsAt: NOW + 3 * 3600e3, boughtAt: NOW - 2 * 3600e3 } }; // resetsAt in MILLISECONDS
     const d30 = { '7d': { at: NOW, resetsAt: NOW / 1000 + 30 * 86400, boughtAt: NOW } };
@@ -595,7 +595,7 @@ parentPort.on('message', (m) => {
     const perHour = []; for (let h = 0; h < 3; h++) { const b = w.spawns.length; await run(w, 60); perHour.push(w.spawns.length - b); }
     const per = {}; for (const x of w.proj()) per[x.key] = (per[x.key] || 0) + 1;
     const readMembers = new Set(w.spawns.map((x) => x.key));
-    ok(Object.values(per).every((n) => n === 1) && Object.keys(per).length >= 8 && readMembers.size === 10 && perHour[0] <= 20, `④ fleet, ${label}: at most ONE projection read per member (a member the one-per-tick slot reached late is read by its age rung instead), every member read, ${perHour.join('/')} spawns per hour (red on quota r1 under sparse Poisson: 42 projection reads in the first hour)`, { perHour, per });
+    ok(gateOf(Object.values(per).every((n) => n === 1)) && Object.keys(per).length >= 8 && readMembers.size === 10 && perHour[0] <= 20, `④ fleet, ${label}: at most ONE projection read per member (a member the one-per-tick slot reached late is read by its age rung instead), every member read, ${perHour.join('/')} spawns per hour (red on quota r1 under sparse Poisson: 42 projection reads in the first hour)`, { perHour, per });
   }
 }
 
@@ -640,7 +640,7 @@ parentPort.on('message', (m) => {
     && AC.probeEligibility(oatRow({ oatCli: { measured: 'yes' } })) === AC.CLI_UNMEASURED && AC.probeEligibility(oatRow({ oatScopes: 'user:profile' })) === AC.OAT_NO_PROFILE,
     '§10a a harness without the cli-usage rung / hostile input ⇒ null; a garbage loginState is no oat-only claim; a truthy-but-not-true measured / a scopes STRING are no facts');
   // B-360d: + `unknown:sign-in` (the row's sign-in facts not read / unreadable / unconfirmed) — NOT unprobeable: it decides nothing
-  ok(AC.PROBE_ELIGIBILITY.join() === 'probeable,unprobeable:oat-no-profile,unprobeable:cli-unmeasured,unprobeable:oat-not-in-folder,unprobeable:oat-folder-no-panel,unprobeable:no-login,unknown:sign-in' && AC.PROBE_ELIGIBILITY.slice(1, -1).every(AC.isUnprobeable) && !AC.isUnprobeable(AC.SIGNIN_UNKNOWN) && AC.probeEligibility({ type: 'subscription', facts: { state: 'unread' } }) === AC.SIGNIN_UNKNOWN && !AC.isUnprobeable(AC.PROBEABLE) && !AC.isUnprobeable('unprobeable:oat-only') && AC.PROFILE_SCOPE === 'user:profile',
+  ok(AC.PROBE_ELIGIBILITY.join() === 'probeable,unprobeable:oat-no-profile,unprobeable:cli-unmeasured,unprobeable:oat-not-in-folder,unprobeable:oat-folder-no-panel,unprobeable:no-login,unknown:sign-in' && gateOf(AC.PROBE_ELIGIBILITY.slice(1, -1).every(AC.isUnprobeable)) && !AC.isUnprobeable(AC.SIGNIN_UNKNOWN) && AC.probeEligibility({ type: 'subscription', facts: { state: 'unread' } }) === AC.SIGNIN_UNKNOWN && !AC.isUnprobeable(AC.PROBEABLE) && !AC.isUnprobeable('unprobeable:oat-only') && AC.PROFILE_SCOPE === 'user:profile',
     '§10a the closed table: one probeable state (a LIVE login), four named oat-only facts + no login, + the sign-in not read (decides nothing — never unprobeable); the retired blanket `unprobeable:oat-only` is no state');
   ok(AC.notProbedWords(AC.OAT_FOLDER_NO_PANEL, { oatCli: { cli: '2.1.312' } }) === 'long-lived token in the account\'s folder: claude 2.1.312 prints no quota lines for a folder-token login; refreshes when a session uses it', '§10a R3: the folder-token row is said with the CLI that prints nothing for it', AC.notProbedWords(AC.OAT_FOLDER_NO_PANEL, { oatCli: { cli: '2.1.312' } }));
   // R3: A PANEL ANSWER WITH NO QUOTA LINE IS CLASSED BY WHAT THE CLI SAID (the two shapes in the owner's log, 10-28)
@@ -656,7 +656,7 @@ parentPort.on('message', (m) => {
   ok(AC.notProbedWords(AC.OAT_NO_PROFILE) === 'long-lived token only, without the user:profile scope the usage panel reads; refreshes when a session uses it'
     && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '2.1.308' } }) === 'long-lived token only, and Claude Code 2.1.308 isn\'t cleared for it on this machine yet (the hub checks a new build itself when its switch is on); refreshes when a session uses it'
     && AC.notProbedWords(AC.OAT_NOT_IN_FOLDER, { oatFile: { reason: 'write-failed' } }) === 'long-lived token only, not written to the account\'s folder (write-failed); refreshes when a session uses it'
-    && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '<b>x</b> 1' } }).includes('Claude Code ? isn') && AC.notProbedWords(AC.PROBEABLE) === '',
+    && gateOf(AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '<b>x</b> 1' } }).includes('Claude Code ? isn')) && AC.notProbedWords(AC.PROBEABLE) === '',
     '§10a the journal names the fact that failed (the CLI version, the folder refusal — a value outside their shape is said as «?» / dropped)');
   // the reason + THE ONE scrub: a planted token-shaped line never survives (built at runtime — never a literal)
   const OAT = ['sk-ant-', 'oat01-', 'Qx7Lm2'.repeat(14)].join('');
@@ -664,12 +664,12 @@ parentPort.on('message', (m) => {
   const JWT = ['eyJ', 'hbGciOiJIUzI1NiJ9', '.eyJ', 'zdWIiOiIxIn0', '.c2lnbmF0dXJlLXNpZ25hdHVyZQ'].join('');
   const STDIN_WARN = 'Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.';
   const w1 = AC.probeFailWhy({ exitCode: 1, rawStderr: `${STDIN_WARN}\n\x1b[31mError: token ${OAT} rejected · Authorization: Bearer ${BARE}\x1b[0m\n`, rawStdout: '' });
-  ok(/^exit 1: Error: token sk-«redacted» rejected/.test(w1) && !w1.includes(OAT.slice(14, 40)) && !w1.includes(BARE) && !/\x1b/.test(w1), '§10a a failed spawn: `exit N: <the CLI\'s first line>` — the stdin Warning skipped, ANSI out, the token and the bearer «redacted»', w1);
+  ok(gateOf(/^exit 1: Error: token sk-«redacted» rejected/.test(w1)) && !w1.includes(OAT.slice(14, 40)) && !w1.includes(BARE) && !/\x1b/.test(w1), '§10a a failed spawn: `exit N: <the CLI\'s first line>` — the stdin Warning skipped, ANSI out, the token and the bearer «redacted»', w1);
   ok(AC.probeFailWhy({ exitCode: 1, rawStderr: STDIN_WARN + '\n', rawStdout: 'Not logged in · Please run /login\n' }) === 'exit 1: Not logged in · Please run /login', '§10a …nothing but the Warning on stderr ⇒ the first stdout line (the CLI\'s own refusal)');
   ok(AC.probeFailWhy({ exitCode: 0, rawStdout: 'You are currently using your subscription to power your Claude Code usage\n' }) === 'no quota lines in its answer: You are currently using your subscription to power your Claude Code usage', '§10a an answer with no quota line (exit 0, the measured 152-row shape) says so with its first line');
   ok(AC.probeFailWhy({ exitCode: 'killed' }) === 'killed (the 60 s limit)' && AC.probeFailWhy({}) === 'exit ?' && AC.probeFailWhy({ exitCode: 2, why: 'spawn threw: ENOENT' }) === 'exit 2: spawn threw: ENOENT', '§10a a kill / nothing said / the door\'s own why');
   const long = AC.probeWhyText('x'.repeat(5000) + ' ' + JWT), wj = AC.probeWhyText(`session: ${JWT} and ${BARE}`);
-  ok(long.length === AC.WHY_MAX && long.endsWith('…') && !wj.includes(JWT.slice(3, 20)) && !wj.includes(BARE) && AC.probeWhyText(wj) === wj && AC.probeWhyText(null) === '',
+  ok(long.length === AC.WHY_MAX && gateOf(long.endsWith('…')) && !wj.includes(JWT.slice(3, 20)) && !wj.includes(BARE) && AC.probeWhyText(wj) === wj && AC.probeWhyText(null) === '',
     '§10a probeWhyText: bounded (WHY_MAX, the cut after the redaction), a JWT and an unnamed key run hidden, idempotent, null ⇒ \'\'', { long: long.length, wj });
   ok(AC.probeRecordOf({ at: 5, ok: false, why: `boom ${OAT}` }).why === 'boom sk-«redacted»' && AC.probeRecordOf({ at: 5, ok: true, why: 'x' }) === null && AC.probeRecordOf({ at: 0, ok: false, why: 'x' }) === null && AC.probeRecordOf({ at: 5, ok: false, why: '' }) === null && AC.probeRecordOf('x') === null,
     '§10a probeRecordOf: a record\'s fact bounded and scrubbed again; ok / no instant / no reason / garbage ⇒ null');
@@ -683,7 +683,7 @@ parentPort.on('message', (m) => {
   const loopTxt = loopOf(fs.readFileSync(REAL_LOOP, 'utf8'));
   // RED CONTROL 1: the fix reverted — the base filter (`!a.loggedIn`, no verdict) — every other line the real loop's
   const CUT = ['|| a.pooled || capsOf(a.backend).quotaProbe !== \'cli-usage\' || unprobeable(a, now) || !d.autoCliReady(a.id)) continue;', '|| !a.loggedIn || a.pooled || capsOf(a.backend).quotaProbe !== \'cli-usage\' || !d.autoCliReady(a.id)) continue;'];
-  ok(loopTxt.includes(CUT[0]), '§10b the control\'s anchor is the real loop\'s filter (the verdict sits between the rung filter and autoCliReady)');
+  ok(verdictOf(loopTxt.includes(CUT[0])), '§10b the control\'s anchor is the real loop\'s filter (the verdict sits between the rung filter and autoCliReady)');
   const BASE_LOOP = path.join(scratch, 'loop-base-filter.js'); fs.writeFileSync(BASE_LOOP, loopTxt.replace(CUT[0], CUT[1]));
   // RED CONTROLS 2 + 3: the verdict with ONE of its checks cut (the same loop, re-pointed at the patched verdict)
   const modelTxt = fs.readFileSync(REAL_MODEL, 'utf8').replace(/require\('\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(path.join(SRC, f))})`);
@@ -759,7 +759,7 @@ parentPort.on('message', (m) => {
     const w = world({ stateFile: { v: 1, attempts: { 'sub-np': T0 - H, 'sub-ok': T0 - 2 * H }, fails: { 'sub-np': 36 }, projReads: {} } });
     await w.run(1);
     const st1 = w.state(), first = linesOf(w, 'sub-np', /not probed/);
-    ok(st1 && !('sub-np' in (st1.fails || {})) && !('sub-np' in (st1.attempts || {})) && st1.said && st1.said['sub-np|unprobeable:oat-no-profile'] === T0, '§10b the FIRST tick clears what the base booked against an unprobeable row (its 36 failures, its attempt stamp) and stamps the say-memory per kind', st1);
+    ok(gateOf(st1) && !('sub-np' in (st1.fails || {})) && !('sub-np' in (st1.attempts || {})) && gateOf(st1.said) && st1.said['sub-np|unprobeable:oat-no-profile'] === T0, '§10b the FIRST tick clears what the base booked against an unprobeable row (its 36 failures, its attempt stamp) and stamps the say-memory per kind', st1);
     ok(first.length === 1 && first[0] === NP_LINE + ' (36 failed attempts booked before this cleared)', '§10b …and SAYS so, once, naming the fact that failed (no user:profile)', first);
     ok(linesOf(w, 'sub-um', /not probed/).join() === UM_LINE, '§10b an unmeasured CLI is said with its version', linesOf(w, 'sub-um', /./));
     await w.run(10 * 60 - 1); w.restart(); await w.run(14 * 60); // 24 h, a restart at 10 h (the say-memory is on disk)
@@ -774,7 +774,7 @@ parentPort.on('message', (m) => {
     ok(oat.length === 0 && linesOf(w, 'sub-oat', /not probed — long-lived token in the account's folder: claude 2\.1\.306 prints no quota lines for a folder-token login; refreshes when a session uses it$/).length === 2, `§10b R3: an oat-only row whose token (user:profile, a measured CLI) is written in its folder is NEVER probed (${oat.length} in 30 h) — said once a day by name, read passively instead (the 2.369.342 addendum's premise retired)`, linesOf(w, 'sub-oat', /./));
     const bad = linesOf(w, 'sub-bad', /: failed \(/), good = linesOf(w, 'sub-ok', /: ok \(/);
     ok(of(w, 'sub-bad').length >= 4 && of(w, 'sub-bad').length <= 12 && (w.state().fails || {})['sub-bad'] >= 4, `§10b a probeable failing row is still asked, paced by the failure backoff (${of(w, 'sub-bad').length} attempts in 30 h, fails ${(w.state().fails || {})['sub-bad']})`);
-    ok(bad.length === of(w, 'sub-bad').length && bad.every((l) => / — exit 1: Error: token sk-«redacted» rejected \[exit\]$/.test(l)), '§10b …EVERY failed line names its reason: the CLI\'s line + the class', bad.slice(0, 2));
+    ok(bad.length === of(w, 'sub-bad').length && verdictOf(bad.every((l) => / — exit 1: Error: token sk-«redacted» rejected \[exit\]$/.test(l))), '§10b …EVERY failed line names its reason: the CLI\'s line + the class', bad.slice(0, 2));
     ok(!w.logs.some((l) => l.includes(OAT.slice(10)) || l.includes(OAT.slice(14, 40))), '§10b …the planted token-shaped line never reaches the journal (the loop\'s scrub — the door\'s RAW why here)');
     ok(good.length >= 25 && !good.some((l) => / — /.test(l)), `§10b a probeable reading row reads on the idle rung (${good.length} reads in 30 h), its ok lines unchanged`);
   }
@@ -951,7 +951,7 @@ parentPort.on('message', (m) => {
       ok(!e0.harness && again === null && e0.hung === 1 && said5 === 1 && e0.w.calls.length === 0 && fs.readFileSync(e0.file, 'utf8') === JSON.stringify(STATE),
         `§ban-safety r5030 (a): a read that NEVER ANSWERS at the wait's end (placed) — past its bound (50 ms here; READ_AGAIN_MS = ${require(REAL_LOOP).READ_AGAIN_MS / 1000} s) it is unreadable: the tick returned, said once (${said5}), the wait started again — no call in ${2 * WAIT_MIN} min (${e0.w.calls.length}), the file whole`, { harness: e0.harness, again, hung: e0.hung, said5 });
       const e1 = await hungRead(NO_READ_BOUND, 1000);
-      ok(!!e1.harness && /the read began/.test(e1.harness) && e1.hung === 1 && e1.w.calls.length === 0, `§ban-safety r5030 (a) RED CONTROL (the read with no bound): a hung folder holds the tick — ${e1.harness}`, { harness: e1.harness, hung: e1.hung });
+      ok(!!e1.harness && gateOf(/the read began/.test(e1.harness)) && e1.hung === 1 && e1.w.calls.length === 0, `§ban-safety r5030 (a) RED CONTROL (the read with no bound): a hung folder holds the tick — ${e1.harness}`, { harness: e1.harness, hung: e1.hung });
     }
     { // (f) 主开发 r5030 (c): the tick's clock READ AGAIN after the read — a read that takes three minutes (placed: the world's clock moves while it
       //     reads) never makes this tick's stamps older than its spawns; RED: the clock not read again — those stamps three minutes older
@@ -960,8 +960,8 @@ parentPort.on('message', (m) => {
           const end = w.calls.filter((c) => c.t === T0 + (WAIT_MIN + 3) * 60e3), disk = w.state();
           return { asks: end.map((c) => c.key), at: end.map((c) => c.t), stamps: end.map((c) => (disk && disk.attempts ? disk.attempts[c.key] : null)) }; } finally { pa.restore(); } };
       const f0 = await slowRead(REAL_LOOP), f1 = await slowRead(NO_RECLOCK);
-      ok(f0.asks.length >= 1 && f0.stamps.every((s, i) => s === f0.at[i]), `§ban-safety r5030 (c): a read of three minutes at the wait's end — the ${f0.asks.length} ask(s) of that tick (${f0.asks.join(', ')}) are stamped with the clock AFTER the read (the minute they start)`, f0);
-      ok(f1.asks.length >= 1 && f1.stamps.every((s, i) => s === f1.at[i] - 3 * 60e3), `§ban-safety r5030 (c) RED CONTROL (the clock not read again): that tick's stamps are three minutes older than its asks`, f1);
+      ok(f0.asks.length >= 1 && verdictOf(f0.stamps.every((s, i) => s === f0.at[i])), `§ban-safety r5030 (c): a read of three minutes at the wait's end — the ${f0.asks.length} ask(s) of that tick (${f0.asks.join(', ')}) are stamped with the clock AFTER the read (the minute they start)`, f0);
+      ok(f1.asks.length >= 1 && verdictOf(f1.stamps.every((s, i) => s === f1.at[i] - 3 * 60e3)), `§ban-safety r5030 (c) RED CONTROL (the clock not read again): that tick's stamps are three minutes older than its asks`, f1);
     }
     { // (g) 主开发 r5061 (2)+(3): a LATE ANSWER (placed: the first read answers 200 ms after its 50 ms bound, with a state holding an OLDER
       //     stamp) — NOTHING merged, the unknown mark still set, the wait restarted from the clock read AFTER the read gave up (the world's
@@ -1009,16 +1009,16 @@ parentPort.on('message', (m) => {
         } finally { pa.restore(); } };
       const WAIT = WAIT_MIN * 60e3, at = (f) => (f ? `${(f.since - T0) / 60e3}/${(f.next - T0) / 60e3}` : 'none');
       const iM = await roads(REAL_LOOP, 'merged'), iN = await roads(REAL_LOOP, 'missing'), iT = await roads(REAL_LOOP, 'torn'), iR = await roads(REAL_LOOP, 'restart');
-      ok(iM.f0 && iM.f0.since === T0 && iM.f0.next === T0 + WAIT && iM.keys === 'key,facts,onLift' && iM.f1 === null && iM.lifted === 1 && iM.said.merged === 1,
+      ok(gateOf(iM.f0) && iM.f0.since === T0 && iM.f0.next === T0 + WAIT && iM.keys === 'key,facts,onLift' && iM.f1 === null && iM.lifted === 1 && iM.said.merged === 1,
         `§ban-safety r5143 (i): the held row during the wait — since the first unreadable moment, next the wait's end (min ${at(iM.f0)}), no read-again on it (${iM.keys}); the state merged at the wait's end: said once (${iM.said.merged}), the row lifted ONCE (${iM.lifted}), its facts gone`, iM);
       ok(iN.f1 === null && iN.lifted === 1 && iN.said.missing === 1 && iT.f1 === null && iT.lifted === 1 && iT.said.torn === 1,
         `§ban-safety r5143 (i): the file NOT THERE at the wait's end — said once (${iN.said.missing}), lifted once (${iN.lifted}); TORN bytes kept aside — said once (${iT.said.torn}), lifted once (${iT.lifted})`, { iN, iT });
-      ok(iR.f1 && iR.f1.since === T0 && iR.f1.next === T0 + WAIT + WAIT && iR.lifted1 === 0 && iR.said.still === 1 && iR.f2 === null && iR.lifted === 1 && iR.said.merged === 1,
+      ok(gateOf(iR.f1) && iR.f1.since === T0 && iR.f1.next === T0 + WAIT + WAIT && iR.lifted1 === 0 && iR.said.still === 1 && iR.f2 === null && iR.lifted === 1 && iR.said.merged === 1,
         `§ban-safety r5143 (i): a RESTARTED wait (an error of the file system at its end) keeps the row — since unchanged, next moved (min ${at(iR.f1)}), no lift; the healed read at the next end lifts it once (${iR.lifted})`, iR);
       const FIXED_SINCE_CUT = loopCut('loop-since-jumps', 'since: unknownSince != null ? unknownSince : st.unknownAt', 'since: st.unknownAt');
       const LIFT_CUT = loopCut('loop-lift-cut', "every bucket kept)'); liftRow(); return; }", "every bucket kept)'); return; }");   // stale-pins: kept — the merged road as it was before the lift, planted back as the RED
       const rS = await roads(FIXED_SINCE_CUT, 'restart'), rL = await roads(LIFT_CUT, 'merged');
-      ok(rS.f1 && rS.f1.since === T0 + WAIT, `§ban-safety r5143 (i) RED CONTROL (since taken from the wait's own mark): at the restart «since» jumps (min ${at(rS.f1)})`, rS);
+      ok(gateOf(rS.f1) && rS.f1.since === T0 + WAIT, `§ban-safety r5143 (i) RED CONTROL (since taken from the wait's own mark): at the restart «since» jumps (min ${at(rS.f1)})`, rS);
       ok(rL.f1 === null && rL.lifted === 0, `§ban-safety r5143 (i) RED CONTROL (the lift cut on the merged road): the wait ended and the row was never lifted (${rL.lifted}) — the notice would stand until a reload`, rL);
       // r5213's should: a red for each other road's lift (not there, torn)
       const MISSING_LIFT_CUT = loopCut('loop-missing-lift-cut', "nothing to merge; the loop goes on with its memory'); liftRow(); return; }", "nothing to merge; the loop goes on with its memory'); return; }");   // stale-pins: kept — the road without its lift, planted as the RED
@@ -1037,7 +1037,7 @@ parentPort.on('message', (m) => {
         await hl.readAgain(); const pressReads = pa.reads(), c0 = casts.length;   // the press says the list once (the row in it)
         await w.run(WAIT_MIN + 1);
         const after = hl.list().filter((r) => r.key === 'auto-cli-state.json').length;
-        ok(!!during && during.what === 'auto-cli-state.json' && during.since === T0 && during.next === T0 + WAIT_MIN * 60e3 && during.readAgain === false && pressReads === 0 && after === 0 && c0 === 1 && casts[0].lists.some((r) => r.key === 'auto-cli-state.json') && casts.length - c0 === 1 && casts[casts.length - 1].lists.every((r) => r.key !== 'auto-cli-state.json'),
+        ok(!!during && during.what === 'auto-cli-state.json' && during.since === T0 && during.next === T0 + WAIT_MIN * 60e3 && during.readAgain === false && pressReads === 0 && after === 0 && c0 === 1 && gateOf(casts[0].lists.some((r) => r.key === 'auto-cli-state.json')) && casts.length - c0 === 1 && verdictOf(casts[casts.length - 1].lists.every((r) => r.key !== 'auto-cli-state.json')),
           `§ban-safety r5143 (j): in the real held-lists notice — listed (${during ? during.what : 'absent'}, readAgain ${during ? during.readAgain : '-'}), the person's press reads the state file not (${pressReads} reads), the wait's end broadcasts ONCE (${casts.length - c0}) and the row is gone (${after})`, { during, casts: casts.length, c0, after, pressReads });
         if (typeof hl.stop === 'function') hl.stop();
       } finally { pa.restore(); }
@@ -1062,25 +1062,25 @@ parentPort.on('message', (m) => {
           return { manual0, manual1, on, off };
         } finally { pa.restore(); } };
       const k0 = await gated(REAL_LOOP);
-      ok(k0.manual0.facts === null && !k0.manual0.listed && k0.manual1.facts === null && !k0.manual1.listed && k0.manual1.unknown && k0.manual1.reads === 0 && k0.manual1.calls === 0
-        && k0.on.facts && k0.on.listed && k0.on.casts === 1 && k0.on.last === true && k0.off.facts === null && !k0.off.listed && k0.off.casts === 2 && k0.off.last === false,
+      ok(k0.manual0.facts === null && !k0.manual0.listed && k0.manual1.facts === null && !k0.manual1.listed && gateOf(k0.manual1.unknown) && k0.manual1.reads === 0 && k0.manual1.calls === 0
+        && gateOf(k0.on.facts) && gateOf(k0.on.listed) && k0.on.casts === 1 && k0.on.last === true && k0.off.facts === null && !k0.off.listed && k0.off.casts === 2 && k0.off.last === false,
         `§ban-safety r5213 (k): under MANUAL with the file unreadable — no row (listed ${k0.manual1.listed}), the wait runs on (${k0.manual1.unknown}), no read (${k0.manual1.reads}), no call (${k0.manual1.calls}); switched to the automatic form — the row, the list told once (${k0.on.casts}); switched away — the row leaves by ONE broadcast (${k0.off.casts - k0.on.casts})`, k0);
       const GATE_CUT = loopCut('loop-row-ungated', 'st.unknownAt != null && autoOn() ? {', 'st.unknownAt != null ? {');   // stale-pins: kept — the row before its gate, planted back as the RED
       const k1 = await gated(GATE_CUT);
-      ok(!!k1.manual1.facts && k1.manual1.listed, `§ban-safety r5213 (k) RED CONTROL (the setting's gate removed): under Manual the row stands (listed ${k1.manual1.listed}) — «paused … next try» with no read coming`, k1.manual1);
+      ok(!!k1.manual1.facts && verdictOf(k1.manual1.listed), `§ban-safety r5213 (k) RED CONTROL (the setting's gate removed): under Manual the row stands (listed ${k1.manual1.listed}) — «paused … next try» with no read coming`, k1.manual1);
     }
   }
   // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts
   const loopSrc = fs.readFileSync(REAL_LOOP, 'utf8'), ur = fs.readFileSync(new URL('../src/usage-routes.js', import.meta.url), 'utf8'), acc = fs.readFileSync(new URL('../src/accounts.js', import.meta.url), 'utf8');
-  ok(/const el = probeEligibility\(a\);/.test(loopSrc) && /require\('\.\.\/auto-cli-model\.js'\)/.test(loopSrc) && /const sk = `\$\{a\.id\}\|\$\{el\}`;/.test(loopSrc), 'WIRING PIN: the loop asks src/auto-cli-model.js probeEligibility for every rung subject, its say-memory per kind');
-  ok(/const pv = d\.usage\.panelVerdictFor\?\.\(key\); if \(pv && pv\.at >= now && pv\.why\) failWhy = `\$\{probeWhyText\(pv\.why\)\} \[/.test(loopSrc), 'WIRING PIN: a failed pick\'s line carries the door\'s verdict for THIS attempt, through the ONE scrub');
+  ok(gateOf(/const el = probeEligibility\(a\);/.test(loopSrc)) && gateOf(/require\('\.\.\/auto-cli-model\.js'\)/.test(loopSrc)) && verdictOf(/const sk = `\$\{a\.id\}\|\$\{el\}`;/.test(loopSrc)), 'WIRING PIN: the loop asks src/auto-cli-model.js probeEligibility for every rung subject, its say-memory per kind');
+  ok(verdictOf(/const pv = d\.usage\.panelVerdictFor\?\.\(key\); if \(pv && pv\.at >= now && pv\.why\) failWhy = `\$\{probeWhyText\(pv\.why\)\} \[/.test(loopSrc)), 'WIRING PIN: a failed pick\'s line carries the door\'s verdict for THIS attempt, through the ONE scrub');
   const fnAt = ur.indexOf('async function refreshViaCliPanel('), askAt = ur.indexOf('const el = probeEligibility(acctMeta);', fnAt), spawnAt = ur.indexOf('spawnPanelProbe(bin', fnAt);
-  ok(fnAt > 0 && askAt > fnAt && spawnAt > askAt && /const el = probeEligibility\(acctMeta\);\n\s*if \(isUnprobeable\(el\)\) \{\n(?:[^\n]*\n){1,6}\s*panelSays\(key, \{ at: Date\.now\(\), outcome: folderToken \? 'not-probed' : 'login-needed', code: 'unprobeable', el,/.test(ur), 'WIRING PIN: the probe door asks the SAME verdict before the spawn and refuses EVERY unprobeable row by name — the no-login one too (R3; code unprobeable since acceptance r2: the route\'s token ladder is tried first, no spawn; r3: a locked vault said as the roster says it)');
-  ok(/panelSays\(key, \{ at: Date\.now\(\), outcome: cls === 'no-login' \? 'login-needed' : probeRec\.exitCode === 0 \? 'no-buckets-parsed' : 'spawn-failed', code: cls === 'no-login' \? 'login' : cls === 'folder-token' \? 'folder-token' : probeRec\.exitCode === 0 \? 'parse' : 'exit', identityVerified: false, why: failWhy, rung: 'panel' \}\);/.test(ur) && !/_panelVerdict\[key\] = \{/.test(ur),
+  ok(fnAt > 0 && askAt > fnAt && spawnAt > askAt && verdictOf(/const el = probeEligibility\(acctMeta\);\n\s*if \(isUnprobeable\(el\)\) \{\n(?:[^\n]*\n){1,6}\s*panelSays\(key, \{ at: Date\.now\(\), outcome: folderToken \? 'not-probed' : 'login-needed', code: 'unprobeable', el,/.test(ur)), 'WIRING PIN: the probe door asks the SAME verdict before the spawn and refuses EVERY unprobeable row by name — the no-login one too (R3; code unprobeable since acceptance r2: the route\'s token ladder is tried first, no spawn; r3: a locked vault said as the roster says it)');
+  ok(gateOf(/panelSays\(key, \{ at: Date\.now\(\), outcome: cls === 'no-login' \? 'login-needed' : probeRec\.exitCode === 0 \? 'no-buckets-parsed' : 'spawn-failed', code: cls === 'no-login' \? 'login' : cls === 'folder-token' \? 'folder-token' : probeRec\.exitCode === 0 \? 'parse' : 'exit', identityVerified: false, why: failWhy, rung: 'panel' \}\);/.test(ur)) && !/_panelVerdict\[key\] = \{/.test(ur),
     'WIRING PIN: the door names its silent failures — exit / parse, and (R3) the two classed answers no-login / folder-token — and EVERY verdict goes through panelSays (the record\'s one writer call)');
-  ok(/const pe = probeEligibility\(row, \{ quotaProbe: capsOf\(backend\)\.quotaProbe \}\);/.test(acc) && /row\.oatCli = \{ cli: caps\.cli, measured: !!caps\.ok \};/.test(acc) && /row\.oatScopes = a\.oatShape && Array\.isArray\(a\.oatShape\.scopes\)/.test(acc), 'WIRING PIN: the roster row carries the verdict AND its facts (oatScopes from the recorded shape, oatCli from oatFileCaps)');
+  ok(gateOf(/const pe = probeEligibility\(row, \{ quotaProbe: capsOf\(backend\)\.quotaProbe \}\);/.test(acc)) && gateOf(/row\.oatCli = \{ cli: caps\.cli, measured: !!caps\.ok \};/.test(acc)) && verdictOf(/row\.oatScopes = a\.oatShape && Array\.isArray\(a\.oatShape\.scopes\)/.test(acc)), 'WIRING PIN: the roster row carries the verdict AND its facts (oatScopes from the recorded shape, oatCli from oatFileCaps)');
   ok(!/require\(['"](https?|child_process|net)['"]\)|fetch\(/.test(fs.readFileSync(REAL_MODEL, 'utf8')), '§ban-safety: the verdict module makes no call of any kind (no http/https/net/child_process/fetch)');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

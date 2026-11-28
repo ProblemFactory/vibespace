@@ -46,7 +46,7 @@ const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0, skipped = 0;
 /** a leg whose premise is a FONT fact absent here: said BY NAME with what was measured, never assumed (lane needs-card-tail r13) */
 const skip = (n, why) => { skipped++; console.log(`  ○ SKIP ${n} — ${typeof why === 'string' ? why : JSON.stringify(why).slice(0, 1500)}`); };
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CONV = 'fake-poll/fake-poll-ops';
 
@@ -332,15 +332,15 @@ try {
       await show(S.item);
       const f = await A.evalJs(S23);
       await A.shot(`phone-390-strip-${name}.png`);
-      check(`㉓ ${name}: FOLDED on the phone — ${f && f.dock.h} px of ${f && f.vh} (≤ 56; the base drew this shape 192–338), the count «${f && f.num}», its words «${f && f.q && f.q.slice(0, 40)}» on ONE line, «View» and the door «${f && f.all}», no answer on the row (${f && f.answers}), every target ≥ 44 px, the composer on screen (${f && f.comp && f.comp.top}–${f && f.comp && f.comp.bottom})`, foldedOk(f, S.words), f);
+      check(`㉓ ${name}: FOLDED on the phone — ${f && f.dock.h} px of ${f && f.vh} (≤ 56; the base drew this shape 192–338), the count «${f && f.num}», its words «${f && f.q && f.q.slice(0, 40)}» on ONE line, «View» and the door «${f && f.all}», no answer on the row (${f && f.answers}), every target ≥ 44 px, the composer on screen (${f && f.comp && f.comp.top}–${f && f.comp && f.comp.bottom})`, verdictOf(foldedOk(f, S.words)), f);
       await openStrip(A);
       const o = await A.evalJs(S23);
       await A.shot(`phone-390-strip-${name}-open.png`);
       check(`㉓ ${name}: «View» OPENS that item in place — its ${o && o.answers} answers (${S.answers}), ${o && o.dock.h} px ≤ 45 % of ${o && o.vh}, the composer on screen, the head says it is open (aria-expanded ${o && o.expanded})`,
-        !!o && o.open && o.id === S.item.id && o.answers === S.answers && o.dock.h <= Math.round(0.45 * o.vh) + 1 && onScreen(o) && o.expanded === 'true' && !o.small.length, o);
+        !!o && gateOf(o.open) && o.id === S.item.id && o.answers === S.answers && o.dock.h <= Math.round(0.45 * o.vh) + 1 && gateOf(onScreen(o)) && o.expanded === 'true' && !o.small.length, o);
       const hp = await A.evalJs(HEAD23); await A.tapAt(hp.x, hp.y); await sleep(500);
       const c = await A.evalJs(S23);
-      check(`㉓ ${name}: a tap on the head FOLDS it again (${c && c.dock.h} px)`, foldedOk(c, S.words), c);
+      check(`㉓ ${name}: a tap on the head FOLDS it again (${c && c.dock.h} px)`, verdictOf(foldedOk(c, S.words)), c);
     }
     // a newer item while it is open: IT STAYS OPEN on the item the person opened (主开发 2026-11-13, the owner's case — law 7: «the
     // open state survives a redraw of the strip: a new item arriving, a count change»; it was: the row folded to the newer one),
@@ -350,7 +350,7 @@ try {
     const newer = { ...SHAPES23.q3.item, id: 'ut-r23newer', text: 'Rotate the staging password now?', createdAt: Date.now() };
     await A.evalJs(PUSH23(J([newer, SHAPES23.hub.item, ...more23]))); await A.waitFor(`(() => { const w = ${CHAT(s23)}, d = w && w.element.querySelector('.chat-attn-dock'); return !!d && /4/.test(((d.querySelector('.cad-count') || {}).textContent || '') + ((d.querySelector('.cad-num') || {}).textContent || '')); })()`, 8000); await sleep(600); await A.evalJs(noToasts23);
     const nw = await A.evalJs(S23), cnt = await A.evalJs(`(() => { const d = ${CHAT(s23)}.element.querySelector('.chat-attn-dock'); return ((d.querySelector('.cad-count') || {}).textContent || '') + ' ' + ((d.querySelector('.cad-num') || {}).textContent || ''); })()`);
-    check(`㉓ a NEWER item while the row is open: it STAYS open on the item opened («${nw && nw.q && nw.q.slice(0, 30)}»), the count says «${cnt}» — and the composer keeps the focus (${nw && nw.focus})`, !!nw && nw.open && nw.id === SHAPES23.hub.item.id && /4/.test(cnt) && /^TEXTAREA/.test(nw.focus || ''), { nw, cnt });
+    check(`㉓ a NEWER item while the row is open: it STAYS open on the item opened («${nw && nw.q && nw.q.slice(0, 30)}»), the count says «${cnt}» — and the composer keeps the focus (${nw && nw.focus})`, !!nw && gateOf(nw.open) && nw.id === SHAPES23.hub.item.id && gateOf(/4/.test(cnt)) && verdictOf(/^TEXTAREA/.test(nw.focus || '')), { nw, cnt });
     // ── round 2 (the acceptance of 6aed457b7). P1: «View» put a chip / ✕ under the finger and a second tap 150 ms later
     //    answered (only the Allows were armed) — EVERY button of the opened item answers nothing for ARM_MS (700 ms) after the
     //    open; at 820 ms the same tap answers. Three shapes. RED CONTROL: the open's stamp taken back (round 1's arm — the
@@ -374,7 +374,7 @@ try {
       const r = await twice23(it);
       await A.shot(`phone-390-strip-${name}-second-tap.png`);
       check(`㉓ r2 ${name}: «View», then a tap on the SAME point at ${r.at[0]} and ${r.at[1]} ms (${r.under} under it) answers NOTHING — no POST (${J(r.early)}), the item still open (${J(r.still)}); at ${r.at[2]} ms the same tap answers (${J(r.late)})`,
-        r.early.length === 0 && !!r.still && r.still.id === it.id && r.still.open && r.late.length >= 1 && r.at[1] < 700, r);
+        r.early.length === 0 && !!r.still && r.still.id === it.id && gateOf(r.still.open) && r.late.length >= 1 && r.at[1] < 700, r);
       await A.evalJs(noToasts23);
     }
     const rr = await twice23(SHAPES23.q3.item, { red: true });
@@ -389,10 +389,10 @@ try {
     await show(live23); const k1 = await A.evalJs(CLK23); await sleep(2100); const k2 = await A.evalJs(CLK23);
     await A.shot('phone-390-strip-clock.png');
     check(`㉓ r2 a FOLDED row with a deadline shows its clock after its words — «${k1 && k1.text}» → «${k2 && k2.text}» 2 s later (${k2 && k2.tab}), inside its one row (${k2 && k2.h} px), the words keeping ${k2 && k2.qw} px`,
-      !!k1 && !!k2 && k1.vis && k2.vis && !k1.open && k1.state === 'live' && /\d/.test(k1.text || '') && k1.text !== k2.text && k2.inRow && k2.after && k2.h <= 56 && /tabular-nums/.test(k2.tab || '') && k2.qw >= 60, { k1, k2 });
+      !!k1 && !!k2 && gateOf(k1.vis) && gateOf(k2.vis) && !k1.open && k1.state === 'live' && gateOf(/\d/.test(k1.text || '')) && k1.text !== k2.text && gateOf(k2.inRow) && gateOf(k2.after) && k2.h <= 56 && gateOf(/tabular-nums/.test(k2.tab || '')) && k2.qw >= 60, { k1, k2 });
     const due23 = { ...SHAPES23.hub.item, id: 'ut-r23clk02', createdAt: Date.now() - 70e3, expiresAt: Date.now() - 10e3 };
     await show(due23); const k3 = await A.evalJs(CLK23);
-    check(`㉓ r2 …past its end the folded clock says the card's state («${k3 && k3.text}», ${k3 && k3.state}, its accent ${k3 && k3.warn}) as the item's own line does (${J(k3 && k3.line)})`, !!k3 && k3.vis && k3.state === 'due' && k3.warn && !!k3.line && k3.line.state === 'due' && k3.line.warn && k3.inRow, k3);
+    check(`㉓ r2 …past its end the folded clock says the card's state («${k3 && k3.text}», ${k3 && k3.state}, its accent ${k3 && k3.warn}) as the item's own line does (${J(k3 && k3.line)})`, !!k3 && gateOf(k3.vis) && k3.state === 'due' && gateOf(k3.warn) && !!k3.line && k3.line.state === 'due' && gateOf(k3.line.warn) && verdictOf(k3.inRow), k3);
     await show(SHAPES23.q3.item); const k0 = await A.evalJs(CLK23);
     check(`㉓ r2 …an item with no deadline shows no clock on its row (${k0 && k0.vis})`, !!k0 && !k0.vis && !k0.line, k0);
     // ── r3 (Q2 — the folded row's clock was a dead zone beside «View»: it is no row's child) and (Q3 — the last item gone, the
@@ -410,7 +410,7 @@ try {
       return { at, opened, left: await A.evalJs(`document.querySelectorAll('[data-deadline-at]').length`), ticked: await A.evalJs(TICK23) };
     };
     const q23 = await r3leg();
-    check(`㉓ r3 a tap on the FOLDED row's clock (${J(q23.at)}) opens the item (${q23.opened}) — no dead zone beside «View»`, !!q23.at && q23.at.hit && q23.opened === true, q23);
+    check(`㉓ r3 a tap on the FOLDED row's clock (${J(q23.at)}) opens the item (${q23.opened}) — no dead zone beside «View»`, !!q23.at && gateOf(q23.at.hit) && q23.opened === true, q23);
     check(`㉓ r3 nothing waits ⇒ no deadline stamp left in the page (${q23.left}) and its ticker stopped — a line put in after it reads «${q23.ticked}»`, q23.left === 0 && q23.ticked === '', q23);
     await show(SHAPES23.q3.item); // (the fill legs below read a FOLDED row: the r3 leg left nothing waiting)
     // P3: the folded head's count wears the attention fill while an item is unseen (window-announce) — as the desktop's
@@ -419,21 +419,21 @@ try {
     const ANN23 = (on) => `(() => { ${CHAT(s23)}.element.classList.toggle('window-announce', ${on}); return 1; })()`;
     await A.evalJs(ANN23(true)); await sleep(150); const f1 = await A.evalJs(FILL23); await A.shot('phone-390-strip-announce.png');
     await A.evalJs(ANN23(false)); await sleep(150); const f0 = await A.evalJs(FILL23);
-    check(`㉓ r2 the FOLDED head's count wears the attention fill while an item is unseen (window-announce: ${f1 && f1.bg} = the fill ${f1 && f1.want}), none without (${f0 && f0.bg})`, !!f1 && f1.vis && f1.bg === f1.want && !!f0 && f0.bg === 'rgba(0, 0, 0, 0)', { f1, f0 });
+    check(`㉓ r2 the FOLDED head's count wears the attention fill while an item is unseen (window-announce: ${f1 && f1.bg} = the fill ${f1 && f1.want}), none without (${f0 && f0.bg})`, !!f1 && gateOf(f1.vis) && f1.bg === f1.want && !!f0 && f0.bg === 'rgba(0, 0, 0, 0)', { f1, f0 });
     const CUT23 = (a, b) => `(() => { let n = 0; const walk = (sheet) => { for (let i = sheet.cssRules.length - 1; i >= 0; i--) { const r = sheet.cssRules[i]; if (r.cssRules && !r.selectorText) { walk(r); continue; } const s = r.selectorText || ''; if (s.includes(${J(a)}) && s.includes(${J(b)})) { sheet.deleteRule(i); n++; } } }; for (const s of document.styleSheets) { try { walk(s); } catch { } } return n; })()`;
     const cutF = await A.evalJs(CUT23('window-announce', 'cad-num'));
     await A.evalJs(ANN23(true)); await sleep(150); const fr = await A.evalJs(FILL23); await A.evalJs(ANN23(false));
-    check(`CONTROL (㉓ r2): the fill rule cut out (${cutF}) ⇒ the folded count is bare under window-announce (${fr && fr.bg}) — «wears the attention fill» goes red`, cutF >= 1 && !!fr && fr.vis && fr.bg !== fr.want, { cutF, fr });
+    check(`CONTROL (㉓ r2): the fill rule cut out (${cutF}) ⇒ the folded count is bare under window-announce (${fr && fr.bg}) — «wears the attention fill» goes red`, cutF >= 1 && !!fr && gateOf(fr.vis) && fr.bg !== fr.want, { cutF, fr });
     const cutC = await A.evalJs(CUT23('[data-vc="regular"]', 'cad-clock'));
     const live23b = { ...live23, id: 'ut-r23clk03', createdAt: Date.now() - 19e3, expiresAt: Date.now() + 41e3 };
     await show(live23b); const kr = await A.evalJs(CLK23);
-    check(`CONTROL (㉓ r2): the folded clock's rules cut out (${cutC}) ⇒ no clock on the row (${kr && kr.vis}; «${kr && kr.text}» in the DOM) — «shows its clock» goes red`, cutC >= 3 && !!kr && !kr.vis && /\d/.test(kr.text || ''), kr);
+    check(`CONTROL (㉓ r2): the folded clock's rules cut out (${cutC}) ⇒ no clock on the row (${kr && kr.vis}; «${kr && kr.text}» in the DOM) — «shows its clock» goes red`, cutC >= 3 && !!kr && !kr.vis && verdictOf(/\d/.test(kr.text || '')), kr);
     if (!DOCK_BUNDLE) check('CONTROL (㉓ r3): the r2 lines\' bundle builds from this source (its anchors are this lane\'s lines)', false, DOCK_ERR);
     else {
       mutant = { bundle: DOCK_BUNDLE };
       try {
         await toConv(A, s23, [], 390, 844, true); const q23r = await r3leg();
-        check(`CONTROL (㉓ r3): the r2 lines put back ⇒ the clock's tap opens nothing (${q23r.opened}), ${q23r.left} stamp left, a line put in after it reads «${q23r.ticked}» — both r3 legs red`, !!q23r.at && q23r.at.hit && q23r.opened === false && q23r.left >= 1 && q23r.ticked !== '', q23r);
+        check(`CONTROL (㉓ r3): the r2 lines put back ⇒ the clock's tap opens nothing (${q23r.opened}), ${q23r.left} stamp left, a line put in after it reads «${q23r.ticked}» — both r3 legs red`, !!q23r.at && gateOf(q23r.at.hit) && q23r.opened === false && q23r.left >= 1 && q23r.ticked !== '', q23r);
       } finally { mutant = null; }
     }
     // THE DESKTOP NEVER FOLDS (the .373 strip the owner accepted): the answers on the strip, no «View», the head no door
@@ -451,10 +451,10 @@ try {
   } catch (e) { fail++; console.log('  ✗ ㉓ threw: ' + (e?.message || e)); }
   lap('㉓ done');
 
-  check('the shots are written (phone 390: three shapes folded and open, the clock, the announce, the red control)', ['phone-390-strip-hub.png', 'phone-390-strip-hub-open.png', 'phone-390-strip-q3.png', 'phone-390-strip-run.png', 'phone-390-strip-clock.png', 'phone-390-strip-announce.png', 'phone-390-strip-red-control.png'].every((f) => fs.existsSync(path.join(SHOTS, f))));
+  check('the shots are written (phone 390: three shapes folded and open, the clock, the announce, the red control)', verdictOf(['phone-390-strip-hub.png', 'phone-390-strip-hub-open.png', 'phone-390-strip-q3.png', 'phone-390-strip-run.png', 'phone-390-strip-clock.png', 'phone-390-strip-announce.png', 'phone-390-strip-red-control.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))));
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 
 console.log(`\nshots: ${SHOTS}`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

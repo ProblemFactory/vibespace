@@ -49,7 +49,7 @@ const call = (route, body = {}) => {
 const promptCtx = () => call('GET /api/agent/prompt-context').out.context || '';
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -62,9 +62,9 @@ const cAll = promptCtx();
 // when their managers are wired) — pin the shape and the three core tools,
 // never a literal count (this suite rotted on '3 CLIs' for 27 releases).
 const cliCount = (c) => Number((c.match(/— (\d+) CLIs on your PATH/) || [])[1] || (/— one CLI on your PATH/.test(c) ? 1 : 0));
-check('defaults: full context teaches the core CLIs (status/ask/task) with a dynamic count', cliCount(cAll) >= 3 && cAll.includes('vibespace-status blocked') && cAll.includes('vibespace-ask "the question"') && cAll.includes('progress "one-line summary"'), cAll.slice(0, 300));
+check('defaults: full context teaches the core CLIs (status/ask/task) with a dynamic count', cliCount(cAll) >= 3 && gateOf(cAll.includes('vibespace-status blocked')) && gateOf(cAll.includes('vibespace-ask "the question"')) && verdictOf(cAll.includes('progress "one-line summary"')), cAll.slice(0, 300));
 const rAll = promptCtx();
-check('defaults: per-turn reminder lists all three', rAll.includes('vibespace-status') && rAll.includes('vibespace-ask') && rAll.includes('vibespace-task'), rAll);
+check('defaults: per-turn reminder lists all three', gateOf(rAll.includes('vibespace-status')) && gateOf(rAll.includes('vibespace-ask')) && verdictOf(rAll.includes('vibespace-task')), rAll);
 check('defaults: status write serves', call('POST /api/agent/session-status', { state: 'working' }).code === 200);
 check('defaults: ask write serves', call('POST /api/agent/user-todo', { add: { text: 'q' } }).code === 200);
 check('defaults: progress write serves', call('POST /api/agent/task-progress', { note: 'n' }).code === 200);
@@ -74,13 +74,13 @@ settings['agents.toolAsk'] = false;
 settings['agents.toolTask'] = false;
 freshSession();
 const cS = promptCtx();
-check('ask/task off: context drops ask+task (count shrinks by 2), still teaches status', cliCount(cS) === cliCount(cAll) - 2 && cS.includes('vibespace-status blocked') && !cS.includes('vibespace-ask') && !cS.includes('backlog-add') && !cS.includes('progress "one-line summary"'), `count ${cliCount(cS)} vs ${cliCount(cAll)}\n` + cS.slice(0, 400));
+check('ask/task off: context drops ask+task (count shrinks by 2), still teaches status', cliCount(cS) === cliCount(cAll) - 2 && gateOf(cS.includes('vibespace-status blocked')) && !cS.includes('vibespace-ask') && !cS.includes('backlog-add') && !cS.includes('progress "one-line summary"'), `count ${cliCount(cS)} vs ${cliCount(cAll)}\n` + cS.slice(0, 400));
 const rS = promptCtx();
-check('ask/task off: reminder lists only status', rS.includes('vibespace-status') && !rS.includes('vibespace-ask') && !rS.includes('vibespace-task'), rS);
+check('ask/task off: reminder lists only status', gateOf(rS.includes('vibespace-status')) && !rS.includes('vibespace-ask') && !rS.includes('vibespace-task'), rS);
 const askRef = call('POST /api/agent/user-todo', { add: { text: 'q' } });
-check('ask off: endpoint refuses with guidance', askRef.code === 403 && /disabled/.test(askRef.out.error) && /continue/.test(askRef.out.error), JSON.stringify(askRef));
+check('ask off: endpoint refuses with guidance', askRef.code === 403 && gateOf(/disabled/.test(askRef.out.error)) && verdictOf(/continue/.test(askRef.out.error)), JSON.stringify(askRef));
 const progRef = call('POST /api/agent/task-progress', { note: 'n' });
-check('task off: progress endpoint refuses', progRef.code === 403 && /disabled/.test(progRef.out.error), JSON.stringify(progRef));
+check('task off: progress endpoint refuses', progRef.code === 403 && verdictOf(/disabled/.test(progRef.out.error)), JSON.stringify(progRef));
 const blRef = call('POST /api/agent/task-backlog', { add: 'x' });
 check('task off: backlog endpoint refuses', blRef.code === 403, JSON.stringify(blRef));
 check('ask/task off: status still serves', call('POST /api/agent/session-status', { state: 'working' }).code === 200);
@@ -93,12 +93,12 @@ freshSession();
 const stop1 = call('GET /api/agent/stop-check');
 check('status off: stop-check never blocks', stop1.out.block === false, JSON.stringify(stop1.out));
 const stRef = call('POST /api/agent/session-status', { state: 'working' });
-check('status off: endpoint refuses', stRef.code === 403 && /disabled/.test(stRef.out.error), JSON.stringify(stRef));
+check('status off: endpoint refuses', stRef.code === 403 && verdictOf(/disabled/.test(stRef.out.error)), JSON.stringify(stRef));
 settings['agents.toolStatus'] = true;
 freshSession();
 const stop2 = call('GET /api/agent/stop-check');
-check('status on: stop-check nudges (stale board)', stop2.out.block === true && /vibespace-status/.test(stop2.out.reason), JSON.stringify(stop2.out).slice(0, 200));
-check('stop nudge lists ask+task steps when enabled', /vibespace-ask/.test(stop2.out.reason) && /vibespace-task progress/.test(stop2.out.reason), stop2.out.reason);
+check('status on: stop-check nudges (stale board)', stop2.out.block === true && verdictOf(/vibespace-status/.test(stop2.out.reason)), JSON.stringify(stop2.out).slice(0, 200));
+check('stop nudge lists ask+task steps when enabled', gateOf(/vibespace-ask/.test(stop2.out.reason)) && verdictOf(/vibespace-task progress/.test(stop2.out.reason)), stop2.out.reason);
 settings['agents.toolAsk'] = false;
 settings['agents.toolTask'] = false;
 freshSession();
@@ -112,7 +112,7 @@ settings['agents.contextInjection'] = false;
 freshSession();
 const cNoCtx = promptCtx();
 check('contextInjection off: NO group context', !cNoCtx.includes('<vibespace-task-context>') && !cNoCtx.includes('obj one'), cNoCtx.slice(0, 300));
-check('contextInjection off: baseline tools intro delivered instead', cNoCtx.includes('<vibespace-session-tools>') && cNoCtx.includes('vibespace-status'), cNoCtx.slice(0, 300));
+check('contextInjection off: baseline tools intro delivered instead', gateOf(cNoCtx.includes('<vibespace-session-tools>')) && verdictOf(cNoCtx.includes('vibespace-status')), cNoCtx.slice(0, 300));
 check('contextInjection off: writes still serve', call('POST /api/agent/task-progress', { note: 'n2' }).code === 200);
 
 // ── everything off: silence (no intro, no reminder) ──
@@ -126,4 +126,4 @@ check('all tools off: reminder has no tool teaching', !/vibespace-(status|ask|ta
 
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
-console.log('\ntool-toggle smoke passed — disabled features neither taught nor served');
+console.log('\ntool-toggle smoke passed — disabled features neither taught nor served'); import { verdictOf, gateOf } from './lib/check.mjs';

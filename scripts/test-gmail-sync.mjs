@@ -13,7 +13,7 @@ import http from 'node:http';
 const require = createRequire(import.meta.url);
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -90,11 +90,11 @@ for (let i = 0; i < 100 && w.state !== 'idle' && w.state !== 'error'; i++) await
 check('seed sync reaches idle', w.state === 'idle', w.error || '');
 let files = fs.readdirSync(dir).filter((f) => f.endsWith('.eml')).sort();
 check('two messages seeded', files.length === 2, files.join(','));
-check('RFC2047 subject decoded in filename', files.some((f) => f.includes('中文测试')), files.join(','));
-check('id rides the filename tail', files.every((f) => /_(m1aaaa11|m2bbbb22)\.eml$/.test(f)));
+check('RFC2047 subject decoded in filename', verdictOf(files.some((f) => f.includes('中文测试'))), files.join(','));
+check('id rides the filename tail', verdictOf(files.every((f) => /_(m1aaaa11|m2bbbb22)\.eml$/.test(f))));
 check('email learned', gs.status('mnt-test').email === 'tester@example.com');
 const body = fs.readFileSync(path.join(dir, files.find((f) => f.includes('m1aaaa11'))), 'utf-8');
-check('raw eml content intact', body.includes('Subject: Hello world') && body.includes('body one'));
+check('raw eml content intact', gateOf(body.includes('Subject: Hello world')) && verdictOf(body.includes('body one')));
 const state1 = JSON.parse(fs.readFileSync(path.join(dir, '.vibespace-gmail-state.json'), 'utf-8'));
 check('historyId persisted', state1.historyId === '1000');
 
@@ -104,7 +104,7 @@ await w._forceOnce?.() ?? await (async () => { await gsSyncOnce(); })().catch(()
 async function gsSyncOnce() { await gs._syncOnce(w); }
 await gs._syncOnce(w).catch((e) => check('incremental sync throws nothing', false, e.message));
 files = fs.readdirSync(dir).filter((f) => f.endsWith('.eml'));
-check('incremental adds the new message', files.some((f) => f.includes('m3cccc33')), files.join(','));
+check('incremental adds the new message', verdictOf(files.some((f) => f.includes('m3cccc33'))), files.join(','));
 check('no duplicates on re-sync', files.length === 3);
 const state2 = JSON.parse(fs.readFileSync(path.join(dir, '.vibespace-gmail-state.json'), 'utf-8'));
 check('historyId advanced', state2.historyId === '2000');
@@ -149,11 +149,11 @@ for (let i = 0; i < 100 && w3.state !== 'idle' && w3.state !== 'error'; i++) awa
 check('label-month sync reaches idle', w3.state === 'idle', w3.error || '');
 const hasInbox = fs.existsSync(path.join(dir3, 'Inbox')) && fs.readdirSync(path.join(dir3, 'Inbox')).some((d) => /^\d{4}-\d{2}$/.test(d));
 const hasArchive = fs.existsSync(path.join(dir3, 'Archive'));
-check('Inbox/<month>/ + Archive/ created by label precedence', hasInbox && hasArchive, fs.readdirSync(dir3).join(','));
+check('Inbox/<month>/ + Archive/ created by label precedence', gateOf(hasInbox) && verdictOf(hasArchive), fs.readdirSync(dir3).join(','));
 await gs._syncOnce(w3).catch(() => {});
 const countL = (root) => { let n = 0; const walk = (d, depth) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory() && depth < 2) walk(path.join(d, e.name), depth + 1); else if (e.name.endsWith('.eml')) n++; } }; walk(root, 0); return n; };
 // the 2nd pass is INCREMENTAL (historyId persisted) → m3 arrives with SENT
-check('incremental lands under Sent/ + no duplicates', countL(dir3) === 3 && fs.existsSync(path.join(dir3, 'Sent')), String(countL(dir3)));
+check('incremental lands under Sent/ + no duplicates', countL(dir3) === 3 && verdictOf(fs.existsSync(path.join(dir3, 'Sent'))), String(countL(dir3)));
 // labels list endpoint
 const labs = await gs.listLabels({ token: cfg.token, clientPreset: 't' });
 check('listLabels returns system+user', labs.length === 2 && labs[0].type === 'system' && labs[1].name === 'Receipts');
@@ -170,15 +170,15 @@ for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 30)); if (
 gs.stop('mnt-cp');
 await new Promise((r) => setTimeout(r, 50));
 const stateAfterP1 = JSON.parse(fs.readFileSync(path.join(dir4, '.vibespace-gmail-state.json'), 'utf-8'));
-check('checkpoint persists a DATE cursor (seedOldestMs) after page 1', !!stateAfterP1.seedOldestMs || stateAfterP1.historyId, JSON.stringify(stateAfterP1));
-check('seed captured a determinate total from profile.messagesTotal', stateAfterP1.seedTotal === 2 || stateAfterP1.historyId, JSON.stringify(stateAfterP1));
+check('checkpoint persists a DATE cursor (seedOldestMs) after page 1', !!stateAfterP1.seedOldestMs || verdictOf(stateAfterP1.historyId), JSON.stringify(stateAfterP1));
+check('seed captured a determinate total from profile.messagesTotal', stateAfterP1.seedTotal === 2 || verdictOf(stateAfterP1.historyId), JSON.stringify(stateAfterP1));
 check('seed-start historyId anchored', !!(stateAfterP1.seedHistoryId || stateAfterP1.historyId));
 // restart → should resume, end with BOTH messages, no duplicates
 const w4b = gs.start({ ...cfg, id: 'mnt-cp', dir: dir4, groupBy: 'none' });
 for (let i = 0; i < 100 && w4b.state !== 'idle'; i++) await new Promise((r) => setTimeout(r, 40));
 const cpFiles = fs.readdirSync(dir4).filter((f) => f.endsWith('.eml'));
 const cpIds = cpFiles.map((f) => (f.match(/_([^_]+)\.eml$/) || [])[1]);
-check('resume completes seed — page-1 + page-2 present, no duplicates', cpIds.includes('m1aaaa11') && cpIds.includes('m2bbbb22') && new Set(cpIds).size === cpIds.length, cpFiles.join(','));
+check('resume completes seed — page-1 + page-2 present, no duplicates', gateOf(cpIds.includes('m1aaaa11')) && gateOf(cpIds.includes('m2bbbb22')) && new Set(cpIds).size === cpIds.length, cpFiles.join(','));
 const finalState = JSON.parse(fs.readFileSync(path.join(dir4, '.vibespace-gmail-state.json'), 'utf-8'));
 check('seed done → historyId set, seed cursor cleared', !!finalState.historyId && !finalState.seedPageToken);
 
@@ -191,4 +191,4 @@ srv.close();
 fs.rmSync(dir, { recursive: true, force: true });
 fs.rmSync(tmpMod, { force: true });
 console.log(failed ? `\n${failed} FAILED` : '\nall green');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

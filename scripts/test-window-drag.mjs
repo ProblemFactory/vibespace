@@ -43,7 +43,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -93,7 +93,7 @@ const DE = await import('../src/lib/drag-end.js');
   ];
   const bad = T.filter(([ev, s, end, why]) => { const v = DE.dragEndVerdict(ev, s); return v.end !== end || v.why !== why; }).map(([ev, s]) => JSON.stringify([ev, s]));
   ok(bad.length === 0, `dragEndVerdict: ${T.length} rows — release / cancel / capture lost / blur / hidden / no button / owner gone ⇒ end; another pointer, a held move, visible, idle, unknown ⇒ never${bad.length ? ' — ' + bad.join(' ; ') : ''}`);
-  ok(same(DE.DRAG_FEED, { move: 'pointermove', up: 'pointerup', cancel: 'pointercancel', lost: 'lostpointercapture' }) && DE.SHIELD_CLASS === 'wm-dragging' && DE.feedTarget(true) === 'element' && DE.feedTarget(false) === 'document', 'the feed is the pointer events, the shield class is body.wm-dragging, the feed listens on the capturing element else the document');
+  ok(gateOf(same(DE.DRAG_FEED, { move: 'pointermove', up: 'pointerup', cancel: 'pointercancel', lost: 'lostpointercapture' })) && DE.SHIELD_CLASS === 'wm-dragging' && DE.feedTarget(true) === 'element' && DE.feedTarget(false) === 'document', 'the feed is the pointer events, the shield class is body.wm-dragging, the feed listens on the capturing element else the document');
   ok(!/\bimport\b|\brequire\s*\(/.test(read('src/lib/drag-end.js').replace(/\/\/.*$/gm, '')), 'drag-end.js is PURE (imports nothing)');
 }
 
@@ -245,7 +245,7 @@ console.log('§2 the real WindowManager over the fake DOM: the incident, every e
   // (a) THE INCIDENT, fixed: a drop released over an iframe
   const wm = mkWm(); const win = mkWin(wm, 'v', { w: 500, h: 400, l: 100, t: 80 });
   const r = await dragThen(win, { end: 'pointerup', at: IFRAME });
-  ok(r.mid.captured && r.mid.dragging && r.mid.shield && r.mid.box.left === 500 && r.mid.box.top === 460, `the title bar CAPTURED the pointer; mid-drag the window follows the pointer (${r.mid.box.left},${r.mid.box.top}), .dragging on, the shield on`, r.mid);
+  ok(gateOf(r.mid.captured) && gateOf(r.mid.dragging) && gateOf(r.mid.shield) && r.mid.box.left === 500 && r.mid.box.top === 460, `the title bar CAPTURED the pointer; mid-drag the window follows the pointer (${r.mid.box.left},${r.mid.box.top}), .dragging on, the shield on`, r.mid);
   ok(!r.after.dragging && !r.after.shield && r.after.ends.length === 1 && r.after.ends[0] === 'release' && r.after.feed === 0 && !r.armed && r.endsAfterSecond.length === 1 && (wm.captured || 0) >= 0,
     'a release OVER THE IFRAME ends the drag ONCE (release; .dragging gone, the shield lifted, the feed gone), a further move with the button moves nothing, a second release is a no-op', { after: r.after, armed: r.armed, ends2: r.endsAfterSecond });
   ok(r.after.box.left === 500 && r.after.box.top === 460, 'the drop is APPLIED where the pointer released (a free drop: the window stays where it followed the pointer)', r.after.box);
@@ -300,9 +300,9 @@ console.log('§2 the real WindowManager over the fake DOM: the incident, every e
     const c4 = cellBox(4), centre = { x: c4.left + c4.width / 2, y: c4.top + c4.height / 2 };
     const x = await dragThen(viewer, { end: 'pointerup', at: IFRAME, pid: 60, to: centre });
     const near = (a, b) => Math.abs(a - b) <= 1;
-    ok(same(x.mid.lit, [4]) && wg.lit().length === 0, `mid-drag the highlight is cell 4 (keyed by index); after the end door it is gone (${JSON.stringify(x.mid.lit)} → ${JSON.stringify(wg.lit())})`);
-    ok(near(x.after.box.left, c4.left) && near(x.after.box.top, c4.top) && near(x.after.box.width, c4.width) && near(x.after.box.height, c4.height), `the viewer takes cell 4's box exactly as an empty cell's (${JSON.stringify(x.after.box)})`, { box: x.after.box, c4 });
-    ok(same(box(occupant), ob) && near(ob.left, c4.left) && viewer._isSnapped === true && !x.armed, 'the occupant keeps its box (two windows share the cell — a cell is a position, never a slot); the viewer is snapped; the drag is not armed');
+    ok(gateOf(same(x.mid.lit, [4])) && wg.lit().length === 0, `mid-drag the highlight is cell 4 (keyed by index); after the end door it is gone (${JSON.stringify(x.mid.lit)} → ${JSON.stringify(wg.lit())})`);
+    ok(gateOf(near(x.after.box.left, c4.left)) && gateOf(near(x.after.box.top, c4.top)) && gateOf(near(x.after.box.width, c4.width)) && verdictOf(near(x.after.box.height, c4.height)), `the viewer takes cell 4's box exactly as an empty cell's (${JSON.stringify(x.after.box)})`, { box: x.after.box, c4 });
+    ok(gateOf(same(box(occupant), ob)) && gateOf(near(ob.left, c4.left)) && viewer._isSnapped === true && !x.armed, 'the occupant keeps its box (two windows share the cell — a cell is a position, never a slot); the viewer is snapped; the drag is not armed');
   }
 
   // (e) D5 — THE SHRINK TABLE (type × zoom × dpr): an inward corner drag ends at the floor / the window's own minimum
@@ -328,7 +328,7 @@ console.log('§2 the real WindowManager over the fake DOM: the incident, every e
     ok(bad5.length === 0, `D5: ${rows5.length} rows (viewer / editor / browser / desktop-app × zoom 1, 0.9, 1.25 × dpr 1, 2, 2.2) — an inward SE drag over the window's own page shrinks it to the floor 320×180 (a desktop app: its own 500×400), left/top unmoved, the resize ended; a −90 viewport px move reads as −90 ÷ zoom layout px (1000 → 910 / 900 / 928)${bad5.length ? ' — ' + JSON.stringify(bad5.slice(0, 3)) : ''}`);
     // the refuted hypothesis, pinned: no viewer / editor / browser window feeds a minimum of its own
     const writers = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js') && /\bsetMinSize\(/.test(read('src/lib/' + f).replace(/\/\/.*$/gm, '')) && f !== 'window.js').sort();
-    ok(same(writers, ['desktop-app-window.js']), `setMinSize's only caller is the desktop-app window (${writers.join(', ')}) — a viewer's minimum is the window floor, never its page's size`);
+    ok(verdictOf(same(writers, ['desktop-app-window.js'])), `setMinSize's only caller is the desktop-app window (${writers.join(', ')}) — a viewer's minimum is the window floor, never its page's size`);
     ok(!/min-(width|height)/.test(read('public/viewers.css').match(/\.media-pdf \{[^}]*\}/)?.[0] || '') && !/min-(width|height)/.test(read('public/viewers.css').match(/\.media-content \{[^}]*\}/)?.[0] || ''), 'the PDF frame and the media content carry no CSS minimum');
   }
 
@@ -444,7 +444,7 @@ console.log('§2 the real WindowManager over the fake DOM: the incident, every e
       w.titleBar.remove(); await tick(); // the icon's ANCESTOR goes: the capture under it is lost too
       fire(IFRAME, 'pointerup', { pointerId: 142, buttons: 0, clientX: 700, clientY: 500 }); await tick();
       rows.push(['icon', !CAPTURE.has(142) && ends.join() === 'capture-lost' && w.element.style.visibility !== 'hidden' && !shieldOn()]); }
-    ok(rows.every(([, p]) => p), `THE REMOVAL RULE: the capturing element (the title bar / the handle / the icon's title bar) removed mid-drag ⇒ the capture is lost and the drag ends ONCE as capture-lost, the shield lifted (${JSON.stringify(rows)})`);
+    ok(verdictOf(rows.every(([, p]) => p)), `THE REMOVAL RULE: the capturing element (the title bar / the handle / the icon's title bar) removed mid-drag ⇒ the capture is lost and the drag ends ONCE as capture-lost, the shield lifted (${JSON.stringify(rows)})`);
   }
 
   // (i) TWO FEEDS AT ONCE (verify r2 finding #2): a mouse drag of A and a touch drag of B — the first end keeps the shield up for the second
@@ -460,7 +460,7 @@ console.log('§2 the real WindowManager over the fake DOM: the incident, every e
     const afterA = { a: A.element.classList.contains('dragging'), b: B.element.classList.contains('dragging'), shield: shieldOn(), holders: dragShieldHolders() };
     fire(IFRAME, 'pointerup', { pointerId: 151, buttons: 0, clientX: 1100, clientY: 600 }); await tick();
     const afterB = { b: B.element.classList.contains('dragging'), shield: shieldOn(), holders: dragShieldHolders(), ends: B.dragEnds.join() };
-    ok(both.a && both.b && both.shield && both.holders === 2 && !afterA.a && afterA.b && afterA.shield && afterA.holders === 1 && !afterB.b && !afterB.shield && afterB.holders === 0 && afterB.ends === 'release', `TWO FEEDS: a mouse drag + a touch drag hold the shield as two holders; the first end leaves it UP for the second (${JSON.stringify({ both, afterA, afterB })})`);
+    ok(gateOf(both.a) && gateOf(both.b) && gateOf(both.shield) && both.holders === 2 && !afterA.a && gateOf(afterA.b) && gateOf(afterA.shield) && afterA.holders === 1 && !afterB.b && !afterB.shield && afterB.holders === 0 && afterB.ends === 'release', `TWO FEEDS: a mouse drag + a touch drag hold the shield as two holders; the first end leaves it UP for the second (${JSON.stringify({ both, afterA, afterB })})`);
   }
 }
 
@@ -500,7 +500,7 @@ console.log('§2 the real WindowManager over the fake DOM: the incident, every e
   const pf = MUT.write('src/lib/window.js', text, 'no-release-keep', { esm: true }); copiesF.push(pf);
   const C = await releaseLegs((await import(pathToFileURL(pf).href)).WindowManager);
   ok(C.grid.top > 1000 - 32 && C.free.top > 1000 - 32 && C.named.top === 1200, `CONTROL (the base's three lines): the grid release, the free drop and the named window all stay buried (${C.grid.top} / ${C.free.top} / ${C.named.top})`, C);
-  for (const c of copiesCensus(copiesF, MUT.dir, repo, { minCopies: 1, label: '(f) control: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(copiesF, MUT.dir, repo, { minCopies: 1, label: '(f) control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── §3 CONTROLS ─────────────────────────────────────────────────────────────
@@ -574,7 +574,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
     fire(DOC.body, 'pointerup', { pointerId: ipid, buttons: 0, clientX: 700, clientY: 500 }); fire(DOC.body, 'mouseup', { clientX: 700, clientY: 500 }); await tick();
     res.push([kind, x.after.ends.length === 0 && x.armed && x.after.dragging, y.after.op && y.armed, iconArmed]);
   }
-  ok(res.length === RULES.length && res.every(([, d, r, i]) => d === true && r === true && i === true), `${RULES.length} patched drag-end copies (one end rule each pulled back) ⇒ that end leaves the drag, the resize AND the icon drag armed (${JSON.stringify(res)})`);
+  ok(res.length === RULES.length && verdictOf(res.every(([, d, r, i]) => d === true && r === true && i === true)), `${RULES.length} patched drag-end copies (one end rule each pulled back) ⇒ that end leaves the drag, the resize AND the icon drag armed (${JSON.stringify(res)})`);
   // (b) THE PRE-CAPTURE FEED: no capture, the document's mouse listeners, no shield — the incident in the model, for the
   //     title bar, the resize AND the icon drag (verify r1: the feed is ONE module, src/lib/drag-feed.js — one patched copy
   //     reverts every door; the window copy imports the patched feed + a tab-group copy that imports it too)
@@ -594,7 +594,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
     const tgPath = MUT.write('src/lib/tab-group.js', apply(tgSrc, PATCH_TG).replace("from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`), 'prefix-feed', { esm: true }); copies.push(tgPath);
     const tgUrl = pathToFileURL(tgPath).href;
     const text = apply(winSrc, PATCH_WIN).replace("from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`).replace("from './tab-group.js'", `from ${JSON.stringify(tgUrl)}`);
-    ok(missed.length === 0 && text.includes(dfUrl) && text.includes(tgUrl), 'the pre-capture control found every line it reverts (the capture, the feed names, the shield, both no-button rules) and the window copy imports the patched feed and tab-group copies', missed);
+    ok(missed.length === 0 && gateOf(text.includes(dfUrl)) && verdictOf(text.includes(tgUrl)), 'the pre-capture control found every line it reverts (the capture, the feed names, the shield, both no-button rules) and the window copy imports the patched feed and tab-group copies', missed);
     const dePath = MUT.write('src/lib/drag-end.js', deSrc, 'real-for-prefix', { esm: true, same: true }); copies.push(dePath);
     const WM = await loadWith(dePath, 'prefix-feed', text);
     const wm = mkWm(WM);
@@ -608,14 +608,14 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
     const stillDragging = w.element.classList.contains('dragging');
     fire(DOC.body, 'mousemove', { clientX: 850, clientY: 590 }); await tick();
     const followed = box(w).left === 650 && box(w).top === 550;
-    ok(docFeed && !shieldPre && stillDragging && followed, 'PRE-CAPTURE CONTROL: the feed is the document\'s mousemove/mouseup, no capture, no shield; a release over the iframe never arrives — .dragging stays, the next move drags on (the incident)', { docFeed, shieldPre, stillDragging, box: box(w) });
+    ok(gateOf(docFeed) && !shieldPre && gateOf(stillDragging) && verdictOf(followed), 'PRE-CAPTURE CONTROL: the feed is the document\'s mousemove/mouseup, no capture, no shield; a release over the iframe never arrives — .dragging stays, the next move drags on (the incident)', { docFeed, shieldPre, stillDragging, box: box(w) });
     fire(DOC.body, 'mouseup', { clientX: 850, clientY: 590 }); await tick();
     // …and over the noVNC-like pane (its mouseup stopped)
     const w2 = mkWin(wm, 'pre-pane', { w: 500, h: 400, l: 100, t: 80 });
     fire(w2.titleBar, 'pointerdown', { pointerId: 101, button: 0, isPrimary: true, clientX: 300, clientY: 120 });
     fire(DOC.body, 'mousemove', { clientX: 400, clientY: 200 }); await tick(); fire(DOC.body, 'mousemove', { clientX: 700, clientY: 500 }); await tick();
     fire(PANE, 'mouseup', { clientX: 700, clientY: 500 }); await tick();
-    ok(w2.element.classList.contains('dragging'), 'PRE-CAPTURE CONTROL: a release over the pane that stops its mouseup never arrives either — the drag stays armed');
+    ok(verdictOf(w2.element.classList.contains('dragging')), 'PRE-CAPTURE CONTROL: a release over the pane that stops its mouseup never arrives either — the drag stays armed');
     fire(DOC.body, 'mouseup', { clientX: 700, clientY: 500 }); await tick();
     // the resize: the moves over the window's own iframe are lost (it can grow, not shrink — D5's half)
     const w3 = mkWin(wm, 'pre-resize', { w: 1000, h: 700, l: 40, t: 40 });
@@ -640,7 +640,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
       fire(DOC.body, 'mousemove', { clientX: 200, clientY: 160 }); await tick(); fire(DOC.body, 'mousemove', { clientX: 700, clientY: 500 }); await tick();
       const hiddenMid = w4.element.style.visibility === 'hidden';
       fire(IFRAME, 'mouseup', { clientX: 700, clientY: 500 }); await tick();
-      ok(noCap && hiddenMid && w4.element.style.visibility === 'hidden' && !shieldOn(), 'PRE-CAPTURE CONTROL: the icon drag feeds from the document, no capture, no shield; a release over the iframe never arrives — the source window stays INVISIBLE (the incident, verify r1)', { noCap, hiddenMid, vis: w4.element.style.visibility });
+      ok(gateOf(noCap) && gateOf(hiddenMid) && w4.element.style.visibility === 'hidden' && !shieldOn(), 'PRE-CAPTURE CONTROL: the icon drag feeds from the document, no capture, no shield; a release over the iframe never arrives — the source window stays INVISIBLE (the incident, verify r1)', { noCap, hiddenMid, vis: w4.element.style.visibility });
       fire(DOC.body, 'mouseup', { clientX: 700, clientY: 500 }); await tick();
     }
   }
@@ -648,52 +648,52 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
   {
     const dfSrc = read('src/lib/drag-feed.js');
     const OWNER_LINE = "if (signal && typeof signal.addEventListener === 'function') signal.addEventListener('abort', () => { if (stopped) return; stop(); onEnd({ type: 'owner-gone', pointerId }); }, { signal: ctl.signal });";
-    ok(dfSrc.includes(OWNER_LINE), 'the owner-gone control found the feed line it reverts');
+    ok(verdictOf(dfSrc.includes(OWNER_LINE)), 'the owner-gone control found the feed line it reverts');
     const WM = await loadFeedCtl(dfSrc.replace(OWNER_LINE, '/* control: no owner-gone */'), 'no-owner-gone');
     const wm = mkWm(WM); const win = mkWin(wm, 'c-og', { w: 500, h: 400, l: 100, t: 80 });
     fire(win.titleBar, 'pointerdown', { pointerId: 160, button: 0, isPrimary: true, clientX: 300, clientY: 120 });
     fire(IFRAME, 'pointermove', { pointerId: 160, buttons: 1, clientX: 700, clientY: 500 }); await tick();
     wm.closeWindow('c-og'); await tick(); fire(IFRAME, 'pointerup', { pointerId: 160, buttons: 0, clientX: 700, clientY: 500 }); await tick();
-    ok(shieldOn() && win.dragEnds.length === 0, "OWNER-GONE CONTROL: without the owner's abort ending the drag, a window closed mid-drag leaves body.wm-dragging up and no end door ran (the incident in the model)");
+    ok(gateOf(shieldOn()) && win.dragEnds.length === 0, "OWNER-GONE CONTROL: without the owner's abort ending the drag, a window closed mid-drag leaves body.wm-dragging up and no end door ran (the incident in the model)");
     DOC.body.classList.remove('wm-dragging'); // the copy's stuck shield, cleared by hand
   }
   // (d) verify r2 #2 CONTROL: a BOOLEAN shield ⇒ the first of two drags to end lowers it for the other
   {
     const dfSrc = read('src/lib/drag-feed.js');
     const SET_LINE = 'on = HOLDERS.size > 0; // the shield stands while ANY drag runs';
-    ok(dfSrc.includes(SET_LINE), 'the boolean-shield control found the holders line it reverts');
+    ok(verdictOf(dfSrc.includes(SET_LINE)), 'the boolean-shield control found the holders line it reverts');
     const WM = await loadFeedCtl(dfSrc.replace(SET_LINE, '/* control: a boolean shield */'), 'boolean-shield');
     const wm = mkWm(WM); const A = mkWin(wm, 'c-bs-a', { w: 500, h: 400, l: 100, t: 80 }); const B = mkWin(wm, 'c-bs-b', { w: 400, h: 300, l: 900, t: 500 });
     fire(A.titleBar, 'pointerdown', { pointerId: 161, button: 0, isPrimary: true, clientX: 300, clientY: 120 }); fire(IFRAME, 'pointermove', { pointerId: 161, buttons: 1, clientX: 400, clientY: 200 }); await tick();
     fire(B.titleBar, 'pointerdown', { pointerId: 162, button: 0, isPrimary: true, clientX: 1000, clientY: 520 }); fire(IFRAME, 'pointermove', { pointerId: 162, buttons: 1, clientX: 1100, clientY: 600 }); await tick();
     fire(IFRAME, 'pointerup', { pointerId: 161, buttons: 0, clientX: 400, clientY: 200 }); await tick();
-    ok(B.element.classList.contains('dragging') && !shieldOn(), "BOOLEAN-SHIELD CONTROL: the first drag's end lowered the shield while the second still ran");
+    ok(gateOf(B.element.classList.contains('dragging')) && !shieldOn(), "BOOLEAN-SHIELD CONTROL: the first drag's end lowered the shield while the second still ran");
     fire(IFRAME, 'pointerup', { pointerId: 162, buttons: 0, clientX: 1100, clientY: 600 }); await tick();
     DOC.body.classList.remove('wm-dragging');
   }
-  for (const c of copiesCensus(copies, MUT.dir, repo, { minCopies: RULES.length * 3 + 4 + 6, label: 'controls: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(copies, MUT.dir, repo, { minCopies: RULES.length * 3 + 4 + 6, label: 'controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── §4 PINS ──────────────────────────────────────────────────────────────────
 console.log('§4 pins — the shield CSS, touch-action, ONE feed for the four doors, the hand-over, the xpra hold');
 {
   const css = read('public/style.css'), win = read('src/lib/window.js'), xv = read('src/lib/xpra-view.js'), df = read('src/lib/drag-feed.js'), tg = read('src/lib/tab-group.js');
-  ok(/body\.wm-dragging \.window \.window-content \{ pointer-events: none !important; \}/.test(css) && /body\.wm-dragging \.window iframe, body\.wm-dragging \.window canvas, body\.wm-dragging \.window img/.test(css), 'style.css: the drag shield — every window\'s content, and iframe / canvas / img by name, pointer-events:none while body.wm-dragging');
-  ok(/\.window-titlebar \{[^}]*touch-action: none;/.test(css) && /\.resize-handle \{[^}]*touch-action: none;/.test(css), 'style.css: the title bar and the resize handles are touch-action: none (a touch drag is pointermove, never the page\'s pan)');
-  ok(/titleBar\.addEventListener\('pointerdown', \(e\) => \{/.test(win) && /startFeed\(titleBar, captureOn\(titleBar, e\)\);/.test(win) && /startFeed\(titleBar, captureOn\(titleBar, p0\)\);/.test(win), 'window.js: the title bar\'s door is a pointerdown that captures the pointer; the hand-over captures it too');
-  ok(/handle\.addEventListener\('pointerdown', \(e\) => \{/.test(win) && /startResize\(handle\.dataset\.dir, e\.clientX, e\.clientY, \{ pointerId: e\.pointerId, el: handle \}\);/.test(win) && /const capId = el \? captureOn\(el, \{ pointerId \}\) : null;/.test(win), 'window.js: the handle\'s door is a pointerdown that captures the pointer on the handle');
+  ok(gateOf(/body\.wm-dragging \.window \.window-content \{ pointer-events: none !important; \}/.test(css)) && verdictOf(/body\.wm-dragging \.window iframe, body\.wm-dragging \.window canvas, body\.wm-dragging \.window img/.test(css)), 'style.css: the drag shield — every window\'s content, and iframe / canvas / img by name, pointer-events:none while body.wm-dragging');
+  ok(gateOf(/\.window-titlebar \{[^}]*touch-action: none;/.test(css)) && verdictOf(/\.resize-handle \{[^}]*touch-action: none;/.test(css)), 'style.css: the title bar and the resize handles are touch-action: none (a touch drag is pointermove, never the page\'s pan)');
+  ok(gateOf(/titleBar\.addEventListener\('pointerdown', \(e\) => \{/.test(win)) && gateOf(/startFeed\(titleBar, captureOn\(titleBar, e\)\);/.test(win)) && verdictOf(/startFeed\(titleBar, captureOn\(titleBar, p0\)\);/.test(win)), 'window.js: the title bar\'s door is a pointerdown that captures the pointer; the hand-over captures it too');
+  ok(gateOf(/handle\.addEventListener\('pointerdown', \(e\) => \{/.test(win)) && gateOf(/startResize\(handle\.dataset\.dir, e\.clientX, e\.clientY, \{ pointerId: e\.pointerId, el: handle \}\);/.test(win)) && verdictOf(/const capId = el \? captureOn\(el, \{ pointerId \}\) : null;/.test(win)), 'window.js: the handle\'s door is a pointerdown that captures the pointer on the handle');
   const dfUses = ['move', 'up', 'cancel', 'lost'].filter((k) => new RegExp(`addEventListener\\(DRAG_FEED\\.${k}, on(Move|End), fs\\)`).test(df)).length;
   const noMouseFeed = (t) => !/document\.addEventListener\('mouseup'/.test(t); // a drag's END on the document's mouseup is the pre-fix feed (the overlap switcher's hover mousemove is not a drag)
-  ok(dfUses === 4 && /window\.addEventListener\('blur', onEnd, fs\)/.test(df) && /document\.addEventListener\('visibilitychange', onEnd, fs\)/.test(df) && noMouseFeed(win) && noMouseFeed(tg) && (win.match(/attachDragFeed\(\{/g) || []).length === 2 && (tg.match(/attachDragFeed\(\{/g) || []).length === 2 && !/addEventListener\(DRAG_FEED\./.test(win) && !/addEventListener\(DRAG_FEED\./.test(tg) && !/function captureOn|function setDragShield/.test(win), `ONE feed: drag-feed.js registers DRAG_FEED's four events + blur + visibilitychange; window.js's two doors and tab-group.js's two doors attach it (${(win.match(/attachDragFeed\(\{/g) || []).length}+${(tg.match(/attachDragFeed\(\{/g) || []).length}); no document mouseup / mousemove feeds any drag`);
-  ok(/icon\.addEventListener\('pointerdown', \(e\) => \{/.test(tg) && /const pid = captureOn\(icon, e\);/.test(tg) && /tabEl\.addEventListener\('pointerdown', \(e\) => \{/.test(tg) && /tabEl\.closest\('\.window-titlebar'\)\) \|\| tabEl;/.test(tg) && /const pid = captureOn\(capEl, e\);/.test(tg), 'tab-group.js: the icon drag and the tab drag are pointerdown doors that capture the pointer — the tab drag on the strip\'s TITLE BAR (the element the tear-off\'s re-render keeps; a capture on the tab itself would be lost under the finger)');
-  ok((win.match(/setDragShield\(true, shieldKey\);/g) || []).length === 2 && (win.match(/setDragShield\(false, shieldKey\);/g) || []).length >= 3 && (tg.match(/setDragShield\(true, shieldKey\);/g) || []).length === 2 && (tg.match(/setDragShield\(false, shieldKey\);/g) || []).length >= 4 && !/setDragShield\((true|false)\);/.test(win + tg) && /const HOLDERS = new Set\(\);/.test(df) && /on = HOLDERS\.size > 0;/.test(df) && /if \(dragEndVerdict\(\{ type: 'pointermove', buttons: e\.buttons, pointerId: e\.pointerId \}, feedState\)\.end\) \{ endDrag\(e, 'released-unseen'\); return; \}/.test(win) && (tg.match(/feedState\)\.end\) \{ onUp\(e, 'released-unseen'\); return; \}/g) || []).length === 2, 'the four doors raise + lower the shield under their OWN key — a set of holders, never a boolean (verify r2 #2) — and every door ends on a move with no button held');
-  ok(/client: \{ clientX: e\.clientX, clientY: e\.clientY, pointerId: e\.pointerId \}/.test(xv) && /import \{ dragEndVerdict \} from '\.\/drag-end\.js';/.test(xv) && /for \(const k of \['pointerup', 'pointercancel', 'pointermove', 'visibilitychange'\]\) document\.addEventListener\(k, endHold/.test(xv) && /window\.addEventListener\('blur', endHold/.test(xv), 'xpra-view.js: the handed-over press carries its pointerId, and the hold ends as the WM\'s drag does (the same verdict: release / cancel / no-button move / blur / hidden — verify r1 finding #2)');
-  ok((win.match(/const processMove = \(e\) => \{/g) || []).length === 2 && /const beginAt = \(x, y\) => \{/.test(win), 'window.js keeps ONE drag implementation and ONE resize implementation (two processMove; the shared beginAt)');
+  ok(dfUses === 4 && gateOf(/window\.addEventListener\('blur', onEnd, fs\)/.test(df)) && gateOf(/document\.addEventListener\('visibilitychange', onEnd, fs\)/.test(df)) && gateOf(noMouseFeed(win)) && gateOf(noMouseFeed(tg)) && (win.match(/attachDragFeed\(\{/g) || []).length === 2 && (tg.match(/attachDragFeed\(\{/g) || []).length === 2 && !/addEventListener\(DRAG_FEED\./.test(win) && !/addEventListener\(DRAG_FEED\./.test(tg) && !/function captureOn|function setDragShield/.test(win), `ONE feed: drag-feed.js registers DRAG_FEED's four events + blur + visibilitychange; window.js's two doors and tab-group.js's two doors attach it (${(win.match(/attachDragFeed\(\{/g) || []).length}+${(tg.match(/attachDragFeed\(\{/g) || []).length}); no document mouseup / mousemove feeds any drag`);
+  ok(gateOf(/icon\.addEventListener\('pointerdown', \(e\) => \{/.test(tg)) && gateOf(/const pid = captureOn\(icon, e\);/.test(tg)) && gateOf(/tabEl\.addEventListener\('pointerdown', \(e\) => \{/.test(tg)) && gateOf(/tabEl\.closest\('\.window-titlebar'\)\) \|\| tabEl;/.test(tg)) && verdictOf(/const pid = captureOn\(capEl, e\);/.test(tg)), 'tab-group.js: the icon drag and the tab drag are pointerdown doors that capture the pointer — the tab drag on the strip\'s TITLE BAR (the element the tear-off\'s re-render keeps; a capture on the tab itself would be lost under the finger)');
+  ok((win.match(/setDragShield\(true, shieldKey\);/g) || []).length === 2 && (win.match(/setDragShield\(false, shieldKey\);/g) || []).length >= 3 && (tg.match(/setDragShield\(true, shieldKey\);/g) || []).length === 2 && (tg.match(/setDragShield\(false, shieldKey\);/g) || []).length >= 4 && !/setDragShield\((true|false)\);/.test(win + tg) && gateOf(/const HOLDERS = new Set\(\);/.test(df)) && gateOf(/on = HOLDERS\.size > 0;/.test(df)) && gateOf(/if \(dragEndVerdict\(\{ type: 'pointermove', buttons: e\.buttons, pointerId: e\.pointerId \}, feedState\)\.end\) \{ endDrag\(e, 'released-unseen'\); return; \}/.test(win)) && (tg.match(/feedState\)\.end\) \{ onUp\(e, 'released-unseen'\); return; \}/g) || []).length === 2, 'the four doors raise + lower the shield under their OWN key — a set of holders, never a boolean (verify r2 #2) — and every door ends on a move with no button held');
+  ok(gateOf(/client: \{ clientX: e\.clientX, clientY: e\.clientY, pointerId: e\.pointerId \}/.test(xv)) && gateOf(/import \{ dragEndVerdict \} from '\.\/drag-end\.js';/.test(xv)) && gateOf(/for \(const k of \['pointerup', 'pointercancel', 'pointermove', 'visibilitychange'\]\) document\.addEventListener\(k, endHold/.test(xv)) && verdictOf(/window\.addEventListener\('blur', endHold/.test(xv)), 'xpra-view.js: the handed-over press carries its pointerId, and the hold ends as the WM\'s drag does (the same verdict: release / cancel / no-button move / blur / hidden — verify r1 finding #2)');
+  ok((win.match(/const processMove = \(e\) => \{/g) || []).length === 2 && verdictOf(/const beginAt = \(x, y\) => \{/.test(win)), 'window.js keeps ONE drag implementation and ONE resize implementation (two processMove; the shared beginAt)');
   // verify r2 #1: the owner's abort ends the drag — once, at the feed — and every door CANCELS (no drop of a window that is leaving)
-  ok(/signal\.addEventListener\('abort', \(\) => \{ if \(stopped\) return; stop\(\); onEnd\(\{ type: 'owner-gone', pointerId \}\); \}, \{ signal: ctl\.signal \}\);/.test(df), "drag-feed.js: the owner's abort ENDS the drag it fed (owner-gone), once, with the capture released — never a silent teardown (verify r2 #1)");
-  ok(/if \(v\.why === 'owner-gone'\) \{ win\._lastDragEnd = 'owner-gone'; win\._cancelPointerDrag\(\); return; \}/.test(win) && /if \(v\.why === 'owner-gone'\) \{ win\._lastResizeEnd = 'owner-gone'; if \(win\._resizeOp\) win\._resizeOp\.cancel\(\); return; \}/.test(win) && /if \(why === 'owner-gone'\) \{ targetWin = null; return; \}/.test(tg) && /if \(why === 'owner-gone'\) \{ \/\/ the torn window closed mid-drag/.test(tg) && /AbortSignal\.any\(\[dragCtl\.signal, own\]\)/.test(tg), "every door CANCELS on owner-gone: the title drag's cancel path, the resize op's cancel, the icon drag's no-merge, the tab drag's chrome-only cleanup (its feed joins the dragged window's controller)");
-  ok(/if \(!win\) \{ mouseDown = false; setDragShield\(false, shieldKey\); endDrag\(\); return; \}/.test(tg), "tab-group.js: the tear-off's early return (the window gone at the detach) lifts the shield and tears the feed down (verify r2 ⑥: the binding-model pin admits any statements on that line — this one names them)");
-  ok(!/titleBar\.(replaceWith|remove)\(/.test(win + tg) && !/\.titleBar = /.test(tg) && /const existing = titleBar\.querySelector\('\.tab-bar-tabs'\);\n\s+if \(existing\) existing\.remove\(\);/.test(tg), 'no re-render replaces the title bar ELEMENT (the tear-off rebuilds the tab bar as its children): the capture a drag holds on it survives — §2 (h) shows what a replacement would do');
+  ok(verdictOf(/signal\.addEventListener\('abort', \(\) => \{ if \(stopped\) return; stop\(\); onEnd\(\{ type: 'owner-gone', pointerId \}\); \}, \{ signal: ctl\.signal \}\);/.test(df)), "drag-feed.js: the owner's abort ENDS the drag it fed (owner-gone), once, with the capture released — never a silent teardown (verify r2 #1)");
+  ok(gateOf(/if \(v\.why === 'owner-gone'\) \{ win\._lastDragEnd = 'owner-gone'; win\._cancelPointerDrag\(\); return; \}/.test(win)) && gateOf(/if \(v\.why === 'owner-gone'\) \{ win\._lastResizeEnd = 'owner-gone'; if \(win\._resizeOp\) win\._resizeOp\.cancel\(\); return; \}/.test(win)) && gateOf(/if \(why === 'owner-gone'\) \{ targetWin = null; return; \}/.test(tg)) && gateOf(/if \(why === 'owner-gone'\) \{ \/\/ the torn window closed mid-drag/.test(tg)) && verdictOf(/AbortSignal\.any\(\[dragCtl\.signal, own\]\)/.test(tg)), "every door CANCELS on owner-gone: the title drag's cancel path, the resize op's cancel, the icon drag's no-merge, the tab drag's chrome-only cleanup (its feed joins the dragged window's controller)");
+  ok(verdictOf(/if \(!win\) \{ mouseDown = false; setDragShield\(false, shieldKey\); endDrag\(\); return; \}/.test(tg)), "tab-group.js: the tear-off's early return (the window gone at the detach) lifts the shield and tears the feed down (verify r2 ⑥: the binding-model pin admits any statements on that line — this one names them)");
+  ok(!/titleBar\.(replaceWith|remove)\(/.test(win + tg) && !/\.titleBar = /.test(tg) && verdictOf(/const existing = titleBar\.querySelector\('\.tab-bar-tabs'\);\n\s+if \(existing\) existing\.remove\(\);/.test(tg)), 'no re-render replaces the title bar ELEMENT (the tear-off rebuilds the tab bar as its children): the capture a drag holds on it survives — §2 (h) shows what a replacement would do');
 }
 
 // ── §5 THE DOOR CENSUS (verify r2 T1) ──────────────────────────────────────
@@ -758,7 +758,7 @@ console.log('§5 the door census — every pointer drag in the client is on the 
   const dead = ALLOWED.filter(([f, re]) => !rows.some((r) => r.kind === 'listener' && r.file === f && re.test(r.event)));
   ok(dead.length === 0, `every allowlisted reason names a listener that exists${dead.length ? ' — dead: ' + dead.map(([f, re]) => f + ' ' + re).join(', ') : ''}`);
   // the two bridges that forward a pointer they CAPTURED (their own end semantics: the remote page / X owns the gesture)
-  ok(/pane\.setPointerCapture\(e\.pointerId\)/.test(texts['xpra-view.js']) && /img\.setPointerCapture\(e\.pointerId\)/.test(texts['browser-live-window.js']), "the xpra pane and the live view's picture capture the pointer they forward (the hand-over's hold ends as the WM's drag does — §4)");
+  ok(gateOf(/pane\.setPointerCapture\(e\.pointerId\)/.test(texts['xpra-view.js'])) && verdictOf(/img\.setPointerCapture\(e\.pointerId\)/.test(texts['browser-live-window.js'])), "the xpra pane and the live view's picture capture the pointer they forward (the hand-over's hold ends as the WM's drag does — §4)");
   // THE PLANTED CONTROLS (scripts/mutant-copy.mjs, outside the tree): a door put back on the document ⇒ the census names the file
   {
     const ctlCopies = [];
@@ -775,10 +775,10 @@ console.log('§5 the door census — every pointer drag in the client is on the 
       const b = judge(census({ ...texts, [file]: planted }));
       res.push([name, b.some((x) => x.startsWith(file)) ? 'red' : 'green?']);
     }
-    ok(res.length === 3 && res.every(([, r]) => r === 'red'), `3 PLANTED CONTROLS ⇒ the census names the file: ${JSON.stringify(res)}`);
-    for (const c of copiesCensus(ctlCopies, MUT.dir, repo, { minCopies: 3, label: 'census controls: ' })) ok(c.pass, c.name, c.detail);
+    ok(res.length === 3 && verdictOf(res.every(([, r]) => r === 'red')), `3 PLANTED CONTROLS ⇒ the census names the file: ${JSON.stringify(res)}`);
+    for (const c of copiesCensus(ctlCopies, MUT.dir, repo, { minCopies: 3, label: 'census controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
   }
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

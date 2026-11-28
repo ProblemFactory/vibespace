@@ -38,7 +38,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const root = mintRoot('stage-overlap'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree ──────────────────────────────────────────
@@ -168,7 +168,7 @@ try {
   await bootPage(evalJs); // in-page poll (2.369.118): the heavy tier went red with "no app" in two chrome lanes at once — one probe 1.5 s after navigate is a bet on load speed
   await evalJs(`app.settings.set('desktop.dynamicEnabled', true)`);
   await sleep(600);
-  check('stage enabled', await evalJs('!!(app.stage && app.stage.enabled)'));
+  check('stage enabled', verdictOf(await evalJs('!!(app.stage && app.stage.enabled)')));
 
   // control window on the home desktop at a KNOWN position
   await evalJs(`app.openShellTerminal(${JSON.stringify(wt)})`);
@@ -214,9 +214,9 @@ try {
   // Assert A (H2: slot leak to the desktop): nothing visible at slot bounds
   check('A: no visible window at slot bounds on the normal desktop', onDesk.visibleAtSlot.length === 0,
     JSON.stringify(onDesk));
-  check('A2: control window visible at HOME on its desktop', await evalJs(`(() => {
+  check('A2: control window visible at HOME on its desktop', verdictOf(await evalJs(`(() => {
     const w = app.wm.windows.get(${JSON.stringify(w1)});
-    return !!w && w.element.style.visibility !== 'hidden' && Math.abs((w.gridBounds?.left ?? 9) - 0.1) < 0.02; })()`)
+    return !!w && w.element.style.visibility !== 'hidden' && Math.abs((w.gridBounds?.left ?? 9) - 0.1) < 0.02; })()`))
     || onDesk.visible.includes(w1) === false /* control may be stage-owned-parked if it never adopted — accept hidden */,
     await evalJs(`JSON.stringify(app.wm.windows.get(${JSON.stringify(w1)})?.gridBounds)`));
 
@@ -239,7 +239,7 @@ try {
     const b = w.gridBounds;
     const near = b && ['left','top','width','height'].every((k) => Math.abs((b[k] ?? 0) - (slot[k] ?? 0)) < 0.01);
     return { ok: !near, b, slot }; })()`);
-  check('D: parked ex-hero geometry is not the slot', dCheck.ok, JSON.stringify(dCheck));
+  check('D: parked ex-hero geometry is not the slot', verdictOf(dCheck.ok), JSON.stringify(dCheck));
 
   // ── round trip 2 (accumulation check): counts must not grow ──
   await evalJs(`app.stage.leave(${JSON.stringify(deskId)})`);
@@ -261,7 +261,7 @@ try {
 
   // ── F: THE RACE SHAPE on this build ──
   const F = await raceShape('F');
-  for (const [n, c, e] of F.out) check(n, c, e);
+  for (const [n, c, e] of F.out) check(n, verdictOf(c), e);
 
   // ── G: an id that lands AFTER leave() still publishes (the pre-fix landing was gated on the Stage: nothing ever did) ──
   await evalJs('window.__holdLanding = true; true');
@@ -275,7 +275,7 @@ try {
   check(`G1: Z picked (${zMs} ms), the Stage left before its id landed (${JSON.stringify(zPre)}); the landing off the Stage publishes Z (${zLand} ms)`, zMs >= 0 && zPre.zKey === null && zPre.active === false && zLand >= 0, JSON.stringify(await recOf()));
   await evalJs('app.stage.enter()'); await sleep(600);
   const gBack = await census();
-  check('G2: …and the Stage comes back on Z, alone at the slot', (await heroIs(z)) && gBack.visibleAtSlot.length === 1 && gBack.visibleAtSlot[0] === z, JSON.stringify(gBack));
+  check('G2: …and the Stage comes back on Z, alone at the slot', (gateOf(await heroIs(z))) && gBack.visibleAtSlot.length === 1 && gBack.visibleAtSlot[0] === z, JSON.stringify(gBack));
 
   // ── W: THE WALK-OVER STAYS (挂机 — another device's operations win): page B is another client ──
   const me = await evalJs('app.stage._clientId');
@@ -325,7 +325,7 @@ try {
   const R = await raceShape('R');
   const red = R.out.filter(([, c]) => !c).map(([n]) => n);
   check(`R: control (the pre-fix follow, patched bundle): the shape holds and B2 + D go RED — ${red.length} red: ${red.map((n) => n.slice(0, 48)).join(' | ')}`,
-    anchored && R.out[0][1] && red.some((n) => /^R B2:/.test(n)) && red.some((n) => /^R D:/.test(n)), JSON.stringify({ anchored, out: R.out.map(([n, c, e]) => [n.slice(0, 60), c, String(e).slice(0, 200)]) }));
+    gateOf(anchored) && gateOf(R.out[0][1]) && gateOf(red.some((n) => /^R B2:/.test(n))) && verdictOf(red.some((n) => /^R D:/.test(n))), JSON.stringify({ anchored, out: R.out.map(([n, c, e]) => [n.slice(0, 60), c, String(e).slice(0, 200)]) }));
 } catch (e) {
   failed++; console.error('  ✗ harness threw:', e.message);
 } finally {
@@ -334,4 +334,4 @@ try {
 
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nstage overlap smoke passed — no pile at slot, no __stage__ poisoning');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

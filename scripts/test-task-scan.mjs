@@ -35,7 +35,7 @@ if (!process.env.TASK_SCAN_CHILD) {
   }
 } else {
   let failed = 0;
-  const check = (n, c, extra) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${extra ? '\n    ' + extra : ''}`); } };
+  const check = (n, c, extra) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${extra ? '\n    ' + extra : ''}`); } };
 
   const cwd = '/tmp/task-scan-proj';
   const sid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

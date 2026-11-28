@@ -21,7 +21,7 @@ import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const SRC = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
 const P = require(path.join(REPO, 'src/channel-policy.js'));
 const F = require(path.join(REPO, 'src/channel-filter.js'));
@@ -52,20 +52,20 @@ P.policyDoorOf({ grain: 'account' }, tOf(JA)); P.policyDoorOf({ grain: 'conversa
 ok(miss.size === 0, `every word the row model says is in zh AND ja (${grid.length} rows × 3 guard sets)`, [...miss].join(' | '));
 const m = (grain, pol, extra = {}) => P.policyRowModel({ grain, policy: pol, ...extra });
 const acctNone = m('account', { mode: 'review', source: 'default', declared: null, modes: LARK, inherits: null });
-ok(acctNone.value === null && acctNone.choices.map((c) => c.value).join() === 'review,direct,' && /^Not set on this account/.test(acctNone.sourceText) && /The vendor's default \(review\)/.test(acctNone.choices[2].label), 'account, nothing set: review / direct / the vendor\'s default (review), "Not set on this account"', JSON.stringify(acctNone));
+ok(acctNone.value === null && acctNone.choices.map((c) => c.value).join() === 'review,direct,' && gateOf(/^Not set on this account/.test(acctNone.sourceText)) && verdictOf(/The vendor's default \(review\)/.test(acctNone.choices[2].label)), 'account, nothing set: review / direct / the vendor\'s default (review), "Not set on this account"', JSON.stringify(acctNone));
 const acctDirect = m('account', { mode: 'direct', source: 'account', declared: 'direct', modes: LARK, inherits: { mode: 'review', source: 'default' } });
-ok(acctDirect.value === 'direct' && acctDirect.own === 'direct' && /^Set on this account: direct/.test(acctDirect.sourceText) && /^Direct — agents with send authority send without your approval/.test(acctDirect.words), 'account direct: its own value, "Set on this account: direct", the Direct words', JSON.stringify(acctDirect));
+ok(acctDirect.value === 'direct' && acctDirect.own === 'direct' && gateOf(/^Set on this account: direct/.test(acctDirect.sourceText)) && verdictOf(/^Direct — agents with send authority send without your approval/.test(acctDirect.words)), 'account direct: its own value, "Set on this account: direct", the Direct words', JSON.stringify(acctDirect));
 const slack = m('account', { mode: 'review', source: 'default', declared: null, modes: SLACK });
 ok(!slack.offersDirect && slack.choices.map((c) => c.value).join() === 'review,', 'a review-only vendor (Slack) offers review + the default only — never direct', JSON.stringify(slack.choices));
 const convInh = m('conversation', { mode: 'direct', source: 'account', declared: 'direct', modes: LARK, inherits: null });
-ok(convInh.value === null && /^Inherits the account: direct — pick one above to change it for this conversation only/.test(convInh.sourceText) && convInh.choices[2].label === "Use the account's (direct)", 'a conversation with no policy: "Inherits the account: direct", the null choice = "Use the account\'s (direct)"', JSON.stringify(convInh));
+ok(convInh.value === null && gateOf(/^Inherits the account: direct — pick one above to change it for this conversation only/.test(convInh.sourceText)) && convInh.choices[2].label === "Use the account's (direct)", 'a conversation with no policy: "Inherits the account: direct", the null choice = "Use the account\'s (direct)"', JSON.stringify(convInh));
 const convOwn = m('conversation', { mode: 'review', source: 'conversation', declared: 'review', modes: LARK, inherits: { mode: 'direct', source: 'account' } });
-ok(convOwn.value === 'review' && /without it, it would read direct/.test(convOwn.sourceText) && convOwn.choices[2].label === "Use the account's (direct)", 'a conversation holding review: its own value, what removing it reads (the account\'s direct)', JSON.stringify(convOwn));
+ok(convOwn.value === 'review' && gateOf(/without it, it would read direct/.test(convOwn.sourceText)) && convOwn.choices[2].label === "Use the account's (direct)", 'a conversation holding review: its own value, what removing it reads (the account\'s direct)', JSON.stringify(convOwn));
 const zhInh = m('conversation', { mode: 'direct', source: 'account', declared: 'direct', modes: LARK }, { t: tOf(ZH), modeText: (x) => (x === 'direct' ? '直接发送' : '审核') });
-ok(/^沿用账户：直接发送/.test(zhInh.sourceText) && zhInh.choices[2].label === '沿用账户的设置（直接发送）', 'zh: "沿用账户：直接发送" + "沿用账户的设置（直接发送）"', zhInh.sourceText);
+ok(gateOf(/^沿用账户：直接发送/.test(zhInh.sourceText)) && zhInh.choices[2].label === '沿用账户的设置（直接发送）', 'zh: "沿用账户：直接发送" + "沿用账户的设置（直接发送）"', zhInh.sourceText);
 const g0 = m('account', null, { guards: { linksReview: true, attachmentsReview: true, offHoursTz: ' Asia/Tokyo ' } });
 const g1 = m('account', null, { guards: { linksReview: false, attachmentsReview: false, offHoursTz: '' } });
-ok(/a link · an attachment · off-hours \(Asia\/Tokyo\) always needs your approval/.test(g0.guardsText) && /^No guard is on/.test(g1.guardsText), 'the guards line names exactly the guards that are on (read from the settings handed in)', `${g0.guardsText} || ${g1.guardsText}`);
+ok(gateOf(/a link · an attachment · off-hours \(Asia\/Tokyo\) always needs your approval/.test(g0.guardsText)) && verdictOf(/^No guard is on/.test(g1.guardsText)), 'the guards line names exactly the guards that are on (read from the settings handed in)', `${g0.guardsText} || ${g1.guardsText}`);
 ok(m('account', null).mode === 'review' && m('account', { mode: 'bogus', source: 'account', declared: 'bogus' }).mode === 'review', 'an unreadable view reads review (fail closed)');
 ok(P.policyDoorOf({ grain: 'account' }).grain === 'account' && P.policyDoorOf({ grain: 'conversation', source: 'conversation' }).grain === 'conversation' && P.policyDoorOf({ grain: 'conversation', source: 'account' }).grain === 'account' && P.policyDoorOf({}).label === 'Change the sending policy…', 'a refusal opens WHERE the policy is set (lane ui-needs-a-button: a door, never «the account\'s ⋯ menu» in words) — the conversation\'s own Reach & policy when the policy is its own, else the account\'s');
 
@@ -97,26 +97,26 @@ try {
   // the dialog's caps, derived the way readGrain derives them from the view it re-reads
   const capsOf = (a) => ({ offersSend: (a.sendAs || []).length > 0, sendWhy: null, policyRequiresReview: !(a.policy && a.policy.mode === 'direct') });
   const v0 = (await call('GET', '/api/channels/adapters/acc/view')).j.adapter;
-  ok(v0 && v0.policy && v0.policy.source !== 'account' && F.authorityCapCode(capsOf(v0)) && F.authorityCapCode(capsOf(v0)).code === 'policy-review', 'account review (nothing set): the account-grain dialog\'s cap = policy-review (send NOT offered)', JSON.stringify(v0 && v0.policy));
+  ok(gateOf(v0) && gateOf(v0.policy) && v0.policy.source !== 'account' && gateOf(F.authorityCapCode(capsOf(v0))) && F.authorityCapCode(capsOf(v0)).code === 'policy-review', 'account review (nothing set): the account-grain dialog\'s cap = policy-review (send NOT offered)', JSON.stringify(v0 && v0.policy));
   const own2 = await eng.setPolicy('acc', C2, 'review');
-  ok(own2.ok && own2.policy.source === 'conversation', 'a second conversation holds its OWN review before the flip');
+  ok(gateOf(own2.ok) && own2.policy.source === 'conversation', 'a second conversation holds its OWN review before the flip');
   const refused = await call('PUT', '/api/channels/adapters/acc/access', { access: [{ principal: AG, authority: 'send' }] });
   ok(refused.status === 409 && refused.j.code === 'authority-capped', 'account review: the account-grain access refuses `send` (authority-capped)', JSON.stringify(refused));
   const stale = await call('PUT', '/api/channels/adapters/acc', { policy: 'direct', base: 'review' });
   ok(stale.status === 409 && stale.j.code === 'policy-changed' && (await call('GET', '/api/channels/adapters/acc/view')).j.adapter.policy.source !== 'account', 'a `base` that is not the stored value ⇒ 409 policy-changed, NOTHING written', JSON.stringify(stale));
   const put = await call('PUT', '/api/channels/adapters/acc', { policy: 'direct', base: null });
-  ok(put.status === 200 && put.j.policy && put.j.policy.mode === 'direct' && put.j.policy.source === 'account', 'PUT {policy:direct, base:null} (what the door read) ⇒ saved, the account reads direct', JSON.stringify(put));
+  ok(put.status === 200 && gateOf(put.j.policy) && put.j.policy.mode === 'direct' && put.j.policy.source === 'account', 'PUT {policy:direct, base:null} (what the door read) ⇒ saved, the account reads direct', JSON.stringify(put));
   const v1 = (await call('GET', '/api/channels/adapters/acc/view')).j.adapter;
-  ok(F.authorityCapCode(capsOf(v1)) === null && v1.policy.inherits && v1.policy.inherits.source === 'default', 'the view the SAME dialog re-reads lifts the cap ⇒ `send` offered (and says what removing it reads)', JSON.stringify(v1.policy));
+  ok(F.authorityCapCode(capsOf(v1)) === null && gateOf(v1.policy.inherits) && v1.policy.inherits.source === 'default', 'the view the SAME dialog re-reads lifts the cap ⇒ `send` offered (and says what removing it reads)', JSON.stringify(v1.policy));
   const granted = await call('PUT', '/api/channels/adapters/acc/access', { access: [{ principal: AG, authority: 'send' }], base: F.grainStamp({ access: [], watchers: [] }) });
   ok(granted.status === 200, 'account direct: the account-grain access accepts `send`', JSON.stringify(granted));
   const p1 = eng.conversationView('acc', C1).policy, p2 = eng.conversationView('acc', C2).policy;
-  ok(p1.mode === 'direct' && p1.source === 'account' && P.policyRowModel({ grain: 'conversation', policy: p1 }).sourceText.startsWith('Inherits the account: direct'), 'a conversation with no policy reads direct, source account — its door says "Inherits the account: direct"', JSON.stringify(p1));
-  ok(p2.mode === 'review' && p2.source === 'conversation' && p2.inherits && p2.inherits.mode === 'direct', 'a conversation holding its own review KEEPS it when the account flips (and knows the account says direct)', JSON.stringify(p2));
+  ok(p1.mode === 'direct' && p1.source === 'account' && verdictOf(P.policyRowModel({ grain: 'conversation', policy: p1 }).sourceText.startsWith('Inherits the account: direct')), 'a conversation with no policy reads direct, source account — its door says "Inherits the account: direct"', JSON.stringify(p1));
+  ok(p2.mode === 'review' && p2.source === 'conversation' && gateOf(p2.inherits) && p2.inherits.mode === 'direct', 'a conversation holding its own review KEEPS it when the account flips (and knows the account says direct)', JSON.stringify(p2));
   const st1 = eng.statusFor(ctx, `acc/${C1}`), st2 = eng.statusFor(ctx, `acc/${C2}`), stN = eng.statusFor({ kind: 'agent', id: 'cid-nobody', groups: [] }, `acc/${C1}`);
-  ok(st1.ok && st1.conversation.policy.mode === 'direct' && st1.conversation.policy.source === 'account' && st2.conversation.policy.source === 'conversation' && !stN.ok && stN.code === 'not-found', 'agent `status <conversation>`: the effective policy + its source; an agent that cannot see it gets the uniform not-found', JSON.stringify([st1, stN]));
+  ok(gateOf(st1.ok) && st1.conversation.policy.mode === 'direct' && st1.conversation.policy.source === 'account' && st2.conversation.policy.source === 'conversation' && !stN.ok && stN.code === 'not-found', 'agent `status <conversation>`: the effective policy + its source; an agent that cannot see it gets the uniform not-found', JSON.stringify([st1, stN]));
   const row = (eng.listFor(ctx).conversations || []).find((c) => c.key === `acc/${C1}`);
-  ok(row && row.policy === 'direct' && row.policySource === 'account', 'the agent\'s list row carries the policy AND its source', JSON.stringify(row && { policy: row.policy, policySource: row.policySource }));
+  ok(gateOf(row) && row.policy === 'direct' && row.policySource === 'account', 'the agent\'s list row carries the policy AND its source', JSON.stringify(row && { policy: row.policy, policySource: row.policySource }));
   // B-f276 1b (A3's read, should 1): the ACCOUNT doors read the accounts as a verdict — while the channels are PAUSED they ask the pause
   // first and refuse BY NAME (503 store-blocked), never «no such account» / an empty list over an accounts file nobody read
   {
@@ -169,7 +169,7 @@ try {
   const cli = SRC('data/bin/vibespace-channels');
   const pw = cli.match(/const policyWords = (\(p\) => `[^\n]+`;)/);
   const policyWords = pw ? new Function('return ' + pw[1].replace(/;$/, ''))() : null;
-  ok(policyWords && policyWords({ mode: 'direct', source: 'account' }) === 'direct (account)' && policyWords({ mode: 'review', source: 'conversation' }) === 'review (this conversation)' && /status <conversation>/.test(cli) && /policy: \$\{policyWords\(c\.policy\)\}/.test(cli) && /chips\.push\(`policy: \$\{policyWords\(\{ mode: c\.policy, source: c\.policySource \}\)\}`\)/.test(cli), 'the CLI: `policy: direct (account)` / `review (this conversation)` on status <conversation> and on every list row');
+  ok(gateOf(policyWords) && policyWords({ mode: 'direct', source: 'account' }) === 'direct (account)' && policyWords({ mode: 'review', source: 'conversation' }) === 'review (this conversation)' && gateOf(/status <conversation>/.test(cli)) && gateOf(/policy: \$\{policyWords\(c\.policy\)\}/.test(cli)) && verdictOf(/chips\.push\(`policy: \$\{policyWords\(\{ mode: c\.policy, source: c\.policySource \}\)\}`\)/.test(cli)), 'the CLI: `policy: direct (account)` / `review (this conversation)` on status <conversation> and on every list row');
 } finally { server.close(); }
 
 console.log('⑤ the doors (source) + a patched-copy control');
@@ -182,7 +182,7 @@ const doorPins = ({ panel, reach, dlg, editor }) => [
   ['the Grant access refusal carries the door to where the policy is set', /const pd = P\.policyDoorOf\(/.test(editor) && /door: 'policy', run \}/.test(editor)],
 ];
 const real = { panel: SRC('src/lib/channels-panel.js'), reach: SRC('src/lib/channel-reach-editor.js'), dlg: SRC('src/lib/channel-account-dialogs.js'), editor: SRC('src/lib/channel-filter-editor.js') };
-for (const [name, held] of doorPins(real)) ok(held, name);
+for (const [name, held] of doorPins(real)) ok(verdictOf(held), name);
 // CONTROL: the account dialog WITHOUT its policy row (the copy drops the append) and the ⋯ without the door ⇒ red
 const mutant = { ...real, reach: real.reach.replace('  drawPolicy();\n  body.appendChild(polHost);\n', '  drawPolicy();\n'), panel: real.panel.replace(/\n\s*registerMenuItem\(\{ menu: M, group: '1_rows', order: 9,[^\n]*\n/, '\n') };
 ok(mutant.reach !== real.reach && mutant.panel !== real.panel, 'CONTROL: the patched copy differs from the tree (both mutations applied)');
@@ -213,20 +213,20 @@ console.log('⑥ the guards\' door (lane guards-door)');
       && mm.words === `Direct — agents with send authority send without your approval; files: ${att ? 'ask' : 'allow'} · links: ${lnk ? 'ask' : 'allow'} · off-hours: ${oh === 'on' ? 'on' : 'off'}`;
     cases.push(good ? null : `${JSON.stringify(guards)} owner=${owner} ⇒ ${ids(mm)} ${JSON.stringify(mm.guardRows.map((r) => [r.toggleTo, r.setZone]))} ${mm.words}`);
   }
-  ok(cases.every((c) => c === null), `guardRows: ${cases.length} cases (attachments × links × off-hours none/on/off × owner/agent) — state, the ONE instance key, toggleTo only for the owner, the zone button only without a zone, the direct words say the current answers`, cases.filter(Boolean).slice(0, 3).join(' || '));
+  ok(verdictOf(cases.every((c) => c === null)), `guardRows: ${cases.length} cases (attachments × links × off-hours none/on/off × owner/agent) — state, the ONE instance key, toggleTo only for the owner, the zone button only without a zone, the direct words say the current answers`, cases.filter(Boolean).slice(0, 3).join(' || '));
   const full = m('account', DIRECT, { guards: ALLOW, owner: true });
   const oneAsks = m('account', DIRECT, { guards: { ...ALLOW, attachmentsReview: true }, owner: true });
   const review = m('account', REVIEW, { guards: ALLOW, owner: true });
-  ok(full.fullDelegation && full.delegationText === 'Full delegation: an agent with send authority sends anything — files, links, at any hour — without asking'
+  ok(gateOf(full.fullDelegation) && full.delegationText === 'Full delegation: an agent with send authority sends anything — files, links, at any hour — without asking'
     && !oneAsks.fullDelegation && oneAsks.delegationText === 'Not full delegation — still asks you: A message with files'
-    && !review.fullDelegation && /^Not full delegation — the policy is Review/.test(review.delegationText),
+    && !review.fullDelegation && verdictOf(/^Not full delegation — the policy is Review/.test(review.delegationText)),
   'delegationText: "Full delegation" ONLY when the policy reads direct AND no guard asks; else what still asks (or that Review holds all)', `${full.delegationText} || ${oneAsks.delegationText} || ${review.delegationText}`);
   const zhFull = m('account', DIRECT, { guards: ALLOW, t: tOf(ZH) }), jaFull = m('account', DIRECT, { guards: ALLOW, t: tOf(JA) });
-  ok(/^完全放权/.test(zhFull.delegationText) && /^完全な委任/.test(jaFull.delegationText), 'zh / ja: full delegation said in their words', `${zhFull.delegationText} | ${jaFull.delegationText}`);
-  ok(/also in Settings → Channels/.test(oneAsks.guardsText) && /an attachment always needs/.test(oneAsks.guardsText) && /^No guard is on \(also in Settings → Channels\)/.test(full.guardsText), 'the summary line reads the SAME rows and names where else it lives', `${oneAsks.guardsText} || ${full.guardsText}`);
+  ok(gateOf(/^完全放权/.test(zhFull.delegationText)) && verdictOf(/^完全な委任/.test(jaFull.delegationText)), 'zh / ja: full delegation said in their words', `${zhFull.delegationText} | ${jaFull.delegationText}`);
+  ok(gateOf(/also in Settings → Channels/.test(oneAsks.guardsText)) && gateOf(/an attachment always needs/.test(oneAsks.guardsText)) && verdictOf(/^No guard is on \(also in Settings → Channels\)/.test(full.guardsText)), 'the summary line reads the SAME rows and names where else it lives', `${oneAsks.guardsText} || ${full.guardsText}`);
   // the keys are the INSTANCE settings — every one a schema row, booleans default true (no default changed)
   const S = (await import(pathToFileURL(path.join(REPO, 'src/lib/settings-schema.js')).href)).SETTINGS_SCHEMA;
-  ok(['channels.guardAttachmentsReview', 'channels.guardLinksReview', 'channels.guardOffHours'].every((k) => S[k] && S[k].type === 'boolean' && S[k].default === true) && S['channels.offHoursTz'].default === '' && Object.values(P.GUARD_KEYS).every((k) => S[k]),
+  ok(gateOf(['channels.guardAttachmentsReview', 'channels.guardLinksReview', 'channels.guardOffHours'].every((k) => S[k] && S[k].type === 'boolean' && S[k].default === true)) && S['channels.offHoursTz'].default === '' && verdictOf(Object.values(P.GUARD_KEYS).every((k) => S[k])),
     'every guard row key is an instance setting in the schema; the three switches default ON (asks) — no default changed');
   // the card's pointer: a GUARD's reason, never the policy's own
   const dec = (guards, proposal, mode = 'direct') => P.decideOutbound({ channelPolicy: { mode }, guards, proposal: { authority: 'send', ...proposal }, now: Date.UTC(2026, 9, 7, 19), tz: null });
@@ -234,11 +234,11 @@ console.log('⑥ the guards\' door (lane guards-door)');
   const allowed = dec({ attachmentsReview: false, offHours: { enabled: false } }, { text: 'hi', attachments: [{ name: 'a.pdf' }] });
   const ohOff = dec({ attachmentsReview: true, offHours: { enabled: false, tz: 'Asia/Shanghai' } }, { text: 'hi' });
   const ohOn = dec({ attachmentsReview: true, offHours: { enabled: true, tz: 'Asia/Shanghai' } }, { text: 'hi' });
-  ok(withFile.mode === 'review' && withFile.reasons.join() === 'attachments' && withFile.reasons.some((r) => P.GUARD_REASONS.includes(r)) && allowed.mode === 'direct' && ohOn.reasons.join() === 'off-hours' && ohOff.mode === 'direct' && !dec({}, { text: 'x' }, 'review').reasons.some((r) => P.GUARD_REASONS.includes(r)),
+  ok(withFile.mode === 'review' && withFile.reasons.join() === 'attachments' && gateOf(withFile.reasons.some((r) => P.GUARD_REASONS.includes(r))) && allowed.mode === 'direct' && ohOn.reasons.join() === 'off-hours' && ohOff.mode === 'direct' && !dec({}, { text: 'x' }, 'review').reasons.some((r) => P.GUARD_REASONS.includes(r)),
     'a file under direct + attachments ask ⇒ review (attachments, a GUARD reason); allow ⇒ direct; off-hours switched off at 03:00 Shanghai ⇒ direct, on ⇒ off-hours; a review policy alone is not a guard', JSON.stringify([withFile, allowed, ohOff, ohOn].map((d) => [d.mode, d.reasons])));
   const outbox = SRC('src/lib/channel-outbox.js'), outbound = SRC('src/server/channels-outbound.js');
-  ok(/if \(p\.policy\.mode !== 'direct' && \(p\.policy\.reasons \|\| \[\]\)\.some\(\(r\) => P\.GUARD_REASONS\.includes\(r\)\)\) pol\.textContent \+= ' ' \+ t\('\(a guard — change it in the policy row\)'\);/.test(outbox)
-    && /offHours: \{ enabled: read\('channels\.guardOffHours'\) !== false, tz:/.test(outbound),
+  ok(gateOf(/if \(p\.policy\.mode !== 'direct' && \(p\.policy\.reasons \|\| \[\]\)\.some\(\(r\) => P\.GUARD_REASONS\.includes\(r\)\)\) pol\.textContent \+= ' ' \+ t\('\(a guard — change it in the policy row\)'\);/.test(outbox))
+    && verdictOf(/offHours: \{ enabled: read\('channels\.guardOffHours'\) !== false, tz:/.test(outbound)),
   'the card\'s "awaiting your approval" line points at the policy row when a guard held it; the server reads the off-hours switch');
   // THE RENDERER: the real guardRowsEl over a fake DOM (its own source, evaluated with fake el/btn/t/P)
   const reachSrc = SRC('src/lib/channel-reach-editor.js');
@@ -273,11 +273,11 @@ console.log('⑥ the guards\' door (lane guards-door)');
     && JSON.stringify(r.writes) === '[["channels.guardAttachmentsReview",false]]' && after === 'attachments:allow links:ask offHours:allow' && r.paints === 2,
   'the renderer draws the model\'s rows (2 switches checked = asks, the zone button for off-hours); a click writes ONLY channels.guardAttachmentsReview=false and the store\'s change redraws the row (attachments: allow)', `${rows0} / ${sw0} / ${zone} / ${JSON.stringify(r.writes)} / ${after} / paints ${r.paints}`);
   r.buttons()[0].onclick(); await new Promise((res) => setTimeout(res, 0));
-  ok(JSON.stringify(r.writes[1]) === '["channels.offHoursTz","Asia/Tokyo"]' && r.rows()[2].dataset.state === 'ask' && r.inputs().length === 3 && /Not full delegation — still asks you: A message with a link · Outside working hours/.test(r.text()),
+  ok(JSON.stringify(r.writes[1]) === '["channels.offHoursTz","Asia/Tokyo"]' && r.rows()[2].dataset.state === 'ask' && r.inputs().length === 3 && verdictOf(/Not full delegation — still asks you: A message with a link · Outside working hours/.test(r.text())),
     'the zone button sets the working-hours zone; off-hours then asks and gets its switch; the delegation line follows', `${JSON.stringify(r.writes)} ${r.text().slice(0, 300)}`);
   // a remote snapshot moving TWO keys at once ⇒ ONE repaint, and it ends (the store's live listener Set)
   const before = r.paints; r.store.set('channels.guardLinksReview', false); r.store.set('channels.guardOffHours', false); await new Promise((res) => setTimeout(res, 0));
-  ok(r.paints === before + 1 && r.rows()[1].dataset.state === 'allow' && r.rows()[2].dataset.state === 'allow' && /^Full delegation/.test(r.text().split(' | ').find((x) => /delegation/.test(x)) || ''),
+  ok(r.paints === before + 1 && r.rows()[1].dataset.state === 'allow' && r.rows()[2].dataset.state === 'allow' && verdictOf(/^Full delegation/.test(r.text().split(' | ').find((x) => /delegation/.test(x)) || '')),
     `a burst of store changes ⇒ one repaint after the listener loop (${r.paints - before}); links + off-hours allow ⇒ "Full delegation"`);
   const ag = runRows(reachSrc, {}, false);
   ok(ag.rows().length === 3 && ag.inputs().length === 0 && ag.buttons().length === 0, 'an agent\'s view (owner false): the same rows, no switch, no button');
@@ -285,16 +285,16 @@ console.log('⑥ the guards\' door (lane guards-door)');
   const perGrain = reachSrc.replace('cb.onchange = () => { app.settings.set(r.key, r.toggleTo); };', 'cb.onchange = () => { app.putGrain({ guards: { [r.id]: r.toggleTo } }); };');
   const c1 = runRows(perGrain, {}, true); c1.inputs()[0].onchange(); await new Promise((res) => setTimeout(res, 0));
   const c1red = perGrain !== reachSrc && !(JSON.stringify(c1.writes) === '[["channels.guardAttachmentsReview",false]]' && c1.rows()[0].dataset.state === 'allow');
-  ok(c1red, `CONTROL: a switch that writes a per-grain field instead of the instance setting is RED (writes ${JSON.stringify(c1.writes)}, row ${c1.rows()[0].dataset.state})`);
+  ok(verdictOf(c1red), `CONTROL: a switch that writes a per-grain field instead of the instance setting is RED (writes ${JSON.stringify(c1.writes)}, row ${c1.rows()[0].dataset.state})`);
   // CONTROL (b): delegationText said while a guard still asks ⇒ RED
   const polSrc = SRC('src/channel-policy.js');
   const mutSrc = polSrc.replace(': asking.length ? t(\'Not full delegation — still asks you: {list}\', { list: asking.join(\' · \') })', ': false ? null').replace(/require\('\.\/([\w-]+\.js)'\)/g, (x, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`);
   const mutFile = path.join(ROOT, 'channel-policy-mutant.js'); fs.writeFileSync(mutFile, mutSrc);
   const PM = require(mutFile);
   const mm = PM.policyRowModel({ grain: 'account', policy: DIRECT, guards: { ...ALLOW, attachmentsReview: true } });
-  ok(mutSrc !== polSrc && /^Full delegation/.test(mm.delegationText) && !(mm.delegationText === 'Not full delegation — still asks you: A message with files'), `CONTROL: a model that says full delegation while the attachment guard asks is RED ("${mm.delegationText.slice(0, 40)}…")`);
+  ok(mutSrc !== polSrc && gateOf(/^Full delegation/.test(mm.delegationText)) && !(mm.delegationText === 'Not full delegation — still asks you: A message with files'), `CONTROL: a model that says full delegation while the attachment guard asks is RED ("${mm.delegationText.slice(0, 40)}…")`);
 }
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

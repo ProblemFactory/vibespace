@@ -23,7 +23,7 @@ import { REPO, J, tick, made, toasts, toastText, S, T, DOC, hub, loadHandler, pa
 import { mutantCopies } from './mutant-copy.mjs';
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + J(extra).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + J(extra).slice(0, 1500) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -80,7 +80,7 @@ async function bootLeg(LM, quiet = false) {
   ok(P.creates.length === 3 && max === 1, `3 stopped conversations ⇒ 3 creates, NEVER two in flight (the stand-in hub answers each after ${DELAY} ms — longer than the old 400 ms clock)`, { creates: P.creates.length, inFlightAtSend: P.inFlightAtSend });
   const prog = progOf(t0);
   ok(prog.length === 1 && J(seen) === J(['Resuming 1 of 3…', 'Resuming 2 of 3…', 'Resuming 3 of 3…']) && prog[0].removed === true, 'the person sees it as it goes: ONE line «Resuming i of 3…», updated in place, gone at the end', { seen, lines: prog.length });
-  ok(stopOf(prog[0]) && stopOf(prog[0]).textContent === 'Stop', '…with Stop at hand (the line\'s own button)', (prog[0] && prog[0].children || []).map((c) => [c.tagName, c.className, c.textContent]));
+  ok(gateOf(stopOf(prog[0])) && stopOf(prog[0]).textContent === 'Stop', '…with Stop at hand (the line\'s own button)', (prog[0] && prog[0].children || []).map((c) => [c.tagName, c.className, c.textContent]));
 }
 
 console.log('— ② A REFUSAL OF ONE is said, and the rest go on');
@@ -89,7 +89,7 @@ console.log('— ② A REFUSAL OF ONE is said, and the rest go on');
   const r = await P.lm._resumeAll(stoppedOf(3)); await tick(5);
   const said = saidOf(t0);
   ok(P.creates.length === 3 && Math.max(...P.inFlightAtSend) === 1, 'the hub refuses create 2 ⇒ create 3 is still sent (one in flight throughout)', P.inFlightAtSend);
-  ok(said.includes('1 of 3 conversations could not be resumed: Conv 2 (The transcript could not be read)'), 'the refusal is SAID — its name and the hub\'s why', { said, kept: r });
+  ok(verdictOf(said.includes('1 of 3 conversations could not be resumed: Conv 2 (The transcript could not be read)')), 'the refusal is SAID — its name and the hub\'s why', { said, kept: r });
 }
 
 console.log('— ③ STOP: pressed while create 1 is in flight — nothing after its answer');
@@ -102,7 +102,7 @@ console.log('— ③ STOP: pressed while create 1 is in flight — nothing after
   b && b.onclick({ stopPropagation() {} });
   await tick(20); P.answerNow[0](); await run; await tick(5);
   ok(P.creates.length === 1, 'Stop ⇒ no create after the one in flight (it is answered, nothing follows)', P.creates.length);
-  ok(saidOf(t0).includes('Stopped: 1 of 3 resumed, 0 not resumed, 2 not started.'), 'and it is said: «Stopped: 1 of 3 resumed, 0 not resumed, 2 not started.»', saidOf(t0));
+  ok(verdictOf(saidOf(t0).includes('Stopped: 1 of 3 resumed, 0 not resumed, 2 not started.')), 'and it is said: «Stopped: 1 of 3 resumed, 0 not resumed, 2 not started.»', saidOf(t0));
 }
 
 console.log('— ④ THE 15 s WATCHDOG IS NOT AN END: a hub too slow to answer is a hub not to feed');
@@ -132,9 +132,9 @@ async function groupLeg(resumeGroup) {
 {
   const { resumeGroup } = await import(pathToFileURL(PACER).href);
   const { P, atOnce, max } = await groupLeg(resumeGroup);
-  ok(atOnce && P.creates.length === 3 && max === 1, 'a group of 1 live + 3 stopped ⇒ the live one attached at once, the 3 creates ONE in flight at a time', { atOnce, inFlightAtSend: P.inFlightAtSend });
+  ok(gateOf(atOnce) && P.creates.length === 3 && max === 1, 'a group of 1 live + 3 stopped ⇒ the live one attached at once, the 3 creates ONE in flight at a time', { atOnce, inFlightAtSend: P.inFlightAtSend });
   const st = read('src/lib/sidebar-tasks.js'), i = st.indexOf('resumeAllBtn.onclick = (e) => {'), body = st.slice(i, st.indexOf('};', i));
-  ok(i > 0 && /pressResumeGroup\(this\.app, taskSessions/.test(body) && !/\.resumeSession\(/.test(body), 'the button (sidebar-tasks.js) resumes through pressResumeGroup (the pace, its throw said) — no resumeSession of its own in a loop', body.slice(0, 400));
+  ok(i > 0 && gateOf(/pressResumeGroup\(this\.app, taskSessions/.test(body)) && !/\.resumeSession\(/.test(body), 'the button (sidebar-tasks.js) resumes through pressResumeGroup (the pace, its throw said) — no resumeSession of its own in a loop', body.slice(0, 400));
 }
 
 console.log('— ⑦ M1: EVERY END OF A CREATE IS SEEN — the watchdog disarms nothing that sees one');
@@ -149,7 +149,7 @@ console.log('— ⑦ M1: EVERY END OF A CREATE IS SEEN — the watchdog disarms 
   P.hangUp(); await tick(10); P.reconnect(); await tick(40);   // the liveness probe restarted the hub: the socket dropped and came back, nothing re-sent
   ok(held === 1 && P.creates.length === 2, 'the watchdog fired on create 1, then its socket dropped with no resend ⇒ the pace moves on (create 2 sent)', { held, creates: P.creates.length });
   P.answerNow[1] && P.answerNow[1](); await run; await tick(5);
-  ok(saidOf(t0).includes('1 of 2 conversations could not be resumed: Conv 1 (the connection dropped before the server answered)'), '…and the lost one is named as not resumed, in the person\'s words', saidOf(t0));
+  ok(verdictOf(saidOf(t0).includes('1 of 2 conversations could not be resumed: Conv 1 (the connection dropped before the server answered)')), '…and the lost one is named as not resumed, in the person\'s words', saidOf(t0));
 }
 
 console.log('— ⑧ M2: ONLY THE PRESS ACTS AS A PRESS — the group\'s later members take neither the focus nor the desktop on show');
@@ -170,7 +170,7 @@ console.log('— ⑧ M2: ONLY THE PRESS ACTS AS A PRESS — the group\'s later m
   const seen = [];
   for (let k = 0; k < 40 && P.answered < 3; k++) { await tick(20); seen.push([P.app.wm.activeWindowId, P.dm.activeDesktopId]); }
   await run; await tick(10);
-  ok(P.creates.length === 3 && seen.every(([w, d]) => w === 'v-f' && d === 'desk-v') && P.app.wm.activeWindowId === 'v-f' && P.dm.activeDesktopId === 'desk-v',
+  ok(P.creates.length === 3 && gateOf(seen.every(([w, d]) => w === 'v-f' && d === 'desk-v')) && P.app.wm.activeWindowId === 'v-f' && P.dm.activeDesktopId === 'desk-v',
     'members 2 and 3 (rows on desk-x and desk-y) resume AFTER the press: the person\'s window v-f keeps the focus and desk-v stays on show throughout', { creates: P.creates.length, seen: [...new Set(seen.map(J))], end: [P.app.wm.activeWindowId, P.dm.activeDesktopId] });
 }
 
@@ -194,8 +194,8 @@ console.log('— ⑩ S1 + S2: STOP IS ANSWERED AT ONCE; THE STOPPED LINE ADDS UP
   const stopping = toasts(t0).filter((e) => e.dataset && e.dataset.progress === 'resume-all-stopping');
   ok(stopping.length === 1 && toastText(stopping[0]) === 'Stopping after the conversation now starting…' && !stopping[0].removed && P.creates.length === 2, 'Stop with create 2 in flight ⇒ at ONCE «Stopping after the conversation now starting…» (before its answer)', stopping.map(toastText));
   P.answerNow[1](); await run; await tick(5);
-  ok(stopping[0] && stopping[0].removed === true, '…and that line gives way to the final one when the create ends');
-  ok(saidOf(t0).includes('Stopped: 1 of 4 resumed, 1 not resumed, 2 not started.'), 'the stopped line\'s numbers add up to the total — 1 resumed + 1 not resumed (refused) + 2 not started = 4', saidOf(t0));
+  ok(gateOf(stopping[0]) && stopping[0].removed === true, '…and that line gives way to the final one when the create ends');
+  ok(verdictOf(saidOf(t0).includes('Stopped: 1 of 4 resumed, 1 not resumed, 2 not started.')), 'the stopped line\'s numbers add up to the total — 1 resumed + 1 not resumed (refused) + 2 not started = 4', saidOf(t0));
 }
 
 console.log('— ⑪ S3: ONE SCREEN ON A PHONE; A THROW IN THE GROUP\'S PACE IS SAID');
@@ -204,13 +204,13 @@ console.log('— ⑪ S3: ONE SCREEN ON A PHONE; A THROW IN THE GROUP\'S PACE IS 
   const P = page(install, { delay: 5, answer: (i, m) => ({ type: 'error', reqId: m.reqId, error: why }) });
   await P.lm._resumeAll(stoppedOf(5).map((d) => ({ ...d, name: long + d.name }))); await tick(5);
   const line = saidOf(t0).find((x) => /could not be resumed/.test(x)) || '';
-  ok(line.length > 0 && line.length <= 400 && (line.match(/x{39}…/g) || []).length === 3 && /and 2 more$/.test(line), `the failure line is bounded — three names of ≤ 40 characters, reasons of ≤ 60, «and 2 more» (${line.length} characters)`, line);
+  ok(line.length > 0 && line.length <= 400 && (line.match(/x{39}…/g) || []).length === 3 && verdictOf(/and 2 more$/.test(line)), `the failure line is bounded — three names of ≤ 40 characters, reasons of ≤ 60, «and 2 more» (${line.length} characters)`, line);
   const { pressResumeGroup } = await import(pathToFileURL(path.join(REPO, 'src/lib/resume-pacer.js')).href);
   let unhandled = 0; const onU = () => { unhandled++; }; process.on('unhandledRejection', onU);
   const t1 = made.length;
   const r = await pressResumeGroup(P.app, [{ status: 'stopped', sessionId: CID(9), cwd: '/srv/q9', name: 'Conv 9' }], { nameOf: () => { throw new Error('a name read failed'); } });
   await tick(20); process.off('unhandledRejection', onU);
-  ok(r === null && unhandled === 0 && saidOf(t1).includes('Resuming the group stopped early because of an error on this page.'), 'a throw inside the group\'s pace is SAID, never an unhandled rejection', { r, unhandled, said: saidOf(t1) });
+  ok(r === null && unhandled === 0 && verdictOf(saidOf(t1).includes('Resuming the group stopped early because of an error on this page.')), 'a throw inside the group\'s pace is SAID, never an unhandled rejection', { r, unhandled, said: saidOf(t1) });
 }
 
 console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone»; each window resumes ITSELF once the vault is unlocked, in the pace\'s own lane');
@@ -253,12 +253,12 @@ console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone�
   const w = await waitsLeg(await lifeOf());
   ok(w.first.creates === 3 && w.first.waiting === 3 && w.first.whileLocked === 3, 'three conversations whose folders wait for the vault: three refusals, each window waits (no gone dialog, nothing recreated); a tick still LOCKED starts nothing', w.first);
   ok(J(w.first.said) === J(['3 of 3 conversations wait for the vault — while this page is open, each resumes by itself once you unlock it.']), 'ONE line says it, in the page\'s words: they WAIT (counted apart from a failure), no toast per window', w.first.said);
-  ok(w.after === 6 && w.max === 1 && w.same, 'the unlock ⇒ each conversation resumes ITSELF with the create it asked for, in turn — never two creates in flight', w);
+  ok(w.after === 6 && w.max === 1 && verdictOf(w.same), 'the unlock ⇒ each conversation resumes ITSELF with the create it asked for, in turn — never two creates in flight', w);
   ok(w.left === 0, 'each window waited ONCE: a later unlocked tick starts nothing more', w);
   const mid = await waitsLeg(await lifeOf(), { unlockMidPace: true });
-  ok(mid.after === 5 && mid.max === 1 && mid.same, 'unlocked WHILE the pace still has a create in flight: the waiting window takes its turn in the pace\'s lane — never two in flight', mid);
+  ok(mid.after === 5 && mid.max === 1 && verdictOf(mid.same), 'unlocked WHILE the pace still has a create in flight: the waiting window takes its turn in the pace\'s lane — never two in flight', mid);
   const now = await waitsLeg(await lifeOf(), { already: true });
-  ok(now.after === 6 && now.max === 1 && now.left === 0 && now.same, 'a vault already unlocked when the refusal lands (it was unlocked meanwhile): the window resumes at once, in the lane', now);
+  ok(now.after === 6 && now.max === 1 && now.left === 0 && verdictOf(now.same), 'a vault already unlocked when the refusal lands (it was unlocked meanwhile): the window resumes at once, in the lane', now);
   const ar = await waitsLeg(await lifeOf(), { archive: CID(2) });
   ok(ar.after === 5 && ar.of2 === 1 && ar.max === 1, 'a conversation the person ARCHIVED while it waited (cure 2 — archiving leaves its window open, the create door reads no archive) is NOT resumed at the unlock (its one create was the refused one); the other two are', ar);
   const aa = await waitsLeg(await lifeOf(), { archivedAtAsk: CID(2) });
@@ -271,7 +271,7 @@ console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone�
   // typed — the skip line gives its text back (source pin: the rig draws no window renderer; RED: cure 2's line, the text dropped)
   { const LS = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
     const quotes = (x) => x.includes("const typed = typeof createArgs.initialMessage === 'string' ? createArgs.initialMessage.trim() : '';") && x.includes("appendSystem(typed ? t('Not resumed \\u2014 this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»', { text: typed })");
-    ok(quotes(LS), 'an archived-while-waiting window that carried a typed message says it was NOT sent and gives its text back (cure 3)');
+    ok(verdictOf(quotes(LS)), 'an archived-while-waiting window that carried a typed message says it was NOT sent and gives its text back (cure 3)');
     ok(!quotes(LS.replace("appendSystem(typed ? t('Not resumed \\u2014 this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»', { text: typed }) : ", "appendSystem((")), 'RED control: cure 2\'s line (the message dropped unsaid) ⇒ the pin is red'); }
   const r1 = await waitsLeg(await lifeOf((x) => x.replace('        if (msg.resumesAtUnlock) {\n', '        if (false) {\n')));
   ok(r1.after === 3, 'RED control: the window that waits taken out (the .407 shape) ⇒ nothing resumes after the unlock', r1);
@@ -280,12 +280,12 @@ console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone�
   ok(r2.after === 6 && r2.max >= 2, 'RED control: the waits outside the lane ⇒ the unlock fires every create at once', r2);
   const r3 = await waitsLeg(await lifeOf(flood), { unlockMidPace: true });
   ok(r3.max >= 2, 'RED control: …and an unlock mid-pace puts a second create in flight beside the pace\'s', r3);
-  ok(/if \(msg\.code === 'vault_locked' && msg\.cwd && !hostId && resumeId && !fork && sessionMode === 'chat'\) msg\.resumesAtUnlock = true;\n\s*pending\.remove\(\); settled\('refused', msg\);/.test(SRC), 'the window that waits is a local chat RESUME (never a fork, a terminal or a machine\'s session), said on the answer BEFORE its end is told');
+  ok(verdictOf(/if \(msg\.code === 'vault_locked' && msg\.cwd && !hostId && resumeId && !fork && sessionMode === 'chat'\) msg\.resumesAtUnlock = true;\n\s*pending\.remove\(\); settled\('refused', msg\);/.test(SRC)), 'the window that waits is a local chat RESUME (never a fork, a terminal or a machine\'s session), said on the answer BEFORE its end is told');
   delete globalThis.__rapVault; delete globalThis.__rapFacts; delete globalThis.__rapTurn;
   // the boot offer while LOCKED (layout.js _offerResumeAll): it reads the facts when the page has none, says so and unlocks FIRST
   const LY = read('src/lib/layout.js'), body = LY.slice(LY.indexOf('  async _offerResumeAll(stopped) {'), LY.indexOf('  async _resumeAll(stopped) {'));
-  ok(/if \(!vaultFacts\(\)\) await refreshVaultFacts\(\);/.test(body) && /const locked = vaultFacts\(\)\?\.state === 'locked';/.test(body) && /confirmText: locked \? t\('Unlock and resume all \{n\}'/.test(body) && /if \(locked && vaultFacts\(\)\?\.state === 'locked'\) return await new Promise\(\(done\) => unlockThen\(\(\) => done\(this\._resumeAll\(stopped\)\), \{ ended: \(\) => done\(null\) \}\)\);[^\n]*\n      if \(locked && vaultFacts\(\)\?\.state !== 'unlocked'\) return null;[^\n]*\n      return await this\._resumeAll\(stopped\);/.test(body), 'the boot offer while locked: the facts read first, «Unlock and resume all n», the unlock dialog first, the paced resumes from unlockThen (its close OR the unlock — test-vault-secrets ⑪ drives it)');
-  ok(!/      if \(locked && vaultFacts\(\)\?\.state !== 'unlocked'\) return null;/.test(body.replace(/      if \(locked && vaultFacts\(\)\?\.state !== 'unlocked'\) return null;[^\n]*\n/, '')) && /      if \(locked && vaultFacts\(\)\?\.state !== 'unlocked'\) return null;/.test(body), 'cure 4 (its read): a reset that lands while the offer\'s question is open resumes nothing — the offer returns before _resumeAll (RED: the line removed ⇒ the pin above is red)');
+  ok(gateOf(/if \(!vaultFacts\(\)\) await refreshVaultFacts\(\);/.test(body)) && gateOf(/const locked = vaultFacts\(\)\?\.state === 'locked';/.test(body)) && gateOf(/confirmText: locked \? t\('Unlock and resume all \{n\}'/.test(body)) && verdictOf(/if \(locked && vaultFacts\(\)\?\.state === 'locked'\) return await new Promise\(\(done\) => unlockThen\(\(\) => done\(this\._resumeAll\(stopped\)\), \{ ended: \(\) => done\(null\) \}\)\);[^\n]*\n      if \(locked && vaultFacts\(\)\?\.state !== 'unlocked'\) return null;[^\n]*\n      return await this\._resumeAll\(stopped\);/.test(body)), 'the boot offer while locked: the facts read first, «Unlock and resume all n», the unlock dialog first, the paced resumes from unlockThen (its close OR the unlock — test-vault-secrets ⑪ drives it)');
+  ok(!/      if \(locked && vaultFacts\(\)\?\.state !== 'unlocked'\) return null;/.test(body.replace(/      if \(locked && vaultFacts\(\)\?\.state !== 'unlocked'\) return null;[^\n]*\n/, '')) && verdictOf(/      if \(locked && vaultFacts\(\)\?\.state !== 'unlocked'\) return null;/.test(body)), 'cure 4 (its read): a reset that lands while the offer\'s question is open resumes nothing — the offer returns before _resumeAll (RED: the line removed ⇒ the pin above is red)');
 }
 
 console.log('— ⑥ RED CONTROLS');
@@ -309,7 +309,7 @@ console.log('— ⑥ RED CONTROLS');
     ok(P.creates.length === 3 && max >= 2, `mutant clock (the master's 400 ms loop): RED — a create sent while the one before it was unanswered (in flight at each send: ${J(P.inFlightAtSend)})`);
   }
   const PS = fs.readFileSync(PACER, 'utf8'), a = '    if (!sent) end(\'none\', null, row);';
-  if (ok(PS.includes(a), 'mutant no-wait: the patched line exists in resume-pacer.js')) {
+  if (ok(verdictOf(PS.includes(a)), 'mutant no-wait: the patched line exists in resume-pacer.js')) {
     const { resumeGroup } = await import(pathToFileURL(M.write('src/lib/resume-pacer.js', PS.replace(a, "    end('none', null, row);"), 'rap-nowait', { esm: true })).href);
     const { P, max } = await groupLeg(resumeGroup);
     ok(P.creates.length === 3 && max >= 2, `mutant no-wait (a pacer that never waits for the create's end): RED on the group button — ${max} in flight`);
@@ -320,13 +320,13 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
 {
   const RP = await import(pathToFileURL(PACER).href);
   const U = { status: 'stopped', liveness: 'unknown', backend: 'codex', backendSessionId: 'th-1', sessionId: 'th-1' };
-  ok(RP.livenessUnknown(U) && !RP.livenessUnknown({ ...U, liveness: undefined }) && !RP.livenessUnknown({ ...U, status: 'external' }) && RP.unknownRowOf([U], 'codex', 'th-1') === U && RP.unknownRowOf([U], 'claude', 'th-1') === null,
+  ok(gateOf(RP.livenessUnknown(U)) && !RP.livenessUnknown({ ...U, liveness: undefined }) && !RP.livenessUnknown({ ...U, status: 'external' }) && RP.unknownRowOf([U], 'codex', 'th-1') === U && RP.unknownRowOf([U], 'claude', 'th-1') === null,
     'the pure rule: a row is «still checking» when it is stopped AND its liveness is unknown — found by its backend and id');
   const rowsOf = (unknownAt) => stoppedOf(3).map((d, k) => ({ status: 'stopped', sessionId: d.sessionId, backendSessionId: d.sessionId, backend: 'claude', cwd: d.cwd, name: d.name, ...(k === unknownAt ? { liveness: 'unknown' } : {}) }));
   // the GROUP press (the sidebar's «Resume all»)
   const groupUnknown = async (resumeGroup) => { const P = page(install, { delay: 30 }); P.app.attachSession = () => null; const t0 = made.length; await resumeGroup(P.app, rowsOf(1), { nameOf: (x) => x.name }); await tick(5); return { creates: P.creates.length, said: saidOf(t0) }; };
   const g1 = await groupUnknown(RP.resumeGroup);
-  ok(g1.creates === 2 && g1.said.some((x) => /^1 not resumed: still checking/.test(x)), 'the GROUP press: the row still being checked is not resumed (2 creates of 3) and it is SAID', g1);
+  ok(g1.creates === 2 && verdictOf(g1.said.some((x) => /^1 not resumed: still checking/.test(x))), 'the GROUP press: the row still being checked is not resumed (2 creates of 3) and it is SAID', g1);
   const PS2 = fs.readFileSync(PACER, 'utf8'), skip = "    if (livenessUnknown(s)) { checking.push(nameOf(s) || s.name); continue; }   // B-f64b cure: never started by a group press\n";
   if (!PS2.includes(skip)) throw new Error('the anchor of the control «B-f64b cure: the group skip» is not in the source');
   const g0 = await groupUnknown((await import(pathToFileURL(M.write('src/lib/resume-pacer.js', PS2.replace(skip, ''), 'rap-unknown-group', { esm: true })).href)).resumeGroup);
@@ -334,11 +334,11 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
   // the BOOT's «resume all» (layout _resumeAll)
   const bootUnknown = async (LMx) => { const P = page(install, { delay: 30, ...(LMx ? { LM: LMx } : {}) }); P.app.sidebar._allSessions = rowsOf(2); const t0 = made.length; await P.lm._resumeAll(stoppedOf(3)); await tick(5); return { creates: P.creates.length, said: saidOf(t0) }; };
   const b1 = await bootUnknown();
-  ok(b1.creates === 2 && b1.said.some((x) => /^1 not resumed: still checking/.test(x)), 'the BOOT\'s «resume all»: the row still being checked is not resumed (2 creates of 3) and it is SAID', b1);
+  ok(b1.creates === 2 && verdictOf(b1.said.some((x) => /^1 not resumed: still checking/.test(x))), 'the BOOT\'s «resume all»: the row still being checked is not resumed (2 creates of 3) and it is SAID', b1);
   const LY2 = read('src/lib/layout.js'), fcut = "    const go = (stopped || []).filter((d) => !unknownRowOf(rows, d.opts?.backend, d.opts?.backendSessionId || d.sessionId));\n";
   if (!LY2.includes(fcut)) throw new Error('the anchor of the control «B-f64b cure: the boot filter» is not in the source');
   const b0 = await bootUnknown((await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY2, fcut, '    const go = stopped || [];\n', "src/lib/layout.js"), 'rap-unknown-boot', { esm: true })).href)).LayoutManager);
-  ok(b0.creates === 2 && !b0.said.some((x) => /^1 not resumed: still checking/.test(x)) && b0.said.some((x) => /could not be resumed: .*still checking/.test(x)), 'CONTROL: a boot «resume all» without the filter — the backstop (resumeSession) still holds the row, and the pace reports it as a FAILURE instead of the skip\'s own words (RED for the leg above\'s «said»)', b0);
+  ok(b0.creates === 2 && !b0.said.some((x) => /^1 not resumed: still checking/.test(x)) && verdictOf(b0.said.some((x) => /could not be resumed: .*still checking/.test(x))), 'CONTROL: a boot «resume all» without the filter — the backstop (resumeSession) still holds the row, and the pace reports it as a FAILURE instead of the skip\'s own words (RED for the leg above\'s «said»)', b0);
   // THE BACKSTOP (resumeSession): unattended or bulk starts nothing; a person's own press asks first — a no starts nothing, a yes starts it
   const lifeUnknown = async (inst) => {
     const P = page(inst, { delay: 30 });
@@ -357,7 +357,7 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
     return { checking: [r1, r2, r3].map((r) => !!(r && r.checking)), before, after: P.creates.length, asked };
   };
   const l1 = await lifeUnknown(install);
-  ok(l1.checking.every(Boolean) && l1.before === 0 && l1.after === 1 && l1.asked.length === 2,
+  ok(gateOf(l1.checking.every(Boolean)) && l1.before === 0 && l1.after === 1 && l1.asked.length === 2,
     'resumeSession (the backstop): unattended or bulk starts nothing; a person\'s own press asks «still checking» first — a no starts nothing, a yes starts it (one create)', l1);
   const LS = read('src/lib/session-lifecycle.js'), gcut = '    if (!unknownOk && !excludeWebuiId && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {';
   if (!LS.includes(gcut)) throw new Error('the anchor of the control «B-f64b cure: the backstop» is not in the source');
@@ -378,7 +378,7 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
     return { creates: P.creates.length, said: saidOf(t0), door };
   };
   const pr1 = await presetUnknown();
-  ok(pr1.creates === 2 && pr1.said.some((x) => /^1 not resumed: still checking/.test(x)) && pr1.door,
+  ok(pr1.creates === 2 && gateOf(pr1.said.some((x) => /^1 not resumed: still checking/.test(x))) && verdictOf(pr1.door),
     'cure 2: a PERSON\'S PRESET resumes the two rows it knows and SAYS the one left because it is still being checked, with «Try again»', pr1);
   const LY3 = read('src/lib/layout.js'), tcut = LY3.match(/\n    if \(stillChecking\) showToast\([^\n]*/);
   if (!tcut) throw new Error('the anchor of the control «B-f64b cure 2: the preset\'s words» is not in the source');
@@ -387,4 +387,4 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

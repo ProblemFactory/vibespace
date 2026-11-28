@@ -47,7 +47,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { UsageHistory } = require(path.join(ROOT, 'src/usage-history.js'));
 let pass = 0, fail = 0, skip = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + e : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -83,7 +83,7 @@ try {
   ok(tier('claude-opus-5-5') === 'opus-5-5' && tier('claude-opus-5-5[1m]') === 'opus-5-5', 'claude-opus-5-5 and claude-opus-5-5[1m] → the opus-5-5 tier');
   ok(tier('claude-opus-4-8') === 'opus' && tier('claude-opus-4-5') === 'opus' && tier('claude-opus-5') === 'opus', 'claude-opus-4-8 / -4-5 / claude-opus-5 stay on `opus`');
   const o55 = t['opus-5-5'];
-  ok(o55 && o55.input === 4 && o55.output === 20 && o55.cacheWrite5m === 5 && o55.cacheWrite1h === 8 && o55.cacheRead === 0.2, 'opus-5-5 = tier_4_20_cache_read_0_20: $4/$20, cw 5m $5 / 1h $8, hit $0.20', JSON.stringify(o55));
+  ok(gateOf(o55) && o55.input === 4 && o55.output === 20 && o55.cacheWrite5m === 5 && o55.cacheWrite1h === 8 && o55.cacheRead === 0.2, 'opus-5-5 = tier_4_20_cache_read_0_20: $4/$20, cw 5m $5 / 1h $8, hit $0.20', JSON.stringify(o55));
   // ONE measured `result` record's modelUsage row for claude-opus-5-5[1m] (CLI 2.1.280,
   // costBasis "list"; this conversation's cache writes are all 1h — its usage block's
   // cache_creation carries ephemeral_1h only). Numbers only.
@@ -109,9 +109,9 @@ try {
   ok(tier('claude-mythos-5') === 'mythos' && tier('claude-mythos-5[1m]') === 'mythos', 'claude-mythos-5 (and [1m]) → the mythos tier');
   ok(tier('claude-fable-5-1') === 'fable-5-1' && tier('claude-fable-5') === 'fable' && tier('claude-fable-5-1[1m]') === 'fable-5-1', 'fable / fable-5-1 routing undisturbed by the new keys');
   const my = t.mythos, my51 = t['mythos-5-1'];
-  ok(my && my.input === 10 && my.output === 50 && my.cacheWrite5m === 12.5 && my.cacheWrite1h === 20 && my.cacheRead === 1, 'mythos = tier_10_50: $10/$50, cw 5m $12.5 / 1h $20, hit $1', JSON.stringify(my));
-  ok(my51 && my51.input === 10 && my51.output === 50 && my51.cacheWrite5m === 12.5 && my51.cacheWrite1h === 20 && my51.cacheRead === 0.25, 'mythos-5-1 = tier_10_50_cache_read_0_25: $10/$50, cw 5m $12.5 / 1h $20, hit $0.25', JSON.stringify(my51));
-  ok(['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'].every((k) => my[k] === t.fable[k] && my51[k] === t['fable-5-1'][k]), 'the two mythos rows price exactly as fable / fable-5-1 (same catalog tiers)');
+  ok(gateOf(my) && my.input === 10 && my.output === 50 && my.cacheWrite5m === 12.5 && my.cacheWrite1h === 20 && my.cacheRead === 1, 'mythos = tier_10_50: $10/$50, cw 5m $12.5 / 1h $20, hit $1', JSON.stringify(my));
+  ok(gateOf(my51) && my51.input === 10 && my51.output === 50 && my51.cacheWrite5m === 12.5 && my51.cacheWrite1h === 20 && my51.cacheRead === 0.25, 'mythos-5-1 = tier_10_50_cache_read_0_25: $10/$50, cw 5m $12.5 / 1h $20, hit $0.25', JSON.stringify(my51));
+  ok(verdictOf(['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'].every((k) => my[k] === t.fable[k] && my51[k] === t['fable-5-1'][k])), 'the two mythos rows price exactly as fable / fable-5-1 (same catalog tiers)');
   // NEGATIVE CONTROL — the same matcher over a copy of the table WITHOUT the two rows
   const neg = mk();
   const noMythos = { ...neg._pricing.tiers }; delete noMythos.mythos; delete noMythos['mythos-5-1'];
@@ -130,8 +130,8 @@ try {
   ok(tier('claude-mythos-5-2') === 'mythos-5-2' && tier('claude-mythos-5-2[1m]') === 'mythos-5-2', 'claude-mythos-5-2 (and [1m]) → the mythos-5-2 tier', tier('claude-mythos-5-2'));
   ok(tier('claude-fable-5-1') === 'fable-5-1' && tier('claude-fable-5') === 'fable' && tier('claude-mythos-5-1') === 'mythos-5-1' && tier('claude-mythos-5') === 'mythos', '5-1 and 5 keep their rows');
   const f52 = t['fable-5-2'], m52 = t['mythos-5-2'];
-  ok(f52 && f52.input === 8 && f52.output === 40 && f52.cacheWrite5m === 10 && f52.cacheWrite1h === 16 && f52.cacheRead === 0.2, 'fable-5-2 = the published price: $8/$40, cw 5m $10 / 1h $16, hit $0.20 (0.025× base)', JSON.stringify(f52));
-  ok(m52 && ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'].every((k) => m52[k] === f52[k]), 'mythos-5-2 prices exactly as fable-5-2 (the same published row, the same catalog tier)', JSON.stringify(m52));
+  ok(gateOf(f52) && f52.input === 8 && f52.output === 40 && f52.cacheWrite5m === 10 && f52.cacheWrite1h === 16 && f52.cacheRead === 0.2, 'fable-5-2 = the published price: $8/$40, cw 5m $10 / 1h $16, hit $0.20 (0.025× base)', JSON.stringify(f52));
+  ok(gateOf(m52) && verdictOf(['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'].every((k) => m52[k] === f52[k])), 'mythos-5-2 prices exactly as fable-5-2 (the same published row, the same catalog tier)', JSON.stringify(m52));
   const ev52 = { model: 'claude-fable-5-2[1m]', acct: null, i: 1000, o: 2000, cw5: 3000, cw1: 4000, cr: 50000 };
   const hand52 = (1000 * 8 + 2000 * 40 + 3000 * 10 + 4000 * 16 + 50000 * 0.2) / 1e6;
   ok(Math.abs(uh._cost(ev52) - hand52) < 1e-12, `a Fable 5.2 [1m] event costs the hand arithmetic ($${hand52.toFixed(6)})`, uh._cost(ev52));
@@ -177,7 +177,7 @@ try {
   else {
     const buf = fs.readFileSync(bin);
     const lenient = !!process.env.GITHUB_ACTIONS;
-    const check = (c, m, e) => { if (c || !lenient) ok(c, m, e); else { skip++; console.log('  - SKIP (informational on the mirror) ' + m + ': ' + e); } };
+    const check = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c || !lenient) ok(verdictOf(c), m, e); else { skip++; console.log('  - SKIP (informational on the mirror) ' + m + ': ' + e); } };
     const tierOf = (id) => {
       const at = buf.indexOf(Buffer.from(`id:"${id}",family:`));
       if (at < 0) return null;
@@ -200,7 +200,7 @@ try {
       seen++;
       const ours = t[uh._tier(id)];
       const same = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'].every((k) => ours[k] === cat[k]);
-      check(same, `${id} → our \`${uh._tier(id)}\` row = the catalog's ${cat.name}`, JSON.stringify({ ours, catalog: cat }));
+      check(verdictOf(same), `${id} → our \`${uh._tier(id)}\` row = the catalog's ${cat.name}`, JSON.stringify({ ours, catalog: cat }));
     }
     check(seen >= 5, 'the oracle read the catalog (non-vacuous: ≥ 5 of the named ids found)', String(seen));
   }
@@ -255,13 +255,13 @@ try {
   ok(noLabel.gaps.join() === 'picker: no full id claude-fable-5-2', 'CONTROL: the picker list without Fable 5.2 ⇒ exactly «picker: no full id claude-fable-5-2»', noLabel.gaps.join(' · '));
   const noRow = { ...t }; delete noRow['fable-5-2'];
   const noPrice = fableCensus({ tiers: noRow, labels: labelIds, lock: lockMatch, bar: barMatch });
-  ok(noPrice.gaps.length === 2 && noPrice.gaps.every((g) => g.startsWith('price: claude-fable-5-2') && g.includes('`fable`')), 'CONTROL: the price table without fable-5-2 ⇒ both spellings named, landing on `fable` (Fable 5)', noPrice.gaps.join(' · '));
+  ok(noPrice.gaps.length === 2 && verdictOf(noPrice.gaps.every((g) => g.startsWith('price: claude-fable-5-2') && g.includes('`fable`'))), 'CONTROL: the price table without fable-5-2 ⇒ both spellings named, landing on `fable` (Fable 5)', noPrice.gaps.join(' · '));
   const planted = fableCensus({ tiers: { ...t, 'fable-5-3': { ...t['fable-5-2'] } }, labels: labelIds, lock: lockMatch, bar: barMatch });
-  ok(planted.members.includes('claude-fable-5-3') && planted.gaps.join() === 'picker: no full id claude-fable-5-3', 'CONTROL: a member planted in ONE table (a fable-5-3 price row) ⇒ the picker that lacks it FAILS — «one table lacks a family member the others have»', planted.gaps.join(' · '));
+  ok(gateOf(planted.members.includes('claude-fable-5-3')) && planted.gaps.join() === 'picker: no full id claude-fable-5-3', 'CONTROL: a member planted in ONE table (a fable-5-3 price row) ⇒ the picker that lacks it FAILS — «one table lacks a family member the others have»', planted.gaps.join(' · '));
   const base = fableCensus({ tiers: noRow, labels: labelIds.filter((l) => l.id === 'claude-fable-5' || !FABLE_ID.test(l.id)), lock: lockMatch, bar: barMatch });
   ok(base.members.join() === 'claude-fable-5,claude-fable-5-1' && base.gaps.join() === 'picker: no full id claude-fable-5-1', 'CONTROL: the f5e087bb5 tables (no 5-2 row, the picker with Fable 5 alone) ⇒ red on the 5.1 gap they already had — and 5.2 is in no table at all', base.gaps.join(' · '));
   const wrongFam = fableCensus({ tiers: t, labels: labelIds, lock: lockMatch, bar: barMatch, family: (m) => (String(m).includes('fable-5-2') ? null : familyOfModel(m)) });
-  ok(wrongFam.gaps.some((g) => g.startsWith('family: claude-fable-5-2')) && wrongFam.gaps.some((g) => g.startsWith('cap lane: claude-fable-5-2')), 'CONTROL: a family rule keyed on point releases (5-2 unknown) ⇒ the family AND the cap lane gaps named', wrongFam.gaps.join(' · '));
+  ok(gateOf(wrongFam.gaps.some((g) => g.startsWith('family: claude-fable-5-2'))) && verdictOf(wrongFam.gaps.some((g) => g.startsWith('cap lane: claude-fable-5-2'))), 'CONTROL: a family rule keyed on point releases (5-2 unknown) ⇒ the family AND the cap lane gaps named', wrongFam.gaps.join(' · '));
 
   // ── §5 THE UNKNOWN-ID ROAD (law 4) ──────────────────────────────────────────
   // What an id NO table names gets — f5e087bb5's lot for claude-fable-5-2, and the next point release's on this tree. Every reader survives
@@ -274,9 +274,9 @@ try {
   const NEXT = 'claude-fable-5-3';
   const evN = { model: NEXT + '[1m]', acct: null, i: 1000, o: 2000, cw5: 0, cw1: 0, cr: 40000 };
   ok(tier(NEXT) === 'fable' && tier(NEXT + '[1m]') === 'fable' && Math.abs(uh._cost(evN) - (1000 * 10 + 2000 * 50 + 40000 * 1) / 1e6) < 1e-12, 'a Fable id no table names prices on the family row `fable` (Fable 5\'s rates: $10/$50, hit $1) — never `_default`, never a throw: the Usage window shows a number, not a gap', tier(NEXT));
-  ok(tier('claude-zephyr-1') === '_default' && Number.isFinite(uh._cost({ ...evN, model: 'claude-zephyr-1' })), '…an id of a family no row names lands on `_default` ($3/$15) — a number, no throw (only a codex id is said in the journal)');
+  ok(tier('claude-zephyr-1') === '_default' && verdictOf(Number.isFinite(uh._cost({ ...evN, model: 'claude-zephyr-1' }))), '…an id of a family no row names lands on `_default` ($3/$15) — a number, no throw (only a codex id is said in the journal)');
   ok(familyOfModel(NEXT) === 'fable' && familyOfModel(NEXT + '[1m]') === 'fable' && familyOfModel('claude-zephyr-1') === null, '…the Fable family (the Fable cap lane the 5h / 7d windows and the Fable weekly cap ride); an unknown FAMILY is null = no projection, every cap counts (fail closed)');
-  ok(lockMatch('fable', NEXT) && lockMatch(NEXT, NEXT + '[1m]') && !lockMatch('claude-fable-5-2', NEXT) && barMatch('fable[1m]', NEXT) && !barMatch('claude-fable-5-2', NEXT), '…the lock and the status bar take it alias-tolerant (the fable alias, [1m]) and never as its sibling 5-2');
+  ok(gateOf(lockMatch('fable', NEXT)) && gateOf(lockMatch(NEXT, NEXT + '[1m]')) && !lockMatch('claude-fable-5-2', NEXT) && gateOf(barMatch('fable[1m]', NEXT)) && !barMatch('claude-fable-5-2', NEXT), '…the lock and the status bar take it alias-tolerant (the fable alias, [1m]) and never as its sibling 5-2');
   const echoN = parseSetModelEcho('<local-command-stdout>Set model to `fable[1m] (' + NEXT + '[1m])`</local-command-stdout>', { envelope: 'required' });
   ok(!!echoN && echoN.alias === 'fable[1m]' && echoN.id === NEXT + '[1m]', '…the /model echo reads it back whole', echoN);
   const baseSub = MP.withListed(MP.presetOf('pv-anthropic-subscription'), CAT.harness.claude);   // the f5e087bb5 claude list (no Fable 5.1 / 5.2 rows)
@@ -291,9 +291,9 @@ try {
     fs.writeFileSync(path.join(cdir, 'model-providers.js'), editAnchor(mpSrc, NEW_LINE, OLD_LINE, "src/model-providers.js"));
     const MP388 = require(path.join(cdir, 'model-providers.js'));
     const sub388 = MP388.withListed(MP388.presetOf('pv-anthropic-subscription'), CAT.harness.claude);
-    ok(mpSrc.includes(NEW_LINE) && MP388.resolveModel(sub388, NEXT) === NEXT && MP388.resolveModel(sub388, NEXT + '[1m]') === null, 'CONTROL (a patched copy with the .388 open branch, the f5e087bb5 list): the forward predicate FAILS there — the bare id went through, the [1m] form was REFUSED (a conversation could pick a new model only bare, which an older CLI ran at its unknown-model 200k window)', [MP388.resolveModel(sub388, NEXT), MP388.resolveModel(sub388, NEXT + '[1m]')]);
+    ok(gateOf(mpSrc.includes(NEW_LINE)) && MP388.resolveModel(sub388, NEXT) === NEXT && MP388.resolveModel(sub388, NEXT + '[1m]') === null, 'CONTROL (a patched copy with the .388 open branch, the f5e087bb5 list): the forward predicate FAILS there — the bare id went through, the [1m] form was REFUSED (a conversation could pick a new model only bare, which an older CLI ran at its unknown-model 200k window)', [MP388.resolveModel(sub388, NEXT), MP388.resolveModel(sub388, NEXT + '[1m]')]);
   }
-  ok(sub.models.some((m) => m.id === 'claude-fable-5-2' && m.label === 'Fable 5.2') && sub.models.some((m) => m.id === 'claude-fable-5-2[1m]' && m.label === 'Fable 5.2 [1m]' && m.context === 1000000), '…and on this tree Fable 5.2 is a ROW of the claude list (src/server/cli-env.js), bare and [1m] — the [1m] row carries the 1M context', sub.models.filter((m) => /fable/.test(m.id)).map((m) => [m.id, m.context]));
+  ok(gateOf(sub.models.some((m) => m.id === 'claude-fable-5-2' && m.label === 'Fable 5.2')) && verdictOf(sub.models.some((m) => m.id === 'claude-fable-5-2[1m]' && m.label === 'Fable 5.2 [1m]' && m.context === 1000000)), '…and on this tree Fable 5.2 is a ROW of the claude list (src/server/cli-env.js), bare and [1m] — the [1m] row carries the 1M context', sub.models.filter((m) => /fable/.test(m.id)).map((m) => [m.id, m.context]));
   const subNo1m = MP.withListed(MP.presetOf('pv-anthropic-subscription'), [...CAT.harness.claude, ...labelIds.filter((l) => l.id !== 'claude-fable-5-2[1m]' && !CAT.harness.claude.some((c) => c.id === l.id))]);
   ok(MP.resolveModel(subNo1m, 'claude-fable-5-2[1m]') === 'claude-fable-5-2', 'CONTROL: the list with the bare 5.2 row and no [1m] row resolves a typed claude-fable-5-2[1m] to the bare id — the [1m] dropped, so on 2.1.319 the CLI would run 5.2 with its unknown-model 200k window — the reason the [1m] row exists', MP.resolveModel(subNo1m, 'claude-fable-5-2[1m]'));
   // ── §6 THE UNKNOWN PRICE (lane lg-providers, B-d578 P1-b — the law agreed 2026-11-21) ─────────────────────────────────
@@ -353,22 +353,22 @@ try {
     ok(Math.abs(T.cost - pricedUsd) < 1e-12 && sonnetIfDefault > 0, `…and the cost is the PRICED part only ($${T.cost.toFixed(6)}) — never the $${sonnetIfDefault.toFixed(6)} the old road added at _default's (Sonnet's) rates`, { cost: T.cost, pricedUsd });
     const g = (dim, key) => (mem.groups[dim] || []).find((r) => r.key === key);
     const qRow = g('model', QWEN), aRow = g('account', PV), sRow = g('session', 'sess-p1'), bRow = g('billing', 'provider'), dRow = g('day', new Date(noon).toISOString().slice(0, 10));
-    ok(qRow && qRow.cost === 0 && qRow.unpricedRequests === 2 && qRow.requests === 2, 'the model row: every request unknown (cost 0 = no priced part, unpricedRequests 2)', qRow);
-    ok(aRow && aRow.unpricedRequests === 2 && Math.abs(aRow.cost - uh6._cost(ROWS[2])) < 1e-12 && sRow && sRow.unpricedRequests === 2 && dRow && dRow.unpricedRequests === 2, 'the account, the conversation and the day: their priced part + the unknown part beside it (a mixed sum)', { account: aRow && [aRow.cost, aRow.unpricedRequests], session: sRow && sRow.unpricedRequests, day: dRow && dRow.unpricedRequests });
+    ok(gateOf(qRow) && qRow.cost === 0 && qRow.unpricedRequests === 2 && qRow.requests === 2, 'the model row: every request unknown (cost 0 = no priced part, unpricedRequests 2)', qRow);
+    ok(gateOf(aRow) && aRow.unpricedRequests === 2 && Math.abs(aRow.cost - uh6._cost(ROWS[2])) < 1e-12 && gateOf(sRow) && sRow.unpricedRequests === 2 && gateOf(dRow) && dRow.unpricedRequests === 2, 'the account, the conversation and the day: their priced part + the unknown part beside it (a mixed sum)', { account: aRow && [aRow.cost, aRow.unpricedRequests], session: sRow && sRow.unpricedRequests, day: dRow && dRow.unpricedRequests });
     const uRow = g('billing', 'unknown-account');
-    ok(bRow && bRow.requests === 3 && bRow.unpricedRequests === 2 && uRow && uRow.requests === 1, 'the billing row of a provider is «provider» (its 3 requests, the stored type «unknown» notwithstanding); the built-in record\'s id stays «unknown account» (1)', { provider: bRow, unknown: uRow && uRow.requests });
-    ok(aRow && aRow.type === 'provider', 'the account row\'s type is «provider» (the page badges it), whatever type the row stored', aRow && aRow.type);
+    ok(gateOf(bRow) && bRow.requests === 3 && bRow.unpricedRequests === 2 && gateOf(uRow) && uRow.requests === 1, 'the billing row of a provider is «provider» (its 3 requests, the stored type «unknown» notwithstanding); the built-in record\'s id stays «unknown account» (1)', { provider: bRow, unknown: uRow && uRow.requests });
+    ok(gateOf(aRow) && aRow.type === 'provider', 'the account row\'s type is «provider» (the page badges it), whatever type the row stored', aRow && aRow.type);
     const cell = (mem.pivots['day:account'] || [])[0]?.cells?.[PV];
-    ok(cell && cell.unpricedRequests === 2, 'a pivot cell (day × account) carries the unknown part too', cell);
+    ok(gateOf(cell) && cell.unpricedRequests === 2, 'a pivot cell (day × account) carries the unknown part too', cell);
     ok(!('unpricedRequests' in memPv.totals) && !(memPv.groups.model || []).some((r) => 'unpricedRequests' in r), 'an answer with no provider\'s unknown part carries no new field (the answer of a hub with no provider is unchanged)', Object.keys(memPv.totals));
     // THE INDEX'S SECOND SPELLING
     const grouped = ROWS.map((r) => { const d = new Date(r.ts); return { sid: r.sid, model: r.model, acct: r.acct, be: r.be, atype: r.atype, cwd: r.cwd, mode: r.mode, host: r.host, pool: null, origin: r.origin, day: d.toISOString().slice(0, 10), hour: d.getHours(), weekday: d.getDay(), n: 1, i: r.i, cw5: r.cw5, cw1: r.cw1, cr: r.cr, o: r.o, lo: r.ts, hi: r.ts, ep: 0, lg: 0, pmax: r.i + r.cr + r.cw5 + r.cw1 }; });
     const folded = IM.foldAggregate(grouped, [['day', 'account'], ['session', 'origin']]);
     const costOf = (c) => uh6._cost(c, c.prompt), unknownOf = (c) => uh6.priceUnknown(c.model, c.acct);
     const same = IM.compareAggregates(mem, IM.finalizeAggregate(folded, costOf, unknownOf));
-    ok(same.same && same.checked > 100, `the index's twin (keysOf + finalizeBucket, the ledger's priceUnknown per cell) answers the SAME buckets — billing «provider», the unknown part, every pivot cell (${same.checked} numbers compared)`, same.diffs);
+    ok(gateOf(same.same) && same.checked > 100, `the index's twin (keysOf + finalizeBucket, the ledger's priceUnknown per cell) answers the SAME buckets — billing «provider», the unknown part, every pivot cell (${same.checked} numbers compared)`, same.diffs);
     const ctl = IM.compareAggregates(mem, IM.finalizeAggregate(folded, costOf));
-    ok(!ctl.same && ctl.diffs.some((d) => /unpricedRequests/.test(d.at)), 'CONTROL: the twin WITHOUT the unknown-price test reports the difference (the shadow check sees a one-sided edit)', ctl.diffs.slice(0, 2));
+    ok(!ctl.same && verdictOf(ctl.diffs.some((d) => /unpricedRequests/.test(d.at))), 'CONTROL: the twin WITHOUT the unknown-price test reports the difference (the shadow check sees a one-sided edit)', ctl.diffs.slice(0, 2));
     // THE CONTROLS ON THE LEDGER (anchored: a moved product line fails by name)
     {
       const U1 = M6.load('src/usage-history.js', anchored(UHSRC, "    if (priced === null) { b.unpricedRequests++; b.unpricedTokens += (Number(ev.i) || 0) + (Number(ev.cw5) || 0) + (Number(ev.cw1) || 0) + (Number(ev.cr) || 0) + (Number(ev.o) || 0); }   // B-d578 P1-b: counted apart, never as $0\n    else b.cost += priced;\n", '    b.cost += priced || 0;\n', 'the bucket without its unknown part'), 'no-unknown-part');
@@ -389,12 +389,12 @@ try {
       const cold = await uhC.aggregateAsync({});
       console.log('    judged roads: ' + JSON.stringify({ sync: pick(mem), hot: pick(hot), cold: pick(cold), coldRows: uhC._evCache && uhC._evCache.cold && uhC._evCache.cold.n }));
       ok(JSON.stringify(pick(hot)) === want, 'the HOT FOLD (aggregateAsync over the in-memory rows) answers the same unknown part, cost, billing row and type as the sync road', pick(hot));
-      ok(uhC._evCache && uhC._evCache.cold && uhC._evCache.cold.n === ROWS.length && JSON.stringify(pick(cold)) === want, 'the COLD WORKER (every row past a 1 h window, folded in usage-cold-worker.js — no account resolver there) answers the same: the decision is the id\'s, model-providers loads inside the worker', pick(cold));
+      ok(gateOf(uhC._evCache) && gateOf(uhC._evCache.cold) && uhC._evCache.cold.n === ROWS.length && JSON.stringify(pick(cold)) === want, 'the COLD WORKER (every row past a 1 h window, folded in usage-cold-worker.js — no account resolver there) answers the same: the decision is the id\'s, model-providers loads inside the worker', pick(cold));
     }
     // THE WARN — once per id, in its own words (printed)
     const pw = warns.filter((w) => w.includes(`provider model "${QWEN}"`));
     console.log('    judged warn lines: ' + JSON.stringify(pw));
-    ok(pw.length === 1 && /price is UNKNOWN/.test(pw[0]) && !/_default \(Anthropic Sonnet\) rates until/.test(pw[0]) && pw[0].includes(PV), 'the journal says it ONCE per id over two folds: the price is UNKNOWN (not «priced at _default»), with the provider\'s id', pw);
+    ok(pw.length === 1 && gateOf(/price is UNKNOWN/.test(pw[0])) && !/_default \(Anthropic Sonnet\) rates until/.test(pw[0]) && verdictOf(pw[0].includes(PV)), 'the journal says it ONCE per id over two folds: the price is UNKNOWN (not «priced at _default»), with the provider\'s id', pw);
     // A ROW THE PERSON ADDS MAKES IT A COST
     {
       const { priceKeyOf } = await import(path.join(ROOT, 'src/lib/usage-cost-words.js'));
@@ -423,10 +423,10 @@ try {
       const wantOwn = pricedUsd + unk.reduce((s, r) => s + (r.i * OWN.input + r.o * OWN.output + r.cw5 * OWN.cacheWrite5m + r.cr * OWN.cacheRead) / 1e6, 0);
       const subRow = uh8.priceRowFor(QWEN, { acct: SUB }), pvRow = uh8.priceRowFor(QWEN, { acct: PV });
       const subEv = { ...ROWS[0], acct: SUB, atype: 'subscription' };
-      ok(uh8.priceUnknown(QWEN, PV) === false && !('unpricedRequests' in t8) && Math.abs(t8.cost - wantOwn) < 1e-12 && pvRow && pvRow.input === OWN.input,
+      ok(uh8.priceUnknown(QWEN, PV) === false && !('unpricedRequests' in t8) && Math.abs(t8.cost - wantOwn) < 1e-12 && gateOf(pvRow) && pvRow.input === OWN.input,
         'the provider account\'s OWN row for the model (accounts[pv].tiers[key], what «Add a price» now writes) makes it a cost — that provider\'s rates', { cost: t8.cost, want: wantOwn });
       const D = uh8._pricing.tiers._default, subDefault = (subEv.i * D.input + subEv.o * D.output + subEv.cw5 * D.cacheWrite5m + subEv.cw1 * D.cacheWrite1h + subEv.cr * D.cacheRead) / 1e6;
-      ok(subRow && subRow.label === '_default' && subRow.input === D.input && Math.abs(uh8._cost(subEv) - subDefault) < 1e-15,
+      ok(gateOf(subRow) && subRow.label === '_default' && subRow.input === D.input && Math.abs(uh8._cost(subEv) - subDefault) < 1e-15,
         '…and the SAME model id on a first-party sign-in keeps its own price (the table\'s _default, as before) — the row re-prices nothing else', { sub: subRow && [subRow.label, subRow.input] });
       const keyOf2 = uh8._acctTier(PV, 'qwen3-coder-plus-0925'), none = uh8._acctTier(PV, 'deepseek-chat'), other = uh8._acctTier('pv-other', QWEN);
       ok(keyOf2 === QWEN && none === null && other === null, '…the matcher\'s own rule on that provider\'s rows only (the longest key the id contains; another provider never borrows it)', { keyOf2, none, other });
@@ -440,7 +440,7 @@ try {
         nan: { tiers: { m1: R5({ input: NaN }) } }, ownRow: { accounts: { [PV]: { tiers: { m1: R5({ output: -0.5 }) } } } }, nested: { tiers: { m1: R5({ long: { above: 1000, input: -1, output: 2 } }) } } };
       const errs = Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, CPm.rateErrors(v)]));
       console.log('    judged refusals: ' + JSON.stringify(errs));
-      ok(Object.values(errs).every((e) => e.length === 1) && /below 0/.test(errs.negative[0]) && /not a number/.test(errs.word[0]) && /ceiling of 1000/.test(errs.absurd[0]) && /not a number/.test(errs.nan[0]) && /^accounts\.pv-example-router\.tiers\.m1\.output/.test(errs.ownRow[0]) && /\.long\.input/.test(errs.nested[0]),
+      ok(gateOf(Object.values(errs).every((e) => e.length === 1)) && gateOf(/below 0/.test(errs.negative[0])) && gateOf(/not a number/.test(errs.word[0])) && gateOf(/ceiling of 1000/.test(errs.absurd[0])) && gateOf(/not a number/.test(errs.nan[0])) && gateOf(/^accounts\.pv-example-router\.tiers\.m1\.output/.test(errs.ownRow[0])) && verdictOf(/\.long\.input/.test(errs.nested[0])),
         'rateErrors names each slip by its field: a negative, a word, an absurd 1e12, NaN, a provider account\'s own row, a nested long rate');
       ok(CPm.rateErrors({ tiers: { m1: R5({}), free: R5({ input: 0, output: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0 }) }, accounts: { [PV]: { discount: 0.2 } } }).length === 0 && CPm.rateErrors({}).length === 0, '…and a good row, a free model\'s typed zeros and a discount alone pass');
       const d9 = scratch('pricing-unknown-law'); fs.mkdirSync(path.join(d9, 'usage-history'), { recursive: true });
@@ -448,7 +448,7 @@ try {
       const pf = path.join(d9, 'usage-history', 'pricing.json'), before = JSON.stringify(uh9.pricingTable());
       const refused = Object.entries(cases).map(([k, v]) => { try { uh9.setPricing(v); return [k, 'WRITTEN']; } catch (e) { return [k, e.code]; } });
       const onDisk = fs.existsSync(pf) ? fs.readFileSync(pf, 'utf8') : '';
-      ok(refused.every(([, c]) => c === 'rate-invalid') && JSON.stringify(uh9.pricingTable()) === before && !onDisk.includes('"m1"') && uh9._tier('m1') === '_default', 'setPricing (the route\'s writer — POST /api/usage-stats/pricing answers 400 with code rate-invalid) REFUSES every one by name and WRITES NOTHING (the table unchanged, no row m1 on disk)', refused);
+      ok(gateOf(refused.every(([, c]) => c === 'rate-invalid')) && JSON.stringify(uh9.pricingTable()) === before && !onDisk.includes('"m1"') && uh9._tier('m1') === '_default', 'setPricing (the route\'s writer — POST /api/usage-stats/pricing answers 400 with code rate-invalid) REFUSES every one by name and WRITES NOTHING (the table unchanged, no row m1 on disk)', refused);
       const U3 = M6.load('src/usage-history.js', anchored(fs.readFileSync(path.join(ROOT, 'src/usage-history.js'), 'utf8'), "    const bad = CP.rateErrors(patch);\n", '    const bad = [];\n', 'the rate law'), 'no-rate-law');
       const d10 = scratch('pricing-unknown-nolaw'); fs.mkdirSync(path.join(d10, 'usage-history'), { recursive: true });
       const u10 = new U3.UsageHistory({ dataDir: d10, homeDir: d10 });
@@ -463,7 +463,7 @@ try {
       const { execFileSync } = await import('node:child_process');
       const probe = `const p=require(${JSON.stringify(path.join(ROOT, 'src/usage-history.js'))});const has=()=>Object.keys(require.cache).some(k=>k.endsWith('/src/model-providers.js'));const a=has();const {isThirdPartyAccount}=require(${JSON.stringify(path.join(ROOT, 'src/provider-ids.js'))});const v=isThirdPartyAccount('sub-1');const b=has();const w=isThirdPartyAccount('pv-example');console.log(JSON.stringify({a,b,c:has(),v,w}))`;
       let out = null; try { out = JSON.parse(execFileSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 20000, env: { ...process.env, VIBESPACE_SKIP_AGENT_HOOKS: '1' } }).trim().split('\n').pop()); } catch (e) { out = { error: String(e.message || e).slice(0, 200) }; }
-      ok(out && out.a === false && out.b === false && out.c === true && out.v === false && out.w === true, 'src/provider-ids.js: requiring the ledger loads NO model-providers.js, nor does a non-provider id; the first pv- id loads it (and is judged a third party)', out);
+      ok(gateOf(out) && out.a === false && out.b === false && out.c === true && out.v === false && out.w === true, 'src/provider-ids.js: requiring the ledger loads NO model-providers.js, nor does a non-provider id; the first pv- id loads it (and is judged a third party)', out);
     }
     // THE PAGE'S WORDS (src/lib/usage-cost-words.js, PURE) and the chat bar's (src/lib/chat-bar-words.js)
     {
@@ -474,8 +474,8 @@ try {
       const whole = W.costWords(T, tEn, fC, fN), allU = W.costWords(qRow, tEn, fC, fN), none = W.costWords({ cost: 1.5, requests: 3 }, tEn, fC, fN);
       console.log('    judged words: ' + JSON.stringify([whole.text, whole.note, allU.text, none.text]));
       ok(none.text === '$1.50' && none.note === null && !none.unknown, 'a row with every request priced reads as before («$1.50», no note)');
-      ok(whole.text === `${fC(T.cost)} + unknown` && /^Leaves out \d+ tokens whose price is unknown/.test(whole.note) && whole.note.includes(String(T.unpricedTokens)), 'a mixed sum reads «$x + unknown» and its note says what it leaves out (the tokens)', whole);
-      ok(allU.text === 'price unknown' && !/\$/.test(allU.text) && /^Price unknown: /.test(allU.note), 'a row whose every request is unknown reads «price unknown» — never «$0.00»', allU);
+      ok(whole.text === `${fC(T.cost)} + unknown` && gateOf(/^Leaves out \d+ tokens whose price is unknown/.test(whole.note)) && verdictOf(whole.note.includes(String(T.unpricedTokens))), 'a mixed sum reads «$x + unknown» and its note says what it leaves out (the tokens)', whole);
+      ok(allU.text === 'price unknown' && !/\$/.test(allU.text) && verdictOf(/^Price unknown: /.test(allU.note)), 'a row whose every request is unknown reads «price unknown» — never «$0.00»', allU);
       ok(JSON.stringify(W.unpricedModels(mem)) === JSON.stringify([{ model: QWEN, key: QWEN, acct: PV, tokens: qRow.unpricedTokens }]) && JSON.stringify(qRow.unpricedBy) === JSON.stringify([PV]) && !('unpricedBy' in (g('model', 'claude-sonnet-5') || {})), 'the «Add a price» rows are the answer\'s unpriced models, each with the provider account that ran it (the model row\'s unpricedBy — on no priced model)', { rows: W.unpricedModels(mem), by: qRow.unpricedBy });
       const two = { groups: { model: [{ key: 'GLM-4.6', unpricedRequests: 1, unpricedTokens: 10, requests: 1, unpricedBy: ['pv-a'] }, { key: 'glm-4.6', unpricedRequests: 2, unpricedTokens: 30, requests: 2, unpricedBy: ['pv-a'] }, { key: 'glm-4.6', unpricedRequests: 2, unpricedTokens: 30, requests: 2, unpricedBy: ['pv-a', 'pv-b'] }, { key: '   ', unpricedRequests: 1, unpricedTokens: 5, requests: 1, unpricedBy: ['pv-a'] }, { key: 'unknown', unpricedRequests: 1, unpricedTokens: 5, requests: 1, unpricedBy: ['pv-a'] }, { key: 'old-hub', unpricedRequests: 1, unpricedTokens: 5, requests: 1 }] } };
       ok(JSON.stringify(W.unpricedModels(two)) === JSON.stringify([{ model: 'GLM-4.6', key: 'glm-4.6', acct: 'pv-a', tokens: null }, { model: 'glm-4.6', key: 'glm-4.6', acct: 'pv-b', tokens: null }]), '…ONE row per (key, provider account) — two spellings of one id write one key; a model two providers ran is a row for each, its tokens not split («—»); never an empty key nor the nameless «unknown» row, nor a row of an answer that names no account', W.unpricedModels(two));
@@ -492,7 +492,7 @@ try {
       const chipW = CB.costChipWords(0.47, CB.costBasisOf(pvAuth), tEn);
       console.log('    judged chip: ' + JSON.stringify(chipW));
       ok(CB.costBasisOf(pvAuth) === 'provider' && chipW.text === 'This chat · see Usage for its cost' && !/\$/.test(chipW.text + chipW.title) && !/unknown/i.test(chipW.text + chipW.title) && chipW.tone === 'unknown', 'the chat bar: a provider conversation\'s chip shows no figure (the agent program\'s table does not know the provider\'s prices) and points to Usage — words true before and after a price row is added (r1131 item 5: no «unknown»; the chip reads no ledger)', chipW);
-      ok(CB.costBasisOf({ source: 'api-other' }) === 'api' && /\$0\.47/.test(CB.costChipWords(0.47, 'api', tEn).text), 'CONTROL: an API key\'s conversation keeps its figure («billed per use»)');
+      ok(CB.costBasisOf({ source: 'api-other' }) === 'api' && verdictOf(/\$0\.47/.test(CB.costChipWords(0.47, 'api', tEn).text)), 'CONTROL: an API key\'s conversation keeps its figure («billed per use»)');
       // every word a person reads, in zh and ja through the real dictionaries
       const lits = (rel) => [...fs.readFileSync(path.join(ROOT, rel), 'utf8').matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
       const CBK = ['This chat · see Usage for its cost', "This conversation runs on a third-party provider's model. The agent's program prices it with its own table, which does not know this provider's prices, so its figure is not shown here. Usage prices this conversation's tokens with your price table — and says there which part has no price row yet."];
@@ -503,8 +503,8 @@ try {
       const missing = NEW.filter((k) => !zh[k] || !ja[k]);
       ok(NEW.length >= 17 && !missing.length, `every new word is in zh AND ja (${NEW.length} keys)`, missing);
       const uwLits = lits('src/lib/usage-window.js');
-      ok(CBK.every((k) => lits('src/lib/chat-bar-words.js').includes(k)) && UWK.every((k) => uwLits.includes(k)), '…and those keys are the very t() literals of the chat bar and the Usage window', UWK.filter((k) => !uwLits.includes(k)));
-      ok(/使用状況/.test(ja[CBK[0]]) && /使用状況/.test(ja[CBK[1]]) && !/使用量/.test(ja[CBK[1]]) && /提供方/.test(zh.provider), '…the ja chip names the window by its own name (使用状況), the zh badge says 提供方 like every provider word');
+      ok(gateOf(CBK.every((k) => lits('src/lib/chat-bar-words.js').includes(k))) && verdictOf(UWK.every((k) => uwLits.includes(k))), '…and those keys are the very t() literals of the chat bar and the Usage window', UWK.filter((k) => !uwLits.includes(k)));
+      ok(gateOf(/使用状況/.test(ja[CBK[0]])) && gateOf(/使用状況/.test(ja[CBK[1]])) && !/使用量/.test(ja[CBK[1]]) && verdictOf(/提供方/.test(zh.provider)), '…the ja chip names the window by its own name (使用状況), the zh badge says 提供方 like every provider word');
     }
     // THE WIRING (each surface asks the one rule / the one words module)
     {
@@ -546,4 +546,4 @@ try {
   }
 } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skip} skipped)` : `\nALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

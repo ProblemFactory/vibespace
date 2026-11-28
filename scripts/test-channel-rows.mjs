@@ -28,7 +28,7 @@ const V = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-groups-vie
 const RS = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-rows.js')).href);
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -127,7 +127,7 @@ const P = property(FO.candidateOf);
 const wrong = rows.filter(([a, id, f, want]) => !f.unlistedAt && !!P.tags[id] !== want).map(([, id]) => `${id}=${P.tags[id]}`);
 ok(wrong.length === 0, `FIXTURE: ${rows.length} rows — every tag kind at every window edge wears its tag exactly inside the window (the D4 scope rows only once a wake acted)`, wrong);
 const kinds = new Set(Object.values(P.tags).filter(Boolean));
-ok(['awaiting', 'unknown', 'assigned', 'read', 'held', 'direct', 'replied'].every((k) => kinds.has(k)), `FIXTURE: the generated index holds every tag kind (${[...kinds].join(', ')})`);
+ok(verdictOf(['awaiting', 'unknown', 'assigned', 'read', 'held', 'direct', 'replied'].every((k) => kinds.has(k))), `FIXTURE: the generated index holds every tag kind (${[...kinds].join(', ')})`);
 // lane attention-predicate-shared (decision 7): the first screen's 「需要我」 rows are a SUBSET of the tagged rows — so the same
 // pre-filter never misses one (the server's Channels badge counts what candidateOf lets through), at every window edge
 {
@@ -143,7 +143,7 @@ ok(P.misses.length === 0, `THE PROPERTY: candidateOf names every row statusTag t
   ok(src.split(clause).length === 2, 'CONTROL: the held-wake clause is spelled once');
   const M = MUT.load('src/channel-focus.js', editAnchor(src, clause, '', "src/channel-focus.js"), 'no-held-wake');
   const C = property(M.candidateOf);
-  ok(C.misses.length > 0 && C.misses.every((id) => /held-(wake|scope)-in/.test(id)), `CONTROL: a candidate test without the held-wake clause loses the rows only a held wake tags — red (${C.misses.join(', ')})`);
+  ok(C.misses.length > 0 && verdictOf(C.misses.every((id) => /held-(wake|scope)-in/.test(id))), `CONTROL: a candidate test without the held-wake clause loses the rows only a held wake tags — red (${C.misses.join(', ')})`);
 }
 
 console.log('② the first read: the attention list, the heads, the counts');
@@ -154,9 +154,9 @@ console.log('② the first read: the attention list, the heads, the counts');
   const att = first.conversations.filter((c) => !c.unlisted && FO.statusTag(c, clock)).map((c) => c.key).sort();
   ok(first.scope === 'first' && JSON.stringify(att) === JSON.stringify(focus) && first.attention.total === focus.length && first.attention.cut === 0, `the first read's attention list = focusRows over the whole list, key for key (${focus.length} rows)`, { att: att.length, focus: focus.length });
   const newest = (a) => whole.conversations.filter((c) => c.adapterId === a && !c.unlisted).sort(FO.pageOrder).slice(0, FO.HEAD_ROWS).map((c) => c.key);
-  ok([A, B].every((a) => JSON.stringify(first.heads[a]) === JSON.stringify(newest(a))), `each account's head = its newest ${FO.HEAD_ROWS} listed rows, newest first`);
+  ok(verdictOf([A, B].every((a) => JSON.stringify(first.heads[a]) === JSON.stringify(newest(a)))), `each account's head = its newest ${FO.HEAD_ROWS} listed rows, newest first`);
   const inFirst = new Set(first.conversations.map((c) => c.key));
-  ok(Object.values(first.heads).flat().every((k) => inFirst.has(k)) && first.conversations.length === new Set([...att, ...Object.values(first.heads).flat()]).size, `every head row and attention row rides the first read ONCE (${first.conversations.length} rows of ${whole.conversations.length})`);
+  ok(gateOf(Object.values(first.heads).flat().every((k) => inFirst.has(k))) && first.conversations.length === new Set([...att, ...Object.values(first.heads).flat()]).size, `every head row and attention row rides the first read ONCE (${first.conversations.length} rows of ${whole.conversations.length})`);
   const listed = (a) => whole.conversations.filter((c) => c.adapterId === a && !c.unlisted).length;
   ok(first.counts.byAdapter[A] === listed(A) && first.counts.byAdapter[B] === listed(B) && first.counts.all === glr.rows.length, `the counts are the whole list's: All ${first.counts.all} = the first screen's rows of the whole list, ${A} ${first.counts.byAdapter[A]}, ${B} ${first.counts.byAdapter[B]} (unlisted excluded)`, first.counts);
   const stats0 = eng.digestStats().rowViews;
@@ -166,7 +166,7 @@ console.log('② the first read: the attention list, the heads, the counts');
   ok(JSON.stringify(Object.keys(eng.digest({ scope: 'totals' })).sort()) === JSON.stringify(['at', 'awaitingTotal', 'needsMe', 'paused', 'scope', 'signin', 'unreadTotal']) /* B-f276 1b: + paused (word 8 — the rail badge never reads «nothing needs you» while paused) */ && !('conversations' in eng.digest({ scope: 'accounts' })), 'the slivers: ?scope=totals is the numbers (+ signin — the dead sign-ins, lane channel-reauth-visible; + needsMe, the rail badge since lane attention-predicate-shared), ?scope=accounts carries no row');
   // the focus view of rows(): the attention rows past a cut, paged in the same order
   const fp = eng.rows({ view: 'focus', limit: 5 });
-  ok(fp.ok && fp.total === focus.length && fp.rows.every((r) => FO.statusTag(r, clock)) && JSON.stringify(fp.rows.map((r) => r.key)) === JSON.stringify(first.conversations.filter((c) => !c.unlisted && FO.statusTag(c, clock)).sort(FO.pageOrder).slice(0, 5).map((c) => c.key)), `rows({view:'focus'}) pages the attention list in the first read's order (${fp.total})`);
+  ok(gateOf(fp.ok) && fp.total === focus.length && gateOf(fp.rows.every((r) => FO.statusTag(r, clock))) && JSON.stringify(fp.rows.map((r) => r.key)) === JSON.stringify(first.conversations.filter((c) => !c.unlisted && FO.statusTag(c, clock)).sort(FO.pageOrder).slice(0, 5).map((c) => c.key)), `rows({view:'focus'}) pages the attention list in the first read's order (${fp.total})`);
 }
 try { eng.stop && eng.stop(); } catch {}
 
@@ -187,7 +187,7 @@ console.log('③ the keyed store: first → pages → broadcasts → stale → a
   const stale0 = RS.applyFirst(s, first, NOW);
   const keys = (name) => RS.listRows(s, name).map((r) => r.id).join(',');
   ok(stale0.length === 0 && keys('account:x') === 'h0,h1,h2' && keys('account:y') === 'h0' && RS.focusRowsOf(s, NOW).map((r) => r.id).join() === 'att', 'applyFirst: the heads become the account lists, the attention row is held (focus), nothing stale on a first read');
-  ok(s.lists.get('account:x').next && s.lists.get('account:x').next.key === 'x/h2' && s.lists.get('account:y').next !== null && s.lists.get('account:agents').next === null, 'an account with more rows than its head has a cursor after the head; an empty one has none');
+  ok(gateOf(s.lists.get('account:x').next) && s.lists.get('account:x').next.key === 'x/h2' && s.lists.get('account:y').next !== null && s.lists.get('account:agents').next === null, 'an account with more rows than its head has a cursor after the head; an empty one has none');
   const q1 = RS.pageQueryOf(s, 'account:x');
   ok(q1.adapter === 'x' && q1.beforeKey === 'x/h2' && q1.limit === '200' && q1.view === 'all', `an account's "Show more" asks 200 after its head (${JSON.stringify(q1)})`);
   // All: a first page of 2, then the next
@@ -198,19 +198,19 @@ console.log('③ the keyed store: first → pages → broadcasts → stale → a
   const b = (convs, extra = {}) => RS.applyBroadcast(s, { partial: true, adapters, counts: { all: 10, byAdapter: { x: 8, y: 2 } }, conversations: convs, ...extra }, NOW);
   // (a) a never-loaded row gains a tag → it joins the attention list
   b([row('x', 'deep', NOW - 40 * DAY, tagged)]);
-  ok(s.byKey.has('x/deep') && RS.focusRowsOf(s, NOW).some((r) => r.id === 'deep') && !keys('all').includes('deep'), '(a) a row the client never loaded gains a tag → it is taken (attention), and not into All (it sorts past All\'s cursor)');
+  ok(gateOf(s.byKey.has('x/deep')) && gateOf(RS.focusRowsOf(s, NOW).some((r) => r.id === 'deep')) && !keys('all').includes('deep'), '(a) a row the client never loaded gains a tag → it is taken (attention), and not into All (it sorts past All\'s cursor)');
   // (b) …and loses it → it leaves
   b([row('x', 'deep', NOW - 40 * DAY)]);
   ok(!s.byKey.has('x/deep') && !RS.focusRowsOf(s, NOW).some((r) => r.id === 'deep'), '(b) a held row that lost its tag and belongs to no loaded range leaves');
   // (c) a new message in a never-loaded chat → the top of All and of its (loaded) account
   b([row('x', 'news', NOW + 60e3)]);
-  ok(keys('all').startsWith('news,') && keys('account:x').startsWith('news,') && s.byKey.has('x/news'), '(c) a new message in a never-loaded chat → at the top of All and of its account');
+  ok(gateOf(keys('all').startsWith('news,')) && gateOf(keys('account:x').startsWith('news,')) && verdictOf(s.byKey.has('x/news')), '(c) a new message in a never-loaded chat → at the top of All and of its account');
   // (d) a never-loaded quiet row past every cursor → dropped (paging brings it; the counts already hold it)
   b([row('x', 'old', NOW - 90 * DAY)]);
   ok(!s.byKey.has('x/old') && !keys('all').includes('old'), '(d) a never-loaded untagged row past the loaded range is dropped');
   // (e) a held row moves up: kept, re-ordered
   b([row('x', 'h1', NOW + 120e3)]);
-  ok(keys('all').startsWith('h1,news,') && keys('account:x').startsWith('h1,news,'), '(e) a held row that moved to the top is re-ordered in place');
+  ok(gateOf(keys('all').startsWith('h1,news,')) && verdictOf(keys('account:x').startsWith('h1,news,')), '(e) a held row that moved to the top is re-ordered in place');
   // (f) unlisted → leaves the lists; a built-in watcher's row never enters All
   b([row('x', 'h0', NOW - 1, { unlisted: true }), row('agents', 'sess', NOW + 1e6)]);
   ok(!keys('all').split(',').includes('h0') || keys('all') === 'h1,news,h0', 'fixture guard');
@@ -229,7 +229,7 @@ console.log('③ the keyed store: first → pages → broadcasts → stale → a
   // (i) a NON-partial broadcast = the first read's shape: heads replaced, every other loaded list stale
   RS.applyPage(s, 'account:x', { rows: [row('x', 'p9', NOW - 3 * DAY)], next: { lastAt: NOW - 3 * DAY, key: 'x/p9' }, total: 8 });
   const r2 = RS.applyBroadcast(s, { ...first, conversations: [att, ...hx, ...hy], attention: { total: 1, cut: 0 } }, NOW);
-  ok(r2.refetch.includes('all') && r2.refetch.includes('search') && r2.refetch.includes('account:x') && ['h0', 'h1', 'h2', 'p9'].every((k) => keys('account:x').split(',').includes(k)) && s.lists.get('all').stale && s.lists.get('account:x').had > 3, `(i) a non-partial broadcast gives every account its head — a paged one KEEPS its range (owner 2026-10-03) — and marks the paged lists stale (${r2.refetch.join(', ')}) — the panel re-reads the one on screen`, keys('account:x') + ' · stale ' + JSON.stringify(r2.refetch));
+  ok(gateOf(r2.refetch.includes('all')) && gateOf(r2.refetch.includes('search')) && gateOf(r2.refetch.includes('account:x')) && gateOf(['h0', 'h1', 'h2', 'p9'].every((k) => keys('account:x').split(',').includes(k))) && gateOf(s.lists.get('all').stale) && s.lists.get('account:x').had > 3, `(i) a non-partial broadcast gives every account its head — a paged one KEEPS its range (owner 2026-10-03) — and marks the paged lists stale (${r2.refetch.join(', ')}) — the panel re-reads the one on screen`, keys('account:x') + ' · stale ' + JSON.stringify(r2.refetch));
   const rq = RS.pageQueryOf(s, 'all', { more: false });
   ok(!rq.beforeKey && Number(rq.limit) >= 60 && Number(rq.limit) <= 200, `a stale list re-reads what it had from the top, ≤ 200 rows (${JSON.stringify(rq)})`);
   // (j) an account removed → its rows and its list leave
@@ -241,7 +241,7 @@ console.log('③ the keyed store: first → pages → broadcasts → stale → a
   const s2 = RS.createRowStore();
   RS.applyFirst(s2, { partial: false, adapters: [ad('x')], counts: { all: 0, byAdapter: { x: 0 } }, attention: { total: 0, cut: 0 }, conversations: [], heads: {} }, NOW);
   RS.applyBroadcast(s2, { partial: true, adapters: [ad('x')], counts: { all: 2, byAdapter: { x: 2 } }, conversations: [row('x', 'n1', NOW), row('x', 'n2', NOW - 1)] }, NOW);
-  ok(s2.lists.get('account:x') && RS.listRows(s2, 'account:x').map((r) => r.id).join() === 'n1,n2', '(k) an account with no row at the first read keeps a whole (empty) list — its first rows join it from the broadcast');
+  ok(gateOf(s2.lists.get('account:x')) && RS.listRows(s2, 'account:x').map((r) => r.id).join() === 'n1,n2', '(k) an account with no row at the first read keeps a whole (empty) list — its first rows join it from the broadcast');
 }
 
 console.log('④ source census: the full-list readers');
@@ -299,7 +299,7 @@ console.log('④ source census: the full-list readers');
   const st = RS.createRowStore(), st2 = RS.createRowStore();
   RS.applyFirst(st, d1, clock); RS.applyFirst(st2, d1, clock);
   const foc1 = RS.focusRowsOf(st, clock).map((r) => r.key);
-  ok(urgent.every((k) => foc1.includes(k)) && foc1.length === 3, 'G (precondition): the three tagged rows — none of them a head — are the first screen', foc1);
+  ok(gateOf(urgent.every((k) => foc1.includes(k))) && foc1.length === 3, 'G (precondition): the three tagged rows — none of them a head — are the first screen', foc1);
   await tagIt(false);   // while this client is away: the draft is sent, the hand-over revoked, the held wake delivered
   const d2 = fresh();
   ok(d2.attention.total === 0, 'G: the server tags none of them now');
@@ -315,14 +315,14 @@ console.log('④ source census: the full-list readers');
   const d3 = fresh();
   const st3 = RS.createRowStore(); RS.applyFirst(st3, d3, clock);
   const foc3 = RS.focusRowsOf(st3, clock).map((r) => r.key);
-  ok(urgent.every((k) => foc3.includes(k)), 'C: 320 newer "replied" rows never push an old awaiting / held / handed-over row off the first screen (the cut keeps TAG_ORDER first)', foc3.length);
+  ok(verdictOf(urgent.every((k) => foc3.includes(k))), 'C: 320 newer "replied" rows never push an old awaiting / held / handed-over row off the first screen (the cut keeps TAG_ORDER first)', foc3.length);
   ok(foc3.length + d3.attention.cut === d3.attention.total && d3.attention.total === 323, `C: drawn + cut = total (${foc3.length} + ${d3.attention.cut} = ${d3.attention.total})`);
   for (const [q, key] of [['bob', `${A}/v-part`], ['daniel', `${A}/v-dm`]]) {
     const got = ve.rows({ q }).rows.map((v) => v.key);
-    ok(got.includes(key), `S: q=${q} finds the row whose shown name is clean of a hidden character the raw name holds`, got);
+    ok(verdictOf(got.includes(key)), `S: q=${q} finds the row whose shown name is clean of a hidden character the raw name holds`, got);
   }
 }
 
 console.log(`\ntest-channel-rows: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -71,7 +71,7 @@ const BOOTS = [];
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -167,7 +167,7 @@ const M = mutantCopies('bli', REPO);
   // the cap
   const cap = [];
   for (const t of ['abc', 'abcd', '你好世', '你好世界', '😀a', '😀😀', 'hello world']) { await A.ev(`(() => { const e = document.getElementById('a'); e.value = ''; e.focus(); return 1; })()`); const r = await A.call('Input.dispatchKeyEvent', { type: 'char', text: t, modifiers: 0 }); cap.push({ t, units: t.length, refused: !!r.error, v: await A.ev('document.getElementById("a").value') }); }
-  ok(cap.every((c) => (c.units <= S.CHAR_TEXT_MAX_UNITS ? !c.refused && c.v === c.t : c.refused && c.v === '')), `Chromium ${ver}: a key event's text of ≤ ${S.CHAR_TEXT_MAX_UNITS} UTF-16 units inserts, 4+ is REFUSED (${cap.map((c) => `${JSON.stringify(c.t)}:${c.refused ? 'refused' : 'ok'}`).join(' ')})`, JSON.stringify(cap));
+  ok(verdictOf(cap.every((c) => (c.units <= S.CHAR_TEXT_MAX_UNITS ? !c.refused && c.v === c.t : c.refused && c.v === ''))), `Chromium ${ver}: a key event's text of ≤ ${S.CHAR_TEXT_MAX_UNITS} UTF-16 units inserts, 4+ is REFUSED (${cap.map((c) => `${JSON.stringify(c.t)}:${c.refused ? 'refused' : 'ok'}`).join(' ')})`, JSON.stringify(cap));
   // the chunker on the real textarea: a seeded walk
   const ALPH = ['a', 'b', 'Z', ' ', '-', '\n', '\n', '\t', '你', '好', '😀', '👩‍👩‍👧', 'é', '́', '\r\n'];
   let seed = 4242; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -191,7 +191,7 @@ const M = mutantCopies('bli', REPO);
   // the copy watch on the real page (a SECOND CDP client = the daemon dispatching the keys)
   const got = [];
   const w = await VP.watchCopies(`ws://127.0.0.1:${C.port}/devtools/browser/x`, { activeUrl: url, onCopy: (c) => got.push(c) });
-  ok(w.ok, 'the copy watch arms on the real page', w.error);
+  ok(verdictOf(w.ok), 'the copy watch arms on the real page', w.error);
   const chord = async (letter) => { await A.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 }); await A.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: letter, code: 'Key' + letter.toUpperCase(), windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0), modifiers: 2 }); await A.call('Input.dispatchKeyEvent', { type: 'keyUp', key: letter, code: 'Key' + letter.toUpperCase(), windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0), modifiers: 2 }); await A.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 0 }); };
   const take = async (n0) => { await until(() => got.length > n0, 1500, 20); await sleep(60); return got.slice(n0); };
   const selectP = (id = 's', doc = 'document') => A.ev(`(() => { const d = ${doc}; const r = d.createRange(); r.selectNodeContents(d.getElementById('${id}')); d.getSelection().removeAllRanges(); d.getSelection().addRange(r); return 1; })()`);
@@ -451,7 +451,7 @@ async function inputLegs(W, P, sid, n, label, { control = false } = {}) {
   out.focus = await W.innerUntil(n, (r) => r.act === 'b', 5000);
   out.sinkAfterClick = await P.q(sid, 'return document.activeElement === L.kbd();');
   if (!out.focus) { const r = W.inner(n) || {}; out.clickMiss = { pd: r.pd, box: r.bx, act: r.act, at: out.clickGeo, settled: P.lastSettle, ageMs: r.at ? Date.now() - r.at : null }; }
-  const typed = async (pasteText, how) => { const before = (W.inner(n) || {}).b || ''; ok(await W.setClipboard(pasteText), `${label}: the clipboard holds the text (another app filled it)`, JSON.stringify(W.clipLog.slice(-2))); if (how === 'meta') await P.chord('v', { meta: true, commands: ['paste'] }); else await P.chord('v'); const want = before + pasteText.replace(/\r\n?/g, '\n'); const r = await W.innerUntil(n, (x) => x.b === want, 15000); return { ok: !!r, got: ((W.inner(n) || {}).b || '').slice(before.length) }; };
+  const typed = async (pasteText, how) => { const before = (W.inner(n) || {}).b || ''; ok(verdictOf(await W.setClipboard(pasteText)), `${label}: the clipboard holds the text (another app filled it)`, JSON.stringify(W.clipLog.slice(-2))); if (how === 'meta') await P.chord('v', { meta: true, commands: ['paste'] }); else await P.chord('v'); const want = before + pasteText.replace(/\r\n?/g, '\n'); const r = await W.innerUntil(n, (x) => x.b === want, 15000); return { ok: !!r, got: ((W.inner(n) || {}).b || '').slice(before.length) }; };
   out.p11 = await typed('hello world', 'ctrl');
   out.pCjk = await typed('你好世界 😀😀', 'meta');
   const long = Array.from({ length: 12 }, (_, i) => `row ${i}\tvalue 值 ${i} 😀`).join('\n');
@@ -496,9 +496,9 @@ const ONLY = (process.env.LIVE_INPUT_ONLY || '').split(',').filter(Boolean); // 
 const want = (x) => !ONLY.length || ONLY.includes(x);
 const kinds = [];
 const wd = await makeWorld('w');
-if (!ok(wd.booted, 'the scratch server booted (its own data/, HOME, XDG root; the real agent-browser on its PATH)', wd.journal().slice(-800))) await done();
+if (!ok(verdictOf(wd.booted), 'the scratch server booted (its own data/, HOME, XDG root; the real agent-browser on its PATH)', wd.journal().slice(-800))) await done();
 const E = await wd.page({ lang: 'en' });
-ok(E.ready && E.facts && (LAN_IP ? E.facts.secure === false && E.facts.clipboard === false : true), `the viewer page: ${JSON.stringify(E.facts)} (the owner's shape: a hostname over plain http — no secure context, no navigator.clipboard)`);
+ok(gateOf(E.ready) && gateOf(E.facts) && (LAN_IP ? E.facts.secure === false && E.facts.clipboard === false : true), `the viewer page: ${JSON.stringify(E.facts)} (the owner's shape: a hostname over plain http — no secure context, no navigator.clipboard)`);
 
 // ── ② per kind ──
 console.log('— ② every kind of browser: a real click, the real paste chord (Ctrl and ⌘), a real composition, the mouse selecting, copy out');
@@ -523,21 +523,21 @@ else if (want('med')) ok(false, 'the MEDIATED named profile comes up (new medsho
 const results = {};
 for (const k of kinds) {
   const opened = await E.openLive(k.S.sessionId, { profileId: k.profileId });
-  if (!ok(opened, `${k.label}: its live view shows the page`)) continue;
-  ok(await E.takeover(k.S.sessionId), `${k.label}: take over — this view owns the keyboard`);
+  if (!ok(verdictOf(opened), `${k.label}: its live view shows the page`)) continue;
+  ok(verdictOf(await E.takeover(k.S.sessionId)), `${k.label}: take over — this view owns the keyboard`);
   const r = await inputLegs(wd, E, k.S.sessionId, k.n, k.label);
   results[k.n] = r;
-  ok(r.focus && r.sinkAfterClick, `${k.label}: a real click into the picture focuses the page's field AND the view's keyboard sink keeps the focus`, JSON.stringify({ focus: !!r.focus, sink: r.sinkAfterClick, miss: r.clickMiss }));
-  ok(r.p11.ok, `${k.label}: Ctrl+V of "hello world" (11 units) lands`, JSON.stringify(r.p11));
-  ok(r.pCjk.ok, `${k.label}: ⌘V (the Mac's paste command) of "你好世界 😀😀" lands`, JSON.stringify(r.pCjk));
-  ok(r.pLong.ok, `${k.label}: a 12-line paste with tabs, CJK and emoji lands EXACTLY in the textarea`, JSON.stringify(r.pLong).slice(0, 300));
-  ok(r.ime, `${k.label}: a real composition (keyCode 229 → the IME's commit of 12 characters) lands`);
+  ok(gateOf(r.focus) && verdictOf(r.sinkAfterClick), `${k.label}: a real click into the picture focuses the page's field AND the view's keyboard sink keeps the focus`, JSON.stringify({ focus: !!r.focus, sink: r.sinkAfterClick, miss: r.clickMiss }));
+  ok(verdictOf(r.p11.ok), `${k.label}: Ctrl+V of "hello world" (11 units) lands`, JSON.stringify(r.p11));
+  ok(verdictOf(r.pCjk.ok), `${k.label}: ⌘V (the Mac's paste command) of "你好世界 😀😀" lands`, JSON.stringify(r.pCjk));
+  ok(verdictOf(r.pLong.ok), `${k.label}: a 12-line paste with tabs, CJK and emoji lands EXACTLY in the textarea`, JSON.stringify(r.pLong).slice(0, 300));
+  ok(verdictOf(r.ime), `${k.label}: a real composition (keyCode 229 → the IME's commit of 12 characters) lands`);
   ok(r.enterKeyUp === 0, `${k.label}: the commit key's keyup never reaches the page alone (${r.enterKeyUp} Enter keyups seen)`);
-  ok(/^SELECT/.test(r.dbl), `${k.label}: a double click selects a word ("${r.dbl}")`);
-  ok(/SELECT-ME selectable/.test(r.drag), `${k.label}: a drag selects across the paragraph ("${r.drag}")`, JSON.stringify({ end: r.dragEnd, frames: r.dragFrames }));
-  ok(r.clip && /SELECT-ME selectable/.test(r.clip), `${k.label}: Ctrl+C puts the page's selection on the VIEWER's clipboard (plain http: inside the key's moment, no click) — "${r.clip}"`, JSON.stringify(r.copyView));
-  ok(r.cut.emptied && r.cut.clip && r.cut.clip.includes('hello world') && r.cut.clip.includes('我想买这个东西然后付款吧'), `${k.label}: Ctrl+A + Ctrl+X cuts the whole textarea to the viewer's clipboard`, JSON.stringify(r.cut).slice(0, 300));
-  ok(r.view && r.view.receipts && r.view.receipts.failed === 0 && !r.view.receipts.failing, `${k.label}: every receipt came back delivered (${r.view && r.view.receipts && r.view.receipts.delivered} delivered, 0 failed)`, JSON.stringify(r.view));
+  ok(verdictOf(/^SELECT/.test(r.dbl)), `${k.label}: a double click selects a word ("${r.dbl}")`);
+  ok(verdictOf(/SELECT-ME selectable/.test(r.drag)), `${k.label}: a drag selects across the paragraph ("${r.drag}")`, JSON.stringify({ end: r.dragEnd, frames: r.dragFrames }));
+  ok(gateOf(r.clip) && verdictOf(/SELECT-ME selectable/.test(r.clip)), `${k.label}: Ctrl+C puts the page's selection on the VIEWER's clipboard (plain http: inside the key's moment, no click) — "${r.clip}"`, JSON.stringify(r.copyView));
+  ok(gateOf(r.cut.emptied) && gateOf(r.cut.clip) && gateOf(r.cut.clip.includes('hello world')) && verdictOf(r.cut.clip.includes('我想买这个东西然后付款吧')), `${k.label}: Ctrl+A + Ctrl+X cuts the whole textarea to the viewer's clipboard`, JSON.stringify(r.cut).slice(0, 300));
+  ok(gateOf(r.view) && gateOf(r.view.receipts) && r.view.receipts.failed === 0 && !r.view.receipts.failing, `${k.label}: every receipt came back delivered (${r.view && r.view.receipts && r.view.receipts.delivered} delivered, 0 failed)`, JSON.stringify(r.view));
   await E.handback(k.S.sessionId);
   await E.q(k.S.sessionId, 'window.app.wm.minimize(w.id); return true;');
 }
@@ -552,16 +552,16 @@ if (medUp && want('med') && want('fit')) {
   const fitted0 = await until(() => mine('const s = L.state(); return s.mode !== "takeover" && s.fit && s.fit.state === "fitted" && s.fit.viewerId === s.you ? { w: s.fit.width, h: s.fit.height } : null;'), 15000, 200);
   ok(!!fitted0, `the shared browser's page fits the big window while the agent drives (${fitted0 && fitted0.w}×${fitted0 && fitted0.h})`);
   const jFrom = wd.journal().length; // this leg's own takeover (the input legs above took over this browser too)
-  ok(await E.takeover(sid), 'take over the shared browser');
+  ok(verdictOf(await E.takeover(sid)), 'take over the shared browser');
   await E.layout(sid, [24, 12, 1000, 700]); // the window changes size while you drive
   const held = await until(() => mine('const s = L.state(); const c = L.el().querySelector(".browser-live-fit"); return s.fit && s.fit.code === "held_while_driving" && c && c.style.display !== "none" ? { state: s.fit.state, text: c.textContent, title: c.title, natW: L.img().naturalWidth } : null;'), 15000, 200);
-  ok(held && held.state === 'unavailable' && fitted0 && held.text === `Page ${fitted0.w}×${fitted0.h} · resized after the handback` && /cannot change its size while you drive it/.test(held.title) && !/CDP|Emulation|interrupted|Details/.test(held.title), `the chip says it in plain words: "${held && held.text}" — "${held && held.title}"`, JSON.stringify(held));
+  ok(gateOf(held) && held.state === 'unavailable' && gateOf(fitted0) && held.text === `Page ${fitted0.w}×${fitted0.h} · resized after the handback` && gateOf(/cannot change its size while you drive it/.test(held.title)) && !/CDP|Emulation|interrupted|Details/.test(held.title), `the chip says it in plain words: "${held && held.text}" — "${held && held.title}"`, JSON.stringify(held));
   const j = wd.journal().slice(jFrom).split('\n');
   const jl = j.filter((l) => /the agent set the page|could not be sized to the pane|keeps its size while the user drives/.test(l));
   ok(!j.some((l) => /the agent set the page/.test(l)) && !j.some((l) => l.includes(medId) && /could not be sized to the pane/.test(l)) && j.filter((l) => l.includes(medId) && /keeps its size while the user drives/.test(l)).length === 1, 'the journal (this takeover): never "the agent set the page\'s size", never a warning — ONE line for the takeover', jl.slice(-8).join(' | '));
   await E.handback(sid);
   const after = await until(() => mine('const s = L.state(); const c = L.el().querySelector(".browser-live-fit"); return s.fit && s.fit.state === "fitted" && s.fit.viewerId === s.you && (!c || c.style.display === "none") ? { w: s.fit.width, h: s.fit.height, natW: L.img().naturalWidth } : null;'), 15000, 200);
-  ok(after && fitted0 && after.w < fitted0.w - 100, `after the handback the page fits THIS window again at once (${after && after.w}×${after && after.h}; the chip gone)`, JSON.stringify(after));
+  ok(gateOf(after) && gateOf(fitted0) && after.w < fitted0.w - 100, `after the handback the page fits THIS window again at once (${after && after.w}×${after && after.h}; the chip gone)`, JSON.stringify(after));
   await E.q(sid, 'window.app.wm.minimize(w.id); return true;');
 }
 
@@ -572,8 +572,8 @@ if (want('door')) {
   await S1.vb(['open', wd.innerUrl('hostile', '&hostile=1')]);
   ok(!!(await wd.innerUntil('hostile', () => true, 20000)), 'the hostile page is up in the agent\'s browser (a synthetic copy every 400 ms on a hidden selection)');
   await E.q(S1.sessionId, 'window.app.wm.revealWindow(w.id); return true;');
-  ok(await E.takeover(S1.sessionId), 'the non-secure viewer takes over');
-  ok(await wd.setClipboard('(untouched)'), 'the clipboard holds "(untouched)"');
+  ok(verdictOf(await E.takeover(S1.sessionId)), 'the non-secure viewer takes over');
+  ok(verdictOf(await wd.setClipboard('(untouched)')), 'the clipboard holds "(untouched)"');
   await sleep(1300);
   const v0 = await view(E);
   ok((await wd.readClipboard()) === '(untouched)' && !v0.copyChip && !/copied/.test(String(v0.echo || '')), `nothing pressed: the clipboard is untouched and the bar offers nothing (${JSON.stringify(v0)})`);
@@ -581,14 +581,14 @@ if (want('door')) {
   await sleep(1500);
   const v1 = await view(E);
   ok((await wd.readClipboard()) === '(untouched)', `after one plain click the clipboard is STILL untouched (before the door: "HIJACK-11") — ${JSON.stringify(v1)}`);
-  ok(v1.copyChip && v1.copiedLength > 0, 'the click\'s copy is offered as the chip only (one explicit click) — never a silent write');
+  ok(gateOf(v1.copyChip) && v1.copiedLength > 0, 'the click\'s copy is offered as the chip only (one explicit click) — never a silent write');
   await E.handback(S1.sessionId);
   await E.q(S1.sessionId, 'window.app.wm.minimize(w.id); return true;');
   const Es = await wd.page({ lang: 'en', app: wd.APP_SECURE });
-  ok(Es.ready && Es.facts && Es.facts.secure === true && Es.facts.clipboard === true, `a SECURE viewer (127.0.0.1): ${JSON.stringify(Es.facts)} — the Clipboard API rung, which needs no browser gesture`);
-  ok(await Es.openLive(S1.sessionId, { profileId: profId }), 'its live view shows the hostile page');
-  ok(await wd.setClipboard('(untouched-secure)'), 'the clipboard holds "(untouched-secure)"');
-  ok(await Es.takeover(S1.sessionId), 'the secure viewer takes over');
+  ok(gateOf(Es.ready) && gateOf(Es.facts) && Es.facts.secure === true && Es.facts.clipboard === true, `a SECURE viewer (127.0.0.1): ${JSON.stringify(Es.facts)} — the Clipboard API rung, which needs no browser gesture`);
+  ok(verdictOf(await Es.openLive(S1.sessionId, { profileId: profId })), 'its live view shows the hostile page');
+  ok(verdictOf(await wd.setClipboard('(untouched-secure)')), 'the clipboard holds "(untouched-secure)"');
+  ok(verdictOf(await Es.takeover(S1.sessionId)), 'the secure viewer takes over');
   await sleep(1500);
   const v2 = await view(Es);
   ok((await wd.readClipboard()) === '(untouched-secure)' && !v2.copyChip && !/copied/.test(String(v2.echo || '')), `nothing pressed on a secure page: the clipboard is untouched, no chip (before the door: "HIJACK-19" written through the API) — ${JSON.stringify(v2)}`);
@@ -609,7 +609,7 @@ if (want('journal')) {
   await E.q(S1.sessionId, 'window.app.wm.revealWindow(w.id); return true;');
   await E.takeover(S1.sessionId); await sleep(300); await E.handback(S1.sessionId);
   const hb = await until(() => (wd.journal().split('\n').filter((l) => /handed back to the agent/.test(l)).at(-1) || '').includes('/q?') ? wd.journal().split('\n').filter((l) => /handed back to the agent/.test(l)).at(-1) : null, 5000, 100);
-  ok(hb && /\/q\?…/.test(hb) && !/A-1234|s3cr3t|order=/.test(hb), `the handback line prints origin + path, never the query ("…${hb && hb.slice(hb.indexOf(' at ')).slice(0, 80)}")`, hb);
+  ok(gateOf(hb) && gateOf(/\/q\?…/.test(hb)) && !/A-1234|s3cr3t|order=/.test(hb), `the handback line prints origin + path, never the query ("…${hb && hb.slice(hb.indexOf(' at ')).slice(0, 80)}")`, hb);
   // recording switched on WHILE agent commands run: one start
   const patchP = wd.api('PATCH', `/api/browser/profiles/${profId}`, { record: true });
   const verbs = [S1.vb(['get', 'title']), S1.vb(['get', 'url'])];
@@ -667,13 +667,13 @@ async function macLegs(W, Mp, sid, n) {
 }
 if (want('mac')) {
   const Mp = await wd.page({ mac: true, lang: 'en' });
-  ok(Mp.ready && Mp.facts && /Mac/.test(Mp.facts.platform) && (Mp.facts.uad === 'macOS' || (Mp.facts.uad === null && Mp.facts.secure === false)), `the Mac viewer: navigator.platform ${Mp.facts && Mp.facts.platform}, userAgentData ${Mp.facts && Mp.facts.uad} (a plain-http page has no userAgentData — the view reads navigator.platform)`);
+  ok(gateOf(Mp.ready) && gateOf(Mp.facts) && gateOf(/Mac/.test(Mp.facts.platform)) && (Mp.facts.uad === 'macOS' || (Mp.facts.uad === null && Mp.facts.secure === false)), `the Mac viewer: navigator.platform ${Mp.facts && Mp.facts.platform}, userAgentData ${Mp.facts && Mp.facts.uad} (a plain-http page has no userAgentData — the view reads navigator.platform)`);
   const m = await macLegs(wd, Mp, S1.sessionId, 'named');
-  ok(m.took, 'the Mac viewer takes over');
-  ok(m.selAll && m.noA, `⌘A selects ALL of the textarea and types no "a" (the owner's Chromium typed it) — keys the page saw: ${JSON.stringify(m.kd)}`);
-  ok(m.clip && m.clip.includes('mac text 苹果'), `⌘C copies the selection to the viewer's clipboard ("${String(m.clip).slice(-20)}")`);
-  ok(m.cut && m.undo && m.redo, `⌘X cuts, ⌘Z undoes, ⌘⇧Z redoes (${JSON.stringify({ cut: m.cut, undo: m.undo, redo: m.redo })})`);
-  ok(m.onA && m.caps, `lane browser-uppercase-keys: Shift+a, Shift+1, a French layout's Shift+& ("1") and & reach the page as the Mac typed them — "${m.capsGot}" (want "A!1&")`, JSON.stringify({ onA: m.onA, got: m.capsGot }));
+  ok(verdictOf(m.took), 'the Mac viewer takes over');
+  ok(gateOf(m.selAll) && verdictOf(m.noA), `⌘A selects ALL of the textarea and types no "a" (the owner's Chromium typed it) — keys the page saw: ${JSON.stringify(m.kd)}`);
+  ok(gateOf(m.clip) && verdictOf(m.clip.includes('mac text 苹果')), `⌘C copies the selection to the viewer's clipboard ("${String(m.clip).slice(-20)}")`);
+  ok(gateOf(m.cut) && gateOf(m.undo) && verdictOf(m.redo), `⌘X cuts, ⌘Z undoes, ⌘⇧Z redoes (${JSON.stringify({ cut: m.cut, undo: m.undo, redo: m.redo })})`);
+  ok(gateOf(m.onA) && verdictOf(m.caps), `lane browser-uppercase-keys: Shift+a, Shift+1, a French layout's Shift+& ("1") and & reach the page as the Mac typed them — "${m.capsGot}" (want "A!1&")`, JSON.stringify({ onA: m.onA, got: m.capsGot }));
   // B-46fc (lane bl-windows, batch 4 — «a page that leaves takes its last change with it»; 主开发 2026-11-18): the Mac page
   // CLOSES its first window of the session — one the layout sync shares with the en page (one id on every page) — and ENDS
   // inside its save's debounce. The release lost that close (the page left before its save ran): the en page kept the window
@@ -697,7 +697,7 @@ if (want('mac')) {
   const mac = await Mp.q(S1.sessionId, CLOSE_HELD(false));
   await wd.closePage(Mp); // lane live-input-under-load (a): END the page — a loaded one stays a live client of the app
   const enGone = await until(async () => { const l = await enLive(E); return l && !l.includes(mac && mac.id) ? true : null; }, LEAVE_MS, 200);
-  ok(!!macGate && wouldSend(mac) && enBefore.includes(mac.id) && !!enGone, `B-46fc through a real browser: the Mac page closed the session's window ${mac && mac.id} with its save HELD (due, a person's, no gate, never to fire by itself) and left; the en page's window ${mac && mac.id} is GONE within ${LEAVE_MS} ms — the leave's flush, the close's only road, carried it`, JSON.stringify({ macGate, mac, enBefore, after: await enLive(E) }));
+  ok(!!macGate && gateOf(wouldSend(mac)) && gateOf(enBefore.includes(mac.id)) && !!enGone, `B-46fc through a real browser: the Mac page closed the session's window ${mac && mac.id} with its save HELD (due, a person's, no gate, never to fire by itself) and left; the en page's window ${mac && mac.id} is GONE within ${LEAVE_MS} ms — the leave's flush, the close's only road, carried it`, JSON.stringify({ macGate, mac, enBefore, after: await enLive(E) }));
   // RED CONTROL — the release's behaviour, the same held close on a second page with NO flush at its leave: ④'s OWN window
   // opened by the en page (a person's key there first, past its apply gate — a scripted open alone is never saved); a second
   // en page that holds the hub's copy of it; past its boot gate (steady 1.2 s) a person's key there; the held close; the page
@@ -707,7 +707,7 @@ if (want('mac')) {
   await E.key('Shift', { code: 'ShiftLeft', vk: 16 });
   const opened = await E.openLive(S1.sessionId, { profileId: profId });
   const own = E.opened[S1.sessionId];
-  ok(!!enGate && opened && !!own, `④'s own window: the en page (its gate down, a person's key) opened ${own} and it streams`);
+  ok(!!enGate && gateOf(opened) && !!own, `④'s own window: the en page (its gate down, a person's key) opened ${own} and it streams`);
   const Pc = await wd.page({ lang: 'en' });
   const held = await until(async () => (((await enLive(Pc)) || []).includes(own) ? true : null), 20000, 200);
   ok(!!held, `the control's page holds the hub's copy of ${own} (the en page's open was saved as a person's)`, JSON.stringify({ own, pc: await enLive(Pc) }));
@@ -718,7 +718,7 @@ if (want('mac')) {
   const pcGone = await wd.targetGone(Pc);
   await sleep(LEAVE_MS);
   const enAfter = (await enLive(E)) || [];
-  ok(!!pcGate && wouldSend(pc) && pc.id === own && pcGone && enAfter.includes(own), `RED CONTROL — the release's behaviour (no flush at the leave): the second page closed its copy of ${own} with its save HELD — the very state the fact leg's flush sends — and ended; the en page KEEPS it ${LEAVE_MS} ms later (without B-46fc the leg above is red on any machine)`, JSON.stringify({ pcGate, pc, pcGone, enAfter }));
+  ok(!!pcGate && gateOf(wouldSend(pc)) && pc.id === own && gateOf(pcGone) && verdictOf(enAfter.includes(own)), `RED CONTROL — the release's behaviour (no flush at the leave): the second page closed its copy of ${own} with its save HELD — the very state the fact leg's flush sends — and ended; the en page KEEPS it ${LEAVE_MS} ms later (without B-46fc the leg above is red on any machine)`, JSON.stringify({ pcGate, pc, pcGone, enAfter }));
 }
 
 // ═══ ④ THE FIT CHIP ═══════════════════════════════════════════════════════════
@@ -740,8 +740,8 @@ if (want('fit')) {
   await E.openLive(S1.sessionId, { profileId: profId, popOut: true, box: [1000, 520, 900, 420], nth: 1 });
   const chipOf = (P, nth) => P.q(S1.sessionId, 'const c = L.el().querySelector(".browser-live-fit"); return c && c.style.display !== "none" ? { text: c.textContent, title: c.title, kind: c.dataset.kind } : null;', nth);
   const popChip = await until(() => chipOf(E, 1), 12000, 200);
-  ok(popChip && popChip.text === 'Sized for your other window · Fit here', `the smaller window on the same page: "${popChip && popChip.text}" — "${popChip && popChip.title}"`);
-  ok(popChip && /your other window/.test(popChip.title) && /shown smaller/.test(popChip.title) && /Click to make the page fit this window instead/.test(popChip.title), 'its tooltip: the page follows your other window, it is shown smaller here, a click makes it fit this one');
+  ok(gateOf(popChip) && popChip.text === 'Sized for your other window · Fit here', `the smaller window on the same page: "${popChip && popChip.text}" — "${popChip && popChip.title}"`);
+  ok(gateOf(popChip) && gateOf(/your other window/.test(popChip.title)) && gateOf(/shown smaller/.test(popChip.title)) && verdictOf(/Click to make the page fit this window instead/.test(popChip.title)), 'its tooltip: the page follows your other window, it is shown smaller here, a click makes it fit this one');
   const shotEn = await shootBar(E, S1.sessionId, 1, 'live-bar-en-other-window.png');
   const Z = await wd.page({ lang: 'zh' });
   await Z.openLive(S1.sessionId, { profileId: profId, box: [24, 12, 960, 480] });
@@ -749,7 +749,7 @@ if (want('fit')) {
   // windows into this tab (seen under load: the claim landed on the wrong one, the page followed a 1398×835 pane)
   const zw = Z.opened[S1.sessionId];
   const zChip = await until(() => chipOf(Z, zw), 12000, 200);
-  ok(zChip && zChip.text === '网页大小跟随你的另一个标签页 · 点此适配本窗口' && /另一个标签页或窗口/.test(zChip.title) && /缩小显示/.test(zChip.title) && /适配这个窗口/.test(zChip.title), `a window in another tab, in Chinese: "${zChip && zChip.text}" — "${zChip && zChip.title}"`);
+  ok(gateOf(zChip) && zChip.text === '网页大小跟随你的另一个标签页 · 点此适配本窗口' && gateOf(/另一个标签页或窗口/.test(zChip.title)) && gateOf(/缩小显示/.test(zChip.title)) && verdictOf(/适配这个窗口/.test(zChip.title)), `a window in another tab, in Chinese: "${zChip && zChip.text}" — "${zChip && zChip.title}"`);
   const shotZh = await shootBar(Z, S1.sessionId, zw, 'live-bar-zh-other-tab.png');
   // the click: the page follows the zh window
   await Z.q(S1.sessionId, 'L.el().querySelector(".browser-live-fit").click(); return true;', zw);
@@ -764,10 +764,10 @@ if (want('fit')) {
   // lane live-input-under-load: the big window's chip once ITS view holds the ruling the zh window's click made (seen under load:
   // the chip of the ruling before it — "shown smaller" — read first)
   const bigChip = await until(async () => { const c = await chipOf(E, 0); const f = await E.q(S1.sessionId, 'const s = L.state(); return s.fit ? { w: s.fit.width, h: s.fit.height } : null;').catch(() => null); return c && f && followed && f.w === followed.width && f.h === followed.height ? c : null; }, 8000, 200);
-  ok(zGone && bigChip && bigChip.text === 'Sized for your other tab · Fit here' && /shown larger/.test(bigChip.title), `the zh window's chip is gone; the big en window now says "${bigChip && bigChip.text}" (${bigChip && bigChip.title})`);
+  ok(gateOf(zGone) && gateOf(bigChip) && bigChip.text === 'Sized for your other tab · Fit here' && verdictOf(/shown larger/.test(bigChip.title)), `the zh window's chip is gone; the big en window now says "${bigChip && bigChip.text}" (${bigChip && bigChip.title})`);
   const shotEnBig = await shootBar(E, S1.sessionId, 0, 'live-bar-en-other-tab.png');
   const recTitle = await E.q(S1.sessionId, 'const r = L.el().querySelector(".browser-live-rec"); return { text: r.textContent, title: r.title };');
-  ok(recTitle && recTitle.text === 'Video off' && /Actions/.test(recTitle.title), `the recording chip in words: "${recTitle && recTitle.text}" — "${recTitle && recTitle.title}"`);
+  ok(gateOf(recTitle) && recTitle.text === 'Video off' && verdictOf(/Actions/.test(recTitle.title)), `the recording chip in words: "${recTitle && recTitle.text}" — "${recTitle && recTitle.title}"`);
   if (SHOTS) console.log(`  (shots: ${[shotEn, shotZh, shotEnBig].filter(Boolean).join(', ')})`);
   await wd.closePage(Z); // lane live-input-under-load (a): END the page (see ③)
 }
@@ -1483,60 +1483,60 @@ await wd.closePage(E);
 if (want('split')) {
   console.log('— ⑥ the split layout (userW inc-mum339id-1zsb): your OWN press on the chat composer gets the keyboard while you drive; a script\'s focus never does');
   const s = await splitLegs(wd);
-  ok(s.pageUp && s.ready && s.chat && s.live, `userW's world: the agent's page is up, the viewer page is ready, the chat window is attached and its live view shows the page (${JSON.stringify({ pageUp: s.pageUp, ready: s.ready, chat: s.chat, live: s.live })})`);
-  ok(s.layout && s.layout.split && /tab-split-pane/.test(s.layout.pane) && s.layout.vw === 2327 && s.layout.vh === 1229 && Math.abs(parseFloat(s.layout.zoom) - 0.9) < 0.001 && s.layout.liveLeft < s.layout.chatLeft, `userW's layout: the live view LEFT of the chat in ONE split group, a 2327×1229 viewer at UI scale 0.9 (${JSON.stringify(s.layout)})`);
-  ok(s.take.ok && s.took, `a real press on Take over — this view drives and owns the keyboard (${JSON.stringify(s.take.at)})`);
-  ok(s.pageField && s.pageFirst, 'a real press in the picture focuses the page\'s field and "pg" typed there lands in the page');
-  ok(s.pressComposer.ok && s.afterPress.active === 'composer', `a real press on the chat composer KEEPS the caret there (focus: ${s.afterPress.active}) — before the fix it was pulled back into the view's hidden sink`, JSON.stringify({ press: s.pressComposer, after: s.afterPress }));
+  ok(gateOf(s.pageUp) && gateOf(s.ready) && gateOf(s.chat) && verdictOf(s.live), `userW's world: the agent's page is up, the viewer page is ready, the chat window is attached and its live view shows the page (${JSON.stringify({ pageUp: s.pageUp, ready: s.ready, chat: s.chat, live: s.live })})`);
+  ok(gateOf(s.layout) && gateOf(s.layout.split) && gateOf(/tab-split-pane/.test(s.layout.pane)) && s.layout.vw === 2327 && s.layout.vh === 1229 && Math.abs(parseFloat(s.layout.zoom) - 0.9) < 0.001 && s.layout.liveLeft < s.layout.chatLeft, `userW's layout: the live view LEFT of the chat in ONE split group, a 2327×1229 viewer at UI scale 0.9 (${JSON.stringify(s.layout)})`);
+  ok(gateOf(s.take.ok) && verdictOf(s.took), `a real press on Take over — this view drives and owns the keyboard (${JSON.stringify(s.take.at)})`);
+  ok(gateOf(s.pageField) && verdictOf(s.pageFirst), 'a real press in the picture focuses the page\'s field and "pg" typed there lands in the page');
+  ok(gateOf(s.pressComposer.ok) && s.afterPress.active === 'composer', `a real press on the chat composer KEEPS the caret there (focus: ${s.afterPress.active}) — before the fix it was pulled back into the view's hidden sink`, JSON.stringify({ press: s.pressComposer, after: s.afterPress }));
   ok(s.typed.composer === 'hello agent' && s.pageAfterTyping === 'pg', `"hello agent" typed after that press lands in the COMPOSER (${JSON.stringify(s.typed.composer)}) and nothing reaches the page (its field still ${JSON.stringify(s.pageAfterTyping)}) — userW's report`, JSON.stringify(s.typed));
-  ok(s.typed.mode === 'takeover' && s.typed.mine && !s.typed.owns, `…the takeover itself continues (mode ${s.typed.mode}, mine ${s.typed.mine}) while the view does not own the keys (owns ${s.typed.owns})`);
-  ok(!s.agentRefused.ok && s.agentRefused.paused, `…and the agent is still refused: its \`press Tab\` answers browser_paused (${JSON.stringify(s.agentRefused.tail)})`);
+  ok(s.typed.mode === 'takeover' && gateOf(s.typed.mine) && !s.typed.owns, `…the takeover itself continues (mode ${s.typed.mode}, mine ${s.typed.mine}) while the view does not own the keys (owns ${s.typed.owns})`);
+  ok(!s.agentRefused.ok && verdictOf(s.agentRefused.paused), `…and the agent is still refused: its \`press Tab\` answers browser_paused (${JSON.stringify(s.agentRefused.tail)})`);
   ok(s.typed.chip === 'Keyboard is in the chat box — click the picture to keep using the page' && s.typed.line === 'You are typing to the agent (you still drive the browser)', `both sides SAY where the keyboard is: the bar "${s.typed.chip}", above the composer "${s.typed.line}"`, JSON.stringify(s.typed));
-  ok(s.sent && s.afterSend.composer === '', `Enter sends the chat message: the agent's stdin received "hello agent", the composer is empty again (${JSON.stringify(s.afterSend.composer)})`);
-  ok(s.afterPicture.owns && s.afterPicture.active === 'sink' && s.afterPicture.line === null && /^Typing (goes|is sent) to the browser$/.test(String(s.afterPicture.chip)), `a real press on the picture gives the keyboard back to the page (owns ${s.afterPicture.owns}, focus ${s.afterPicture.active}, the bar "${s.afterPicture.chip}", no line above the composer)`, JSON.stringify(s.afterPicture));
-  ok(s.pageAfterPicture && s.afterPictureTyped.composer === '', `"xyz" typed then lands in the PAGE (its field "pgxyz"), the composer stays ${JSON.stringify(s.afterPictureTyped.composer)}`, JSON.stringify(s.afterPictureTyped));
-  ok(s.afterScript.active === 'sink' && s.afterScript.owns && s.afterScript.reclaims >= 1, `THE PASSWORD GUARD: the attach's chatView.focus() and a raw composer.focus() — no press — are reclaimed at once (focus ${s.afterScript.active}, ${s.afterScript.reclaims} reclaim(s))`, JSON.stringify({ script: s.script, after: s.afterScript }));
-  ok(s.pageGuard && s.guard.composer === '', `…"tomsmith" typed after the script's focus reaches the PAGE ("pgxyztomsmith"), the composer holds ${JSON.stringify(s.guard.composer)} — nothing typed while you drive reaches a chat box by a focus you did not make`, JSON.stringify(s.guard));
-  ok(s.afterPressThenScript.active === 'sink' && s.afterPressThenScript.owns, `a script's composer focus right after a press on the PICTURE is still reclaimed (focus ${s.afterPressThenScript.active}) — only a press ON the composer yields`, JSON.stringify(s.afterPressThenScript));
-  ok(s.held && s.held.press && s.held.view.active === 'composer' && s.held.shiftDown === 1 && s.held.altDown === 1 && s.held.shiftUp === 1 && s.held.altUp === 1 && JSON.stringify(s.held.kuTail.slice(-2)) === '["Alt","Shift"]',
+  ok(gateOf(s.sent) && s.afterSend.composer === '', `Enter sends the chat message: the agent's stdin received "hello agent", the composer is empty again (${JSON.stringify(s.afterSend.composer)})`);
+  ok(gateOf(s.afterPicture.owns) && s.afterPicture.active === 'sink' && s.afterPicture.line === null && verdictOf(/^Typing (goes|is sent) to the browser$/.test(String(s.afterPicture.chip))), `a real press on the picture gives the keyboard back to the page (owns ${s.afterPicture.owns}, focus ${s.afterPicture.active}, the bar "${s.afterPicture.chip}", no line above the composer)`, JSON.stringify(s.afterPicture));
+  ok(gateOf(s.pageAfterPicture) && s.afterPictureTyped.composer === '', `"xyz" typed then lands in the PAGE (its field "pgxyz"), the composer stays ${JSON.stringify(s.afterPictureTyped.composer)}`, JSON.stringify(s.afterPictureTyped));
+  ok(s.afterScript.active === 'sink' && gateOf(s.afterScript.owns) && s.afterScript.reclaims >= 1, `THE PASSWORD GUARD: the attach's chatView.focus() and a raw composer.focus() — no press — are reclaimed at once (focus ${s.afterScript.active}, ${s.afterScript.reclaims} reclaim(s))`, JSON.stringify({ script: s.script, after: s.afterScript }));
+  ok(gateOf(s.pageGuard) && s.guard.composer === '', `…"tomsmith" typed after the script's focus reaches the PAGE ("pgxyztomsmith"), the composer holds ${JSON.stringify(s.guard.composer)} — nothing typed while you drive reaches a chat box by a focus you did not make`, JSON.stringify(s.guard));
+  ok(s.afterPressThenScript.active === 'sink' && verdictOf(s.afterPressThenScript.owns), `a script's composer focus right after a press on the PICTURE is still reclaimed (focus ${s.afterPressThenScript.active}) — only a press ON the composer yields`, JSON.stringify(s.afterPressThenScript));
+  ok(gateOf(s.held) && gateOf(s.held.press) && s.held.view.active === 'composer' && s.held.shiftDown === 1 && s.held.altDown === 1 && s.held.shiftUp === 1 && s.held.altUp === 1 && JSON.stringify(s.held.kuTail.slice(-2)) === '["Alt","Shift"]',
     `verify r1 (K4): Shift + Alt HELD in the page across a real press on the composer are RELEASED in the page (keyups ${JSON.stringify(s.held && s.held.kuTail)}) — before, their keyups went to the composer and the page kept them down`, JSON.stringify(s.held));
   { const all = s.barContrast ? Object.values(s.barContrast).flatMap((r) => Object.values(r)) : [];
-    ok(all.length === 30 && all.every((c) => typeof c === 'number' && c >= 4.5),
+    ok(all.length === 30 && verdictOf(all.every((c) => typeof c === 'number' && c >= 4.5)),
       `verify r2 (H4): every word the bar says about the keys reads at ≥ 4.5 : 1 in all six themes — the takeover badge, Hand back, the owning / failing / yielded chip (${JSON.stringify(s.barContrast)})`, JSON.stringify(s.barContrast)); }
-  ok(s.chipContrast && s.chipContrast.yielded && Object.keys(s.chipContrast.out).length === 6 && Object.values(s.chipContrast.out).every((r) => r >= 4.5),
+  ok(gateOf(s.chipContrast) && gateOf(s.chipContrast.yielded) && Object.keys(s.chipContrast.out).length === 6 && verdictOf(Object.values(s.chipContrast.out).every((r) => r >= 4.5)),
     `verify r1: the yielded chip's words read at ≥ 4.5 : 1 in all six themes (${JSON.stringify(s.chipContrast && s.chipContrast.out)}) — the amber text was 1.93 : 1 on the light theme`, JSON.stringify(s.chipContrast));
-  ok(s.tabPress && s.tabPress.ok && s.afterTab.owns && s.afterTab.active === 'sink' && s.afterTab.line === null && s.tabPage && s.afterTabTyped.view.composer === '',
+  ok(gateOf(s.tabPress) && gateOf(s.tabPress.ok) && gateOf(s.afterTab.owns) && s.afterTab.active === 'sink' && s.afterTab.line === null && gateOf(s.tabPage) && s.afterTabTyped.view.composer === '',
     `verify r1 (K3): yielded, a real press on the live view's OWN TAB in the split strip takes the keys back — the sink holds the caret (${s.afterTab && s.afterTab.active}), "kk" reaches the PAGE, the composer stays empty`, JSON.stringify({ press: s.tabPress, after: s.afterTab, typed: s.afterTabTyped }));
-  ok(s.termUp && s.termOpened.active !== 'xterm-helper-textarea' && s.termOpened.owns, `a TERMINAL window opened while you drive: its own focus() stands down — the view still owns the keys (focus ${s.termOpened && s.termOpened.active})`, JSON.stringify({ termUp: s.termUp, opened: s.termOpened }));
-  ok(s.pressTerm && s.pressTerm.ok && /xterm-helper-textarea/.test(String(s.termActive)) && !s.afterTermPress.owns && s.afterTermPress.mode === 'takeover' && s.afterTermPress.chip === 'Keyboard is in the terminal — click the picture to keep using the page', `a real press on the terminal's screen YIELDS to it (xterm's helper textarea holds the focus; the bar: "${s.afterTermPress && s.afterTermPress.chip}"; the takeover continues)`, JSON.stringify({ press: s.pressTerm, active: s.termActive, after: s.afterTermPress }));
-  ok(s.termGot && s.pageAfterTerm === 'pgxyztomsmith' && s.afterTermPicture.owns && s.afterTermPicture.active === 'sink', `"echo tkbdtyped" reaches the SHELL (its buffer shows it), the page keeps ${JSON.stringify(s.pageAfterTerm)}; a press on the picture takes the keys back`, JSON.stringify({ got: s.termGot, buf: s.termBuf, page: s.pageAfterTerm, after: s.afterTermPicture }) + ' · journal: ' + wd.journal().split('\n').filter((l) => /shell|terminal|dtach|create/i.test(l)).slice(-6).join(' | '));
-  ok(s.handPress.ok && s.handed && s.afterHandback.chip === null && s.afterHandback.line === null && !s.afterHandback.owns, `a real press on Hand back ends the takeover; the bar and the composer say nothing any more (${JSON.stringify(s.afterHandback)})`);
+  ok(gateOf(s.termUp) && s.termOpened.active !== 'xterm-helper-textarea' && verdictOf(s.termOpened.owns), `a TERMINAL window opened while you drive: its own focus() stands down — the view still owns the keys (focus ${s.termOpened && s.termOpened.active})`, JSON.stringify({ termUp: s.termUp, opened: s.termOpened }));
+  ok(gateOf(s.pressTerm) && gateOf(s.pressTerm.ok) && gateOf(/xterm-helper-textarea/.test(String(s.termActive))) && !s.afterTermPress.owns && s.afterTermPress.mode === 'takeover' && s.afterTermPress.chip === 'Keyboard is in the terminal — click the picture to keep using the page', `a real press on the terminal's screen YIELDS to it (xterm's helper textarea holds the focus; the bar: "${s.afterTermPress && s.afterTermPress.chip}"; the takeover continues)`, JSON.stringify({ press: s.pressTerm, active: s.termActive, after: s.afterTermPress }));
+  ok(gateOf(s.termGot) && s.pageAfterTerm === 'pgxyztomsmith' && gateOf(s.afterTermPicture.owns) && s.afterTermPicture.active === 'sink', `"echo tkbdtyped" reaches the SHELL (its buffer shows it), the page keeps ${JSON.stringify(s.pageAfterTerm)}; a press on the picture takes the keys back`, JSON.stringify({ got: s.termGot, buf: s.termBuf, page: s.pageAfterTerm, after: s.afterTermPicture }) + ' · journal: ' + wd.journal().split('\n').filter((l) => /shell|terminal|dtach|create/i.test(l)).slice(-6).join(' | '));
+  ok(gateOf(s.handPress.ok) && gateOf(s.handed) && s.afterHandback.chip === null && s.afterHandback.line === null && !s.afterHandback.owns, `a real press on Hand back ends the takeover; the bar and the composer say nothing any more (${JSON.stringify(s.afterHandback)})`);
   await wd.closePage(s.P); // verify r2: END the page — a loaded one stays a live client (it took the desktop app's one active seat)
   // verify r1: the standalone windows on another client
   const t = await standaloneLegs(wd, { S: s.S, pid: s.pid, tag: 'split', seatRace: true });
-  ok(t.ready && t.chat && t.live && t.alone === true && t.took && t.pressComposer.ok && t.yielded.active === 'composer' && !t.yielded.owns, `verify r1 standalone world: another client, the chat and the live view as two windows (no group), a real Take over, a real press on the composer yields (${JSON.stringify({ ready: t.ready, chat: t.chat, live: t.live, alone: t.alone, took: t.took, press: t.pressComposer, yielded: t.yielded })})`);
-  ok(t.titlePress.ok && t.afterTitle.owns && t.afterTitle.active === 'sink' && t.titlePage && t.afterTitleTyped.view.composer === '' && t.handed,
+  ok(gateOf(t.ready) && gateOf(t.chat) && gateOf(t.live) && t.alone === true && gateOf(t.took) && gateOf(t.pressComposer.ok) && t.yielded.active === 'composer' && !t.yielded.owns, `verify r1 standalone world: another client, the chat and the live view as two windows (no group), a real Take over, a real press on the composer yields (${JSON.stringify({ ready: t.ready, chat: t.chat, live: t.live, alone: t.alone, took: t.took, press: t.pressComposer, yielded: t.yielded })})`);
+  ok(gateOf(t.titlePress.ok) && gateOf(t.afterTitle.owns) && t.afterTitle.active === 'sink' && gateOf(t.titlePage) && t.afterTitleTyped.view.composer === '' && verdictOf(t.handed),
     `verify r1 (K3): yielded, a real press on the live window's OWN TITLE BAR takes the keys back — the sink holds the caret (${t.afterTitle && t.afterTitle.active}), "tt" reaches the PAGE, the composer stays empty`, JSON.stringify({ press: t.titlePress, after: t.afterTitle, typed: t.afterTitleTyped }));
-  ok(t.pressHidden.ok && t.hiddenTyped.composer === 'c1' && !t.restored.owns && t.restored.yielded && t.restored.active === 'composer' && t.restored.chip === 'Keyboard is in the chat box — click the picture to keep using the page' && t.restored.line === 'You are typing to the agent (you still drive the browser)'
+  ok(gateOf(t.pressHidden.ok) && t.hiddenTyped.composer === 'c1' && !t.restored.owns && gateOf(t.restored.yielded) && t.restored.active === 'composer' && t.restored.chip === 'Keyboard is in the chat box — click the picture to keep using the page' && t.restored.line === 'You are typing to the agent (you still drive the browser)'
     && t.restoredTyped.view.composer === 'c1c2' && t.restoredTyped.page === t.b1 && t.restoredTyped.view.strayKeys === 0,
     `verify r2 (H1): minimized → a real press on the composer → restored: the view does NOT take the keys back — at the restore, before any key, the caret is the composer's and both sides say so ("${t.restored && t.restored.chip}" / "${t.restored && t.restored.line}"); "c2" lands in the composer, the page keeps ${JSON.stringify(t.b1)}`, JSON.stringify({ hidden: t.pressHidden, hiddenTyped: t.hiddenTyped, restored: t.restored, typed: t.restoredTyped, b1: t.b1 }));
   ok(!h1bPreFix(t.deskBack, t.deskBackTyped), `verify r4 (attack 6): the H1b' control's predicate ("the yield outlives its home") REJECTS the fixed tree's own reading — it is still a control, whichever chip wording it accepts (${JSON.stringify({ yielded: t.deskBack && t.deskBack.yielded, owns: t.deskBack && t.deskBack.owns, active: t.deskBack && t.deskBack.active })})`);
-  ok(t.deskPressComposer && t.deskPressComposer.ok && t.deskYielded.yielded && t.deskYielded.composer === 'k1' && t.deskBack.owns && !t.deskBack.yielded && t.deskBack.active === 'sink' && /^Typing (goes|is sent) to the browser$/.test(String(t.deskBack.chip)) && t.deskBackTyped.page === t.deskBackTyped.b + 'k2' && t.deskBackTyped.view.composer === 'k1',
+  ok(gateOf(t.deskPressComposer) && gateOf(t.deskPressComposer.ok) && gateOf(t.deskYielded.yielded) && t.deskYielded.composer === 'k1' && gateOf(t.deskBack.owns) && !t.deskBack.yielded && t.deskBack.active === 'sink' && gateOf(/^Typing (goes|is sent) to the browser$/.test(String(t.deskBack.chip))) && t.deskBackTyped.page === t.deskBackTyped.b + 'k2' && t.deskBackTyped.view.composer === 'k1',
     `verify r2 (H1b'): the chat pressed on ANOTHER desktop (a yield), back on the view's desktop — its home gone, the yield ends: before any key the caret is in the sink ("${t.deskBack && t.deskBack.chip}"), "k2" reaches the page, the chat box keeps "k1"`, JSON.stringify({ desks: t.desks, press: t.deskPressComposer, yielded: t.deskYielded, back: t.deskBack, typed: t.deskBackTyped }));
-  ok(t.expandPress && t.expandPress.ok && t.q1.view.active === 'sink' && t.q1.view.owns && t.q1.cues === 1 && /Typing still goes to the browser — click the text box itself to type there/.test(t.q1.toast) && t.q1Press.ok && t.q1Typed.yielded && t.q1Typed.composer === 'ok',
+  ok(gateOf(t.expandPress) && gateOf(t.expandPress.ok) && t.q1.view.active === 'sink' && gateOf(t.q1.view.owns) && t.q1.cues === 1 && gateOf(/Typing still goes to the browser — click the text box itself to type there/.test(t.q1.toast)) && gateOf(t.q1Press.ok) && gateOf(t.q1Typed.yielded) && t.q1Typed.composer === 'ok',
     `verify r2 (Q1): the composer's expand button (a press of his that focuses the box) is still reclaimed — and SAID once ("${t.q1 && t.q1.toast}"); following the advice (a press on the box itself) yields, "ok" lands in the composer`, JSON.stringify({ press: t.expandPress, q1: t.q1, press2: t.q1Press, typed: t.q1Typed }));
-  ok(t.wvUp && t.wvPress && t.wvPress.ok && t.wv.view.active === 'sink' && t.wv.view.owns && t.wv.frames >= 1 && /Typing still goes to the browser — to type in another page, hand back first/.test(t.wv.toast) && t.wvTyped.page === t.wvTyped.b + 'wv' && t.wvTyped.field === '',
+  ok(gateOf(t.wvUp) && gateOf(t.wvPress) && gateOf(t.wvPress.ok) && t.wv.view.active === 'sink' && gateOf(t.wv.view.owns) && t.wv.frames >= 1 && gateOf(/Typing still goes to the browser — to type in another page, hand back first/.test(t.wv.toast)) && t.wvTyped.page === t.wvTyped.b + 'wv' && t.wvTyped.field === '',
     `verify r2 (H5): a real press INTO a Web view page's field while you drive is taken back (the frame's press is indistinguishable from its own script) and SAID ("${t.wv && t.wv.toast}"); "wv" reaches the agent's page as the chip says`, JSON.stringify({ up: t.wvUp, press: t.wvPress, wv: t.wv, typed: t.wvTyped }));
-  ok(t.deskUp && t.deskPress && t.deskPress.ok && t.deskAfter.active === true && t.deskAfter.view.yielded && !t.deskAfter.view.owns && t.deskAfter.view.chip === 'Keyboard is outside the browser — click the picture to keep using the page' && t.deskTyped.page === t.deskTyped.b,
+  ok(gateOf(t.deskUp) && gateOf(t.deskPress) && gateOf(t.deskPress.ok) && t.deskAfter.active === true && gateOf(t.deskAfter.view.yielded) && !t.deskAfter.view.owns && t.deskAfter.view.chip === 'Keyboard is outside the browser — click the picture to keep using the page' && t.deskTyped.page === t.deskTyped.b,
     `verify r2 (N1): the DESKTOP (a real noVNC over this world's Xvnc) — a real press on its picture while you drive YIELDS to its canvas ("${t.deskAfter && t.deskAfter.view.chip}"), "vn" never reaches the page (${JSON.stringify(t.deskTyped && t.deskTyped.page)})`, JSON.stringify({ up: t.deskUp, diag: t.deskDiag, press: t.deskPress, after: t.deskAfter, typed: t.deskTyped }));
   { const sr = t.seatRace || {}; const a = (sr.after && sr.after.asked) || [];
-    ok(sr.blocked && sr.press && sr.press.ok && Array.isArray(sr.asked) && sr.asked.length === 0 && sr.after.joined && sr.after.mine && a.length === 1 && a[0].status === 200,
+    ok(gateOf(sr.blocked) && gateOf(sr.press) && gateOf(sr.press.ok) && gateOf(Array.isArray(sr.asked)) && sr.asked.length === 0 && gateOf(sr.after.joined) && gateOf(sr.after.mine) && a.length === 1 && a[0].status === 200,
       `lane live-input-under-load (a): Resume here pressed while THIS pane's socket is not yet seated (another client holds the app) asks nothing until the socket joins — then the takeover (${a.map((x) => x.status).join(',')}): this pane is ACTIVE`, JSON.stringify(sr)); }
-  ok(t.appId && t.appUp && t.appPress && t.appPress.ok && /xpra-ime/.test(String(t.appAfter.active)) && t.appAfter.view.yielded && !t.appAfter.view.owns && t.appTyped.app === 'xp\n' && t.appTyped.page === t.appTyped.b,
+  ok(gateOf(t.appId) && gateOf(t.appUp) && gateOf(t.appPress) && gateOf(t.appPress.ok) && gateOf(/xpra-ime/.test(String(t.appAfter.active))) && gateOf(t.appAfter.view.yielded) && !t.appAfter.view.owns && t.appTyped.app === 'xp\n' && t.appTyped.page === t.appTyped.b,
     `verify r2 (N1): a DESKTOP APP (a real xterm under xpra) — a real press on its picture yields to its IME; "xp" + Enter reach the APP (its shell wrote ${JSON.stringify(t.appTyped && t.appTyped.app)}), nothing reaches the page`, JSON.stringify({ id: t.appId, up: t.appUp, seat: t.appSeat, press: t.appPress, after: t.appAfter, typed: t.appTyped, diag: t.appDiag }));
-  ok(t.heldHide.down && t.heldHide.ku === 'Shift' && Array.isArray(t.heldHide.pressed) && t.heldHide.pressed.length === 0 && t.hand.ok && t.handed && t.heldHandback.down && t.heldHandback.ku === 'Shift',
+  ok(gateOf(t.heldHide.down) && t.heldHide.ku === 'Shift' && gateOf(Array.isArray(t.heldHide.pressed)) && t.heldHide.pressed.length === 0 && gateOf(t.hand.ok) && gateOf(t.handed) && gateOf(t.heldHandback.down) && t.heldHandback.ku === 'Shift',
     `verify r2 (H3): Shift HELD in the page when the window is minimized, and across a real press on Hand back, is let go IN THE PAGE (keydown / keyup: ${JSON.stringify(t.heldHide)} · ${JSON.stringify(t.heldHandback)}) — before, the page kept it down`, JSON.stringify({ hide: t.heldHide, hand: t.hand, handed: t.handed, handback: t.heldHandback }));
-  ok(t.scriptFocus === true && t.restoredB.owns && t.restoredB.active === 'sink' && t.restoredB.caretMoves >= 1 && /^Typing (goes|is sent) to the browser$/.test(String(t.restoredB.chip)) && t.restoredB.line === null
+  ok(t.scriptFocus === true && gateOf(t.restoredB.owns) && t.restoredB.active === 'sink' && t.restoredB.caretMoves >= 1 && gateOf(/^Typing (goes|is sent) to the browser$/.test(String(t.restoredB.chip))) && t.restoredB.line === null
     && t.restoredBTyped.view.composer === 'd1' && t.restoredBTyped.page === t.b2 + 'd2' && t.restoredBTyped.view.strayKeys === 0,
     `verify r2 (H1): the password guard across the return — a SCRIPT's caret in the composer while minimized is MOVED to the sink at the restore (before any key: ${t.restoredB && t.restoredB.active}, "${t.restoredB && t.restoredB.chip}"), "d2" reaches the page, the composer keeps "d1"`, JSON.stringify({ script: t.scriptFocus, restored: t.restoredB, typed: t.restoredBTyped, b2: t.b2 }));
   await wd.closePage(t.P);
@@ -1546,46 +1546,46 @@ if (want('r3')) {
   console.log('— ⑦ verify r3: the input-surface census in chrome (the code editor, the channel composer) and the round\'s findings');
   const nb = await newBrowserSession(wd, 'r3m');
   const r = await r3Legs(wd, { S: nb.S, pid: nb.pid, tag: 'r3m' });
-  ok(nb.pageUp && r.ready && r.chat && r.live && r.take.ok && r.took, `r3's world: the agent's page, a client with the chat and its live view as two windows, a real Take over (${JSON.stringify({ pageUp: nb.pageUp, ready: r.ready, chat: r.chat, live: r.live, took: r.took })})`);
-  ok(r.cmUp && r.cmOpened.owns && r.cmPress.ok && r.cm.active === 'cm-content' && r.cm.yielded && !r.cm.owns && r.cm.chip === 'Keyboard is outside the browser — click the picture to keep using the page' && r.cmTyped.doc.startsWith('line one/line twozz/') && r.cmTyped.page === r.cmTyped.b0,
+  ok(gateOf(nb.pageUp) && gateOf(r.ready) && gateOf(r.chat) && gateOf(r.live) && gateOf(r.take.ok) && verdictOf(r.took), `r3's world: the agent's page, a client with the chat and its live view as two windows, a real Take over (${JSON.stringify({ pageUp: nb.pageUp, ready: r.ready, chat: r.chat, live: r.live, took: r.took })})`);
+  ok(gateOf(r.cmUp) && gateOf(r.cmOpened.owns) && gateOf(r.cmPress.ok) && r.cm.active === 'cm-content' && gateOf(r.cm.yielded) && !r.cm.owns && r.cm.chip === 'Keyboard is outside the browser — click the picture to keep using the page' && gateOf(r.cmTyped.doc.startsWith('line one/line twozz/')) && r.cmTyped.page === r.cmTyped.b0,
     `the census (text row): THE CODE EDITOR opened while you drive keeps the keys the page's; a real press on a line YIELDS to CodeMirror's .cm-content ("${r.cm && r.cm.chip}"), "zz" lands in the document (${JSON.stringify(r.cmTyped && r.cmTyped.doc)}), the page keeps ${JSON.stringify(r.cmTyped && r.cmTyped.b0)}`, JSON.stringify({ up: r.cmUp, opened: r.cmOpened, press: r.cmPress, after: r.cm, typed: r.cmTyped }));
-  ok(r.selPress && r.selPress.ok && r.sel.focused === true && r.sel.open === true && r.sel.owns,
+  ok(gateOf(r.selPress) && gateOf(r.selPress.ok) && r.sel.focused === true && r.sel.open === true && verdictOf(r.sel.owns),
     `verify r3 (F1): the editor's language <select>, pressed while you drive, is focused and OPEN 150 ms later (its list the pointer's; the view still owns the keys) — before, the sink took the focus back and the list closed at once`, JSON.stringify({ press: r.selPress, sel: r.sel }));
-  ok(r.exUp && r.copyPress && r.copyPress.ok && r.copy.reclaims >= 1 && r.copy.cues === 0 && !/click the text box itself/.test(r.copy.toasts) && r.copy.active === 'sink' && r.copy.owns,
+  ok(gateOf(r.exUp) && gateOf(r.copyPress) && gateOf(r.copyPress.ok) && r.copy.reclaims >= 1 && r.copy.cues === 0 && !/click the text box itself/.test(r.copy.toasts) && r.copy.active === 'sink' && verdictOf(r.copy.owns),
     `verify r3 (F2): "Copy Path" on the plain-http viewer — copyText's scratch box taken back (${r.copy && r.copy.reclaims} reclaim), and NOTHING says "click the text box itself" (toasts: ${JSON.stringify(r.copy && r.copy.toasts)})`, JSON.stringify({ up: r.exUp, press: r.copyPress, copy: r.copy }));
-  ok(r.delPress && r.delPress.ok && r.dialog.open && r.dialog.takes === 1 && r.dialog.held && r.dialog.cues === 0 && r.dialog.why === 'pressed' && /btn-create/.test(String(r.dialog.active)) && !r.dialog.owns && r.dialog.chip === 'Keyboard is in the dialog — it goes back when you answer it' && r.dialog.mode === 'takeover' && r.dialog.mine
-    && r.dialogEnter.page === r.dialogEnter.b && !r.dialogEnter.stillOpen && r.dialogEnter.gone && r.dialogEnter.active === 'sink' && r.dialogEnter.owns && !r.dialogEnter.held && r.dialogEnter.returns === 1 && /^Typing (goes|is sent) to the browser$/.test(String(r.dialogEnter.chip))
-    && r.dialogAfter.page === r.dialogAfter.b + 'dk' && r.dialogAfter.owns,
+  ok(gateOf(r.delPress) && gateOf(r.delPress.ok) && gateOf(r.dialog.open) && r.dialog.takes === 1 && gateOf(r.dialog.held) && r.dialog.cues === 0 && r.dialog.why === 'pressed' && gateOf(/btn-create/.test(String(r.dialog.active))) && !r.dialog.owns && r.dialog.chip === 'Keyboard is in the dialog — it goes back when you answer it' && r.dialog.mode === 'takeover' && gateOf(r.dialog.mine)
+    && r.dialogEnter.page === r.dialogEnter.b && !r.dialogEnter.stillOpen && gateOf(r.dialogEnter.gone) && r.dialogEnter.active === 'sink' && gateOf(r.dialogEnter.owns) && !r.dialogEnter.held && r.dialogEnter.returns === 1 && gateOf(/^Typing (goes|is sent) to the browser$/.test(String(r.dialogEnter.chip)))
+    && r.dialogAfter.page === r.dialogAfter.b + 'dk' && verdictOf(r.dialogAfter.owns),
     `lane dialog-keys (THE RULE, the owner's): a real press on Delete → the confirm dialog TAKES the keys while you drive ("${r.dialog && r.dialog.chip}"); a real Enter CONFIRMS it (the file is gone) and the page's textarea gets NO line break; its close gives the keys back to the page ("dk" lands there, the chip "${r.dialogEnter && r.dialogEnter.chip}")`, JSON.stringify({ press: r.delPress, dialog: r.dialog, enter: r.dialogEnter, after: r.dialogAfter }));
-  ok(r.selfDialog.open && r.selfDialog.takes === 0 && r.selfDialog.cues === 1 && r.selfDialog.why === 'pressed the page' && /Typing still goes to the browser — click the dialog’s buttons to answer it/.test(r.selfDialog.toasts) && r.selfDialog.active === 'sink' && r.selfDialog.owns
-    && r.selfEnter.page === r.selfEnter.b + '\n' && r.selfEnter.open,
+  ok(gateOf(r.selfDialog.open) && r.selfDialog.takes === 0 && r.selfDialog.cues === 1 && r.selfDialog.why === 'pressed the page' && gateOf(/Typing still goes to the browser — click the dialog’s buttons to answer it/.test(r.selfDialog.toasts)) && r.selfDialog.active === 'sink' && gateOf(r.selfDialog.owns)
+    && r.selfEnter.page === r.selfEnter.b + '\n' && verdictOf(r.selfEnter.open),
     `lane dialog-keys (THE PASSWORD GUARD, in chrome): the New-session dialog opened BY A SCRIPT 400 ms after nothing he pressed in the app is TAKEN BACK — its own field focus reclaimed, SAID once ("Typing still goes to the browser — click the dialog’s buttons to answer it"); its Enter reaches the PAGE (the dialog stays up — nothing submitted)`, JSON.stringify({ self: r.selfDialog, enter: r.selfEnter }));
-  ok(r.formPanel && r.formPress && r.formPress.ok && r.formOpen.form && r.formOpen.takes === 1 && r.formOpen.held && !r.formOpen.owns && /plugin-install-value/.test(String(r.formOpen.active))
-    && /pg/.test(r.formTyped.value) && r.formTyped.page === r.formTyped.b && r.formEsc.asked && r.formEsc.open && r.formEsc.page === r.formEsc.b && r.formDiscard && r.formDiscard.ok && r.formAfter.page === r.formAfter.b + 'fk' && r.formAfter.owns,
+  ok(gateOf(r.formPanel) && gateOf(r.formPress) && gateOf(r.formPress.ok) && gateOf(r.formOpen.form) && r.formOpen.takes === 1 && gateOf(r.formOpen.held) && !r.formOpen.owns && gateOf(/plugin-install-value/.test(String(r.formOpen.active)))
+    && gateOf(/pg/.test(r.formTyped.value)) && r.formTyped.page === r.formTyped.b && gateOf(r.formEsc.asked) && gateOf(r.formEsc.open) && r.formEsc.page === r.formEsc.b && gateOf(r.formDiscard) && gateOf(r.formDiscard.ok) && r.formAfter.page === r.formAfter.b + 'fk' && verdictOf(r.formAfter.owns),
     `lane dialog-yield r2 (THE ONE PREDICATE, in chrome): a FORM his press opened while he drives (Install plugin…, a window of its own) TAKES the keys like the confirm — its field focused ("${r.formOpen && r.formOpen.chip}"), "pg" lands in it (${JSON.stringify(r.formTyped && r.formTyped.value)}) and never in the page; Escape is the form's (it asks about what was typed); Discard closes it and "fk" reaches the page again`, JSON.stringify({ panel: r.formPanel, press: r.formPress, open: r.formOpen, typed: r.formTyped, esc: r.formEsc, discard: r.formDiscard, after: r.formAfter }));
-  ok(r.floatPress && r.floatPress.ok && r.floatHeld.held && !r.floatHeld.owns && /plugin-install-value/.test(String(r.floatHeld.active)) && r.floatTyped.value === '/home/me' && r.floatTyped.page === r.floatTyped.b,
+  ok(gateOf(r.floatPress) && gateOf(r.floatPress.ok) && gateOf(r.floatHeld.held) && !r.floatHeld.owns && gateOf(/plugin-install-value/.test(String(r.floatHeld.active))) && r.floatTyped.value === '/home/me' && r.floatTyped.page === r.floatTyped.b,
     `lane dialog-yield r3 (WHAT A FORM FLOATS IS THE FORM'S, in chrome): his press on a list the form floated on <body> (stamped data-owner-form, path-field's way) keeps the form's keys — "me" lands in its field (${JSON.stringify(r.floatTyped && r.floatTyped.value)}), the page keeps ${JSON.stringify(r.floatTyped && r.floatTyped.b)} (c3ed5f0a: the hold dropped, "me" into the agent's page)`, JSON.stringify({ press: r.floatPress, held: r.floatHeld, typed: r.floatTyped }));
-  ok(r.raiseOpen && r.raiseOpen.ok && r.raisePress && r.raisePress.ok && r.raised.windows === 1 && r.raised.held && !r.raised.owns && /plugin-install-value/.test(String(r.raised.active)) && /abcd/.test(r.raiseTyped.value) && r.raiseTyped.page === r.raiseTyped.b,
+  ok(gateOf(r.raiseOpen) && gateOf(r.raiseOpen.ok) && gateOf(r.raisePress) && gateOf(r.raisePress.ok) && r.raised.windows === 1 && gateOf(r.raised.held) && !r.raised.owns && gateOf(/plugin-install-value/.test(String(r.raised.active))) && gateOf(/abcd/.test(r.raiseTyped.value)) && r.raiseTyped.page === r.raiseTyped.b,
     `lane dialog-yield r3 (A RAISE IS AN ANNOUNCE, in chrome): Install plugin… pressed again while its form waits behind RAISES it — one window, the keys its (${JSON.stringify(r.raised)}): "cd" after "ab" in its field (${JSON.stringify(r.raiseTyped && r.raiseTyped.value)}), the page keeps ${JSON.stringify(r.raiseTyped && r.raiseTyped.b)} (c3ed5f0a: the raise unannounced, its caret reclaimed, "cd" to the page)`, JSON.stringify({ open: r.raiseOpen, press: r.raisePress, raised: r.raised, typed: r.raiseTyped }));
-  ok(r.chanUp && r.chanPress && r.chanPress.ok && r.chan.active === true && r.chan.view.yielded && !r.chan.view.owns && r.chanTyped.value === 'ch' && r.chanTyped.page === r.chanTyped.b0,
+  ok(gateOf(r.chanUp) && gateOf(r.chanPress) && gateOf(r.chanPress.ok) && r.chan.active === true && gateOf(r.chan.view.yielded) && !r.chan.view.owns && r.chanTyped.value === 'ch' && r.chanTyped.page === r.chanTyped.b0,
     `the census (text row): THE CHANNEL COMPOSER (fake-poll · Ops) — a real press YIELDS to it ("${r.chan && r.chan.view.chip}"), "ch" lands there, the page keeps ${JSON.stringify(r.chanTyped && r.chanTyped.b0)}`, JSON.stringify({ up: r.chanUp, press: r.chanPress, chan: r.chan, typed: r.chanTyped }));
-  ok(r.listComposer.ok && r.listYielded.yielded && r.listYielded.composer === 'l1' && r.listPress.ok && r.list.yielded && r.list.where === 'none' && r.list.chip === 'Keyboard is not in a text box — click one to type there, or the picture to use the page' && r.listTyped.view.composer === 'l1' && r.listTyped.page === r.listTyped.b,
+  ok(gateOf(r.listComposer.ok) && gateOf(r.listYielded.yielded) && r.listYielded.composer === 'l1' && gateOf(r.listPress.ok) && gateOf(r.list.yielded) && r.list.where === 'none' && r.list.chip === 'Keyboard is not in a text box — click one to type there, or the picture to use the page' && r.listTyped.view.composer === 'l1' && r.listTyped.page === r.listTyped.b,
     `verify r3 (r2's held): yielded to the composer, a real press on the chat's MESSAGE LIST — the yield stays and the bar says "${r.list && r.list.chip}"; "nn" reaches neither the composer nor the page`, JSON.stringify({ composer: r.listComposer, yielded: r.listYielded, press: r.listPress, after: r.list, typed: r.listTyped }));
-  ok(r.handPress.ok && r.handed, 'r3\'s legs end with a real Hand back');
+  ok(gateOf(r.handPress.ok) && verdictOf(r.handed), 'r3\'s legs end with a real Hand back');
   await wd.closePage(r.P);
   // ── verify r4: the round's chrome legs (same session, its own client) ──
   const r4 = await r4Legs(wd, { S: nb.S, pid: nb.pid, tag: 'r3m' });
-  ok(r4.ready && r4.chat && r4.live && r4.take.ok && r4.took, `r4's world: the chat and the live view as two windows, a real Take over (${JSON.stringify({ ready: r4.ready, chat: r4.chat, live: r4.live, took: r4.took })})`);
-  ok(r4.selPress && r4.selPress.ok && r4.selOpen.focused && r4.selOpen.open === true && r4.selArrow.open === true && r4.selEnter.value === 'beta' && r4.selEnter.open === false && r4.selEnter.active === 'browser-live-kbd' && r4.selKeysToPage === 0 && r4.selOpen2.open === true && r4.selType.open === true && r4.selEsc.open === false && r4.selEsc.active === 'browser-live-kbd' && r4.selKeysToPage2 === 0 && r4.selEsc.owns,
+  ok(gateOf(r4.ready) && gateOf(r4.chat) && gateOf(r4.live) && gateOf(r4.take.ok) && verdictOf(r4.took), `r4's world: the chat and the live view as two windows, a real Take over (${JSON.stringify({ ready: r4.ready, chat: r4.chat, live: r4.live, took: r4.took })})`);
+  ok(gateOf(r4.selPress) && gateOf(r4.selPress.ok) && gateOf(r4.selOpen.focused) && r4.selOpen.open === true && r4.selArrow.open === true && r4.selEnter.value === 'beta' && r4.selEnter.open === false && r4.selEnter.active === 'browser-live-kbd' && r4.selKeysToPage === 0 && r4.selOpen2.open === true && r4.selType.open === true && r4.selEsc.open === false && r4.selEsc.active === 'browser-live-kbd' && r4.selKeysToPage2 === 0 && verdictOf(r4.selEsc.owns),
     `verify r4 (attack 1, measured): a <select> pressed while you drive opens its list; on the OPEN list ArrowDown / Enter / type-ahead / Escape are the list's (Enter commits "${r4.selEnter && r4.selEnter.value}", ${r4.selKeysToPage + r4.selKeysToPage2} of them reached the page) and the closing key's keyup hands the caret to the sink — the next keys are the page's`, JSON.stringify({ open: r4.selOpen, arrow: r4.selArrow, enter: r4.selEnter, type: r4.selType, esc: r4.selEsc, toPage: [r4.selKeysToPage, r4.selKeysToPage2] }));
-  ok(r4.colorPress && r4.colorPress.ok && r4.color80.open === true && r4.color80.active === 'browser-live-kbd' && r4.color330.open === true && r4.color330.owns,
+  ok(gateOf(r4.colorPress) && gateOf(r4.colorPress.ok) && r4.color80.open === true && r4.color80.active === 'browser-live-kbd' && r4.color330.open === true && verdictOf(r4.color330.owns),
     `verify r4 (attack 1, measured): an <input type=color> pressed while you drive keeps its picker OPEN across the sink's take-back (:open at 80 ms and 330 ms with the caret in the sink) — the colour pickers of the theme editor and a Task Group are not dead`, JSON.stringify({ c80: r4.color80, c330: r4.color330 }));
-  ok(r4.yielded.yielded && r4.storm && r4.storm.n === 300 && r4.storm.writes <= 2 && r4.storm.active === 'r4row' && r4.storm.where === 'none' && /not in a text box/.test(String(r4.storm.chip)) && r4.storm.yielded && !r4.storm.owns && r4.afterStorm.where === 'chat' && r4.afterStorm.active === 'composer',
+  ok(gateOf(r4.yielded.yielded) && gateOf(r4.storm) && r4.storm.n === 300 && r4.storm.writes <= 2 && r4.storm.active === 'r4row' && r4.storm.where === 'none' && gateOf(/not in a text box/.test(String(r4.storm.chip))) && gateOf(r4.storm.yielded) && !r4.storm.owns && r4.afterStorm.where === 'chat' && r4.afterStorm.active === 'composer',
     `verify r4 (attack 3): 300 focus moves over a list while yielded — the chip is written ${r4.storm && r4.storm.writes} time(s): the one change of words at the first move ("${r4.storm && r4.storm.chip}"), never again; the focus stays where the script put it, ${r4.storm && r4.storm.ms} ms; a press back on the composer says "chat"`, JSON.stringify({ yielded: r4.yielded, storm: r4.storm, after: r4.afterStorm }));
-  ok(r4.afterClose.mode === 'watch' && !r4.afterClose.yielded && r4.afterClose.chip === null && r4.afterClose.line === null && r4.afterClose.active === 'composer' && !r4.afterClose.owned && r4.closeTyped.composer === 'y1y2' && r4.reconnected && r4.afterReconnect.mode === 'watch' && !r4.afterReconnect.owned && r4.took2 && r4.retake.b === r4.retake.b0 + 'zz',
+  ok(r4.afterClose.mode === 'watch' && !r4.afterClose.yielded && r4.afterClose.chip === null && r4.afterClose.line === null && r4.afterClose.active === 'composer' && !r4.afterClose.owned && r4.closeTyped.composer === 'y1y2' && gateOf(r4.reconnected) && r4.afterReconnect.mode === 'watch' && !r4.afterReconnect.owned && gateOf(r4.took2) && r4.retake.b === r4.retake.b0 + 'zz',
     `verify r4 (attack 7): the socket closes while yielded — the takeover ends as the server ends it (watch), the yield with it (chip and line gone), the caret stays in the composer ("y2" lands there), the reconnect leaves nothing claimed, a new Take over works ("zz" to the page)`, JSON.stringify({ close: r4.afterClose, typed: r4.closeTyped, reconnected: r4.reconnected, after: r4.afterReconnect, retake: r4.retake }));
   console.log('  · r4 two views: ' + JSON.stringify({ cap: [r4.capBefore, r4.capAfter], secondUp: r4.secondUp, two: r4.two, driving: r4.bothDriving, yielded: r4.bothYielded, hand2: r4.afterHand2, both: r4.afterBoth, chatFocus: r4.chatFocus })); // (whole — the ok line's detail is cut at 900 chars)
-  ok(r4.two && r4.two.n === 2 && r4.bothDriving.L2.owns && !r4.bothDriving.L1.owns && r4.bothDriving.owned && r4.bothYielded.L1.yielded && r4.bothYielded.L2.yielded && !r4.bothYielded.owned && r4.bothYielded.active === 'composer' && r4.bothYielded.line && r4.afterHand2.L1.yielded && r4.afterHand2.L2.mode === 'watch' && !r4.afterHand2.owned && /not in a text box|in the chat box/.test(String(r4.afterHand2.L1.chip)) && !r4.afterBoth.L1.yielded && !r4.afterBoth.owned && r4.afterBoth.line === null && r4.chatFocus === true,
+  ok(gateOf(r4.two) && r4.two.n === 2 && gateOf(r4.bothDriving.L2.owns) && !r4.bothDriving.L1.owns && gateOf(r4.bothDriving.owned) && gateOf(r4.bothYielded.L1.yielded) && gateOf(r4.bothYielded.L2.yielded) && !r4.bothYielded.owned && r4.bothYielded.active === 'composer' && gateOf(r4.bothYielded.line) && gateOf(r4.afterHand2.L1.yielded) && r4.afterHand2.L2.mode === 'watch' && !r4.afterHand2.owned && gateOf(/not in a text box|in the chat box/.test(String(r4.afterHand2.L1.chip))) && !r4.afterBoth.L1.yielded && !r4.afterBoth.owned && r4.afterBoth.line === null && r4.chatFocus === true,
     `verify r4 (attack 7): two views driving (the last claim owns), one press yields BOTH (the line on), a Hand back on the second leaves the first yielded and its chip honest ("${r4.afterHand2 && r4.afterHand2.L1.chip}"), the other Hand back leaves no claim and the composer focuses as always`, JSON.stringify({ cap: [r4.capBefore, r4.capAfter], secondNew: r4.secondNew, secondUp: r4.secondUp, two: r4.two, driving: r4.bothDriving, yielded: r4.bothYielded, hand2: r4.afterHand2, both: r4.afterBoth, chatFocus: r4.chatFocus }));
   await wd.closePage(r4.P);
 }
@@ -1605,7 +1605,7 @@ if (want('controls')) {
     P('Resume here pre-fix: the takeover asked at once (before the pane is seated)', 'src/lib/desktop-app-window.js', '    await whenSeated(until - Date.now());', '    void until;'), // lane live-input-under-load (a)
   ];
   const wc = await makeWorld('c', { patches });
-  ok(wc.rebuilt === true && wc.booted, `the control tree: ${patches.length} patches, its bundle rebuilt, its server booted`, String(wc.rebuilt));
+  ok(wc.rebuilt === true && verdictOf(wc.booted), `the control tree: ${patches.length} patches, its bundle rebuilt, its server booted`, String(wc.rebuilt));
   if (wc.booted) {
     const Ec = await wc.page({ lang: 'en' });
     const C1 = await wc.createSession('ctl-chat');
@@ -1642,7 +1642,7 @@ if (want('controls')) {
     await wc.setClipboard('(untouched)');
     await Ec.click(C1.sessionId, 200, 140); await sleep(1800);
     const hij = await wc.readClipboard();
-    ok(/^HIJACK-\d+$/.test(String(hij)), `NEGATIVE CONTROL (no copy-out door): the page's own synthetic copy is written to the viewer's clipboard after one plain click — ${JSON.stringify(hij)} (the real-stack hijack the door closes)`);
+    ok(verdictOf(/^HIJACK-\d+$/.test(String(hij))), `NEGATIVE CONTROL (no copy-out door): the page's own synthetic copy is written to the viewer's clipboard after one plain click — ${JSON.stringify(hij)} (the real-stack hijack the door closes)`);
     await Ec.handback(C1.sessionId);
     // lane live-input-under-load (a): the pre-fix Resume here in the same deterministic seat race — this world's other viewer
     // pages ENDED first, as on the fixed tree's N1 world (the race's two clients are the leg's own)
@@ -1650,7 +1650,7 @@ if (want('controls')) {
     const Pc = await wc.page({ lang: 'en', size: [2000, 1100] });
     const appC = await Pc.ev(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify({ exec: '/usr/bin/xterm', args: ['-T', 'vs-seat-ctl', '-geometry', '80x24', '-e', 'sh', '-c', `cat > ${path.join(wc.D, 'xterm-seat-ctl.txt')}`], label: 'vs-seat-ctl' }))} }).then((r) => r.json())`).catch(() => null);
     const sc = appC && appC.id ? await seatRaceLeg(wc, Pc, appC.id) : null;
-    ok(sc && sc.blocked && sc.press && sc.press.ok && Array.isArray(sc.asked) && sc.asked.length === 1 && sc.asked[0].status === 409 && sc.asked[0].code === 'no_viewer' && sc.after.joined && !sc.after.mine && sc.after.overlay,
+    ok(gateOf(sc) && gateOf(sc.blocked) && gateOf(sc.press) && gateOf(sc.press.ok) && gateOf(Array.isArray(sc.asked)) && sc.asked.length === 1 && sc.asked[0].status === 409 && sc.asked[0].code === 'no_viewer' && gateOf(sc.after.joined) && !sc.after.mine && verdictOf(sc.after.overlay),
       `NEGATIVE CONTROL (a, Resume here pre-fix): the press asks the takeover before this pane's socket is seated — ${sc && sc.asked && sc.asked[0] ? `${sc.asked[0].status} ${sc.asked[0].code}` : 'nothing'} — and the pane joins a moment later BLOCKED behind the other client (race-sweep's "connecting 30 s")`, JSON.stringify({ app: appC && (appC.id || appC.error), sc }) + ' · journal: ' + wc.journal().split('\n').filter((l) => /\[desktop/.test(l)).slice(-10).join(' | '));
     await wc.closePage(Pc);
   }
@@ -1661,10 +1661,10 @@ if (want('controls')) {
 if (want('split')) {
   console.log('— ⑥ CONTROL: the pre-fix focus verdict (the user\'s press reclaimed like a script\'s focus) on a patched tree');
   const wk = await makeWorld('k', { patches: [{ name: 'the pre-fix focus verdict: no yield', file: 'src/browser-takeover.js', from: "  return byUserPress ? 'yield' : 'reclaim';", to: "  return 'reclaim';" }] });
-  ok(wk.rebuilt === true && wk.booted, `the control tree: the pre-fix focus verdict, its bundle rebuilt, its server booted (${String(wk.rebuilt)})`);
+  ok(wk.rebuilt === true && verdictOf(wk.booted), `the control tree: the pre-fix focus verdict, its bundle rebuilt, its server booted (${String(wk.rebuilt)})`);
   if (wk.booted) {
     const c = await splitLegs(wk, { tag: 'splitc', upTo: 'typed' });
-    ok(c.live && c.took && c.pressComposer.ok && c.afterPress.active === 'sink' && c.typed.composer === '' && c.pageAfterTyping === 'pghello agent' && c.typed.line === null,
+    ok(gateOf(c.live) && gateOf(c.took) && gateOf(c.pressComposer.ok) && c.afterPress.active === 'sink' && c.typed.composer === '' && c.pageAfterTyping === 'pghello agent' && c.typed.line === null,
       `NEGATIVE CONTROL (the pre-fix verdict): the same real press on the composer leaves the caret in the view's hidden sink and "hello agent" lands in the PAGE (${JSON.stringify(c.pageAfterTyping)}) while the composer holds ${JSON.stringify(c.typed.composer)} — userW's report, said by nothing`, JSON.stringify({ live: c.live, took: c.took, press: c.pressComposer, after: c.afterPress, typed: c.typed, page: c.pageAfterTyping }));
     c.P.close();
   }
@@ -1695,34 +1695,34 @@ if (want('split')) {
     // integration appended `expectWakes` to the same handler and the whole-line anchor stopped matching: the .197 heavy red)
     { name: 'H3 pre-fix: Hand back without letting go', file: 'src/lib/browser-live-window.js', from: "  handBtn.onclick = () => { if (st.claimed) releaseHeld(); send({ type: 'handback'", to: "  handBtn.onclick = () => { send({ type: 'handback'" },
   ] });
-  ok(wv.rebuilt === true && wv.booted, `the verify-r1 control tree: its bundle rebuilt, its server booted (${String(wv.rebuilt)})`);
+  ok(wv.rebuilt === true && verdictOf(wv.booted), `the verify-r1 control tree: its bundle rebuilt, its server booted (${String(wv.rebuilt)})`);
   if (wv.booted) {
     const c = await splitLegs(wv, { tag: 'splitv', upTo: 'verify-r1' });
-    ok(c.held && c.held.press && c.held.view.active === 'composer' && c.held.shiftDown === 1 && c.held.altDown === 1 && c.held.shiftUp === 0 && c.held.altUp === 0,
+    ok(gateOf(c.held) && gateOf(c.held.press) && c.held.view.active === 'composer' && c.held.shiftDown === 1 && c.held.altDown === 1 && c.held.shiftUp === 0 && c.held.altUp === 0,
       `NEGATIVE CONTROL (K4 pre-fix): Shift + Alt held across the press reach the page as keydowns and NEVER as keyups (${JSON.stringify(c.held && { kd: c.held.kdTail, ku: c.held.kuTail })})`, JSON.stringify(c.held));
-    ok(c.barContrast && c.barContrast.light.badge < 4.5 && c.barContrast.solarized.badge < 4.5 && c.barContrast.solarized.own < 4.5 && c.barContrast.nord.own < 4.5 && c.barContrast.light.handback < 4.5,
+    ok(gateOf(c.barContrast) && c.barContrast.light.badge < 4.5 && c.barContrast.solarized.badge < 4.5 && c.barContrast.solarized.own < 4.5 && c.barContrast.nord.own < 4.5 && c.barContrast.light.handback < 4.5,
       `NEGATIVE CONTROL (H4 pre-fix css): the amber badge and the accent chip measure ${c.barContrast && c.barContrast.light.badge} (badge, light) / ${c.barContrast && c.barContrast.solarized.own} (chip, solarized) : 1 — the measurement sees them`, JSON.stringify(c.barContrast));
-    ok(c.chipContrast && c.chipContrast.yielded && c.chipContrast.out.light < 4.5,
+    ok(gateOf(c.chipContrast) && gateOf(c.chipContrast.yielded) && c.chipContrast.out.light < 4.5,
       `NEGATIVE CONTROL (pre-fix css): the amber chip text measures ${c.chipContrast && c.chipContrast.out.light} : 1 on the light theme — the measurement sees it`, JSON.stringify(c.chipContrast));
-    ok(c.tabPress && c.tabPress.ok && c.afterTab.active === 'composer' && !c.afterTab.owns && !c.tabPage && c.afterTabTyped.view.composer === 'kk',
+    ok(gateOf(c.tabPress) && gateOf(c.tabPress.ok) && c.afterTab.active === 'composer' && !c.afterTab.owns && !c.tabPage && c.afterTabTyped.view.composer === 'kk',
       `NEGATIVE CONTROL (K3 pre-fix): a press on the live view's own TAB leaves the caret in the composer and "kk" meant for the page lands in the CHAT box (${JSON.stringify(c.afterTabTyped && c.afterTabTyped.view.composer)})`, JSON.stringify({ press: c.tabPress, after: c.afterTab, typed: c.afterTabTyped }));
     await wv.closePage(c.P); // verify r2: END the page (see above)
     const ct = await standaloneLegs(wv, { S: c.S, pid: c.pid, tag: 'splitv' });
-    ok(ct.took && ct.alone === true && ct.titlePress.ok && ct.afterTitle.active === 'composer' && !ct.titlePage && ct.afterTitleTyped.view.composer === 'tt',
+    ok(gateOf(ct.took) && ct.alone === true && gateOf(ct.titlePress.ok) && ct.afterTitle.active === 'composer' && !ct.titlePage && ct.afterTitleTyped.view.composer === 'tt',
       `NEGATIVE CONTROL (K3 pre-fix): a press on the standalone live window's own TITLE BAR leaves the caret in the composer and "tt" lands in the CHAT box (${JSON.stringify(ct.afterTitleTyped && ct.afterTitleTyped.view.composer)})`, JSON.stringify({ took: ct.took, press: ct.titlePress, after: ct.afterTitle, typed: ct.afterTitleTyped }));
-    ok(ct.pressHidden && ct.pressHidden.ok && ct.restored && ct.restored.owns && ct.restored.active === 'composer' && ct.restoredTyped && ct.restoredTyped.page !== ct.b1 && ct.restoredTyped.view.composer === 'c1',
+    ok(gateOf(ct.pressHidden) && gateOf(ct.pressHidden.ok) && gateOf(ct.restored) && gateOf(ct.restored.owns) && ct.restored.active === 'composer' && gateOf(ct.restoredTyped) && ct.restoredTyped.page !== ct.b1 && ct.restoredTyped.view.composer === 'c1',
       `NEGATIVE CONTROL (H1 pre-fix): minimized → a real press on the composer → restored — the view takes the keys with the caret left in the composer and "c2" never reaches the composer (the page: ${JSON.stringify(ct.restoredTyped && ct.restoredTyped.page)})`, JSON.stringify({ hidden: ct.pressHidden, restored: ct.restored, typed: ct.restoredTyped, b1: ct.b1 }));
-    ok(ct.expandPress && ct.expandPress.ok && ct.q1 && ct.q1.view.active === 'sink' && ct.q1.cues === 0 && !/Typing still goes to the browser/.test(ct.q1.toast),
+    ok(gateOf(ct.expandPress) && gateOf(ct.expandPress.ok) && gateOf(ct.q1) && ct.q1.view.active === 'sink' && ct.q1.cues === 0 && !/Typing still goes to the browser/.test(ct.q1.toast),
       `NEGATIVE CONTROL (Q1 pre-fix): the expand button's box is reclaimed and nothing says so (toasts: ${JSON.stringify(ct.q1 && ct.q1.toast)})`, JSON.stringify({ press: ct.expandPress, q1: ct.q1 }));
-    ok(ct.wvUp && ct.wv && ct.wv.view.active === 'sink' && ct.wv.frames === 0 && !/to type in another page/.test(ct.wv.toast),
+    ok(gateOf(ct.wvUp) && gateOf(ct.wv) && ct.wv.view.active === 'sink' && ct.wv.frames === 0 && !/to type in another page/.test(ct.wv.toast),
       `NEGATIVE CONTROL (H5 pre-fix): a press into the Web view page's field is taken back and nothing says so (toasts: ${JSON.stringify(ct.wv && ct.wv.toast)})`, JSON.stringify({ up: ct.wvUp, wv: ct.wv }));
-    ok(ct.deskUp && ct.deskAfter && ct.deskAfter.active === false && ct.deskAfter.view.owns && ct.deskTyped && ct.deskTyped.page === ct.deskTyped.b + 'vn',
+    ok(gateOf(ct.deskUp) && gateOf(ct.deskAfter) && ct.deskAfter.active === false && gateOf(ct.deskAfter.view.owns) && gateOf(ct.deskTyped) && ct.deskTyped.page === ct.deskTyped.b + 'vn',
       `NEGATIVE CONTROL (N1 pre-fix): a real press on the Desktop's picture is reclaimed — "vn" goes to the agent's PAGE (${JSON.stringify(ct.deskTyped && ct.deskTyped.page)})`, JSON.stringify({ up: ct.deskUp, after: ct.deskAfter, typed: ct.deskTyped }));
-    ok(ct.appUp && ct.appAfter && ct.appAfter.view.owns && ct.appTyped && ct.appTyped.page === ct.appTyped.b + 'xp\n' && !ct.appTyped.app,
+    ok(gateOf(ct.appUp) && gateOf(ct.appAfter) && gateOf(ct.appAfter.view.owns) && gateOf(ct.appTyped) && ct.appTyped.page === ct.appTyped.b + 'xp\n' && !ct.appTyped.app,
       `NEGATIVE CONTROL (N1 pre-fix): a real press on the xterm app's picture is reclaimed — "xp" goes to the agent's PAGE (${JSON.stringify(ct.appTyped && ct.appTyped.page)}), the app gets nothing`, JSON.stringify({ up: ct.appUp, after: ct.appAfter, typed: ct.appTyped }));
-    ok(ct.heldHide && ct.heldHide.down && ct.heldHide.ku === 'm' && ct.heldHandback && ct.heldHandback.down && ct.heldHandback.ku === 'n',
+    ok(gateOf(ct.heldHide) && gateOf(ct.heldHide.down) && ct.heldHide.ku === 'm' && gateOf(ct.heldHandback) && gateOf(ct.heldHandback.down) && ct.heldHandback.ku === 'n',
       `NEGATIVE CONTROL (H3 pre-fix): Shift held across the minimize and across Hand back reaches the page as a keydown and NEVER as a keyup (${JSON.stringify(ct.heldHide)} · ${JSON.stringify(ct.heldHandback)})`, JSON.stringify({ hide: ct.heldHide, handback: ct.heldHandback }));
-    ok(ct.restoredB && ct.restoredB.owns && ct.restoredB.active === 'composer' && ct.restoredB.caretMoves === 0,
+    ok(gateOf(ct.restoredB) && gateOf(ct.restoredB.owns) && ct.restoredB.active === 'composer' && ct.restoredB.caretMoves === 0,
       `NEGATIVE CONTROL (H1 pre-fix): a script's caret in the composer while minimized is NOT moved at the restore (${ct.restoredB && ct.restoredB.active}) — the keys would merely be routed past it`, JSON.stringify({ restored: ct.restoredB, typed: ct.restoredBTyped }));
     await wv.closePage(ct.P);
   }
@@ -1733,12 +1733,12 @@ if (want('split')) {
   const wh = await makeWorld('h', { patches: [
     { name: 'H1b\' pre-fix: a yield outlives its home', file: 'src/lib/keyboard-yield.js', from: '      const v = yieldHomeVerdict({ yielded: s.yielded, drivesNow: !!drives, drovePrev, homeVisible });', to: "      const v = 'keep';" },
   ] });
-  ok(wh.rebuilt === true && wh.booted, `the control tree: the H1b' pre-fix patch, its bundle rebuilt, its server booted (${String(wh.rebuilt)})`);
+  ok(wh.rebuilt === true && verdictOf(wh.booted), `the control tree: the H1b' pre-fix patch, its bundle rebuilt, its server booted (${String(wh.rebuilt)})`);
   if (wh.booted) {
     const c = await splitLegs(wh, { tag: 'splith', upTo: 'typed' });
     await wh.closePage(c.P);
     const ct = await standaloneLegs(wh, { S: c.S, pid: c.pid, tag: 'splith' });
-    ok(h1bPreFix(ct.deskBack, ct.deskBackTyped), // (verify r3, r2's held: the caret fell to <body> — the chip now says "not in a text box"; the yield outliving its home is the red; verify r4: the ONE predicate, rejected on the fixed tree above)
+    ok(verdictOf(h1bPreFix(ct.deskBack, ct.deskBackTyped)), // (verify r3, r2's held: the caret fell to <body> — the chip now says "not in a text box"; the yield outliving its home is the red; verify r4: the ONE predicate, rejected on the fixed tree above)
       `NEGATIVE CONTROL (H1b' pre-fix): back on the view's desktop the yield outlives its home — the chip says "${ct.deskBack && ct.deskBack.chip}" while the caret is on ${ct.deskBack && ct.deskBack.active} and "k2" goes nowhere`, JSON.stringify({ back: ct.deskBack, typed: ct.deskBackTyped }));
     await wh.closePage(ct.P);
   }
@@ -1754,25 +1754,25 @@ if (want('r3')) {
     { name: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said)', file: 'src/lib/keyboard-yield.js', from: "const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: 'app' });", to: "const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: 'app' });" },
     { name: 'r4 pre-fix: the chip written on every re-read', file: 'src/lib/browser-live-window.js', from: '    if (kbdText.textContent !== text) kbdText.textContent = text;\n    if (kbdChip.title !== title) kbdChip.title = title;', to: '    kbdText.textContent = text;\n    kbdChip.title = title;' },
   ] });
-  ok(w3.rebuilt === true && w3.booted, `the r3 control tree: 5 patches, its bundle rebuilt, its server booted (${String(w3.rebuilt)})`);
+  ok(w3.rebuilt === true && verdictOf(w3.booted), `the r3 control tree: 5 patches, its bundle rebuilt, its server booted (${String(w3.rebuilt)})`);
   if (w3.booted) {
     const nb = await newBrowserSession(w3, 'r3c');
     const c = await r3Legs(w3, { S: nb.S, pid: nb.pid, tag: 'r3c' });
-    ok(c.selPress && c.selPress.ok && !(c.sel.focused === true && c.sel.open === true),
+    ok(gateOf(c.selPress) && gateOf(c.selPress.ok) && !(c.sel.focused === true && c.sel.open === true),
       `NEGATIVE CONTROL (F1 pre-fix): the editor's language <select> pressed while driving is not open 150 ms later (${JSON.stringify(c.sel)}) — every dropdown dead`, JSON.stringify({ press: c.selPress, sel: c.sel }));
-    ok(c.copyPress && c.copyPress.ok && c.copy.cues === 1 && /click the text box itself/.test(c.copy.toasts),
+    ok(gateOf(c.copyPress) && gateOf(c.copyPress.ok) && c.copy.cues === 1 && verdictOf(/click the text box itself/.test(c.copy.toasts)),
       `NEGATIVE CONTROL (F2 pre-fix): "Copy Path" says "click the text box itself to type there" — about a box that no longer exists (${JSON.stringify(c.copy && c.copy.toasts)})`, JSON.stringify(c.copy));
-    ok(c.list && c.list.yielded && c.list.chip === 'Keyboard is in the chat box — click the picture to keep using the page' && c.listTyped.view.composer === 'l1' && c.listTyped.page === c.listTyped.b,
+    ok(gateOf(c.list) && gateOf(c.list.yielded) && c.list.chip === 'Keyboard is in the chat box — click the picture to keep using the page' && c.listTyped.view.composer === 'l1' && c.listTyped.page === c.listTyped.b,
       `NEGATIVE CONTROL (r2's held pre-fix): after the press on the message list the chip still says "${c.list && c.list.chip}" while "nn" goes nowhere`, JSON.stringify({ after: c.list, typed: c.listTyped }));
-    ok(c.dialog && c.dialog.open && c.dialog.takes === 0 && c.dialog.owns && c.dialog.active === 'sink' && c.dialogEnter.page === c.dialogEnter.b + '\n' && c.dialogEnter.stillOpen && !c.dialogEnter.gone,
+    ok(gateOf(c.dialog) && gateOf(c.dialog.open) && c.dialog.takes === 0 && gateOf(c.dialog.owns) && c.dialog.active === 'sink' && c.dialogEnter.page === c.dialogEnter.b + '\n' && gateOf(c.dialogEnter.stillOpen) && !c.dialogEnter.gone,
       `NEGATIVE CONTROL (lane dialog-keys pre-fix): the confirm his press opened is taken back — the real Enter meant for it puts a LINE BREAK into the page's textarea (${JSON.stringify(c.dialogEnter && c.dialogEnter.page.slice(-6))}), the dialog stays up, the file is kept`, JSON.stringify({ dialog: c.dialog, enter: c.dialogEnter }));
     await w3.closePage(c.P);
     const c4 = await r4Legs(w3, { S: nb.S, pid: nb.pid, tag: 'r3c', only: 'storm' });
-    ok(c4.yielded && c4.yielded.yielded && c4.storm && c4.storm.n === 300 && c4.storm.writes >= 600 && c4.storm.active === 'r4row', `NEGATIVE CONTROL (r4 pre-fix): 300 focus moves while yielded write the chip ${c4.storm && c4.storm.writes} times for words that never change (the measurement sees them)`, JSON.stringify({ yielded: c4.yielded, storm: c4.storm }));
+    ok(gateOf(c4.yielded) && gateOf(c4.yielded.yielded) && gateOf(c4.storm) && c4.storm.n === 300 && c4.storm.writes >= 600 && c4.storm.active === 'r4row', `NEGATIVE CONTROL (r4 pre-fix): 300 focus moves while yielded write the chip ${c4.storm && c4.storm.writes} times for words that never change (the measurement sees them)`, JSON.stringify({ yielded: c4.yielded, storm: c4.storm }));
     await w3.closePage(c4.P);
   }
   await w3.close();
 }
-for (const c of copiesCensus(M.files.filter((f) => f.startsWith(M.dir + path.sep)), M.dir, REPO, { minCopies: 1, label: 'live-input heavy controls: ' })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files.filter((f) => f.startsWith(M.dir + path.sep)), M.dir, REPO, { minCopies: 1, label: 'live-input heavy controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 console.log(`  · viewer page boots (world:ms): ${BOOTS.join(' ')}`);
-await done();
+await done(); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -41,7 +41,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } return !!c; };
 const J = (x) => JSON.stringify(x);
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
 
@@ -122,18 +122,18 @@ function judgeModel(Tm) {
   return rows;
 }
 const MODEL_ROWS = judgeModel(T);
-for (const r of MODEL_ROWS) ok(r.okKind && r.okPlace && r.okAgent, `${r.id}: ${r.want}${r.topic ? ` (topic ${r.topic})` : ''}${r.quotes ? `, quotes ${r.quotes}` : ''} — the place ${r.place.thread ? `carries the topic ${r.place.thread}` : 'carries NO thread fact'}; the agent reads ${J(r.words.line || r.words.tag || '(nothing)')}`, r);
+for (const r of MODEL_ROWS) ok(gateOf(r.okKind) && gateOf(r.okPlace) && verdictOf(r.okAgent), `${r.id}: ${r.want}${r.topic ? ` (topic ${r.topic})` : ''}${r.quotes ? `, quotes ${r.quotes}` : ''} — the place ${r.place.thread ? `carries the topic ${r.place.thread}` : 'carries NO thread fact'}; the agent reads ${J(r.words.line || r.words.tag || '(nothing)')}`, r);
 ok(J(T.PLACE_KINDS) === J(['plain', 'quote', 'topic-root', 'topic-reply', 'topic-quote']), `the kinds are a CLOSED set of five (${T.PLACE_KINDS.join(' / ')})`);
 {
   // by ID (the engine asks about the message a reply answers — loaded or not): the same answer as by record
   const ix = T.threadIndex(RECS, { convId: CONV });
   const byId = TABLE.every(([id]) => J(T.placeKindOf(id, ix)) === J(T.placeKindOf(BY.get(id), ix)));
   const gone = T.placeKindOf('om_gone', ix);
-  ok(byId && gone.kind === 'plain' && gone.topic === null, 'the classifier by vendor id answers the same as by record; a message the log never held (om_gone) is in no topic', J(gone));
+  ok(gateOf(byId) && gone.kind === 'plain' && gone.topic === null, 'the classifier by vendor id answers the same as by record; a message the log never held (om_gone) is in no topic', J(gone));
   // a Gmail thread (threadKey === convId) is the conversation itself — never a topic, never a quote
   const gm = [REC.makeRecord({ adapterId: 'g', convId: 'th-1', vendorId: 'g1', at: 1, text: 'mail', threadKey: 'th-1' }), REC.makeRecord({ adapterId: 'g', convId: 'th-1', vendorId: 'g2', at: 2, text: 'mail 2', threadKey: 'th-1' })];
   const gix = T.threadIndex(gm, { convId: 'th-1' });
-  ok(gm.every((r) => T.placeKindOf(r, gix).kind === 'plain' && T.placeOf(r, gix).thread === null), 'a mail thread (kind conversation) is plain — the window draws nothing new');
+  ok(verdictOf(gm.every((r) => T.placeKindOf(r, gix).kind === 'plain' && T.placeOf(r, gix).thread === null)), 'a mail thread (kind conversation) is plain — the window draws nothing new');
 }
 
 // ═══ ② THE RENDER READS IT (the REAL pane module over a small fake DOM) ═════════════════════════════
@@ -176,8 +176,8 @@ function judgeRender(P, Tm) {
   return out;
 }
 const RENDER_ROWS = judgeRender(Pane, T);
-for (const r of RENDER_ROWS) ok(r.ok, `${r.id} (${r.kind}) draws ${r.d.strip !== null ? `the strip "${r.d.strip}"${r.d.jumps.length ? ` (a click jumps to ${r.d.jumps.join()})` : ''}` : 'no strip'}${r.d.chip ? ' + the topic chip' : ''}${r.d.tag ? ' + the topic tag' : ''}${!r.d.chip && !r.d.tag ? ' — no chip, no tag, no pane' : ` (opens ${r.d.opens.join()})`}`, r.d);
-ok(RENDER_ROWS.filter((r) => QUOTE_ROWS.includes(r.id)).every((r) => r.d.stripKind === 'quote'), 'every quote\'s strip carries the classifier\'s kind (data-place-kind="quote") — the render read the same word the placement rules read');
+for (const r of RENDER_ROWS) ok(verdictOf(r.ok), `${r.id} (${r.kind}) draws ${r.d.strip !== null ? `the strip "${r.d.strip}"${r.d.jumps.length ? ` (a click jumps to ${r.d.jumps.join()})` : ''}` : 'no strip'}${r.d.chip ? ' + the topic chip' : ''}${r.d.tag ? ' + the topic tag' : ''}${!r.d.chip && !r.d.tag ? ' — no chip, no tag, no pane' : ` (opens ${r.d.opens.join()})`}`, r.d);
+ok(verdictOf(RENDER_ROWS.filter((r) => QUOTE_ROWS.includes(r.id)).every((r) => r.d.stripKind === 'quote')), 'every quote\'s strip carries the classifier\'s kind (data-place-kind="quote") — the render read the same word the placement rules read');
 {
   // shot 03's account — the FAKE poll adapter's seeded rooms (the big room included) through the REAL engine's read
   // shape: their reply chains are QUOTES (no chip on the message a chain answers, no tag), their fthr_ threads TOPICS
@@ -198,10 +198,10 @@ ok(RENDER_ROWS.filter((r) => QUOTE_ROWS.includes(r.id)).every((r) => r.d.stripKi
   const drawn = page.map((r) => ({ vid: r.vendorId, room: r.room, kind: r.place ? r.place.kind : 'plain', ...drawRow(Pane, r.place || null) }));
   const d = (vid) => drawn.find((x) => x.vid === vid);
   const chainRoots = [...new Set(chainRecs.map((r) => String(r.threadKey)))].filter((v) => d(v));
-  ok(chainRecs.length >= 5 && topicRecs.length >= 5 && chainRoots.length >= 2 && rooms.every((c) => page.some((r) => r.room === c)), `setup: shot 03's account (fake-poll, ${rooms.length} rooms, ${page.length} records) holds BOTH shapes — ${chainRecs.length} reply-chain records (Lark quotes, under ${chainRoots.length} drawn messages) and ${topicRecs.length} topic records (fthr_)`);
-  ok(chainRecs.every((r) => d(r.vendorId).kind === 'quote' && !d(r.vendorId).tag && !d(r.vendorId).chip && d(r.vendorId).strip !== null), 'every reply-chain record is a QUOTE: its strip, no "in thread" tag, no chip (shot 03 drew "在线程中" on each)', J(chainRecs.map((r) => d(r.vendorId)).filter((x) => x.kind !== 'quote' || x.tag || x.chip).slice(0, 3)));
-  ok(chainRoots.every((vid) => !d(vid).chip && !d(vid).kind.startsWith('topic-')), `the ${chainRoots.length} messages quote chains answer grow NO topic chip (shot 03's "3 条回复 · 最近 0s" on Brook's line)`, J(chainRoots.map((v) => d(v)).filter((x) => x.chip)));
-  ok(topicRecs.every((r) => d(r.vendorId).kind.startsWith('topic-')) && drawn.some((x) => x.kind === 'topic-root' && x.chip) && topicRecs.filter((r) => r.replyTo).every((r) => d(r.vendorId).tag), 'every fthr_ record is a TOPIC (a root with its chip, the replies with their tag)');
+  ok(chainRecs.length >= 5 && topicRecs.length >= 5 && chainRoots.length >= 2 && verdictOf(rooms.every((c) => page.some((r) => r.room === c))), `setup: shot 03's account (fake-poll, ${rooms.length} rooms, ${page.length} records) holds BOTH shapes — ${chainRecs.length} reply-chain records (Lark quotes, under ${chainRoots.length} drawn messages) and ${topicRecs.length} topic records (fthr_)`);
+  ok(verdictOf(chainRecs.every((r) => d(r.vendorId).kind === 'quote' && !d(r.vendorId).tag && !d(r.vendorId).chip && d(r.vendorId).strip !== null)), 'every reply-chain record is a QUOTE: its strip, no "in thread" tag, no chip (shot 03 drew "在线程中" on each)', J(chainRecs.map((r) => d(r.vendorId)).filter((x) => x.kind !== 'quote' || x.tag || x.chip).slice(0, 3)));
+  ok(verdictOf(chainRoots.every((vid) => !d(vid).chip && !d(vid).kind.startsWith('topic-'))), `the ${chainRoots.length} messages quote chains answer grow NO topic chip (shot 03's "3 条回复 · 最近 0s" on Brook's line)`, J(chainRoots.map((v) => d(v)).filter((x) => x.chip)));
+  ok(gateOf(topicRecs.every((r) => d(r.vendorId).kind.startsWith('topic-'))) && gateOf(drawn.some((x) => x.kind === 'topic-root' && x.chip)) && verdictOf(topicRecs.filter((r) => r.replyTo).every((r) => d(r.vendorId).tag)), 'every fthr_ record is a TOPIC (a root with its chip, the replies with their tag)');
   try { eng.stop(); } catch { }
 }
 
@@ -260,21 +260,21 @@ async function engineLeg(EngMod, name) {
 }
 const WANT_DEFAULTS = { om_t0: 'thread:parent-in-thread', om_t1: 'thread:parent-in-thread', om_t2: 'quote:root', om_t3: 'thread:parent-in-thread', om_p: 'quote:root', om_q: 'quote:root', om_q2: 'quote:root', om_z: 'thread:parent-in-thread', om_z1: 'thread:parent-in-thread' };
 const E = await engineLeg(ENG, 'real');
-ok(E.logged, 'setup: the REAL engine ingested the nine rows (the REAL Lark normalizer\'s records)');
+ok(verdictOf(E.logged), 'setup: the REAL engine ingested the nine rows (the REAL Lark normalizer\'s records)');
 ok(J(E.defaults) === J(WANT_DEFAULTS), `--to alone follows THE classifier: a quote (or what quotes answer) ⇒ quote, the vendor's norm; a topic message ⇒ thread — ${Object.entries(E.defaults).map(([k, v]) => `${k} ${v.split(':')[0]}`).join(', ')}`, J(E.defaults));
 ok(E.quoteOfTopic === 'placement-not-offered:parent-in-thread', 'quoting a TOPIC reply is refused parent-in-thread (the vendor would file it in the topic — the card would lie)', E.quoteOfTopic);
-ok(E.threadOnQuote && E.threadOnQuote.placement === 'thread' && E.threadOnQuote.threadKey === null, 'a reply INTO a thread on a quote is allowed and records NO thread key — the vendor mints the topic on it (never the quote chain\'s key)', J(E.threadOnQuote));
-ok(E.read.om_q.startsWith('ok:not-a-thread::0') && E.read.om_p.startsWith('ok:not-a-thread::0') && E.read.om_t1 === 'ok::omt_a:3' && E.read.om_nowhere.startsWith('ok:thread-not-loaded'), `the thread read: a quote (and the message it quotes) answers not-a-thread with no records; a topic reply its topic; an unknown id thread-not-loaded — ${J(E.read)}`);
-ok(/not in a thread — a quoted reply and the message it quotes are both shown in the conversation itself/.test(E.agentNote || ''), `the agent's thread read of a quote says so: "${E.agentNote}"`);
-ok(E.walkQuote.code === 'not-a-thread' && E.walkQuote.agent === 'not-a-thread' && E.walkQuote.calls === 0 && E.walkTopic.ok && E.walkTopic.calls === 1, `the WALK of a quote is refused not-a-thread (the owner's and the agent's door) with ZERO vendor calls; a topic's walk is one call (${J({ quote: E.walkQuote, topic: E.walkTopic })})`);
+ok(gateOf(E.threadOnQuote) && E.threadOnQuote.placement === 'thread' && E.threadOnQuote.threadKey === null, 'a reply INTO a thread on a quote is allowed and records NO thread key — the vendor mints the topic on it (never the quote chain\'s key)', J(E.threadOnQuote));
+ok(gateOf(E.read.om_q.startsWith('ok:not-a-thread::0')) && gateOf(E.read.om_p.startsWith('ok:not-a-thread::0')) && E.read.om_t1 === 'ok::omt_a:3' && verdictOf(E.read.om_nowhere.startsWith('ok:thread-not-loaded')), `the thread read: a quote (and the message it quotes) answers not-a-thread with no records; a topic reply its topic; an unknown id thread-not-loaded — ${J(E.read)}`);
+ok(verdictOf(/not in a thread — a quoted reply and the message it quotes are both shown in the conversation itself/.test(E.agentNote || '')), `the agent's thread read of a quote says so: "${E.agentNote}"`);
+ok(E.walkQuote.code === 'not-a-thread' && E.walkQuote.agent === 'not-a-thread' && E.walkQuote.calls === 0 && gateOf(E.walkTopic.ok) && E.walkTopic.calls === 1, `the WALK of a quote is refused not-a-thread (the owner's and the agent's door) with ZERO vendor calls; a topic's walk is one call (${J({ quote: E.walkQuote, topic: E.walkTopic })})`);
 {
   const eng = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files
   const words = read('src/lib/channel-words.js');
   const rx = read('src/routes/channels.js'), ag = read('src/agent-routes.js');
-  ok(eng.includes("parentKey = Thr.placeKindOf(String(v.proposal.replyTo), ix).topic;") && eng.includes('const tk = topicKeyOf(ix, id);') && /function topicKeyOf\(ix, id\) \{\n    const c = Thr\.placeKindOf\(id, ix\);/.test(eng), 'WIRING: the engine\'s placement parent fact, its thread read and its walk all ask Thr.placeKindOf (one classifier)');
-  ok(/'not-a-thread': 409/.test(rx) && /'not-a-thread': 409/.test(ag) && words.includes("case 'not-a-thread': return t("), 'WIRING: not-a-thread is a named 409 on both routes and worded for the window');
+  ok(gateOf(eng.includes("parentKey = Thr.placeKindOf(String(v.proposal.replyTo), ix).topic;")) && gateOf(eng.includes('const tk = topicKeyOf(ix, id);')) && verdictOf(/function topicKeyOf\(ix, id\) \{\n    const c = Thr\.placeKindOf\(id, ix\);/.test(eng)), 'WIRING: the engine\'s placement parent fact, its thread read and its walk all ask Thr.placeKindOf (one classifier)');
+  ok(gateOf(/'not-a-thread': 409/.test(rx)) && gateOf(/'not-a-thread': 409/.test(ag)) && verdictOf(words.includes("case 'not-a-thread': return t(")), 'WIRING: not-a-thread is a named 409 on both routes and worded for the window');
   const win = read('src/lib/channel-window.js');
-  ok(win.includes('quoteLine(rec.place,') && win.includes('inThreadTag(rec.place,') && win.includes('threadChip(rec.place,'), 'WIRING: the window\'s rows draw the strip / tag / chip from the server\'s place (the classifier\'s kind)');
+  ok(gateOf(win.includes('quoteLine(rec.place,')) && gateOf(win.includes('inThreadTag(rec.place,')) && verdictOf(win.includes('threadChip(rec.place,')), 'WIRING: the window\'s rows draw the strip / tag / chip from the server\'s place (the classifier\'s kind)');
 }
 
 // ═══ ④ 话题, NEVER 线程 ═══════════════════════════════════════════════════════════════════════════
@@ -328,22 +328,22 @@ function zhCensus(zh, ja, keys) {
 const ZH = dictOf(ZH_SRC), JA = dictOf(JA_SRC);
 const KEYS = channelKeys();
 const Z = zhCensus(ZH, JA, KEYS);
-ok(KEYS.size >= 300 && KEYS.has('channel::Thread') && KEYS.has('in thread') && KEYS.has('Reply in thread') && KEYS.has('drafted a reply in a thread') && KEYS.has('Threads: seconds between two loads of one thread'), `the census reads the channels surfaces: ${KEYS.size} keys from ${channelFiles().length} files + the Channels settings (the pane title, the tag, the placement words, the touch row, the setting among them)`);
+ok(KEYS.size >= 300 && gateOf(KEYS.has('channel::Thread')) && gateOf(KEYS.has('in thread')) && gateOf(KEYS.has('Reply in thread')) && gateOf(KEYS.has('drafted a reply in a thread')) && verdictOf(KEYS.has('Threads: seconds between two loads of one thread')), `the census reads the channels surfaces: ${KEYS.size} keys from ${channelFiles().length} files + the Channels settings (the pane title, the tag, the placement words, the touch row, the setting among them)`);
 ok(Z.bad.length === 0, `no zh string a channels surface draws says 线程 — it says 话题${Z.bad.length ? ': ' + Z.bad.slice(0, 6).join(' | ') : ''}`, Z.bad);
 ok(Z.unlisted.length === 0, `every other 线程 in the zh dictionary is a NAMED non-channel meaning (${Object.keys(NOT_CHANNELS).length} + the accessibility setting's browser UI thread)${Z.unlisted.length ? ': ' + Z.unlisted.slice(0, 6).join(' | ') : ''}`, Z.unlisted);
-ok(Object.keys(NOT_CHANNELS).every((k) => ZH.has(k) && !KEYS.has(k)), 'NOT_CHANNELS names only real zh keys no channels surface draws (a retired or channel key is red)');
+ok(verdictOf(Object.keys(NOT_CHANNELS).every((k) => ZH.has(k) && !KEYS.has(k))), 'NOT_CHANNELS names only real zh keys no channels surface draws (a retired or channel key is red)');
 ok(Z.badJa.length === 0, `ja keeps ONE word for a thread — スレッド (Lark's own ja word); never トピック${Z.badJa.length ? ': ' + Z.badJa.slice(0, 4).join(' | ') : ''}`, Z.badJa);
 {
   const zhT = ZH.get('channel::Thread'), jaT = JA.get('channel::Thread');
   const want = [['in thread', '话题'], ['Open the thread', '话题'], ['Reply in thread…', '话题'], ['Lands inside this thread', '话题'], ['Reply in thread', '话题'], ['drafted a reply in a thread', '话题'], ['This group does not allow replies in threads', '话题'], ['That message is inside a thread — a reply to it goes in the thread', '话题'], ['is in a thread I am in, or quotes a message of mine', '话题'], ['Quoted reply — to {author}: "{quote}"', '引用回复'], ['drafted a quoted reply', '引用回复']];
   const got = want.map(([k, w]) => [k, ZH.get(k) || null, (ZH.get(k) || '').includes(w)]);
-  ok(zhT === '话题' && jaT === 'スレッド' && got.every((x) => x[2]), `the words: the pane title 话题 / スレッド; ${got.map((x) => `"${x[0]}" → ${x[1]}`).join(' · ')}`, J(got.filter((x) => !x[2])));
+  ok(zhT === '话题' && jaT === 'スレッド' && verdictOf(got.every((x) => x[2])), `the words: the pane title 话题 / スレッド; ${got.map((x) => `"${x[0]}" → ${x[1]}`).join(' · ')}`, J(got.filter((x) => !x[2])));
   const cli = read('data/bin/vibespace-channels'), man = read('docs/agent/channels-manual.md');
   ok(!/线程/.test(cli) && !/线程/.test(man), 'the agent CLI and its manual carry no 线程 (English; a zh word never rides them)');
   const r = spawnSync(process.execPath, [path.join(REPO, 'scripts/i18n-check.mjs')], { encoding: 'utf8', cwd: REPO });
   const newKeys = ['channel::Thread', 'That message is not in a thread — a quoted reply is shown in the conversation itself', 'quoting a message not loaded', 'quoting a message in another chat', 'Show the quoted message'];
   const warnNew = newKeys.filter((k) => String(r.stderr).includes(k.slice(0, 40)));
-  ok(r.status === 0 && /i18n check ok/.test(r.stdout) && warnNew.length === 0 && newKeys.every((k) => ZH.has(k) && JA.has(k)), `the build's i18n check passes (${String(r.stdout).trim()}) and the round's new keys are in both dictionaries with no parity warning`, r.stderr.slice(0, 400));
+  ok(r.status === 0 && gateOf(/i18n check ok/.test(r.stdout)) && warnNew.length === 0 && verdictOf(newKeys.every((k) => ZH.has(k) && JA.has(k))), `the build's i18n check passes (${String(r.stdout).trim()}) and the round's new keys are in both dictionaries with no parity warning`, r.stderr.slice(0, 400));
 }
 
 // ═══ ⑤ CONTROLS ═══════════════════════════════════════════════════════════════════════════════════
@@ -355,7 +355,7 @@ console.log('⑤ patched-copy controls');
   const Ta = M.load(MODEL, MODEL_SRC.replace(A_LINE, "  return e && e.kind !== 'conversation' ? e : null;"), 'chain-is-topic');
   const ra = judgeModel(Ta);
   const redA = ra.filter((r) => !(r.okKind && r.okPlace && r.okAgent)).map((r) => r.id);
-  ok(QUOTE_ROWS.every((id) => redA.includes(id)), `CONTROL (a): a classifier that calls a reply chain a topic turns every quote row RED (${redA.join(', ')}) — the quote reads "topic-*" and its agent line "in thread"`, J(ra.filter((r) => QUOTE_ROWS.includes(r.id)).map((r) => ({ id: r.id, got: r.got, words: r.words.line }))));
+  ok(verdictOf(QUOTE_ROWS.every((id) => redA.includes(id))), `CONTROL (a): a classifier that calls a reply chain a topic turns every quote row RED (${redA.join(', ')}) — the quote reads "topic-*" and its agent line "in thread"`, J(ra.filter((r) => QUOTE_ROWS.includes(r.id)).map((r) => ({ id: r.id, got: r.got, words: r.words.line }))));
   // (b) THE SHOT, reproduced: the pre-fix render PAIR — placeOf attaching the index entry's thread to every record
   //     (a chain included) + the pane's tag / chip without the classifier's check
   const B_LINE = '  const e = c.topic ? idx.threads.get(c.topic) : null;';
@@ -368,18 +368,18 @@ console.log('⑤ patched-copy controls');
   const Pb = await import(pathToFileURL(M.write(PANE_PATH, PANE_SRC.replace(P_CHIP, '  if (!th || !th.isRoot) return null;').replace(P_TAG, "  if (!th || th.isRoot || th.kind === 'conversation') return null;"), 'prefix-pane')).href);
   const pair = judgeRender(Pb, Tb);
   const q2 = pair.find((r) => r.id === 'om_q2'), pr = pair.find((r) => r.id === 'om_p');
-  ok(q2 && !q2.ok && q2.d.tag && pr && !pr.ok && pr.d.chip, `CONTROL (b): the pre-fix pair reproduces the shot — the quote om_q2 wears the "in thread" tag (opens ${q2 && q2.d.opens.join()}) and the plain message it quotes grows a topic chip — the rows above would be red`, J({ q2: q2 && q2.d, p: pr && pr.d }));
+  ok(gateOf(q2) && !q2.ok && gateOf(q2.d.tag) && gateOf(pr) && !pr.ok && verdictOf(pr.d.chip), `CONTROL (b): the pre-fix pair reproduces the shot — the quote om_q2 wears the "in thread" tag (opens ${q2 && q2.d.opens.join()}) and the plain message it quotes grows a topic chip — the rows above would be red`, J({ q2: q2 && q2.d, p: pr && pr.d }));
   // …and each layer ALONE still holds (the render's own check under a lying model; the model under a check-less pane)
   const layerPane = judgeRender(Pane, Tb).filter((r) => QUOTE_ROWS.includes(r.id) || r.id === 'om_p');
   const layerModel = judgeRender(Pb, T).filter((r) => QUOTE_ROWS.includes(r.id) || r.id === 'om_p');
-  ok(layerPane.every((r) => !r.d.tag && !r.d.chip) && layerModel.every((r) => !r.d.tag && !r.d.chip), 'each layer alone holds: the REAL pane under the lying placeOf draws no tag / chip on a quote (it reads the kind), and the pre-fix pane under the REAL placeOf draws none either (no thread fact)');
+  ok(gateOf(layerPane.every((r) => !r.d.tag && !r.d.chip)) && verdictOf(layerModel.every((r) => !r.d.tag && !r.d.chip)), 'each layer alone holds: the REAL pane under the lying placeOf draws no tag / chip on a quote (it reads the kind), and the pre-fix pane under the REAL placeOf draws none either (no thread fact)');
   // (c) the ENGINE's parent fact on its own rule (the index entry, a chain counted): --to on a quote defaults INTO a thread
   const engSrc = engineSource(REPO);
   const C_LINE = '        parentKey = Thr.placeKindOf(String(v.proposal.replyTo), ix).topic;';
   ok(engSrc.split(C_LINE).length === 2, 'CONTROL (c) setup: the engine\'s parent fact is one line');
   const Ec = M.load('src/server/channels-engine.js', engSrc.replace(C_LINE, "        parentKey = ix.byRecord.get(String(v.proposal.replyTo)) || null; if (parentKey && ix.threads.get(parentKey).kind === 'conversation') parentKey = null;"), 'own-parent-rule');
   const Rc = await engineLeg(Ec, 'ctl-c');
-  ok(['om_q', 'om_q2', 'om_p'].every((id) => /^thread:parent-in-thread/.test(Rc.defaults[id])), `CONTROL (c): an engine judging the parent by its own rule files --to on a QUOTE into a thread (${['om_q', 'om_q2', 'om_p'].map((id) => `${id} ${Rc.defaults[id]}`).join(', ')}) — the card would say "in thread" for Lark's plain reply`, J(Rc.defaults));
+  ok(verdictOf(['om_q', 'om_q2', 'om_p'].every((id) => /^thread:parent-in-thread/.test(Rc.defaults[id]))), `CONTROL (c): an engine judging the parent by its own rule files --to on a QUOTE into a thread (${['om_q', 'om_q2', 'om_p'].map((id) => `${id} ${Rc.defaults[id]}`).join(', ')}) — the card would say "in thread" for Lark's plain reply`, J(Rc.defaults));
   // (d) the walk without its refusal: a quote's "thread" is handed to the vendor (Lark would answer a message id with an error — a wasted metered call)
   const D_LINE = "    if (!tk.key && tk.quote && vendorNamed !== true) return { ok: false, code: 'not-a-thread', error: NOT_A_THREAD, walked: false };";
   const D_KEY = '    const key = tk.key || (vendorNamed === true ? id : null);';
@@ -392,11 +392,11 @@ console.log('⑤ patched-copy controls');
   const plantUn = new Map(ZH); plantUn.set('No replies yet.', '这个线程还没有回复。');
   const plantJa = new Map(JA); plantJa.set('Open the thread', 'トピックを開く');
   const e1 = zhCensus(plantZh, JA, KEYS), e2 = zhCensus(plantUn, JA, KEYS), e3 = zhCensus(ZH, plantJa, KEYS);
-  ok(e1.bad.length === 1 && /^in thread → 在线程中/.test(e1.bad[0]) && e3.badJa.length === 1 && /^Open the thread → トピック/.test(e3.badJa[0]), `CONTROL (e): one planted 线程 in a channel string is RED ("${e1.bad[0]}"), one planted トピック in ja is RED ("${e3.badJa[0]}")`, J({ e1, e3 }));
-  ok(e2.bad.length === 1 && e2.unlisted.some((x) => /^No replies yet\./.test(x)), 'CONTROL (e\'): a planted 线程 in a key no allowlist names is RED twice (a channel string AND an unlisted 线程)', J(e2));
-  for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'chanquote: ' })) ok(row.pass, row.name, row.detail);
+  ok(e1.bad.length === 1 && gateOf(/^in thread → 在线程中/.test(e1.bad[0])) && e3.badJa.length === 1 && verdictOf(/^Open the thread → トピック/.test(e3.badJa[0])), `CONTROL (e): one planted 线程 in a channel string is RED ("${e1.bad[0]}"), one planted トピック in ja is RED ("${e3.badJa[0]}")`, J({ e1, e3 }));
+  ok(e2.bad.length === 1 && verdictOf(e2.unlisted.some((x) => /^No replies yet\./.test(x))), 'CONTROL (e\'): a planted 线程 in a key no allowlist names is RED twice (a channel string AND an unlisted 线程)', J(e2));
+  for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'chanquote: ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 delete globalThis.document;
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

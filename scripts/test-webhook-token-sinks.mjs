@@ -20,7 +20,7 @@ import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
 const PT = require('../src/pairing-token.js');
 const WA = require('../src/webhook-auth.js');
 const ENG = require('../src/server/channels-engine.js');
@@ -65,7 +65,7 @@ try {
   const minted = [r1, r2, rot].map((x) => x.j && x.j.token);
   SENT.push(...minted.filter(Boolean));
   Object.assign(console, realConsole);
-  ok(mk.status === 200 && minted.every((t) => typeof t === 'string' && t.startsWith('vswh_') && t.length === 53) && new Set(minted).size === 3, 'setup: a path + three tokens minted by the REAL owner routes (register ×2, rotate) — the sentinels');
+  ok(mk.status === 200 && gateOf(minted.every((t) => typeof t === 'string' && t.startsWith('vswh_') && t.length === 53)) && new Set(minted).size === 3, 'setup: a path + three tokens minted by the REAL owner routes (register ×2, rotate) — the sentinels');
   ok(r1.j.shownOnce === true && !JSON.stringify(r1.j.caller).includes('vswh_') && !('tokenHash' in r1.j.caller) && !('tokenEnc' in r2.j.caller), 'the register answer shows the token ONCE beside a caller view that holds no hash, no ciphertext');
   console.log = capture('console'); console.warn = capture('console'); console.error = capture('console');
   const [BEAR, OLD, HM] = minted;
@@ -86,12 +86,12 @@ try {
   const list = await call('GET', '/api/channels/webhook/paths');
   Object.assign(console, realConsole);
   ok(c1.status === 200 && c2.status === 200 && c3.status === 401 && c4.status === 401, 'the flows: a Bearer call and an HMAC call land; the ROTATED-OUT token is 401; a body carrying a token is 401', [c1.status, c2.status, c3.status, c4.status]);
-  ok(recs.length === 2 && ladder.calls.length >= 1 && pr.ok && received.length === 1, `a wake (${ladder.calls.length}), a reply proposed by the owner and POSTed to the caller's URL (${received.length})`, { pr, received: received.length });
+  ok(recs.length === 2 && ladder.calls.length >= 1 && gateOf(pr.ok) && received.length === 1, `a wake (${ladder.calls.length}), a reply proposed by the owner and POSTed to the caller's URL (${received.length})`, { pr, received: received.length });
   const rp = received[0] || { headers: {}, body: '' };
   const rb = JSON.parse(rp.body || '{}');
   const ts = rp.headers['x-webhook-timestamp'];
   ok(rp.headers['x-webhook-signature'] === 'v1=' + hmacHex(HM, WA.signatureBase(ts, '/in', rp.body)) && JSON.stringify(Object.keys(rb)) === JSON.stringify(['path', 'inReplyTo', 'replyId', 'at', 'from', 'text']) && rb.from.name === 'VibeSpace' && rb.text === 'ack — looking at db1', 'the reply POST: signed with the caller\'s CURRENT token (v1 = HMAC(token, ts.POST./in.body)), the fixed body {path, inReplyTo, replyId, at, from, text}, from = the path\'s replyName');
-  ok(poll.status === 200 && Array.isArray(poll.j.replies), 'the Bearer caller\'s poll answers (its own queue)');
+  ok(poll.status === 200 && verdictOf(Array.isArray(poll.j.replies)), 'the Bearer caller\'s poll answers (its own queue)');
   console.log = capture('console'); console.warn = capture('console'); console.error = capture('console');
   const pc = await call('POST', '/api/channels/webhook/paths/ci/pair-code', { body: { name: 'Hub A' } });
   const jn = await call('POST', '/api/channels/webhook/join', { body: { code: pc.j && pc.j.code, slug: 'mirror', name: 'Hub B' } });
@@ -105,7 +105,7 @@ try {
   SENT.push(...PAIR);
   ok(pc.status === 200 && jn.status === 200 && PAIR.length === 3 && aRow.kind === 'peer' && bRow.kind === 'peer' && eng.secrets.open(bRow.tokenEnc) === PAIR[2] && eng.secrets.open(bRow.outEnc) === PAIR[1], 'pairing (with itself, over loopback): the code + the token A issued + the token B issued join the sentinels — each side keeps both SEALED', [pc.status, jn.status, jn.t && jn.t.slice(0, 200)]);
   const mr = eng.store.readTail('webhook', 'mirror', { limit: 5 });
-  ok(pa && pa.ok && mr.some((r) => r.text === 'peer hello from A' && r.author && r.author.name === 'Hub A'), 'a peer send A → B lands on B as a record by its peer caller (the canonical payload — no token on the wire)', { pa: pa && (pa.error || pa.ok), mr: mr.map((r) => r.text) });
+  ok(gateOf(pa) && gateOf(pa.ok) && verdictOf(mr.some((r) => r.text === 'peer hello from A' && r.author && r.author.name === 'Hub A')), 'a peer send A → B lands on B as a record by its peer caller (the canonical payload — no token on the wire)', { pa: pa && (pa.error || pa.ok), mr: mr.map((r) => r.text) });
   // ── THE SINKS ──
   const files = [];
   const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else files.push(f); } };
@@ -122,7 +122,7 @@ try {
   ok(!leaksIn(JSON.stringify(ladder)), 'no token in a wake text or the stash (the agent\'s transcript)');
   ok(!leaksIn(JSON.stringify(received)), 'no token in the reply POST the caller received (a signature, never the key)');
   const shown = answers.filter((a) => leaksIn(a.t));
-  ok(shown.length === 4 && shown.every((a) => /\/callers(\/[^/]+\/rotate)?$|\/pair-code$/.test(a.p) && a.method === 'POST'), `a token appears in exactly the 3 register / rotate answers + the ONE pair-code answer (the code) — never in a GET, a receipt, a poll, the join (${answers.length} answers)`, shown.map((a) => a.p));
+  ok(shown.length === 4 && verdictOf(shown.every((a) => /\/callers(\/[^/]+\/rotate)?$|\/pair-code$/.test(a.p) && a.method === 'POST')), `a token appears in exactly the 3 register / rotate answers + the ONE pair-code answer (the code) — never in a GET, a receipt, a poll, the join (${answers.length} answers)`, shown.map((a) => a.p));
   // controls: the scanner is not blind
   const planted = path.join(dataDir, 'planted.txt');
   fs.writeFileSync(planted, 'x ' + HM + ' y');
@@ -131,4 +131,4 @@ try {
 } catch (e) { fail++; Object.assign(console, realConsole); console.error('  ✗ threw:', e.stack || e.message); }
 finally { Object.assign(console, realConsole); try { eng.stop && eng.stop(); } catch { } srv.close(); stub.close(); try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { } }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

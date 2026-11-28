@@ -28,7 +28,7 @@ const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome for the client'); process.exit(0); }
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 250) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const PNG_DIR = process.env.VIBESPACE_RAD_PNG_DIR || null;
@@ -116,7 +116,7 @@ try {
   const P = (await api('/api/accounts/pool', { name: 'Pool P', members: [C] })).id;
   await api('/api/accounts/default', { id: K });
   const L0 = await api('/api/accounts');
-  check('fixtures: B (sub-<12hex>) wiped, C healthy in Pool P, K the default API key', /^sub-[0-9a-f]{12}$/.test(B) && !!K && !!P && L0.defaultAccountId === K
+  check('fixtures: B (sub-<12hex>) wiped, C healthy in Pool P, K the default API key', gateOf(/^sub-[0-9a-f]{12}$/.test(B)) && !!K && !!P && L0.defaultAccountId === K
     && L0.accounts.find((a) => a.id === B)?.loggedIn === false && L0.accounts.find((a) => a.id === B)?.loginState?.state === 'logged-out'
     && L0.accounts.find((a) => a.id === P)?.current === C, L0.accounts?.map((a) => ({ id: a.id, name: a.name, loggedIn: a.loggedIn, ls: a.loginState?.state, current: a.current })));
 
@@ -175,16 +175,16 @@ try {
   check('desk: the app is up with the accounts list loaded', !!D.ready);
   await D.ev(view(SID_DESK));
   const deskBar0 = await until(() => D.ev(`(() => { const f = ${barFacts(SID_DESK)}; return f && !f.account && f.btns.length ? f : null; })()`), 30000);
-  check('desk: the stopped conversation shows its history and the Resume bar', !!deskBar0 && /恢复此会话/.test(deskBar0.btns[0]?.text || ''), deskBar0);
+  check('desk: the stopped conversation shows its history and the Resume bar', !!deskBar0 && verdictOf(/恢复此会话/.test(deskBar0.btns[0]?.text || '')), deskBar0);
   await D.ev('(window.__creates.length = 0, window.__toasts.length = 0, true)');
   await press(D.S, D.ev, '.chat-resume-btn');
   const refusal = await until(() => D.ev(`(() => { const f = ${barFacts(SID_DESK)}; return f && f.account ? f : null; })()`), 15000, 150);
   const dayZh = await D.ev(`new Date(${WIPED_AT}).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' })`);
-  check(`desk: the press is refused IN THE BAR — 「${refusal?.note}」`, !!refusal && refusal.why === 'wiped' && refusal.note.includes('Account B') && refusal.note.includes(dayZh), { refusal, dayZh });
+  check(`desk: the press is refused IN THE BAR — 「${refusal?.note}」`, !!refusal && refusal.why === 'wiped' && gateOf(refusal.note.includes('Account B')) && verdictOf(refusal.note.includes(dayZh)), { refusal, dayZh });
   check('desk: two doors — 「重新登录 Account B」 then 「改用别的账号」', !!refusal && refusal.btns.length === 2 && refusal.btns[0].text === '重新登录 Account B' && refusal.btns[1].text === '改用别的账号', refusal?.btns);
   const quiet = await D.ev('({ creates: window.__creates.length, toasts: window.__toastTexts() })');
   check('desk: no create was sent and no toast shown — the bar is the answer', quiet.creates === 0 && !quiet.toasts.some((x) => /Account error|账号/.test(x)), quiet);
-  check('desk: the window is still there (a refusal never closes the conversation)', await D.ev(`!!${winSel(SID_DESK)}`));
+  check('desk: the window is still there (a refusal never closes the conversation)', verdictOf(await D.ev(`!!${winSel(SID_DESK)}`)));
   const winRect = () => D.ev(`(() => { const q = ${winSel(SID_DESK)}.element.getBoundingClientRect(); const x = Math.max(0, q.left), y = Math.max(0, q.top); return { x, y, width: Math.min(innerWidth - x, q.width), height: Math.min(innerHeight - y, q.height) }; })()`);
   const pDesk = await shot(D.S, 'desk.png', await winRect());
 
@@ -209,14 +209,14 @@ try {
   // 「改用别的账号」 ⇒ the picker, PRE-FILLED with the pool ⇒ confirm ⇒ the resume proceeds on it
   await press(D.S, D.ev, '.chat-account-switch');
   const picker = await until(() => D.ev(`(() => { const f = ${barFacts(SID_DESK)}; return f && f.pickOpen ? f : null; })()`), 5000, 100);
-  check(`desk: 「改用别的账号」 opens the picker pre-filled with the pool — ${JSON.stringify(picker?.options)}`, !!picker && picker.picked === P && picker.options[0] === 'Pool P（池）' && picker.options.includes('Account K（默认账号）') && !picker.options.some((o) => /Account B/.test(o)), picker);
+  check(`desk: 「改用别的账号」 opens the picker pre-filled with the pool — ${JSON.stringify(picker?.options)}`, !!picker && picker.picked === P && picker.options[0] === 'Pool P（池）' && gateOf(picker.options.includes('Account K（默认账号）')) && !picker.options.some((o) => /Account B/.test(o)), picker);
   const pDeskPick = await shot(D.S, 'desk-picker.png', await winRect());
   const fakeBefore = fs.existsSync(FAKE_LOG) ? fs.readFileSync(FAKE_LOG, 'utf8') : '';
   await press(D.S, D.ev, '.chat-account-go');
   const created = await until(() => D.ev(`(() => { const c = window.__creates.find((x) => x.resumeId === ${JSON.stringify(SID_DESK)}); const a = c && window.__answers.find((x) => x.reqId === c.reqId); return a ? { create: { accountId: c.accountId, resumeId: c.resumeId }, answer: a } : null; })()`), 30000, 200);
   check('desk: confirm ⇒ the create carries Pool P and the server answers created', !!created && created.create.accountId === P && created.answer.type === 'created', created);
   const fakeLine = await until(() => { const s = fs.existsSync(FAKE_LOG) ? fs.readFileSync(FAKE_LOG, 'utf8').slice(fakeBefore.length) : ''; return s.split('\n').find((l) => l.startsWith(SID_DESK + '|')) || null; }, 20000, 200);
-  check(`desk: the fake claude resumed THIS conversation on the pool (its per-session link ${((fakeLine || '').split('|')[1] || '-').replace(wt, '<wt>')})`, !!fakeLine && fakeLine.split('|')[1].includes(path.join('pool-links', P) + path.sep), fakeLine);
+  check(`desk: the fake claude resumed THIS conversation on the pool (its per-session link ${((fakeLine || '').split('|')[1] || '-').replace(wt, '<wt>')})`, !!fakeLine && verdictOf(fakeLine.split('|')[1].includes(path.join('pool-links', P) + path.sep)), fakeLine);
   const live = await until(() => D.ev(`(() => { const s = [...app.sessions.values()].find((v) => v && v.sessionId === ${JSON.stringify(created?.answer?.sessionId || '-')}); return s && !s._readOnly ? { live: true, cfg: app.sidebar.getSessionConfig('claude:' + ${JSON.stringify(SID_DESK)}), oldWin: !!${winSel(SID_DESK)} } : null; })()`), 20000, 200);
   check('desk: the conversation is live, the read-only window replaced, the on-resume account saved as Pool P (after the spawn)', !!live && live.cfg?.account === P && live.oldWin === false, live);
 
@@ -259,8 +259,8 @@ try {
     const red = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /Account error/.test(x)); return t ? { toast: t, creates: window.__creates.length } : null; })()`), 30000, 200);
     await sleep(4000); // longer than the press's bounded re-read: a page with no verdict never draws the refusal
     const redBar = await D.ev(`(() => { const f = ${barFacts(SID_RED)}; return f ? { account: f.account, btns: f.btns.map((b) => b.text) } : null; })()`);
-    check(`RED: with no verdict the press goes to the create ⇒ a red toast and the plain Resume bar — "${(red?.toast || '').slice(0, 90)}"`, !!red && red.creates === 1 && /subscription not logged in: Account B/.test(red.toast) && !!redBar && redBar.account === false, { red, redBar });
-    check('the last-resort toast now names both doors (Manage agents, Session Properties)', !!red && /Manage agents/.test(red.toast) && /Session Properties/.test(red.toast), red?.toast);
+    check(`RED: with no verdict the press goes to the create ⇒ a red toast and the plain Resume bar — "${(red?.toast || '').slice(0, 90)}"`, !!red && red.creates === 1 && gateOf(/subscription not logged in: Account B/.test(red.toast)) && !!redBar && redBar.account === false, { red, redBar });
+    check('the last-resort toast now names both doors (Manage agents, Session Properties)', !!red && gateOf(/Manage agents/.test(red.toast)) && verdictOf(/Session Properties/.test(red.toast)), red?.toast);
     { const ans = await D.ev(`(window.__answers.find((x) => x.reqId === ${JSON.stringify(went.reqId)}) || null)`), endN = await D.ev('window.__creates.length'); console.log(`  [probe] RED press: under the point ${aim.under}; creates right after the press ${went.creates}, when the wait ended ${endN}; the create's answer ${JSON.stringify(ans)}`); }   // print-only (r4209): a slow hub from a missed press
   }
   const pRed = await shot(D.S, 'red-toast.png');
@@ -279,12 +279,12 @@ try {
   check('phone: the Resume bar', !!pbar0, pbar0);
   await tap(Ph.S, Ph.ev, '.chat-resume-btn');
   const pref = await until(() => Ph.ev(`(() => { const f = ${barFacts(SID_PHONE)}; return f && f.account ? f : null; })()`), 15000, 150);
-  check(`phone: the refusal in the bar — 「${pref?.note}」`, !!pref && pref.why === 'wiped' && pref.note.includes('Account B'), pref);
-  check('phone: both doors ≥ 44 px tall and inside the viewport', !!pref && pref.btns.length === 2 && pref.btns.every((b) => b.h >= 44 && b.l >= 0 && b.r <= pref.vw), pref?.btns);
+  check(`phone: the refusal in the bar — 「${pref?.note}」`, !!pref && pref.why === 'wiped' && verdictOf(pref.note.includes('Account B')), pref);
+  check('phone: both doors ≥ 44 px tall and inside the viewport', !!pref && pref.btns.length === 2 && verdictOf(pref.btns.every((b) => b.h >= 44 && b.l >= 0 && b.r <= pref.vw)), pref?.btns);
   const pPhone = await shot(Ph.S, 'phone.png');
   await tap(Ph.S, Ph.ev, '.chat-account-switch');
   const ppick = await until(() => Ph.ev(`(() => { const f = ${barFacts(SID_PHONE)}; return f && f.pickOpen ? f : null; })()`), 5000, 100);
-  check('phone: the picker opens pre-filled with the pool, its buttons ≥ 44 px inside the viewport', !!ppick && ppick.picked === P && ppick.btns.filter((b) => /chat-account-(go|cancel)/.test(b.cls)).every((b) => b.h >= 44 && b.r <= ppick.vw), ppick);
+  check('phone: the picker opens pre-filled with the pool, its buttons ≥ 44 px inside the viewport', !!ppick && ppick.picked === P && verdictOf(ppick.btns.filter((b) => /chat-account-(go|cancel)/.test(b.cls)).every((b) => b.h >= 44 && b.r <= ppick.vw)), ppick);
   const pPhonePick = await shot(Ph.S, 'phone-picker.png');
   if (PNG_DIR) console.log('  PNGs:', [pDesk, pDeskPick, pRed, pPhone, pPhonePick].filter(Boolean).join(' '));
 } catch (e) {
@@ -300,4 +300,4 @@ try {
   check(`the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`, lit.offenders.length === 0, JSON.stringify(lit.offenders.slice(0, 3)));
 }
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

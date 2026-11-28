@@ -28,7 +28,7 @@ const dataDir = path.join(tmp, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -66,46 +66,46 @@ let childA;
   check('pipe child spawned (fresh)', !r.existing && childA > 0, JSON.stringify(r));
   await until(() => { try { return !fs.readFileSync(`/proc/${childA}/cmdline`, 'utf8').includes('sh'); } catch { return false; } }, 3000);
   let cmdline = ''; try { cmdline = fs.readFileSync(`/proc/${childA}/cmdline`, 'utf8').replace(/\0/g, ' ').trim(); } catch { }
-  check('child exec\'d away from argv0 (cmdline lacks "sh")', cmdline.startsWith('sleep'), cmdline);
+  check('child exec\'d away from argv0 (cmdline lacks "sh")', verdictOf(cmdline.startsWith('sleep')), cmdline);
   const meta = JSON.parse(fs.readFileSync(sessFile('adopt-a', '.json'), 'utf8'));
   check('meta records exec-proof startTime', !!meta.startTime, JSON.stringify(meta));
 
-  check('daemon killed (simulated upgrade re-exec)', await killDaemon(), '');
+  check('daemon killed (simulated upgrade re-exec)', verdictOf(await killDaemon()), '');
   dm.stop();
   dm = mkDm();
   await dm.connect(); // respawns a fresh daemon on the same root
 
   const h2 = await dm.openPipeSession({ sid: 'adopt-a', cmd: 'sh', args: ['-lc', 'exec sleep 300'], cwd: tmp, env: {}, offset: 0 });
   const r2 = await h2.ready;
-  check('re-open ADOPTS the live child (existing, not exited)', r2.existing && r2.exited === undefined, JSON.stringify(r2));
+  check('re-open ADOPTS the live child (existing, not exited)', gateOf(r2.existing) && r2.exited === undefined, JSON.stringify(r2));
   await sleep(600);
   const out = fs.readFileSync(sessFile('adopt-a', '.out'), 'utf8');
   check('NO synthesized crash sentinel for the live child', !out.includes('_remote_exit'), out.slice(-200));
-  check('child still running after adoption', alive(childA), String(childA));
+  check('child still running after adoption', verdictOf(alive(childA)), String(childA));
 }
 
 console.log('— kill-pipe-session actually kills an ADOPTED child (terminate path) —');
 {
   await dm.killPipeSession('adopt-a');
-  check('adopted child killed by kill-pipe-session', await until(() => !alive(childA), 6000), String(childA));
+  check('adopted child killed by kill-pipe-session', verdictOf(await until(() => !alive(childA), 6000)), String(childA));
 }
 
 console.log('— adopted-child watcher writes the exit sentinel (no wait() possible) —');
 {
   const h = await dm.openPipeSession({ sid: 'adopt-b', cmd: 'sh', args: ['-lc', 'exec sleep 300'], cwd: tmp, env: {} });
   const { pid } = await h.ready;
-  check('daemon killed again', await killDaemon(), '');
+  check('daemon killed again', verdictOf(await killDaemon()), '');
   dm.stop();
   dm = mkDm();
   await dm.connect();
   const h2 = await dm.openPipeSession({ sid: 'adopt-b', cmd: 'sh', args: ['-lc', 'exec sleep 300'], cwd: tmp, env: {}, offset: 0 });
   const r2 = await h2.ready;
-  check('second child adopted alive', r2.existing && r2.exited === undefined, JSON.stringify(r2));
+  check('second child adopted alive', gateOf(r2.existing) && r2.exited === undefined, JSON.stringify(r2));
   process.kill(pid, 'SIGKILL'); // the child dies while only ADOPTED (unwaitable)
   const ok = await until(() => {
     try { return fs.readFileSync(sessFile('adopt-b', '.out'), 'utf8').includes('_remote_exit'); } catch { return false; }
   }, 12000, 500);
-  check('watcher wrote the exit sentinel for the dead adopted child', ok, '');
+  check('watcher wrote the exit sentinel for the dead adopted child', verdictOf(ok), '');
   const meta = JSON.parse(fs.readFileSync(sessFile('adopt-b', '.json'), 'utf8'));
   check('meta finalized (exited set, adopted-flagged)', meta.exited !== undefined && meta.adopted === true, JSON.stringify(meta));
 }
@@ -119,7 +119,7 @@ console.log('— legacy meta (no startTime) still adopts via the CLI-name fallba
   const meta = JSON.parse(fs.readFileSync(mf, 'utf8'));
   delete meta.startTime;
   fs.writeFileSync(mf, JSON.stringify(meta));
-  check('daemon killed a third time', await killDaemon(), '');
+  check('daemon killed a third time', verdictOf(await killDaemon()), '');
   dm.stop();
   dm = mkDm();
   await dm.connect();
@@ -132,7 +132,7 @@ dm.stop();
 // handler's last log line re-creates agentd/state/agentd.log under a racing rmSync (ENOTEMPTY, the 2.369.217 runner red's class)
 // (before: a SIGTERM, a fixed 300 ms standing for «gone», and a removal whose error was swallowed)
 const end = endDaemonsAndWait(ROOT);
-check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && end.gone && !end.killed, JSON.stringify(end));
+check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && gateOf(end.gone) && !end.killed, JSON.stringify(end));
 fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 console.log(failed ? `\n${failed} FAILED` : '\nagentd adoption test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

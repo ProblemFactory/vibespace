@@ -47,7 +47,7 @@ const tr = (lang, k) => (lang === 'zh' ? zhDict[k] : lang === 'ja' ? jaDict[k] :
 
 let pass = 0, fail = 0, skipped = 0;
 let FACE = '';
-const ok = (c, n, extra) => { const name = (FACE ? `[${FACE}] ` : '') + n; if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.error('  ✗ ' + name + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); const name = (FACE ? `[${FACE}] ` : '') + n; if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.error('  ✗ ' + name + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -202,7 +202,7 @@ else await (async () => {
   let journal = '';
   const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 200), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 200)), 'the worktree server booted', journal.slice(-800))) return;
   { // three shell sessions (the sidebar has rows, the taskbar has items)
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
     await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
@@ -309,7 +309,7 @@ else await (async () => {
             await P.setTb(1);
           }
         }
-        if (dejavu && lang === 'en' && ui === 1) { const f = await P.fontsOf('#btn-new-session span'); ok(f.includes('DejaVu Sans'), `the English words are drawn in DejaVu Sans (${f.join(', ')})`); }
+        if (dejavu && lang === 'en' && ui === 1) { const f = await P.fontsOf('#btn-new-session span'); ok(verdictOf(f.includes('DejaVu Sans')), `the English words are drawn in DejaVu Sans (${f.join(', ')})`); }
       }
       ok(tally.bad.length === 0, `${tally.n} states: no two toolbar items intersect, nothing passes the toolbar or lies under the sidebar, words whole on one line, glyphs named, the page's verdict = barLadder(its inputs), the ⋯ iff folded, a glyph / a fold only when the full bar overflows (${tally.full} full, ${tally.compact} with glyphs, ${tally.folded} folded)`, tally.bad.slice(0, 6).join('\n    '));
       ok(tally.folded >= 3 && tally.compact >= 10 && tally.full >= 10, `the census saw all three rungs (full ${tally.full} / glyphs ${tally.compact} / folded ${tally.folded})`);
@@ -332,7 +332,7 @@ else await (async () => {
         reference[id] = delta(a, await snap());
       }
       await reset();
-      ok(reference['btn-file-explorer'].types.files === 1 && reference['btn-browser'].types.browser === 1 && reference['btn-presets'].dialogs.includes('dialog-presets') && reference['btn-new-session'].dialogs.includes('dialog-new-session') && reference['layout-presets'].grid === '1x1' && Object.values(reference['btn-terminal'].types).reduce((s, x) => s + x, 0) === 1, 'the references: each button on a wide page does its thing (a file explorer, a web view, the presets dialog, the new-session dialog, a terminal, the maximize grid)', reference);
+      ok(reference['btn-file-explorer'].types.files === 1 && reference['btn-browser'].types.browser === 1 && gateOf(reference['btn-presets'].dialogs.includes('dialog-presets')) && gateOf(reference['btn-new-session'].dialogs.includes('dialog-new-session')) && reference['layout-presets'].grid === '1x1' && Object.values(reference['btn-terminal'].types).reduce((s, x) => s + x, 0) === 1, 'the references: each button on a wide page does its thing (a file explorer, a web view, the presets dialog, the new-session dialog, a terminal, the maximize grid)', reference);
       // a page folded HARD, as a user can make it: 1024×768 at UI 125 %, toolbar scale 1.25, the sidebar dragged to its
       // 500 px maximum, the tray widgets (usage, For you, desktop previews) moved into the right zone
       const hard = async (on) => P.evaluate(`(() => { const a = window.app, s = a.settings, sb = a.sidebar; const w = ${on ? 500 : 260}; sb._resizer._setSize(w); sb._applySidebarLayoutWidth(w); ${on ? "s.set('chrome.arrangement', { 'toolbar-center': ['layout-presets'], 'toolbar-right': ['btn-presets', 'btn-new-session', 'btn-terminal', 'btn-file-explorer', 'btn-browser', 'btn-desktop-apps', 'btn-desktop', 'taskbar-user-todos', 'taskbar-usage', 'desktop-previews'], 'toolbar-row2': [], 'taskbar-tray': ['taskbar-status'], 'taskbar-row2': [] });" : "s.reset('chrome.arrangement');"} return 1; })()`);
@@ -342,12 +342,12 @@ else await (async () => {
         await P.settle();
         let m = await record(`menu-${lang}-1024x768-ui1.25-sb500-tb1.25-widgets`);
         const folded = m.fold && m.fold.overflow || [];
-        ok(['layout-presets', 'btn-presets', 'btn-browser', 'btn-file-explorer'].every((k) => folded.includes(k)), `${lang}: the hard-folded page folds the layout presets, Presets, Web view and Files at least (${folded.join(', ')})`);
+        ok(verdictOf(['layout-presets', 'btn-presets', 'btn-browser', 'btn-file-explorer'].every((k) => folded.includes(k))), `${lang}: the hard-folded page folds the layout presets, Presets, Web view and Files at least (${folded.join(', ')})`);
         await P.evaluate(`document.getElementById('toolbar-more').click()`); await sleep(200);
         const rows = await P.evaluate(`[...document.querySelectorAll('.toolbar-more-menu > .context-menu-item')].map((e) => (e.childNodes[0] && e.childNodes[0].nodeType === 3 ? e.childNodes[0].nodeValue : e.textContent).replace(' \\u25B8', '').trim())`);
         await P.shot(path.join(SHOTS, `menu-${lang}-open${tag}.png`), 420);
         const want = TM.overflowRows(folded).map((r) => tr(lang, r.submenu || r.label));
-        ok(same(rows, want), `${lang}: the ⋯ lists exactly the ${want.length} folded item(s), in the bar's order, in ${lang} (${rows.join(' · ')})`, { rows, want });
+        ok(verdictOf(same(rows, want)), `${lang}: the ⋯ lists exactly the ${want.length} folded item(s), in the bar's order, in ${lang} (${rows.join(' · ')})`, { rows, want });
         await P.evaluate(`document.querySelectorAll('.context-menu').forEach((x) => x.remove())`);
         // every testable folded row, clicked, does what its button did
         for (const key of folded.filter((k) => ACTS[k])) {
@@ -360,7 +360,7 @@ else await (async () => {
           const clicked = await P.evaluate(`(() => { const rows = [...document.querySelectorAll('.toolbar-more-menu > .context-menu-item')]; const row = rows.find((e) => (e.childNodes[0] && e.childNodes[0].nodeValue || e.textContent).replace(' \\u25B8', '').trim() === ${JSON.stringify(label)}); if (!row) return 'no row'; if (${key === 'layout-presets'}) { row.dispatchEvent(new MouseEvent('mouseenter')); const kid = [...row.querySelectorAll('.context-menu-item')].find((c) => c.textContent === document.querySelector('#layout-presets .layout-btn[data-layout="maximize"]').title); if (!kid) return 'no child'; kid.click(); return 'ok'; } row.click(); return 'ok'; })()`);
           await until(async () => { const d = delta(a, await snap()); return Object.keys(d.types).length || d.dialogs.length || d.grid; }, 6000, 150);
           const d = delta(a, await snap());
-          ok(clicked === 'ok' && same(d, reference[key]), `${lang}: the folded row "${label}" does what the ${key} button did (${JSON.stringify(d)})`, { clicked, d, ref: reference[key] });
+          ok(clicked === 'ok' && verdictOf(same(d, reference[key])), `${lang}: the folded row "${label}" does what the ${key} button did (${JSON.stringify(d)})`, { clicked, d, ref: reference[key] });
         }
         await reset(); await hard(false);
         ok(!!await settingsLanded((js) => !js['chrome.arrangement']), `${lang}: the arrangement reset reached the server`);
@@ -375,10 +375,10 @@ else await (async () => {
         const inCz = await P.evaluate(`(${MEASURE.toString()})()`);
         await P.shot(path.join(SHOTS, `customize-open${tag}.png`), 260);
         const hidden = await P.evaluate(`(() => { const ids = ['btn-presets','btn-new-session','btn-terminal','btn-file-explorer','btn-browser','btn-desktop-apps','btn-desktop','layout-presets']; return ids.filter((id) => { const el = document.getElementById(id); return !el || getComputedStyle(el).display === 'none' || el.classList.contains('bar-folded') || el.classList.contains('tb-compact'); }); })()`);
-        ok(before.fold.overflow.length > 0 && inCz.fold && inCz.fold.suspended && hidden.length === 0 && inCz.mores === 0 && inCz.overlaps.length === 0, `while editing every element is full and shown (none folded or compact: ${hidden.join(',') || 'ok'}), no ⋯, no two items intersect (${inCz.overlaps.length}) — the bar wraps`, { hidden, overlaps: inCz.overlaps, fold: inCz.fold && inCz.fold.suspended });
+        ok(before.fold.overflow.length > 0 && gateOf(inCz.fold) && gateOf(inCz.fold.suspended) && hidden.length === 0 && inCz.mores === 0 && inCz.overlaps.length === 0, `while editing every element is full and shown (none folded or compact: ${hidden.join(',') || 'ok'}), no ⋯, no two items intersect (${inCz.overlaps.length}) — the bar wraps`, { hidden, overlaps: inCz.overlaps, fold: inCz.fold && inCz.fold.suspended });
         await P.evaluate('window.app._customize.exit()'); await sleep(300);
         const after = await record('customize-after-ja-1024-ui1.25-tb1.25');
-        ok(after.fold && same([after.fold.overflow, after.fold.compact], [before.fold.overflow, before.fold.compact]), `Done folds again to the same verdict (${after.fold && after.fold.overflow.join(',')})`);
+        ok(gateOf(after.fold) && verdictOf(same([after.fold.overflow, after.fold.compact], [before.fold.overflow, before.fold.compact])), `Done folds again to the same verdict (${after.fold && after.fold.overflow.join(',')})`);
       }
 
       // ═══ ④ the arranged order ═══
@@ -395,13 +395,13 @@ else await (async () => {
           const keys = m.fold.items.map((x) => x.key);
           const present = m.fold.items.filter((x) => x.px > 0).map((x) => x.key);
           const widgets = ['taskbar-usage', 'taskbar-user-todos', 'desktop-previews'].filter((id) => present.includes(id));
-          ok(same(keys, dom) && !present.includes('btn-terminal') && !m.fold.overflow.includes('btn-terminal') && widgets.every((w) => !m.fold.overflow.includes(w) && !m.fold.compact.includes(w)) && keys.indexOf('btn-browser') < keys.indexOf('btn-new-session'), `toolbar scale ${tb}: the fold reads the ARRANGED order (${keys.filter((k) => k.startsWith('btn') || k.startsWith('task')).join(' → ')}), hidden Terminal never counts, the widgets (${widgets.join(', ')}) never fold (folded: ${m.fold.overflow.join(', ') || 'none'})`, { keys, dom, overflow: m.fold.overflow });
+          ok(gateOf(same(keys, dom)) && !present.includes('btn-terminal') && !m.fold.overflow.includes('btn-terminal') && gateOf(widgets.every((w) => !m.fold.overflow.includes(w) && !m.fold.compact.includes(w))) && keys.indexOf('btn-browser') < keys.indexOf('btn-new-session'), `toolbar scale ${tb}: the fold reads the ARRANGED order (${keys.filter((k) => k.startsWith('btn') || k.startsWith('task')).join(' → ')}), hidden Terminal never counts, the widgets (${widgets.join(', ')}) never fold (folded: ${m.fold.overflow.join(', ') || 'none'})`, { keys, dom, overflow: m.fold.overflow });
           if (m.fold.overflow.length) {
             await P.evaluate(`document.getElementById('toolbar-more').click()`); await sleep(150);
             const rows = await P.evaluate(`[...document.querySelectorAll('.toolbar-more-menu > .context-menu-item')].map((e) => (e.childNodes[0] && e.childNodes[0].nodeType === 3 ? e.childNodes[0].nodeValue : e.textContent).replace(' \\u25B8', '').trim())`);
             await P.evaluate(`document.querySelectorAll('.context-menu').forEach((x) => x.remove())`);
             const want = TM.overflowRows(m.fold.overflow).map((r) => r.submenu || r.label);
-            ok(same(rows, want) && (!rows.includes('Web view') || !rows.includes('Presets') || rows.indexOf('Web view') < rows.indexOf('Presets')), `…the ⋯ rows follow the arrangement — Web view before Presets (${rows.join(' · ')})`, { rows, want });
+            ok(gateOf(same(rows, want)) && (!rows.includes('Web view') || !rows.includes('Presets') || rows.indexOf('Web view') < rows.indexOf('Presets')), `…the ⋯ rows follow the arrangement — Web view before Presets (${rows.join(' · ')})`, { rows, want });
           }
         }
         await P.setTb(1);
@@ -414,7 +414,7 @@ else await (async () => {
         console.log('⑤ controls');
         await P.viewport(1024, 768); await P.load('ja', 1.25); await P.setSidebar(true);
         const neutral = writeCss('neutral', real);
-        ok(await swap(P, neutral), 'the stylesheet swapped for an identical copy');
+        ok(verdictOf(await swap(P, neutral)), 'the stylesheet swapped for an identical copy');
         const mN = await record('control-neutral-ja-1024-ui1.25-sbopen');
         ok(problemsOf(mN).length === 0 && foldProblems(mN).length === 0, 'CONTROL (a): the neutral swap stays green', [...problemsOf(mN), ...foldProblems(mN)]);
         // (b) THE PRE-FIX TOOLBAR: no fold + the old `.toolbar-right` rule, the lane's toolbar rules gone
@@ -433,7 +433,7 @@ else await (async () => {
         const PRE_RULES = `.toolbar-left { display: flex; align-items: center; gap: 6px; min-width: 160px; }\n.toolbar-center { flex: 1; display: flex; justify-content: center; }\n.toolbar-right { display: flex; align-items: center; gap: 4px; min-width: 160px; justify-content: flex-end; }\n.toolbar-title {\n  font-weight: 600; font-size: 13px;\n  background: linear-gradient(135deg, var(--accent), var(--accent-hover));\n  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;\n}\n`;
         const pre = writeCss('prefix', real.slice(0, LANE_START) + PRE_RULES + real.slice(LANE_END + 'body.customize-mode #toolbar > .toolbar-center { flex-wrap: wrap; row-gap: 4px; }'.length));
         await P.load('ja', 1.25); await P.setSidebar(true);
-        ok(await swap(P, pre), 'the pre-fix stylesheet swapped in');
+        ok(verdictOf(await swap(P, pre)), 'the pre-fix stylesheet swapped in');
         await P.frames();
         const mP = await P.evaluate(`(${MEASURE.toString()})()`);
         await P.shot(path.join(SHOTS, 'control-prefix-ja-1024-ui1.25-sbopen.png'), 150);
@@ -446,9 +446,9 @@ else await (async () => {
     }
   }
   FACE = '';
-  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 })();
 
 FACE = '';
 console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -27,7 +27,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -65,7 +65,7 @@ console.log('§1 channel-acl (PURE)');
   ok(ACL.effective({ kind: 'agent', id: 'a2', groups: [] }, target, [gGroup, gAgentWide]).level === 'hidden', 'a grant names ITS principal only — a stranger stays hidden');
   const gAdapter = { principal: { kind: 'agent', id: 'a1' }, scope: { kind: 'adapter', id: 'lark' }, level: 'visible', origin: 'user' };
   ok(ACL.effective(ctx, { key: 'lark/other', adapterId: 'lark' }, [gAdapter]).level === 'visible' && ACL.effective(ctx, { key: 'gmail/x', adapterId: 'gmail' }, [gAdapter]).level === 'hidden', 'an adapter-scoped grant covers every conversation of that adapter and no other');
-  ok(!ACL.validateGrant({ ...gGroup, origin: undefined }).ok && /origin/.test(ACL.validateGrant({ ...gGroup, origin: undefined }).error), 'every grant MUST say who wrote it (origin)');
+  ok(!ACL.validateGrant({ ...gGroup, origin: undefined }).ok && verdictOf(/origin/.test(ACL.validateGrant({ ...gGroup, origin: undefined }).error)), 'every grant MUST say who wrote it (origin)');
   ok(!ACL.validateGrant({ ...gGroup, level: 'super' }).ok && !ACL.validateGrant({ ...gGroup, principal: { kind: 'robot', id: 'x' } }).ok, 'unknown levels / principal kinds are refused');
   // one row per (principal, scope, origin)
   let grants = ACL.applyGrant([], gGroup);
@@ -84,9 +84,9 @@ console.log('§1 channel-acl (PURE)');
   const again = ACL.approveRequest(g2, { principal: { kind: 'agent', id: 'a9' }, scope: { kind: 'conversation', id: 'lark/c1' }, at: 8, by: 'user' });
   ok(again.grants.length === g2.length, 'approving twice is still one row');
   ok(ACL.notFound().code === 'not-found' && ACL.notFound().error === ACL.NOT_FOUND_TEXT && JSON.stringify(ACL.notFound()) === JSON.stringify(ACL.notFound()), 'the not-found answer is ONE constant (hidden === nonexistent)');
-  ok(ACL.canSee('visible') && !ACL.canSee('requestable') && ACL.canRequest('requestable') && !ACL.canRequest('visible') && !ACL.canRequest('hidden'), 'canSee / canRequest are exact');
+  ok(gateOf(ACL.canSee('visible')) && !ACL.canSee('requestable') && gateOf(ACL.canRequest('requestable')) && !ACL.canRequest('visible') && !ACL.canRequest('hidden'), 'canSee / canRequest are exact');
   ok(ACL.fromMsgLevel('none') === 'hidden' && ACL.fromMsgLevel('visible') === 'visible' && ACL.fromMsgLevel('messageable') === 'visible', 'the msg-acl crosswalk: none → hidden, visible|messageable → visible (send authority is another axis)');
-  ok(ACL.grantsFor(target, g2).every((g) => g.id && g.origin) && ACL.grantsFor({ key: 'gmail/z', adapterId: 'gmail' }, g2).length === 0, 'grantsFor lists this target\'s rows with ids and origins');
+  ok(gateOf(ACL.grantsFor(target, g2).every((g) => g.id && g.origin)) && ACL.grantsFor({ key: 'gmail/z', adapterId: 'gmail' }, g2).length === 0, 'grantsFor lists this target\'s rows with ids and origins');
 }
 
 // ── §1c 完全信任 (lane api-tier-write-all, 2026-10-13): the API tier is widen-only up to write-all; everyone NEVER holds it ──
@@ -111,7 +111,7 @@ console.log('§1c the API tier: widen-only none → read → write-ask → write
       ["const api = g.api === API_NAMED_ONLY && g.principal.kind !== 'agent' ? 'write-auto' : g.api;", "const api = g.api === API_NAMED_ONLY && g.principal.kind === 'everyone' ? 'write-auto' : g.api;"]],
   ];
   for (const [name, judge, [a, b]] of legs) {
-    ok(judge(ACL), name);
+    ok(verdictOf(judge(ACL)), name);
     let red; try { red = !judge(load(mutate(SRC, a, b))); } catch (e) { red = `threw: ${e.message}`; }
     ok(red === true, `CONTROL: ${name} — without its rule the leg goes red`, red);
   }
@@ -134,7 +134,7 @@ console.log('§1b the three homes of a grant (2026-09-26: account + pattern scop
   ok(all.length === 3 && ACL.effective(ctx, lark, all).level === 'visible', 'the three homes MAX together (widen only)');
   const left = ACL.removeGrant([userRow, acct], { principal: acct.principal, scope: acct.scope, origin: 'access' });
   ok(left.length === 1 && left[0] === userRow, 'removing that access removes ONLY its own origin:access row — the user row stays');
-  ok(ACL.GRANT_ORIGINS.includes('access') && ACL.GRANT_ORIGINS.includes('assignment'), 'origin `access` is declared; the pre-R4 `assignment` is still honoured as a row (the migration renames it)');
+  ok(gateOf(ACL.GRANT_ORIGINS.includes('access')) && verdictOf(ACL.GRANT_ORIGINS.includes('assignment')), 'origin `access` is declared; the pre-R4 `assignment` is still honoured as a row (the migration renames it)');
   ok(ACL.effective(ctx, lark, ACL.grantsForConversation(lark, { entries: [userRow] })).level === 'requestable', '…so the agent falls back to what the user granted by hand');
 }
 
@@ -148,7 +148,7 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   // 2026-09-26: no track step — a forced pass discovers AND ingests every conversation
   await eng.pass(A, { force: true });
   // hidden by default: absent from list, read = not-found, and IDENTICAL to a nonexistent id
-  ok(eng.listFor(AG).conversations.every((c) => c.adapterId !== A), 'a fresh conversation is absent from the agent\'s list');
+  ok(verdictOf(eng.listFor(AG).conversations.every((c) => c.adapterId !== A)), 'a fresh conversation is absent from the agent\'s list');
   const hidden = eng.readFor(AG, A, C, {});
   const nowhere = eng.readFor(AG, A, 'no-such-conversation', {});
   ok(JSON.stringify(hidden) === JSON.stringify(nowhere) && hidden.code === 'not-found', 'a HIDDEN conversation and a NONEXISTENT one give byte-identical answers');
@@ -158,12 +158,12 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   const userBefore = JSON.stringify(userRow());
   await eng.setAssignment(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all' });
   const rows = ownRows(eng, KEY);
-  ok(rows.length === 2 && rows.some((g) => g.origin === 'access') && rows.some((g) => g.origin === 'user'), 'access (the compatibility write) adds ITS OWN row beside the user\'s');
+  ok(rows.length === 2 && gateOf(rows.some((g) => g.origin === 'access')) && verdictOf(rows.some((g) => g.origin === 'user')), 'access (the compatibility write) adds ITS OWN row beside the user\'s');
   await eng.setAssignment(A, C, null);
   const rowsAfter = ownRows(eng, KEY);
   ok(rowsAfter.length === 1 && JSON.stringify(rowsAfter[0]) === userBefore, 'NEGATIVE CONTROL: removing the access removes ONLY its own row — the user grant is byte-identical');
   ok(eng.reachFor(AG, eng.adapterRecords().adapters.find((r) => r.id === A), eng.store.index.snapshot().conversations[KEY]).level === 'visible', '…and the agent still sees the conversation');
-  ok(eng.listFor(AG).conversations.some((c) => c.key === KEY && c.level === 'visible') && eng.readFor(AG, A, C, {}).ok, 'now listed and readable');
+  ok(gateOf(eng.listFor(AG).conversations.some((c) => c.key === KEY && c.level === 'visible')) && verdictOf(eng.readFor(AG, A, C, {}).ok), 'now listed and readable');
   const audit = eng.store.auditTail().filter((l) => l.kind === 'acl').map((l) => [l.op, l.origin]);
   ok(JSON.stringify(audit) === JSON.stringify([['grant', 'user'], ['grant', 'access'], ['revoke', 'access']]), 'every grant change is an audit line with who/why', JSON.stringify(audit));
   // R4: TWO principals with access — removing ONE takes exactly its own row
@@ -188,19 +188,19 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   await eng.setAgentDirectory(A, { groups: true });
   await eng.setReach(A, C, { principal: { kind: 'group', id: 'g1', name: 'Ops' }, level: 'requestable' });
   const groupBefore = JSON.stringify(ownRows(eng, KEY));
-  ok(eng.listFor(AG).conversations.some((c) => c.key === KEY && c.level === 'requestable') && eng.readFor(AG, A, C, {}).code === 'not-found', 'requestable: listed as such, still not readable');
+  ok(gateOf(eng.listFor(AG).conversations.some((c) => c.key === KEY && c.level === 'requestable')) && eng.readFor(AG, A, C, {}).code === 'not-found', 'requestable: listed as such, still not readable');
   const rq = await eng.request(AG, A, C, 'I need to see the ops room to answer the alert');
-  ok(rq.ok && rq.request.status === 'open' && rq.request.todoId, 'the request is filed with a For-you item');
+  ok(gateOf(rq.ok) && rq.request.status === 'open' && verdictOf(rq.request.todoId), 'the request is filed with a For-you item');
   const item = userTodos.get(rq.request.todoId);
-  ok(item && /Worker requests access to Ops room/.test(item.text) && /answer the alert/.test(item.detail), 'the item names the agent, the conversation and the stated reason');
+  ok(gateOf(item) && gateOf(/Worker requests access to Ops room/.test(item.text)) && verdictOf(/answer the alert/.test(item.detail)), 'the item names the agent, the conversation and the stated reason');
   const rq2 = await eng.request(AG, A, C, 'again');
-  ok(rq2.ok && rq2.already === true && rq2.request.id === rq.request.id, 'a second request from the same agent is the same open request (no spam)');
+  ok(gateOf(rq2.ok) && rq2.already === true && rq2.request.id === rq.request.id, 'a second request from the same agent is the same open request (no spam)');
   const dec = await eng.decideRequest(rq.request.id, true);
   const rowsNow = ownRows(eng, KEY);
-  ok(dec.ok && dec.grant && dec.grant.origin === 'request' && dec.grant.level === 'visible' && dec.grant.principal.id === 'agent-1', 'approval writes EXACTLY ONE visible grant for (that agent, that conversation) with origin request');
+  ok(gateOf(dec.ok) && gateOf(dec.grant) && dec.grant.origin === 'request' && dec.grant.level === 'visible' && dec.grant.principal.id === 'agent-1', 'approval writes EXACTLY ONE visible grant for (that agent, that conversation) with origin request');
   ok(rowsNow.length === 2 && JSON.stringify(rowsNow.filter((g) => g.origin !== 'request')) === groupBefore, 'NEGATIVE CONTROL: the group\'s requestable default is byte-identical after the approval');
   ok(userTodos.get(rq.request.todoId).status === 'done' && userTodos.get(rq.request.todoId).resolvedBy === 'allowed', 'the request\'s For-you item is resolved by the producer — `allowed` (lane chat-needs-you-card: the card\'s record says «approved»)');
-  ok(eng.readFor(AG, A, C, {}).ok && eng.listFor(AG).conversations.find((c) => c.key === KEY).level === 'visible', 'the agent now reads it');
+  ok(gateOf(eng.readFor(AG, A, C, {}).ok) && eng.listFor(AG).conversations.find((c) => c.key === KEY).level === 'visible', 'the agent now reads it');
   ok(eng.listFor({ ...AG, id: 'agent-2' }).conversations.find((c) => c.key === KEY).level === 'requestable', 'another member of the group is still only requestable (the approval touched no default)');
   ok(!(await eng.decideRequest(rq.request.id, true)).ok, 'deciding twice is refused');
   // verify-r6 Q1: two decisions IN FLIGHT at once (Deny in one window, Approve in another) — both used to pass the
@@ -212,7 +212,7 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
     const [dx, dy] = await Promise.all([eng.decideRequest(rq3.request.id, false), eng.decideRequest(rq3.request.id, true)]);
     const lvl = eng.listFor(AG2).conversations.find((c) => c.key === KEY).level;
     const stored = eng.store.index.snapshot().conversations[KEY].reachRequests.find((r) => r.id === rq3.request.id);
-    ok(rq3.ok && dx.ok === true && dy.ok === false && dy.code === 'bad-state' && stored.status === 'denied' && lvl === 'requestable', 'verify-r6 Q1: Deny and Approve in flight at once ⇒ ONE lands (the first: denied), the other is bad-state, NO grant (pre-fix: both ok, the approval overwrote the denial)', { dx: dx.ok, dy: dy.code, status: stored && stored.status, lvl });
+    ok(gateOf(rq3.ok) && dx.ok === true && dy.ok === false && dy.code === 'bad-state' && stored.status === 'denied' && lvl === 'requestable', 'verify-r6 Q1: Deny and Approve in flight at once ⇒ ONE lands (the first: denied), the other is bad-state, NO grant (pre-fix: both ok, the approval overwrote the denial)', { dx: dx.ok, dy: dy.code, status: stored && stored.status, lvl });
   }
   eng.stop();
 }
@@ -225,10 +225,10 @@ console.log('§2b account + pattern grants through the REAL engine');
   const W = { kind: 'agent', id: 'agent-1', name: 'Worker' };
   ok(eng.listFor(AG).conversations.filter((c) => c.adapterId === A).length === 0, 'before any assignment the agent sees nothing of the account');
   const r1 = await eng.setScopeAssignment(A, { kind: 'account' }, { principal: W, mode: 'all' });
-  ok(r1.ok, 'an ACCOUNT assignment is accepted', JSON.stringify(r1));
+  ok(verdictOf(r1.ok), 'an ACCOUNT assignment is accepted', JSON.stringify(r1));
   const seen = eng.listFor(AG).conversations.filter((c) => c.adapterId === A);
-  ok(seen.length === 2 && seen.every((c) => c.level === 'visible'), 'the account grant makes EVERY conversation of the account visible (both fake rooms)', JSON.stringify(seen.map((c) => c.key)));
-  ok(eng.listFor(AG).conversations.every((c) => c.adapterId === A), 'NEGATIVE CONTROL: …and nothing of any OTHER account', JSON.stringify(eng.listFor(AG).conversations.map((c) => c.key)));
+  ok(seen.length === 2 && verdictOf(seen.every((c) => c.level === 'visible')), 'the account grant makes EVERY conversation of the account visible (both fake rooms)', JSON.stringify(seen.map((c) => c.key)));
+  ok(verdictOf(eng.listFor(AG).conversations.every((c) => c.adapterId === A)), 'NEGATIVE CONTROL: …and nothing of any OTHER account', JSON.stringify(eng.listFor(AG).conversations.map((c) => c.key)));
   await eng.setReach(A, C, { principal: W, level: 'visible' });
   const userBefore = JSON.stringify(ownRows(eng, KEY));
   await eng.setScopeAssignment(A, { kind: 'account' }, null);
@@ -236,7 +236,7 @@ console.log('§2b account + pattern grants through the REAL engine');
   ok(JSON.stringify(ownRows(eng, KEY)) === userBefore, '…byte-identical');
   await eng.setReach(A, C, { principal: W, level: null });
   const pr = await eng.setScopeAssignment(A, { kind: 'pattern' }, { principal: W, mode: 'all', pattern: { match: 'any', rules: [{ kind: 'title', value: 'announce' }] } });
-  ok(pr.ok && pr.assignment && pr.assignment.scope && pr.assignment.scope.kind === 'pattern', 'a PATTERN assignment is accepted', JSON.stringify(pr));
+  ok(gateOf(pr.ok) && gateOf(pr.assignment) && gateOf(pr.assignment.scope) && pr.assignment.scope.kind === 'pattern', 'a PATTERN assignment is accepted', JSON.stringify(pr));
   const pseen = eng.listFor(AG).conversations.filter((c) => c.adapterId === A).map((c) => c.key);
   ok(pseen.join() === `${A}/fake-poll-announce`, 'the pattern grant reaches EXACTLY the matching conversation (Announcements), not the Ops room', JSON.stringify(pseen));
   ok(!ownRows(eng, `${A}/fake-poll-announce`).length, 'the pattern grant is DERIVED at read — no row was written to the conversation');
@@ -260,15 +260,15 @@ console.log('§2d the New Session form\'s create-time access row (the same store
   const GRP = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: ['T-ir'], msgLevelFor: () => 'none' };
   const grain = () => eng.adapterView(eng.adapterRecords().adapters.find((r) => r.id === A)).accountGrain;
   const g0 = await eng.setAccess(A, { kind: 'account' }, [{ principal: { kind: 'group', id: 'T-ir', name: 'IR' }, authority: 'draft' }]);
-  ok(g0.ok && eng.listFor(GRP).conversations.some((c) => c.adapterId === A) && !eng.listFor(NEW).conversations.some((c) => c.adapterId === A), 'before the tick: the group\'s member reaches the account, the new conversation does not (everything defaults to hidden)');
+  ok(gateOf(g0.ok) && gateOf(eng.listFor(GRP).conversations.some((c) => c.adapterId === A)) && !eng.listFor(NEW).conversations.some((c) => c.adapterId === A), 'before the tick: the group\'s member reaches the account, the new conversation does not (everything defaults to hidden)');
   const before = grain();
   const list = S.withCreateAccess(before.access, 'cid-new');
   const w = await eng.setAccess(A, { kind: 'account' }, list, { base: F.grainStamp({ access: before.access, watchers: before.watchers }) });
-  ok(w.ok, 'the tick\'s whole list (the stored rows + ONE agent row) is accepted by the access write, the stamp it read as `base`', JSON.stringify(w));
+  ok(verdictOf(w.ok), 'the tick\'s whole list (the stored rows + ONE agent row) is accepted by the access write, the stamp it read as `base`', JSON.stringify(w));
   const after = grain().access;
-  ok(after.length === 2 && after.some((r) => r.principal.kind === 'group' && r.principal.id === 'T-ir' && r.authority === 'draft') && after.some((r) => r.principal.kind === 'agent' && r.principal.id === 'cid-new' && r.authority === 'draft'), 'the grain now holds the group\'s row untouched beside the conversation\'s draft row', JSON.stringify(after));
+  ok(after.length === 2 && gateOf(after.some((r) => r.principal.kind === 'group' && r.principal.id === 'T-ir' && r.authority === 'draft')) && verdictOf(after.some((r) => r.principal.kind === 'agent' && r.principal.id === 'cid-new' && r.authority === 'draft')), 'the grain now holds the group\'s row untouched beside the conversation\'s draft row', JSON.stringify(after));
   const seen = eng.listFor(NEW).conversations.filter((c) => c.adapterId === A);
-  ok(seen.length > 0 && seen.every((c) => c.level === 'visible'), 'the new conversation now sees the account\'s conversations — channel-acl\'s own verdict, through its own row', JSON.stringify(seen.map((c) => c.key)));
+  ok(seen.length > 0 && verdictOf(seen.every((c) => c.level === 'visible')), 'the new conversation now sees the account\'s conversations — channel-acl\'s own verdict, through its own row', JSON.stringify(seen.map((c) => c.key)));
   ok(S.withCreateAccess(grain().access, 'cid-new') === null, 'a second tick writes nothing (the conversation already holds its row)');
   const stale = await eng.setAccess(A, { kind: 'account' }, S.withCreateAccess(before.access, 'cid-other'), { base: F.grainStamp({ access: before.access, watchers: before.watchers }) });
   ok(!stale.ok && stale.code === 'grain-changed', 'CONTROL: a tick built on a list that moved since its read is refused BY NAME (the page reads again once) — never written over', JSON.stringify(stale));
@@ -316,7 +316,7 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
     withdrawWatchRequest: 'the asker\'s OWN open wake request taken back: {id, status: withdrawn, decidedAt} — another agent, or a decided request, = refused by name; no record of a conversation',
     collectReceipt: 'the drafting agent reads its OWN direct send\'s receipt inline (receiptText = the rendered block; marks receipt.road:\'inline\') — a caller who is not the drafter = the uniform not-found',
   };
-  ok(handlers.length >= 9 && called.every((k) => k in JUDGED) && Object.keys(JUDGED).every((k) => called.includes(k)), `THE ROUTE CENSUS: every engine method the ${handlers.length} agent channel handlers call is judged for what it hands an agent (${called.join(', ')})`, JSON.stringify({ called, unjudged: called.filter((k) => !(k in JUDGED)), dead: Object.keys(JUDGED).filter((k) => !called.includes(k)) }));
+  ok(handlers.length >= 9 && gateOf(called.every((k) => k in JUDGED)) && verdictOf(Object.keys(JUDGED).every((k) => called.includes(k))), `THE ROUTE CENSUS: every engine method the ${handlers.length} agent channel handlers call is judged for what it hands an agent (${called.join(', ')})`, JSON.stringify({ called, unjudged: called.filter((k) => !(k in JUDGED)), dead: Object.keys(JUDGED).filter((k) => !called.includes(k)) }));
   // the fake world's mail room is read from process.env by the adapter (the server's own seam)
   const SEAMS = { VIBESPACE_CHANNELS_FAKE_MAIL: '2', VIBESPACE_CHANNELS_FAKE_BEACON: 'http://127.0.0.1:9' };
   const prevEnv = Object.fromEntries(Object.keys(SEAMS).map((k) => [k, process.env[k]]));
@@ -354,7 +354,7 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
   const real = await drive(ENG, 'real');
   ok(real.ownerBodies >= 6 && real.convs >= 3 && real.mailRecords >= 8 && real.searchHits > 0, `FIXTURE: the owner's read carries ${real.ownerBodies} formatted bodies; the agent (account access) sees ${real.convs} conversations, reads ${real.mailRecords} mails of the mail room, finds ${real.searchHits} search hits`, JSON.stringify(real));
   ok(!real.leaks.length, 'every agent answer — list, read of every conversation, search, status, access, an attachment — carries no body attachment, no text/html, no render tree, no markup', real.leaks.join('; '));
-  ok(real.bodyCached && real.bodyAnswer && real.bodyAnswer.code === 'not-found', `the ATTACHMENT verb (lane channel-attach-read): a mail's formatted body the owner's window cached is the agent's not-found (${JSON.stringify(real.bodyAnswer && real.bodyAnswer.code)})`, JSON.stringify(real.bodyAnswer));
+  ok(gateOf(real.bodyCached) && gateOf(real.bodyAnswer) && real.bodyAnswer.code === 'not-found', `the ATTACHMENT verb (lane channel-attach-read): a mail's formatted body the owner's window cached is the agent's not-found (${JSON.stringify(real.bodyAnswer && real.bodyAnswer.code)})`, JSON.stringify(real.bodyAnswer));
   // CONTROL: the same drive on an engine whose readFor forgets withoutBlocks
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const M = mutantCopies('chan-acl-html', REPO);
@@ -362,13 +362,13 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
   // the .197 integration: the agent's copy is withView's agent branch (viewsOf → agentCopy, which calls withoutBlocks) — the control drops that strip
   const noStrip = engSrc.replace('const base = agent ? viewsOf(rec, records).map(agentCopy) : withBlocks(rec, records);', 'const base = agent ? viewsOf(rec, records) : withBlocks(rec, records);');
   const bad = await drive(M.load('src/server/channels-engine.js', noStrip, 'read-keeps-body'), 'control');
-  ok(noStrip !== engSrc && bad.leaks.some((l) => /^read:fake-push-mail: ("role":"body"|text\/html)$/.test(l)), 'CONTROL: an engine whose readFor forgets withoutBlocks hands the mail\'s text/html body attachment to the agent (the census above would be red)', bad.leaks.join('; '));
+  ok(noStrip !== engSrc && verdictOf(bad.leaks.some((l) => /^read:fake-push-mail: ("role":"body"|text\/html)$/.test(l))), 'CONTROL: an engine whose readFor forgets withoutBlocks hands the mail\'s text/html body attachment to the agent (the census above would be red)', bad.leaks.join('; '));
   // CONTROL (lane channel-attach-read): an engine whose agent attachment serves a role:body part hands the agent the text/html body
   const BODY_GATE = "if (!part || part.role === 'body') return";
   const bodyOpen = engSrc.replace(BODY_GATE, 'if (!part) return');
   const badBody = await drive(M.load('src/server/channels-engine.js', bodyOpen, 'agent-body-part'), 'control-body');
-  ok(engSrc.split(BODY_GATE).length === 2 && badBody.leaks.some((l) => /^attachmentBody: text\/html$/.test(l)), 'CONTROL: an engine whose agent attachment serves the role:body part hands the agent the mail\'s text/html body (the leak census above would be red)', badBody.leaks.join('; '));
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, c.name, c.detail);
+  ok(engSrc.split(BODY_GATE).length === 2 && verdictOf(badBody.leaks.some((l) => /^attachmentBody: text\/html$/.test(l))), 'CONTROL: an engine whose agent attachment serves the role:body part hands the agent the mail\'s text/html body (the leak census above would be red)', badBody.leaks.join('; '));
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(verdictOf(c.pass), c.name, c.detail);
   for (const [k, v] of Object.entries(prevEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 }
 
@@ -402,10 +402,10 @@ console.log('§3 agent groups: invite reach = msg-acl (widen-only)');
   ok(lone.code === ghost.code && lone.error.replace('lone', '?') === ghost.error.replace('no-such-session', '?'), 'an unreachable session and a nonexistent one get the SAME refusal (no existence oracle)');
   ok(Object.keys(store.groups.live().groups).length === 0, 'NEGATIVE CONTROL: every refused create wrote nothing');
   const good = await eng.create({ by: 'c-alpha', name: 'x', members: ['beta', 'open', 'grp'], quiet: true });
-  ok(good.ok && good.group.members.length === 4, 'the override and the open group are invitable');
+  ok(gateOf(good.ok) && good.group.members.length === 4, 'the override and the open group are invitable');
   const byOpen = await eng.invite({ by: 'c-open', group: good.group.id, members: ['vis'] });
-  ok(byOpen.ok && byOpen.added.join() === 'vis', 'reach is judged from the INVITER: open shares vis\'s Task Group and brings it in — the same session alpha could not invite', JSON.stringify(byOpen));
-  ok(byOpen.refused.length === 1 && /no delivery ladder/.test(byOpen.refused[0].reason), '…and a wake with no ladder wired is an honest refusal, never a silent drop');
+  ok(gateOf(byOpen.ok) && byOpen.added.join() === 'vis', 'reach is judged from the INVITER: open shares vis\'s Task Group and brings it in — the same session alpha could not invite', JSON.stringify(byOpen));
+  ok(byOpen.refused.length === 1 && verdictOf(/no delivery ladder/.test(byOpen.refused[0].reason)), '…and a wake with no ladder wired is an honest refusal, never a silent drop');
   store.close();
 }
 
@@ -515,9 +515,9 @@ console.log('§P accessFor reads a conversation\'s grain only when a row of its 
   const ENGKEPT = MP.load('src/server/channels-engine.js', editAnchor(engSrcP, "require('./channels-access.js')", `require(${JSON.stringify(accKeptPath)})`, 'src/server/channels-engine.js'), 'kept-set-engine');
   const bn = await between(ENG, 'new'), br = await between(ENGREL, 'release'), bk = await between(ENGKEPT, 'kept');
   const lostAndGained = (b) => b.writes.every(Boolean) && b.t1.includes('Thread 6') && !b.t1.includes('Thread 8') && !b.t2.includes('Thread 6') && b.t2.includes('Thread 8');
-  ok(lostAndGained(bn) && JSON.stringify(bn.first) === JSON.stringify(br.first) && JSON.stringify(bn.second) === JSON.stringify(br.second), `§P A REVOKE AND A GRANT BETWEEN TWO CALLS ON ONE ENGINE: the first answer holds «Thread 6», the second has LOST it and holds «Thread 8» (granted between the calls: a line only a rebuilt own-keys set names) — both roads equal on both calls`, { new: [bn.t1, bn.t2], release: [br.t1, br.t2], writes: bn.writes });
-  ok(bk.writes.every(Boolean) && !bk.t2.includes('Thread 8'), `§P RED CONTROL: an own-keys set kept across calls — the second answer MISSES «Thread 8» (${JSON.stringify(bk.t2)}) — the leg above would be red by name`, { second: bk.t2 });
+  ok(gateOf(lostAndGained(bn)) && JSON.stringify(bn.first) === JSON.stringify(br.first) && JSON.stringify(bn.second) === JSON.stringify(br.second), `§P A REVOKE AND A GRANT BETWEEN TWO CALLS ON ONE ENGINE: the first answer holds «Thread 6», the second has LOST it and holds «Thread 8» (granted between the calls: a line only a rebuilt own-keys set names) — both roads equal on both calls`, { new: [bn.t1, bn.t2], release: [br.t1, br.t2], writes: bn.writes });
+  ok(gateOf(bk.writes.every(Boolean)) && !bk.t2.includes('Thread 8'), `§P RED CONTROL: an own-keys set kept across calls — the second answer MISSES «Thread 8» (${JSON.stringify(bk.t2)}) — the leg above would be red by name`, { second: bk.t2 });
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

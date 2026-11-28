@@ -31,7 +31,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -124,24 +124,24 @@ const W1 = await mkEngine('connect');
   const { eng, v, frames, dir, root } = W1;
   const d0 = eng.digest();
   const avail = (d0.available || []).find((x) => x.kind === 'slack');
-  ok(avail && avail.credential.source === 'paste' && !(avail.credential.missing || []).length, 'the digest OFFERS Slack as ready — no client to choose (credential source: paste)');
+  ok(gateOf(avail) && avail.credential.source === 'paste' && !(avail.credential.missing || []).length, 'the digest OFFERS Slack as ready — no client to choose (credential source: paste)');
   const st = await eng.startOAuth({ kind: 'slack' });
   const fid = st.flowId || (st.flow && st.flow.flowId);
-  ok(st.flow && st.flow.mode === 'paste' && /^https:\/\/api\.slack\.com\/apps\?new_app=1&manifest_json=/.test(st.url || st.flow.consentUrl) && !st.flow.listening, 'startOAuth runs a paste flow whose consent URL is the manifest link');
+  ok(gateOf(st.flow) && st.flow.mode === 'paste' && gateOf(/^https:\/\/api\.slack\.com\/apps\?new_app=1&manifest_json=/.test(st.url || st.flow.consentUrl)) && !st.flow.listening, 'startOAuth runs a paste flow whose consent URL is the manifest link');
   const e1 = await threw(() => eng.oauthCallback({ flowId: fid, url: 'xoxb' + '-1234567890-abcdefghijk' }));
-  ok(e1 && e1.status === 400 && e1.code === 'forbidden' && /bot token/.test(e1.message), `a pasted bot token: 400 by name (${e1 && e1.message.slice(0, 60)}…)`);
+  ok(gateOf(e1) && e1.status === 400 && e1.code === 'forbidden' && verdictOf(/bot token/.test(e1.message)), `a pasted bot token: 400 by name (${e1 && e1.message.slice(0, 60)}…)`);
   ok(v.calls.length === 0, '…before any call to Slack');
   const r = await eng.oauthCallback({ flowId: fid, url: TOKEN });
   ok(r.ok === true && r.user === 'Acme · @mart', `the right token signs in as ${r.user}`);
   const c = await eng.connect('slack', { flowId: fid });
-  ok(c.adapter && c.adapter.kind === 'slack' && c.adapter.id === 'slack', 'Connect creates the account');
-  ok(await settle(eng), 'the Connect\'s own first pass ingests the channel');
+  ok(gateOf(c.adapter) && c.adapter.kind === 'slack' && c.adapter.id === 'slack', 'Connect creates the account');
+  ok(verdictOf(await settle(eng)), 'the Connect\'s own first pass ingests the channel');
   const rec = JSON.parse(fs.readFileSync(path.join(dir, 'adapters.json'), 'utf-8')).adapters.find((x) => x.id === 'slack');
-  ok(rec && rec.auth && rec.auth.tokenEnc && rec.identity && rec.identity.userId === 't0acme001/u0self001', 'the record holds the SEALED token and the identity t…/u… (D11)');
+  ok(gateOf(rec) && gateOf(rec.auth) && gateOf(rec.auth.tokenEnc) && gateOf(rec.identity) && rec.identity.userId === 't0acme001/u0self001', 'the record holds the SEALED token and the identity t…/u… (D11)');
   const unl1 = unlandedUnder(root);   // item 7 (store-writer follow-up): the owner's flush, before the files are listed
   const all = filesUnder(root);
   const plain = [...unl1, ...all.filter((f) => { const b = fs.readFileSync(f); return b.includes(TOKEN) || b.includes(encodeURIComponent(TOKEN)); })];
-  ok(all.some((f) => f.endsWith('adapters.json')) && all.some((f) => f.endsWith('C0GENERAL.ndjson')) && !plain.length, `the token is in NO file of the data dir — the account record and the message log included (${all.length} files read)`, plain.join(', '));
+  ok(gateOf(all.some((f) => f.endsWith('adapters.json'))) && gateOf(all.some((f) => f.endsWith('C0GENERAL.ndjson'))) && !plain.length, `the token is in NO file of the data dir — the account record and the message log included (${all.length} files read)`, plain.join(', '));
   // lane ci-339-reds (the 2.369.339 runner's fast red): a SEALED value is random ciphertext — its base64 read a cephx key
   // («AQ» + 20 base64 after a `+` `/` `.`) in 8 of 2 000 fresh seals of this very record — so the scan reads every file with
   // each sealed value replaced by its LENGTH (the census above already proves the token is in no file), and a red names
@@ -150,19 +150,19 @@ const W1 = await mkEngine('connect');
   const scan = secretScan(scanned.files, scanned.dir);
   const probe = path.join(ROOT, 'probe.txt'); fs.writeFileSync(probe, `token=${TOKEN}\n`);
   const probeScan = secretScan([probe], ROOT);
-  ok(scanned.sealed >= 1 && scan.rc === 0 && probeScan.rc === 1 && probeScan.found.some((x) => / slack-token /.test(x)), `scripts/secret-scan.mjs over the data dir finds nothing (rc ${scan.rc}; ${scanned.sealed} sealed value(s) read as their length); POSITIVE CONTROL: the same scanner finds the token in a file that holds it (rc ${probeScan.rc}: ${probeScan.found.join(', ')})`, { found: scan.found, sealed: scanned.sealed });
+  ok(scanned.sealed >= 1 && scan.rc === 0 && probeScan.rc === 1 && verdictOf(probeScan.found.some((x) => / slack-token /.test(x))), `scripts/secret-scan.mjs over the data dir finds nothing (rc ${scan.rc}; ${scanned.sealed} sealed value(s) read as their length); POSITIVE CONTROL: the same scanner finds the token in a file that holds it (rc ${probeScan.rc}: ${probeScan.found.join(', ')})`, { found: scan.found, sealed: scanned.sealed });
   // RED CONTROL — the same record with a sealed value whose ciphertext happens to hold «AQ» + 20 base64 after a `+` (what a
   // fresh seal gives once in ~250): read as bytes the scanner finds a cephx key in it; read as its length, nothing
   const rec2 = path.join(ROOT, 'scan-ctl', 'adapters.json'); fs.mkdirSync(path.dirname(rec2), { recursive: true });
   const unlucky = SB.encWith(Buffer.alloc(32, 7), 'x').replace(/\.[^.]*$/, '.ZmFrZQ+AQ' + 'Ab9+'.repeat(6) + 'cQ==');
   fs.writeFileSync(rec2, fs.readFileSync(path.join(dir, 'adapters.json'), 'utf-8').replace(rec.auth.tokenEnc, unlucky));
   const asBytes = secretScan([rec2], path.dirname(rec2)), asLength = secretScan(scanSealedAsLength([rec2], path.dirname(rec2), 'scan-ctl-len').files, path.join(ROOT, 'scan-ctl-len'));
-  ok(SB.BOX_CIPHERTEXT_RE.test(unlucky) && asBytes.rc === 1 && asBytes.found.length === 1 && / cephx-key /.test(asBytes.found[0]) && asLength.rc === 0, `RED CONTROL: a sealed value whose ciphertext holds «AQ» + 20 base64 after a \`+\` — the scanner, reading its bytes, says ${JSON.stringify(asBytes.found)}; read as its length it finds nothing`, { asBytes, asLength });
+  ok(gateOf(SB.BOX_CIPHERTEXT_RE.test(unlucky)) && asBytes.rc === 1 && asBytes.found.length === 1 && gateOf(/ cephx-key /.test(asBytes.found[0])) && asLength.rc === 0, `RED CONTROL: a sealed value whose ciphertext holds «AQ» + 20 base64 after a \`+\` — the scanner, reading its bytes, says ${JSON.stringify(asBytes.found)}; read as its length it finds nothing`, { asBytes, asLength });
   const said = JSON.stringify([logLines, frames, st, r, c]);
   ok(!said.includes(TOKEN) && !said.includes(TOKEN.slice(5, 25)), 'no log line, broadcast frame or answer carries the token (or a piece of it)');
   const view = eng.digest().adapters.find((x) => x.id === 'slack');
-  ok(view && view.setup && view.setup.probes && view.setup.probes.userOnlyManifest === 'accepted' && view.setup.probes.planLimited === true, 'the account view carries the setup report (the first real install\'s probes by name)');
-  ok(view && view.retention === 'purge-on-remove' && view.policyModes.join() === 'review', 'the account view says removing deletes the local copy, and that only "review" is offered');
+  ok(gateOf(view) && gateOf(view.setup) && gateOf(view.setup.probes) && view.setup.probes.userOnlyManifest === 'accepted' && view.setup.probes.planLimited === true, 'the account view carries the setup report (the first real install\'s probes by name)');
+  ok(gateOf(view) && view.retention === 'purge-on-remove' && view.policyModes.join() === 'review', 'the account view says removing deletes the local copy, and that only "review" is offered');
 }
 
 // ── ② the first pass ──
@@ -170,20 +170,20 @@ console.log('② the first pass');
 {
   const { eng } = W1;
   const live = eng.store.index.live();
-  ok(live['slack/D0GITHUB1'] && live['slack/D0GITHUB1'].app === true && !live['slack/D0ALICE01'].app, 'the app\'s DM is flagged `app` in the index; the person\'s DM is not');
+  ok(gateOf(live['slack/D0GITHUB1']) && live['slack/D0GITHUB1'].app === true && !live['slack/D0ALICE01'].app, 'the app\'s DM is flagged `app` in the index; the person\'s DM is not');
   const rows = eng.digest({ keys: Object.keys(live) }).conversations || [];
   const gh = rows.find((x) => x.id === 'D0GITHUB1'), al = rows.find((x) => x.id === 'D0ALICE01');
-  ok(gh && gh.app === true && al && !al.app, 'the row carries `app`');
+  ok(gateOf(gh) && gh.app === true && gateOf(al) && !al.app, 'the row carries `app`');
   const t = Date.now();
   const tag = (row) => FOCUS.statusTag({ ...row, unread: 3, lastAt: t - 1000 }, t);
   ok(!tag(gh) || tag(gh).code !== 'direct', `an app's DM with unread messages is never the "Direct" tag (${JSON.stringify(tag(gh))})`);
   const ta = tag(al);
-  ok(ta && ta.code === 'direct', 'CONTROL: a person\'s DM with unread messages is');
+  ok(gateOf(ta) && ta.code === 'direct', 'CONTROL: a person\'s DM with unread messages is');
   const recs = eng.store.readTail('slack', 'C0GENERAL', { limit: 50 });
   const imp = recs.find((x) => x.vendorId === ts(10));
   const rule = { kind: 'sender-in-group', members: ['Alice'] };
   const hits = (rec) => FILTER.matchRecord({ rules: [rule], match: 'any' }, rec, {}).hit;
-  ok(imp && !hits(imp) && recs.some((x) => x.author.name === 'Alice' && hits(x)), 'a bot posting as "Alice" does NOT match Alice\'s sender-in-group rule (the stored author is the app); the real Alice does');
+  ok(gateOf(imp) && !hits(imp) && verdictOf(recs.some((x) => x.author.name === 'Alice' && hits(x))), 'a bot posting as "Alice" does NOT match Alice\'s sender-in-group rule (the stored author is the app); the real Alice does');
 }
 
 // ── ③ prepareSend at propose ──
@@ -199,8 +199,8 @@ console.log('③ the proposal decides who is notified');
   const p = await eng.propose(AGENT, 'slack', 'C0GENERAL', { text: '@Bob see <this> & @alice.c too, @nobody, @here' });
   ok(p.ok === true && p.decision.mode === 'review', 'a resolvable proposal is created — and waits for approval (Slack offers review only)');
   const q = eng.store.outbox.snapshot().proposals[p.proposal.id];
-  ok(q.prepared && q.prepared.mentions.map((x) => `${x.name}:${x.id}`).join() === 'Bob:U0BOB0001,alice.c:U0ALICE01' && q.prepared.notifies.join() === 'Bob,Alice' && q.prepared.plain.join() === 'nobody', 'the decision is STORED: @Bob → U0BOB0001, @alice.c → U0ALICE01; the card\'s notify line "Bob, Alice"; @nobody notifies nobody');
-  ok(q.audience && q.audience.kind === 'public' && q.audience.orgs.join() === 'Acme' && q.audience.members === 40, 'and who will SEE it: everyone in Acme (40) — the card\'s audience line');
+  ok(gateOf(q.prepared) && q.prepared.mentions.map((x) => `${x.name}:${x.id}`).join() === 'Bob:U0BOB0001,alice.c:U0ALICE01' && q.prepared.notifies.join() === 'Bob,Alice' && q.prepared.plain.join() === 'nobody', 'the decision is STORED: @Bob → U0BOB0001, @alice.c → U0ALICE01; the card\'s notify line "Bob, Alice"; @nobody notifies nobody');
+  ok(gateOf(q.audience) && q.audience.kind === 'public' && q.audience.orgs.join() === 'Acme' && q.audience.members === 40, 'and who will SEE it: everyone in Acme (40) — the card\'s audience line');
   // a member renamed (and a NEW "Bob" joined) between the proposal and the approval: nothing changes
   const bob = FX.users.U0BOB0001;
   const saved = JSON.stringify(bob);
@@ -210,7 +210,7 @@ console.log('③ the proposal decides who is notified');
   clock += 7 * 3600e3;
   const a = await eng.approve(p.proposal.id, {});
   const sent = v.state.posted[v.state.posted.length - 1];
-  ok(a && a.ok !== false && sent && sent.text === '<@U0BOB0001> see &lt;this&gt; &amp; <@U0ALICE01> too, @nobody, @here', `what is sent is what was approved: the ids decided at propose, & < > escaped, @here left as words (${sent && sent.text})`);
+  ok(gateOf(a) && a.ok !== false && gateOf(sent) && sent.text === '<@U0BOB0001> see &lt;this&gt; &amp; <@U0ALICE01> too, @nobody, @here', `what is sent is what was approved: the ids decided at propose, & < > escaped, @here left as words (${sent && sent.text})`);
   Object.assign(bob, JSON.parse(saved)); delete FX.users.U0BOB0002; FX['conversations.members'].C0GENERAL.members.pop();
   // CONTROL: an engine copy whose send does not hand the stored decision to the adapter sends the name as plain words
   const esrc = engineSource(REPO);
@@ -229,7 +229,7 @@ console.log('③ the proposal decides who is notified');
   const p2 = await e2.propose(AGENT, 'slack', 'C0GENERAL', { text: '@Bob ping' });
   if (p2.ok) await e2.approve(p2.proposal.id, {});
   const sent2 = v2.state.posted[v2.state.posted.length - 1];
-  ok(p2.ok && sent2 && sent2.text === '@Bob ping', `NEGATIVE CONTROL — an engine copy that drops \`prepared\` at the send notifies nobody (${sent2 && sent2.text}): the stored decision is what makes the mention`);
+  ok(gateOf(p2.ok) && gateOf(sent2) && sent2.text === '@Bob ping', `NEGATIVE CONTROL — an engine copy that drops \`prepared\` at the send notifies nobody (${sent2 && sent2.text}): the stored decision is what makes the mention`);
   // thread + chat
   const t2 = await eng.propose(AGENT, 'slack', 'C0GENERAL', { text: 'answering in the thread and the channel', replyTo: ts(2), placement: 'thread+chat' });
   ok(t2.ok === true, `a thread+chat reply is proposed (${t2.error || ''})`);
@@ -297,7 +297,7 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
   ok(R.three.sent === '<@U0ANN0001> the draft is ready', `B-a0ae r1 a THREE-word name («@Ann Marie Smith», two Anns in the channel): the longest name that answers one person decides (${JSON.stringify(R.three)})`);
   ok(R.adaPark.refused === 'mention-ambiguous', `B-a0ae follow-up AN AMBIGUOUS NAME IS REFUSED, NEVER GUESSED: «@Ada Park» answers two members ⇒ refused by name — never the third member whose handle is ada (${JSON.stringify(R.adaPark)})`);
   ok(R.label.sent === '<@U0BOB0001> see this' && R.label.notifies.join() === 'Bob', `B-a0ae follow-up a name inside a typed token's label is the token's: «<@U0BOB0001| @Alice Chen>» notifies Bob alone — shown equals sent (${JSON.stringify(R.label)})`);
-  ok(R.many.notifies.length === 50 && R.many.over.join() === 'Alice Chen' && !R.many.plain.length && /and @Alice Chen$/.test(R.many.sent || ''), `B-a0ae follow-up ONE bound of 50 marks: 50 typed tokens and one name — the 51st mark (the name) goes as words under its OWN label (over the limit — the cure: never «not a member here» for a member), never dropped unseen (${JSON.stringify({ notifies: R.many.notifies.length, plain: R.many.plain })})`);
+  ok(R.many.notifies.length === 50 && R.many.over.join() === 'Alice Chen' && !R.many.plain.length && verdictOf(/and @Alice Chen$/.test(R.many.sent || '')), `B-a0ae follow-up ONE bound of 50 marks: 50 typed tokens and one name — the 51st mark (the name) goes as words under its OWN label (over the limit — the cure: never «not a member here» for a member), never dropped unseen (${JSON.stringify({ notifies: R.many.notifies.length, plain: R.many.plain })})`);
   const RL = await mentionLeg('mentions-limited', undefined, { limited: true });
   ok(RL.late.sent === '@Zed Late the numbers are in' && !RL.late.refused, `B-a0ae r1 the directory read is BEST EFFORT: users.list rate-limited ⇒ the proposal is still made, the unmatched name goes as words (${JSON.stringify(RL.late)})`);
   // CONTROLS: a copy of slack.js without each part turns its own leg red
@@ -313,8 +313,8 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
   ok(!!noTwo && !!noRaw && !!noDir && !!noAmb && !!noCatch, 'the five patch sites of the B-a0ae controls are in slack.js (once each)');
   const C2 = noTwo ? await mentionLeg('a0ae-two', noTwo) : null, CR = noRaw ? await mentionLeg('a0ae-raw', noRaw) : null, CD = noDir ? await mentionLeg('a0ae-dir', noDir) : null;
   const CA = noAmb ? await mentionLeg('a0ae-guess', noAmb) : null, CC = noCatch ? await mentionLeg('a0ae-nocatch', noCatch, { limited: true }) : null;
-  ok(CA && CA.adaPark.sent === '<@U0ADA0003> Park please look' && CC && CC.late.refused, `CONTROLS B-a0ae follow-up: the old fallback (a shorter reading when the longer answers TWO) notifies the third member «ada» for «@Ada Park», «Park» left as words (${CA && JSON.stringify(CA.adaPark)}); without the catch a rate-limited directory REFUSES the proposal (${CC && JSON.stringify(CC.late)})`);
-  ok(C2 && C2.two.refused === 'mention-ambiguous' && CR && /^&lt;@U0BOB0001&gt;/.test(CR.raw.sent || '') && CD && CD.late.sent === '@Zed Late the numbers are in',
+  ok(gateOf(CA) && CA.adaPark.sent === '<@U0ADA0003> Park please look' && gateOf(CC) && verdictOf(CC.late.refused), `CONTROLS B-a0ae follow-up: the old fallback (a shorter reading when the longer answers TWO) notifies the third member «ada» for «@Ada Park», «Park» left as words (${CA && JSON.stringify(CA.adaPark)}); without the catch a rate-limited directory REFUSES the proposal (${CC && JSON.stringify(CC.late)})`);
+  ok(gateOf(C2) && C2.two.refused === 'mention-ambiguous' && gateOf(CR) && gateOf(/^&lt;@U0BOB0001&gt;/.test(CR.raw.sent || '')) && gateOf(CD) && CD.late.sent === '@Zed Late the numbers are in',
     `CONTROLS B-a0ae: without the two-word name «@Alice Chen» is refused as ambiguous (${C2 && JSON.stringify(C2.two)}); without the member check a typed <@U…> is escaped (${CR && CR.raw.sent}); without the directory read the late member notifies nobody (${CD && CD.late.sent})`);
 }
 
@@ -330,7 +330,7 @@ console.log('④ no "send directly" on Slack');
   const p = await eng.propose({ kind: 'user' }, 'slack', 'C0GENERAL', { text: 'from the owner, through review' });
   ok(p.ok === true && p.decision.mode === 'review', 'a "direct" written before (an old file) is CLAMPED: the decision is review, never a send without the card');
   const full = await eng.conversation ? null : null; void full;
-  ok(P.policyModesOf({ ...slack.caps, policyModes: undefined }).includes('direct'), 'CONTROL: a caps row without policyModes offers direct (the row is what withholds it)');
+  ok(verdictOf(P.policyModesOf({ ...slack.caps, policyModes: undefined }).includes('direct')), 'CONTROL: a caps row without policyModes offers direct (the row is what withholds it)');
 }
 
 // ── ⑤ a lost answer ──
@@ -355,7 +355,7 @@ console.log('⑤ a lost answer stays unknown');
 console.log('⑥ removing the account deletes its local copy');
 {
   const { eng, dir } = W1;
-  ok(fs.existsSync(path.join(dir, 'msgs', 'slack')), 'before: the logs exist (msgs/slack)');
+  ok(verdictOf(fs.existsSync(path.join(dir, 'msgs', 'slack'))), 'before: the logs exist (msgs/slack)');
   const ended = Object.values(eng.store.outbox.snapshot().proposals).filter((x) => x.adapterId === 'slack');
   for (const q of ended) if (!P.isTerminal(q.state)) { try { await eng.reject(q.id, { by: 'user' }); } catch { try { await eng.withdraw(q.id); } catch {} } }
   const live = Object.values(eng.store.outbox.snapshot().proposals).filter((x) => x.adapterId === 'slack' && !P.isTerminal(x.state));
@@ -370,12 +370,12 @@ console.log('⑥ removing the account deletes its local copy');
   // CONTROL: the same adapter declaring `keep` leaves them (archive-never-destroy)
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
   const RET = "  retention: 'purge-on-remove',\n";
-  ok(ssrc.includes(RET), 'the patch site of the retention control is in slack.js');
+  ok(verdictOf(ssrc.includes(RET)), 'the patch site of the retention control is in slack.js');
   const keepMod = require(MC.write('src/channels/slack.js', editAnchor(ssrc, RET, "  retention: 'keep',\n", "src/channels/slack.js"), 'keep'));
   const reg = CH.createChannelRegistry(); reg.register(keepMod.adapter);
   const K = await connected('keep', { registry: reg });
   const r2 = await K.eng.remove(K.id);
-  ok(r2.ok === true && fs.existsSync(path.join(K.dir, 'msgs', K.id)), 'NEGATIVE CONTROL — a copy declaring retention:keep leaves msgs/<id> on disk (the row is what deletes it)');
+  ok(r2.ok === true && verdictOf(fs.existsSync(path.join(K.dir, 'msgs', K.id))), 'NEGATIVE CONTROL — a copy declaring retention:keep leaves msgs/<id> on disk (the row is what deletes it)');
 }
 
 // ── ⑦ slack-core verify r1 (F2): the owner's EDIT is decided like the proposal ──
@@ -405,9 +405,9 @@ async function editLeg(engMod, name) {
 {
   const r = await editLeg(null, 'edit');
   ok(r.amb.ok === false && r.amb.why === 'mention-ambiguous' && r.amb.ambiguous.join() === 'Alice' && r.ambSent === 0 && r.st1 === 'awaiting-approval', `an edit that ADDS an @Alice two people answer is refused by name, nothing sent, the proposal still waits (${r.amb.why}, ${r.ambSent} sent, ${r.st1})`);
-  ok(r.ok2 && r.ok2.code === 'mentions-changed' && r.heldSent === 0, `B-82c2 round wfgpbe038 RULE C: the edit adding @alice.w CHANGES who is notified — stored with its decision, nothing on the wire at that press (${r.ok2 && r.ok2.code}, ${r.heldSent} sent)`);
-  ok(r.ok3 && r.ok3.ok !== false && r.sent === 'Thanks <@U0ALICE02> — <@U0BOB0001> is out, ask @nobody', `…the next press sends what the card then showed: @alice.w resolved, Bob's id, @nobody as words (${r.sent})`);
-  ok(r.stored && r.stored.notifies.join() === 'Alice,Bob' && r.stored.plain.join() === 'nobody', `the decision is stored with the edit — the card and receipt say who was notified (${JSON.stringify(r.stored && { n: r.stored.notifies, p: r.stored.plain })})`);
+  ok(gateOf(r.ok2) && r.ok2.code === 'mentions-changed' && r.heldSent === 0, `B-82c2 round wfgpbe038 RULE C: the edit adding @alice.w CHANGES who is notified — stored with its decision, nothing on the wire at that press (${r.ok2 && r.ok2.code}, ${r.heldSent} sent)`);
+  ok(gateOf(r.ok3) && r.ok3.ok !== false && r.sent === 'Thanks <@U0ALICE02> — <@U0BOB0001> is out, ask @nobody', `…the next press sends what the card then showed: @alice.w resolved, Bob's id, @nobody as words (${r.sent})`);
+  ok(gateOf(r.stored) && r.stored.notifies.join() === 'Alice,Bob' && r.stored.plain.join() === 'nobody', `the decision is stored with the edit — the card and receipt say who was notified (${JSON.stringify(r.stored && { n: r.stored.notifies, p: r.stored.plain })})`);
   const esrc = engineSource(REPO);
   const EDIT = '    if (recD && (registry.capsOf(recD.kind) || {}).prepareSend === true && (edited || !p0.prepared)) {';
   ok(esrc.split(EDIT).length === 2, 'the patch site of the edit-decision control is in channels-engine.js (once)');
@@ -424,25 +424,25 @@ console.log('⑧ two pastes through the engine');
   const st = await eng.startOAuth({ kind: 'slack' });
   const fid = st.flowId;
   const ew = await threw(() => eng.oauthCallback({ flowId: fid, url: TOKEN, box: 'config' }));
-  ok(ew && ew.status === 400 && ew.detail && ew.detail.code === 'user-token-wrong-box' && v.calls.length === 0, `a user token in step 1's box: 400 with its closed why (${ew && ew.detail && ew.detail.code}), nothing called`);
+  ok(gateOf(ew) && ew.status === 400 && gateOf(ew.detail) && ew.detail.code === 'user-token-wrong-box' && v.calls.length === 0, `a user token in step 1's box: 400 with its closed why (${ew && ew.detail && ew.detail.code}), nothing called`);
   const r1 = await eng.oauthCallback({ flowId: fid, url: CONFIG_TOKEN, box: 'config' });
   ok(r1.ok === true && r1.step === 'created' && r1.token === null && r1.stepFacts.appId === 'A0VIBEAPP1' && v.calls.map((c) => c.method).join() === 'apps.manifest.create', 'step 1 through the engine: ONE apps.manifest.create, the step answered with the app — and NO token (the sign-in is not finished)');
   const s1 = eng.oauthStatus(fid);
   ok(s1.running === true && s1.done === false && s1.token === null && s1.flow.step === 'created' && s1.flow.stepFacts.installUrl === 'https://api.slack.com/apps/A0VIBEAPP1/oauth', 'the status a reopened dialog reads: running at `created`, the install page by app id');
   const ec = await threw(() => eng.connect('slack', { flowId: fid }));
-  ok(ec && ec.status === 409 && ec.code === 'flow-not-done' && !eng.digest().adapters.some((x) => x.kind === 'slack'), 'Connect before step 3: 409 flow-not-done, no account');
+  ok(gateOf(ec) && ec.status === 409 && ec.code === 'flow-not-done' && !eng.digest().adapters.some((x) => x.kind === 'slack'), 'Connect before step 3: 409 flow-not-done, no account');
   const ee = await threw(() => eng.oauthCallback({ flowId: fid, url: CONFIG_TOKEN, box: 'user' }));
-  ok(ee && ee.status === 400 && ee.detail.code === 'config-token-wrong-box', 'the setup token in step 3\'s box: 400 config-token-wrong-box');
+  ok(gateOf(ee) && ee.status === 400 && ee.detail.code === 'config-token-wrong-box', 'the setup token in step 3\'s box: 400 config-token-wrong-box');
   const r3 = await eng.oauthCallback({ flowId: fid, url: TOKEN, box: 'user' });
   ok(r3.ok === true && r3.token === fid && r3.user === 'Acme · @mart', 'step 3: the user token signs in');
   const c = await eng.connect('slack', { flowId: fid });
-  ok(c.adapter && c.adapter.kind === 'slack', 'Connect creates the account');
+  ok(gateOf(c.adapter) && c.adapter.kind === 'slack', 'Connect creates the account');
   await settle(eng, c.adapter.id);
   const unl8 = unlandedUnder(root);   // item 7 (store-writer follow-up): the owner's flush, before the files are listed
   const all = filesUnder(root);
   const holds = (f) => { const b = fs.readFileSync(f); return b.includes(CONFIG_TOKEN) || b.includes(encodeURIComponent(CONFIG_TOKEN)) || b.includes(CONFIG_TOKEN.slice(10, 34)) || b.includes(CLIENT_SECRET); };
   const plain = [...unl8, ...all.filter(holds)];
-  ok(all.some((f) => f.endsWith('adapters.json')) && !plain.length, `the setup token and the create's client secret are in NO file of the data dir (${all.length} files read)`, plain.join(', '));
+  ok(gateOf(all.some((f) => f.endsWith('adapters.json'))) && !plain.length, `the setup token and the create's client secret are in NO file of the data dir (${all.length} files read)`, plain.join(', '));
   const planted = path.join(root, 'planted.json'); fs.writeFileSync(planted, JSON.stringify({ flow: { step: 'created', facts: { t: CONFIG_TOKEN } } }));
   ok(filesUnder(root).filter(holds).join() === planted, 'CONTROL: the same census finds a planted copy');
   const said = JSON.stringify([logLines.slice(from), frames, st, r1, s1, r3, c, eng.digest()]);
@@ -495,12 +495,12 @@ console.log('⑨ the workspace app through the engine');
   ok(st.credentialKey === 'cluster:acme' && cq.get('client_id') === WS_CLIENT_ID && cq.get('redirect_uri') === RELAY_URL && cq.get('user_scope') === SM.USER_SCOPES.join(',') && v.calls.length === 0, 'start under the preset: Slack\'s consent URL — the app\'s client id, the relay as redirect_uri, the user scopes; no vendor call yet');
   const L1 = await land(eng, v, st.url);
   const ex = v.calls.filter((c) => c.method === 'oauth.v2.access');
-  ok(L1.to && L1.to.origin === ORIGIN && L1.to.pathname === '/api/channels/oauth/cb/slack' && L1.r.ok === true && L1.r.user === 'Acme · @mart' && ex.length === 1 && ex[0].params.redirect_uri === RELAY_URL && !!ex[0].params.code && v.calls.map((c) => c.method).join() === 'oauth.v2.access,auth.test', 'Allow → the relay sends the browser to THIS instance\'s route → ONE oauth.v2.access (the code + the SAME redirect_uri; the app by HTTP Basic) then auth.test → signed in', JSON.stringify({ to: L1.to && L1.to.href, r: L1.r, calls: v.calls.map((c) => c.method) }));
+  ok(gateOf(L1.to) && L1.to.origin === ORIGIN && L1.to.pathname === '/api/channels/oauth/cb/slack' && L1.r.ok === true && L1.r.user === 'Acme · @mart' && ex.length === 1 && ex[0].params.redirect_uri === RELAY_URL && !!ex[0].params.code && v.calls.map((c) => c.method).join() === 'oauth.v2.access,auth.test', 'Allow → the relay sends the browser to THIS instance\'s route → ONE oauth.v2.access (the code + the SAME redirect_uri; the app by HTTP Basic) then auth.test → signed in', JSON.stringify({ to: L1.to && L1.to.href, r: L1.r, calls: v.calls.map((c) => c.method) }));
   const s1 = eng.oauthStatus(st.flowId);
   const replay = await eng.oauthLanding({ kind: 'slack', code: L1.to.searchParams.get('code'), state: L1.to.searchParams.get('state') });
   ok(s1.done === true && s1.ok === true && s1.token === st.flowId && replay.why === 'used' && v.calls.filter((c) => c.method === 'oauth.v2.access').length === 1, 'the dialog\'s poll reads it done; the same landing replayed is refused `used` and Slack is not asked again');
   const c1 = await eng.connect('slack', { flowId: st.flowId });
-  ok(c1.adapter && c1.adapter.kind === 'slack' && eng.digest().adapters.filter((a) => a.kind === 'slack').length === 1, 'Connect creates the account');
+  ok(gateOf(c1.adapter) && c1.adapter.kind === 'slack' && eng.digest().adapters.filter((a) => a.kind === 'slack').length === 1, 'Connect creates the account');
   // refusals by name
   const st2 = await eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN });
   const s2 = new URL(st2.url).searchParams.get('state');
@@ -514,24 +514,24 @@ console.log('⑨ the workspace app through the engine');
   ok(rf.join() === 'bad-hmac,bad-hmac,wrong-kind,bad-shape' && late.why === 'expired' && v.calls.filter((c) => c.method === 'oauth.v2.access').length === n0, `a flipped signature, another pod's state, the wrong kind's route, a malformed state, past the TTL: refused by name (${rf.join()},${late.why}), Slack never asked`);
   const st3 = await eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN });
   const L3 = await land(eng, v, st3.url, { deny: true });
-  ok(L3.r && L3.r.why === 'denied' && /did not grant/.test(eng.oauthStatus(st3.flowId).error || ''), 'access_denied: the relay passes it back, the flow ends by name');
+  ok(gateOf(L3.r) && L3.r.why === 'denied' && verdictOf(/did not grant/.test(eng.oauthStatus(st3.flowId).error || '')), 'access_denied: the relay passes it back, the flow ends by name');
   // two members → two accounts
   const st4 = await eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN });
   const L4 = await land(eng, v, st4.url, { token: WS_TOKEN2 });
   const c4 = await eng.connect('slack', { flowId: st4.flowId, newAccount: true });
-  ok(L4.r.ok && /@kim/.test(L4.r.user) && c4.adapter && c4.adapter.id !== c1.adapter.id && eng.digest().adapters.filter((a) => a.kind === 'slack').length === 2, 'a second member presses Allow: a second account with its own token');
+  ok(gateOf(L4.r.ok) && gateOf(/@kim/.test(L4.r.user)) && gateOf(c4.adapter) && c4.adapter.id !== c1.adapter.id && eng.digest().adapters.filter((a) => a.kind === 'slack').length === 2, 'a second member presses Allow: a second account with its own token');
   // the secret: in no file, log line, frame, answer, status or error
   const WRONG = ['wrong', 'secret', 'fixture', '0123456789'].join('-');   // split, as the fixture's own literals
   const W9b = await mkEngine('workspace-wrong-secret', { storeEnv: preset({ clientSecret: WRONG }) });
   const stb = await W9b.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN });
   const Lb = await land(W9b.eng, W9b.v, stb.url);
   const basic = Buffer.from(`${WS_CLIENT_ID}:${WS_CLIENT_SECRET}`).toString('base64'), basicB = Buffer.from(`${WS_CLIENT_ID}:${WRONG}`).toString('base64');
-  ok(Lb.r.ok === false && Lb.r.why === 'failed' && /client id or secret was refused/.test(Lb.r.error || '') && !(Lb.r.error || '').includes('wrong-secret-fixture') && !(Lb.r.error || '').includes(basicB), 'a refused client (the fake ECHOES the Basic header): the landing names it — and carries neither the secret nor its Basic form', Lb.r.error);
+  ok(Lb.r.ok === false && Lb.r.why === 'failed' && gateOf(/client id or secret was refused/.test(Lb.r.error || '')) && !(Lb.r.error || '').includes('wrong-secret-fixture') && !(Lb.r.error || '').includes(basicB), 'a refused client (the fake ECHOES the Basic header): the landing names it — and carries neither the secret nor its Basic form', Lb.r.error);
   const holds9 = (f) => { const b = fs.readFileSync(f); return b.includes(WS_CLIENT_SECRET) || b.includes(basic) || b.includes('wrong-secret-fixture') || b.includes(basicB); };
   const unl9 = [...unlandedUnder(root), ...unlandedUnder(W9b.root)];   // item 7 (store-writer follow-up): the owner's flush first
   const files9 = [...filesUnder(root), ...filesUnder(W9b.root)];
   const said9 = JSON.stringify([logLines.slice(from), frames, W9b.frames, st, L1.r, s1, replay, c1, L3.r, L4.r, c4, Lb.r, eng.digest(), eng.oauthStatus(st3.flowId), W9b.eng.oauthStatus(stb.flowId), SW.landingHtml(Lb.r)]);
-  ok(files9.some((f) => f.endsWith('adapters.json')) && !unl9.length && !files9.filter(holds9).length && !said9.includes(WS_CLIENT_SECRET) && !said9.includes(basic) && !said9.includes('wrong-secret-fixture') && !said9.includes(basicB), `the client secret (and its Basic form) in NO file of the data dirs (${files9.length}), log line, frame, answer, status, landing page or error`, [...unl9, ...files9.filter(holds9)].join(', '));
+  ok(gateOf(files9.some((f) => f.endsWith('adapters.json'))) && !unl9.length && !files9.filter(holds9).length && !said9.includes(WS_CLIENT_SECRET) && !said9.includes(basic) && !said9.includes('wrong-secret-fixture') && !said9.includes(basicB), `the client secret (and its Basic form) in NO file of the data dirs (${files9.length}), log line, frame, answer, status, landing page or error`, [...unl9, ...files9.filter(holds9)].join(', '));
   const planted9 = path.join(root, 'planted.json'); fs.writeFileSync(planted9, JSON.stringify({ c: WS_CLIENT_SECRET }));
   ok(filesUnder(root).filter(holds9).join() === planted9, 'CONTROL: the same census finds a planted copy'); fs.unlinkSync(planted9);
   // a paste account RE-POINTED through the preset: the same record, the token replaced
@@ -543,7 +543,7 @@ console.log('⑨ the workspace app through the engine');
   const rr = await W10.eng.reauthorize(cp.adapter.id, { clientPreset: 'acme', origin: ORIGIN });
   const L10 = await land(W10.eng, W10.v, rr.flow.consentUrl);
   const recs = JSON.parse(fs.readFileSync(filesUnder(W10.root).find((f) => f.endsWith('adapters.json')), 'utf-8')).adapters.filter((a) => a.kind === 'slack');
-  ok(sp.flow.mode === 'paste' && before && rr.rebind === true && L10.r.ok === true && recs.length === 1 && recs[0].id === cp.adapter.id && recs[0].credentialKey === 'cluster:acme', 'a paste account re-authorized through the preset: the SAME record, now bound to the preset (no second account)', JSON.stringify({ rebind: rr.rebind, r: L10.r, recs: recs.map((x) => [x.id, x.credentialKey]) }));
+  ok(sp.flow.mode === 'paste' && gateOf(before) && rr.rebind === true && L10.r.ok === true && recs.length === 1 && recs[0].id === cp.adapter.id && recs[0].credentialKey === 'cluster:acme', 'a paste account re-authorized through the preset: the SAME record, now bound to the preset (no second account)', JSON.stringify({ rebind: rr.rebind, r: L10.r, recs: recs.map((x) => [x.id, x.credentialKey]) }));
   // verify r1: re-pointed onto the preset as ANOTHER Slack person / workspace — the landing page AND the record refuse it
   // by name, the paste binding + token untouched (the page used to say "connected" over the record's refusal)
   for (const [who, tok, whoami] of [['another person', WS_TOKEN2, { user_id: 'U0SECOND', user: 'kim' }], ['another workspace', WS_TOKEN.replace('abcd', 'qrst'), { team_id: 'T0OTHERTEAM', team: 'Other' }]]) {
@@ -557,7 +557,7 @@ console.log('⑨ the workspace app through the engine');
     const Lx = await land(Wx.eng, Wx.v, rx.flow.consentUrl, { token: tok });
     const after = recsX();
     // slack-landing-nologin verify r1: the landing page is cookie-free — it says the refusal in fixed words and never the held / offered identity
-    ok(Lx.r.ok === false && /the account was not changed/.test(Lx.r.error || '') && /data-landing="failed"/.test(SW.landingHtml(Lx.r)) && !/t0acme001|u0self001|u0second|t0otherteam/i.test(SW.landingHtml(Lx.r)) && after.length === 1 && after[0].credentialKey == null && JSON.stringify(after[0].auth) === held && /must be the same account/.test(after[0].lastAuthError || ''), `a paste account re-pointed onto the preset as ${who}: the landing page refuses it in fixed words (no identity) and the record by name, the paste binding + token untouched`, JSON.stringify({ r: Lx.r, key: after[0] && after[0].credentialKey, err: after[0] && after[0].lastAuthError }));
+    ok(Lx.r.ok === false && gateOf(/the account was not changed/.test(Lx.r.error || '')) && gateOf(/data-landing="failed"/.test(SW.landingHtml(Lx.r))) && !/t0acme001|u0self001|u0second|t0otherteam/i.test(SW.landingHtml(Lx.r)) && after.length === 1 && after[0].credentialKey == null && JSON.stringify(after[0].auth) === held && verdictOf(/must be the same account/.test(after[0].lastAuthError || '')), `a paste account re-pointed onto the preset as ${who}: the landing page refuses it in fixed words (no identity) and the record by name, the paste binding + token untouched`, JSON.stringify({ r: Lx.r, key: after[0] && after[0].credentialKey, err: after[0] && after[0].lastAuthError }));
   }
   {   // …and through the re-authorize dialog's PASTE-BACK (a public origin: the relay SHOWS the code, the member pastes it)
     const Wp = await mkEngine('repoint-paste', { storeEnv: preset(), mode: { whoami: { [WS_TOKEN2]: { user_id: 'U0SECOND', user: 'kim' } } } });
@@ -568,7 +568,7 @@ console.log('⑨ the workspace app through the engine');
     const shown = RELAY.decide(new URL(Wp.v.allow(rx.flow.consentUrl, { token: WS_TOKEN2 })).search, []);
     const fx = await Wp.eng.finishAuth(cx.adapter.id, shown.code);
     const after = JSON.parse(fs.readFileSync(filesUnder(Wp.root).find((f) => f.endsWith('adapters.json')), 'utf-8')).adapters.filter((a) => a.kind === 'slack');
-    ok(shown.act === 'show-code' && fx.ok === false && /must be the same account/.test(fx.error || '') && after.length === 1 && after[0].credentialKey == null, 'the same re-point through the dialog\'s paste-back (the relay showed the code): refused by name, the paste binding kept', JSON.stringify({ shown: shown.act, fx }));
+    ok(shown.act === 'show-code' && fx.ok === false && gateOf(/must be the same account/.test(fx.error || '')) && after.length === 1 && after[0].credentialKey == null, 'the same re-point through the dialog\'s paste-back (the relay showed the code): refused by name, the paste binding kept', JSON.stringify({ shown: shown.act, fx }));
   }
   // no preset → the paste steps; a preset without a relay: http refused `no-https`; https → refused `preset-unlisted` BEFORE
   // Slack opens (lane gmail-connect-wall R3: a company app comes back to the instance's own address only when its preset
@@ -595,11 +595,11 @@ console.log('⑨ the workspace app through the engine');
     const fo = await W13.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.fleet.example.test' });
     const fc = await W12.eng.startOAuth({ kind: 'slack', clientPreset: 'custom', clientId: WS_CLIENT_ID, clientSecret: WS_CLIENT_SECRET, origin: ORIGIN });
     const back = RELAY.decide(new URL(W12.v.allow(fp.url)).search, ['fleet.example.test']);
-    ok(rOf(fh) === FLEET_RELAY && rOf(fp) === FLEET_RELAY && rOf(fo) === RELAY_URL && rOf(fc) === SM.RELAY_DEFAULT && back.act === 'redirect' && back.to.startsWith('https://pod-7.fleet.example.test/api/channels/oauth/cb/slack?'),
+    ok(rOf(fh) === FLEET_RELAY && rOf(fp) === FLEET_RELAY && rOf(fo) === RELAY_URL && rOf(fc) === SM.RELAY_DEFAULT && back.act === 'redirect' && verdictOf(back.to.startsWith('https://pod-7.fleet.example.test/api/channels/oauth/cb/slack?')),
       'addendum 1: a preset naming no relay page rides the FLEET\'s on a fleet pod (an http hub too — no more no-https), the cluster\'s copy sends the pod back; a preset\'s own page outranks the fleet\'s; the custom rung keeps the setting\'s page', JSON.stringify({ fh: rOf(fh), fp: rOf(fp), fo: rOf(fo), fc: rOf(fc), back: back.act }));
   }
-  ok(nl && nl.detail && nl.detail.why === 'preset-unlisted' && /make your own app/.test(nl.message || ''), `lane gmail-connect-wall (R3): a preset with no relay page that does not list this address is refused on an https origin BEFORE Slack opens — never a redirect its app does not list (${JSON.stringify(nl && nl.detail)})`);
-  ok(np.flow.mode === 'paste' && np.credentialKey === null && nh && nh.detail && nh.detail.why === 'no-https' && new URL(sh.url).searchParams.get('redirect_uri') === 'https://pod-7.example.test/api/channels/oauth/cb/slack' && cu.credentialKey === 'custom' && new URL(cu.url).searchParams.get('redirect_uri') === 'https://problemfactory.github.io/vibespace/slack/', 'no preset → the paste steps; a preset without a relay: an http instance refused by name (no-https), an https one uses its own callback; a custom client → the relay page setting\'s default', JSON.stringify({ np: np.flow.mode, nh: nh && nh.detail, sh: sh.url && new URL(sh.url).searchParams.get('redirect_uri'), cu: cu.url && new URL(cu.url).searchParams.get('redirect_uri') }));
+  ok(gateOf(nl) && gateOf(nl.detail) && nl.detail.why === 'preset-unlisted' && verdictOf(/make your own app/.test(nl.message || '')), `lane gmail-connect-wall (R3): a preset with no relay page that does not list this address is refused on an https origin BEFORE Slack opens — never a redirect its app does not list (${JSON.stringify(nl && nl.detail)})`);
+  ok(np.flow.mode === 'paste' && np.credentialKey === null && gateOf(nh) && gateOf(nh.detail) && nh.detail.why === 'no-https' && new URL(sh.url).searchParams.get('redirect_uri') === 'https://pod-7.example.test/api/channels/oauth/cb/slack' && cu.credentialKey === 'custom' && new URL(cu.url).searchParams.get('redirect_uri') === 'https://problemfactory.github.io/vibespace/slack/', 'no preset → the paste steps; a preset without a relay: an http instance refused by name (no-https), an https one uses its own callback; a custom client → the relay page setting\'s default', JSON.stringify({ np: np.flow.mode, nh: nh && nh.detail, sh: sh.url && new URL(sh.url).searchParams.get('redirect_uri'), cu: cu.url && new URL(cu.url).searchParams.get('redirect_uri') }));
 }
 
 // ── ⑩ THE GRID UPGRADE through the engine (lane slack-grid-identity, 2026-10-14 — owner + userW: the workspace moved
@@ -628,10 +628,10 @@ console.log('⑩ the grid upgrade: the same person named with the org re-authori
   const f1 = await eng.finishAuth(G.id, T2);
   const id1 = recOf().identity, v1 = eng.digest().adapters.find((a) => a.id === G.id);
   const ent = ENT.toLowerCase();
-  ok(r1.flow && r1.flow.mode === 'paste' && f1.ok === true && !f1.error, `the re-authorize after the upgrade is ACCEPTED (${JSON.stringify(f1)})`);
+  ok(gateOf(r1.flow) && r1.flow.mode === 'paste' && f1.ok === true && !f1.error, `the re-authorize after the upgrade is ACCEPTED (${JSON.stringify(f1)})`);
   ok(id1.userId === `${ent}/t0acme001/u0self001` && id1.orgId === ent && id1.teamId === 't0acme001' && id1.memberId === 'u0self001', 'the identity LEARNED the org: rewritten to the richer form (`e…/t…/u…`, orgId)', JSON.stringify(id1));
-  ok(v1 && v1.lastAuthNote && v1.lastAuthNote.code === 'enterprise-learned' && !v1.lastAuthError && v1.auth.state === 'connected', 'the account view carries the card\'s note (`enterprise-learned`), no error, connected');
-  ok(learnLines().length === 1 && learnLines()[0].includes(ent), 'ONE log line says what was learned', JSON.stringify(learnLines()));
+  ok(gateOf(v1) && gateOf(v1.lastAuthNote) && v1.lastAuthNote.code === 'enterprise-learned' && !v1.lastAuthError && v1.auth.state === 'connected', 'the account view carries the card\'s note (`enterprise-learned`), no error, connected');
+  ok(learnLines().length === 1 && verdictOf(learnLines()[0].includes(ent)), 'ONE log line says what was learned', JSON.stringify(learnLines()));
   // 2) the next sign-in naming the same org: nothing new — no second identity write, the note cleared
   await eng.reauthorize(G.id, {});
   const f2 = await eng.finishAuth(G.id, T3);
@@ -647,7 +647,7 @@ console.log('⑩ the grid upgrade: the same person named with the org re-authori
   const f4 = await eng.finishAuth(G.id, T5);
   const said4 = String((f4 && f4.error) || '');
   const want4 = ID.mismatchSentence(recOf().label || G.id, { held: `${ent}/t0acme001/u0self001`, offered: `${ent}/t0acme001/u0afxyou02` });
-  ok(f4.ok === false && said4.includes(want4) && JSON.stringify(recOf().auth) === held && JSON.stringify(recOf().identity) === JSON.stringify(id1), `ANOTHER person of the org is refused with the unchanged sentence; the token and identity untouched (${said4.slice(0, 140)}…)`);
+  ok(f4.ok === false && gateOf(said4.includes(want4)) && JSON.stringify(recOf().auth) === held && JSON.stringify(recOf().identity) === JSON.stringify(id1), `ANOTHER person of the org is refused with the unchanged sentence; the token and identity untouched (${said4.slice(0, 140)}…)`);
   // 5) THE REBIND DOOR: a paste account re-pointed onto a workspace preset by the same person, now named with the org
   const { WS_CLIENT_ID, WS_CLIENT_SECRET, WS_TOKEN } = require(path.join(REPO, 'scripts/fixtures/slack-vendor.cjs'));
   const ORIGIN = 'http://192.168.1.9:3000', RELAY_URL = 'https://relay.example.test/slack/';
@@ -662,8 +662,8 @@ console.log('⑩ the grid upgrade: the same person named with the org re-authori
   const lr = await Wr.eng.oauthLanding({ kind: 'slack', code: back.searchParams.get('code'), state: back.searchParams.get('state') });
   const recR = JSON.parse(fs.readFileSync(filesUnder(Wr.root).find((f) => f.endsWith('adapters.json')), 'utf-8')).adapters.find((a) => a.id === cp.adapter.id);
   const vR = Wr.eng.digest().adapters.find((a) => a.id === cp.adapter.id);
-  ok(rr.rebind === true && lr.ok === true && recR.credentialKey === 'cluster:acme' && recR.identity.userId === `${ent}/t0acme001/u0self001` && recR.identity.orgId === ent && vR.lastAuthNote && vR.lastAuthNote.code === 'enterprise-learned', `THE REBIND DOOR: the same person re-pointed onto the preset, now named with the org — accepted, re-bound, the org learned (${JSON.stringify(recR.identity)})`);
+  ok(rr.rebind === true && lr.ok === true && recR.credentialKey === 'cluster:acme' && recR.identity.userId === `${ent}/t0acme001/u0self001` && recR.identity.orgId === ent && gateOf(vR.lastAuthNote) && vR.lastAuthNote.code === 'enterprise-learned', `THE REBIND DOOR: the same person re-pointed onto the preset, now named with the org — accepted, re-bound, the org learned (${JSON.stringify(recR.identity)})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

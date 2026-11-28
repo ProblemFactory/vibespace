@@ -47,7 +47,7 @@ const locked = [];
 process.on('exit', () => { for (const d of locked) { try { fs.chmodSync(d, 0o755); } catch { } } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 let passed = 0, failed = 0;
 const say = console.log.bind(console);
-function ok(c, name, detail) { if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + String(detail).slice(0, 700)}`); } return !!c; }
+function ok(c, name, detail) { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + String(detail).slice(0, 700)}`); } return !!c; }
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -362,7 +362,7 @@ function patched(tag) {
 
 const run = async (name, T) => { const t = performance.now(); try { const r = await LEGS[name](T); r.detail += ` [${(performance.now() - t).toFixed(0)} ms]`; return r; } catch (e) { return { ok: false, detail: `threw: ${(e && e.stack) || e}`.slice(0, 600) }; } finally { skew = 0; } };
 say('this tree');
-for (const leg of Object.keys(LEGS)) { const r = await run(leg, REPO); ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of Object.keys(LEGS)) { const r = await run(leg, REPO); ok(verdictOf(r.ok), `${leg}: ${r.detail}`); }
 say('RED CONTROLS — patches this suite carries on this tree\'s src/task-groups.js (each RED at its own leg)');
 for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   const M = patched(tag);
@@ -444,32 +444,32 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   for (const f of files) { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); let m; CALLS.lastIndex = 0; while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const x = a != null && factsOf(t, m[1], a, m.index); if (x && x.facts) { calls++; if (x.via) viaVar++; } } for (const x of missing(t, f)) bad.push(`${f}: ${x}`); }
   ok(calls >= 26 && viaVar >= 2 && bad.length === 0 && reentries === 4 && passes === 1 && waits === 1, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession, B-55dc's deciding doors and the create's Task-Group facts; the store's own ${reentries} re-entries pass their caller's facts — 2.369.411's groupIdsForGrant among them; the seam's ONE helper grantMemberIds passes ${passes}, its callers rows here; the keeper's waiting cap re-stamps ${waits} time (retryWaitingCaps) with the facts its own first call was handed), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
   { const before = waits, KPF = path.join('src', 'server', 'browser-keeper.js'), SEEN = "  function retryWaitingCaps() { for (const [k, f] of [...capWaiting]) stampGroupCap(k, f); }\n  function stampGroupCap(browserKey, facts = {}) { capWaiting.set(bk, facts || {}); }";
-    ok(missing(SEEN, KPF).length === 0 && /UNSEEN/.test(missing(SEEN, 'src/server/other.js').join('')) && /UNSEEN/.test(missing("  const later = () => { for (const [k, f] of [...capWaiting]) stampGroupCap(k, f); };\n  function stampGroupCap(browserKey, facts = {}) { capWaiting.set(bk, facts || {}); }", KPF).join('')),
+    ok(missing(SEEN, KPF).length === 0 && gateOf(/UNSEEN/.test(missing(SEEN, 'src/server/other.js').join(''))) && verdictOf(/UNSEEN/.test(missing("  const later = () => { for (const [k, f] of [...capWaiting]) stampGroupCap(k, f); };\n  function stampGroupCap(browserKey, facts = {}) { capWaiting.set(bk, facts || {}); }", KPF).join(''))),
       'CONTROL (the keeper\'s waiting cap): its re-stamp with the facts the first call handed passes ONLY on the line of retryWaitingCaps in the keeper (another file, another line: UNSEEN, a red)');
     waits = before; }
   ok(missing("x = tasks.groupsForSession({\n  sessionKey: k,\n  cwd: s.cwd,\n  initialGroupId: s._initialGroupId,\n});").length === 1, 'CONTROL: a planted MULTI-LINE call that hands a cwd without its machine is caught');
   { const before = passes, MPF = path.join('src', 'server', 'mounts-plugins-wiring.js');
-    ok(/UNSEEN/.test(missing("const grantMemberIds = (tasks, a) => tasks.memberIds(a);", 'src/server/other.js').join('')) && /UNSEEN/.test(missing("const otherHelper = (tasks, a) => tasks.memberIds(a);", MPF).join(''))
+    ok(gateOf(/UNSEEN/.test(missing("const grantMemberIds = (tasks, a) => tasks.memberIds(a);", 'src/server/other.js').join(''))) && gateOf(/UNSEEN/.test(missing("const otherHelper = (tasks, a) => tasks.memberIds(a);", MPF).join('')))
       && missing("const grantMemberIds = (tasks, a, reader) => (tasks.isHeldUnread() ? tasks.groupIdsForGrant(a, reader) : tasks.memberIds(a));", MPF).length === 0
       && missing("x = grantMemberIds(tasks, { sessionKey: k, cwd: s.cwd });", MPF).length === 1 && missing("x = grantMemberIds(tasks, { sessionKey: k, cwd: s.cwd, hostId: s.host || null });", MPF).length === 0,
       'CONTROL (the seam\'s helper): its memberIds(a) passes ONLY on its own line in the wiring (the same line in another file, another name: UNSEEN, a red); a CALLER of it that hands a cwd without its machine is caught, one with it passes');
     passes = before; }
-  ok(OWED_BUILT && owedPasses === 2, `the owed pin's group facts: built ONCE with the machine (src/ws-create.js: gf = { cwd, hostId: data.hostId || null, … } → groupFacts: gf) and handed on as they are at the read — ${owedPasses} declared hand-ons (the keeper's stampGroupCap, the key module's taskGroupCapFor)`);
+  ok(gateOf(OWED_BUILT) && owedPasses === 2, `the owed pin's group facts: built ONCE with the machine (src/ws-create.js: gf = { cwd, hostId: data.hostId || null, … } → groupFacts: gf) and handed on as they are at the read — ${owedPasses} declared hand-ons (the keeper's stampGroupCap, the key module's taskGroupCapFor)`);
   { const before = owedPasses;
-    ok(/UNSEEN/.test(missing("function f(owed) { return kc.stampGroupCap(k, owed.groupFacts, {}); }", 'src/server/other.js').join('')) && /UNSEEN/.test(missing("function f(o) { return kc.taskGroupCapFor(o.facts || {}); }", 'src/server/browser-key.js').join(''))
-      && OWED_PASS.every(([f, n, i, arg]) => owedPass('', f, [null, n], i ? `k, ${arg}, {}` : arg) && !owedPass('', f, [null, n], i ? `k, ${arg}, {}` : arg, builtIn(WSC.replace('const gf = { cwd, hostId: data.hostId || null, ', 'const gf = { cwd, ')))),
+    ok(gateOf(/UNSEEN/.test(missing("function f(owed) { return kc.stampGroupCap(k, owed.groupFacts, {}); }", 'src/server/other.js').join(''))) && gateOf(/UNSEEN/.test(missing("function f(o) { return kc.taskGroupCapFor(o.facts || {}); }", 'src/server/browser-key.js').join('')))
+      && verdictOf(OWED_PASS.every(([f, n, i, arg]) => owedPass('', f, [null, n], i ? `k, ${arg}, {}` : arg) && !owedPass('', f, [null, n], i ? `k, ${arg}, {}` : arg, builtIn(WSC.replace('const gf = { cwd, hostId: data.hostId || null, ', 'const gf = { cwd, '))))),
     'CONTROLS: the same hand-on in ANOTHER file, or another argument in the key module, is UNSEEN (a red); each declared hand-on passes only while its builder hands the machine — a builder copy without hostId fails both (a red)');
     owedPasses = before; }
 
   ok(missing("a = kc.taskGroupCapFor({ cwd, initialGroupId: g }); b = tasks.groupsForSession({ cwd: s.cwd, hostId: s.host || null });").length === 1, 'CONTROL: a hostId of a LATER call on the same line does not cover an earlier one');
   ok(missing("const facts = { cwd: s.cwd, initialGroupId: g };\nconst d = kc.taskGroupDefaultFor(facts); kc.stampGroupCap(k, facts, {});").length === 2, 'CONTROL: a planted VARIABLE whose object literal hands a cwd without its machine is caught at each call that hands it');
-  ok(/UNSEEN/.test(missing("function f(a) { return tasks.groupsForSession(a); }").join('')), 'CONTROL: a variable the census cannot read at an object literal (a parameter) is UNSEEN — a red');
+  ok(verdictOf(/UNSEEN/.test(missing("function f(a) { return tasks.groupsForSession(a); }").join(''))), 'CONTROL: a variable the census cannot read at an object literal (a parameter) is UNSEEN — a red');
   { const before = reentries;
-    ok(/UNSEEN/.test(missing("function f(a) { return this.membershipRead(a); }", 'src/server/other.js').join('')) && missing("x = tasks.membershipRead({ sessionKey: k, cwd: s.cwd });").length === 1 && missing("function f(a) { return this.groupsForSession(a); }", 'src/task-groups.js').length === 0,
+    ok(gateOf(/UNSEEN/.test(missing("function f(a) { return this.membershipRead(a); }", 'src/server/other.js').join(''))) && missing("x = tasks.membershipRead({ sessionKey: k, cwd: s.cwd });").length === 1 && missing("function f(a) { return this.groupsForSession(a); }", 'src/task-groups.js').length === 0,
       'CONTROL: a `this.` re-entry with a bare parameter passes ONLY in the store itself (another file: UNSEEN, a red); a deciding door handed a cwd without its machine is caught');
     reentries = before; }
   ok(missing("function g() { const facts = { cwd, hostId: h }; } function f(s) { const facts = { cwd: s.cwd }; return kc.taskGroupDefaultFor(facts); }").length === 1, 'CONTROL: the NEAREST declaration before the call judges it (another function\'s literal of the same name does not cover it)');
-  ok(/spread/.test(missing("x = tasks.groupsForSession({ ...facts, sessionKey: k });").join('')) && missing("x = tasks.groupsForSession({ sessionKey: k, cwd: s.cwd, hostId: null });").length === 1, 'CONTROL: a spread in the facts is UNSEEN; a literal `hostId: null` hands no machine');
+  ok(gateOf(/spread/.test(missing("x = tasks.groupsForSession({ ...facts, sessionKey: k });").join(''))) && missing("x = tasks.groupsForSession({ sessionKey: k, cwd: s.cwd, hostId: null });").length === 1, 'CONTROL: a spread in the facts is UNSEEN; a literal `hostId: null` hands no machine');
 }
 
 // ⑨c B-df5f cure — THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP (主开发 09:43Z; its reader's must): the page's own copy
@@ -496,9 +496,9 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   const serverSays = (row) => tg.groupsForSession({ sessionKey: row.sessionKey, cwd: row.cwd, hostId: row.host || null }).some((t) => t.id === 'T-bd');   // as every caller asks (no caller hands a realCwd)
   const boardBy = (cwdsOf) => (row) => cwdsOf({ cwd: row.cwd, realCwd: row.realCwd, host: row.host }).some((c) => TM.insideFolder(c, rec));
   ok(typeof TM.membershipCwds === 'function' && typeof TM.onOtherMachine === 'function', 'task-membership carries the ONE rule: membershipCwds (the page\'s cwds) and onOtherMachine (none and \'local\' are the hub)');
-  ok(/const cwds = membershipCwds\(\{ cwd: stripCwdHostLabel\(s\.cwd\), realCwd: s\.realCwd, hostRealCwd: s\.hostRealCwd, host: s\.host \}\);/.test(PAGE) && !/\[stripCwdHostLabel\(s\.cwd\), s\.realCwd\]/.test(PAGE) && /host: wm\?\.host \|\| null,/.test(MERGE),   // stale-pins: kept — the deliberate absence check: the old cwds line is gone
+  ok(gateOf(/const cwds = membershipCwds\(\{ cwd: stripCwdHostLabel\(s\.cwd\), realCwd: s\.realCwd, hostRealCwd: s\.hostRealCwd, host: s\.host \}\);/.test(PAGE)) && !/\[stripCwdHostLabel\(s\.cwd\), s\.realCwd\]/.test(PAGE) && verdictOf(/host: wm\?\.host \|\| null,/.test(MERGE)),   // stale-pins: kept — the deliberate absence check: the old cwds line is gone
     'the page\'s folder match (sidebar-tasks _sessionFolderMatch) takes its cwds from membershipCwds with the row\'s host — the host the merge (sidebar _merge) lays over a hub row');
-  ok(/const under = membershipCwds\(\{ cwd: s\.cwd, realCwd: s\.realCwd, host: s\.host \}\)\.some\(\(c\) => insideFolder\(c, rec\)\);/.test(APP) && !/insideFolder\(s\.cwd, rec\) \|\| \(s\.realCwd && insideFolder\(s\.realCwd, rec\)\)/.test(APP),   // stale-pins: kept — the deliberate absence check: the chips' own copy is gone
+  ok(gateOf(/const under = membershipCwds\(\{ cwd: s\.cwd, realCwd: s\.realCwd, host: s\.host \}\)\.some\(\(c\) => insideFolder\(c, rec\)\);/.test(APP)) && !/insideFolder\(s\.cwd, rec\) \|\| \(s\.realCwd && insideFolder\(s\.realCwd, rec\)\)/.test(APP),   // stale-pins: kept — the deliberate absence check: the chips' own copy is gone
     'cure 2: the New Session folder chips (app.js _taskCwdSuggestions) take their cwds from the same membershipCwds — the page holds ONE copy of the rule');
   {   // (on a tree without membershipCwds the page's rule before is judged — the scene goes red BY NAME, never skipped)
     const cwdsOf = typeof TM.membershipCwds === 'function' ? TM.membershipCwds : ({ cwd, realCwd }) => [cwd, realCwd].filter(Boolean);
@@ -553,7 +553,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
     tg._notify = keepNotify;
     delete tg._state.tasks['T-hub'];
     tg._state.tasks['T-bd'].ctx = keepCtx; tg._save();
-    ok(farNamed.includes('T-bd') && !farNamed.includes('T-hub') && hubNamed.includes('T-hub') && !hubNamed.includes('T-bd'), `B-16d7 × B-06de: a machine's real folder that moved names the group it adds ON THAT MACHINE only — the far pair names T-bd (its own row), never T-hub (a hub row); the hub's own move names T-hub, never T-bd (far ${JSON.stringify(farNamed)} · hub ${JSON.stringify(hubNamed)})`);
+    ok(gateOf(farNamed.includes('T-bd')) && !farNamed.includes('T-hub') && gateOf(hubNamed.includes('T-hub')) && !hubNamed.includes('T-bd'), `B-16d7 × B-06de: a machine's real folder that moved names the group it adds ON THAT MACHINE only — the far pair names T-bd (its own row), never T-hub (a hub row); the hub's own move names T-hub, never T-bd (far ${JSON.stringify(farNamed)} · hub ${JSON.stringify(hubNamed)})`);
     ok(hr.board === true && hr.server === true, `B-16d7: another machine's conversation at a link whose target is the group's folder, by ITS machine's real folder — on that machine's OWN row (B-06de: a hub row gathers the hub's only): the board AND the server say member — ${JSON.stringify(hr)}`);
     ok(hr0.board === true && hr0.server === false, `RED CONTROL (the store reading no machine-resolved folder, as released): the board says member, the server not ⇒ RED — ${JSON.stringify(hr0)}`);
   }
@@ -578,4 +578,4 @@ const b = bench(REPO);
 say(`THE BENCH at the owner's shape (7 Task Groups × 200 bound conversations, 6 discover rows, 36 live, ${36 * 300} asks): the walk ${b.walk.toFixed(2)} µs per ask, the index ${b.index.toFixed(2)} µs; a store write that moves nothing membership reads costs the next ask ${b.sigUs.toFixed(0)} µs (the signature)`);
 ok(b.index < b.walk, `the index answers faster than the walk at the owner's shape (${b.index.toFixed(2)} < ${b.walk.toFixed(2)} µs)`);
 say(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

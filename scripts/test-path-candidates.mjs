@@ -29,7 +29,7 @@ const require = createRequire(import.meta.url);
 const api = require('../src/path-candidates.js');
 
 let bad = 0, n = 0;
-const ok = (name, cond, got) => { n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + JSON.stringify(got)}`); };
+const ok = (name, cond, got) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + JSON.stringify(got)}`); };
 
 /* ═══ the fake machines (the POC's, as they were) ═══ */
 const F = (name, size, when) => ({ name, size, when });
@@ -148,27 +148,27 @@ for (const [q, o, wantTop, wantRes] of cases) {
   const res = m.resolved.map((r) => r.path).join('|');
   const okTop = wantTop == null || top === wantTop;
   const okRes = wantRes == null || res === wantRes;
-  ok(`q=${JSON.stringify(q)} ${JSON.stringify(o)} mode=${m.mode} top=${top} rule=${m.best ? m.best.rule : '-'} score=${m.best ? m.best.score : '-'} resolved=${res || '-'}`, okTop && okRes, { top, res });
+  ok(`q=${JSON.stringify(q)} ${JSON.stringify(o)} mode=${m.mode} top=${top} rule=${m.best ? m.best.rule : '-'} score=${m.best ? m.best.score : '-'} resolved=${res || '-'}`, gateOf(okTop) && verdictOf(okRes), { top, res });
 }
 {
   const m = api.rankCandidates('合同', inputs({}));
-  ok('合同 wins through the link alias ~/合同 → ~/work/contracts (an alias, never a rename table)', m.best && m.best.alias && m.best.alias.text === '合同' && m.best.alias.from.key === 'link' && m.best.why.some((w) => w.key === 'alias'), m.best);
+  ok('合同 wins through the link alias ~/合同 → ~/work/contracts (an alias, never a rename table)', gateOf(m.best) && gateOf(m.best.alias) && m.best.alias.text === '合同' && m.best.alias.from.key === 'link' && verdictOf(m.best.why.some((w) => w.key === 'alias')), m.best);
   const e = api.rankCandidates('', inputs({ name: 'payments', group: 'g-ir' }));
   const s2 = e.sections.find((s) => s.sec === 2).rows.map((r) => r.path + (r.isNew ? '+' : ''));
   ok('empty + name + 投资者关系: ② = the same-name folder, <IR>/payments 新建, ~/payments 新建', s2.join('|') === '~/work/payments|~/work/investor-relations/payments+|~/payments+', s2);
   const pay = api.rankCandidates('pay', inputs({}));
-  ok('pay: the recent ~/work/payments (片段前缀 + 最近) leads', pay.best.path === '~/work/payments' && pay.best.rule === 'segment' && pay.best.boost.some((b) => b.key === 'recent'), pay.best);
+  ok('pay: the recent ~/work/payments (片段前缀 + 最近) leads', pay.best.path === '~/work/payments' && pay.best.rule === 'segment' && verdictOf(pay.best.boost.some((b) => b.key === 'recent')), pay.best);
   const inv = api.rankCandidates('invrel', inputs({}));
-  ok('invrel: a real subsequence hit beats the typed word\'s own ~/invrel 新建 (−3000)', inv.best.path === '~/work/investor-relations' && inv.best.rule === 'subseq' && inv.rows.some((r) => r.path === '~/invrel' && r.boost.some((b) => b.key === 'word-new')), inv.rows.map((r) => r.path));
+  ok('invrel: a real subsequence hit beats the typed word\'s own ~/invrel 新建 (−3000)', inv.best.path === '~/work/investor-relations' && inv.best.rule === 'subseq' && verdictOf(inv.rows.some((r) => r.path === '~/invrel' && r.boost.some((b) => b.key === 'word-new'))), inv.rows.map((r) => r.path));
 }
 
 console.log('\n── ② two / three Task Groups selected (投资者关系, then 算力合同谈判) ──');
 {
   const m = api.rankCandidates('', inputs({ groups: ['g-ir', 'g-cd'], name: 'payments' }));
   const s1 = m.sections.find((s) => s.sec === 1); const s2 = m.sections.find((s) => s.sec === 2);
-  ok('① = every selected group\'s folders, in selection order', s1 && s1.rows.map((r) => r.path).join('|') === '~/work/investor-relations|~/work/investor-relations/共享资料|~/work/compute-deal', s1 && s1.rows.map((r) => r.path));
+  ok('① = every selected group\'s folders, in selection order', gateOf(s1) && s1.rows.map((r) => r.path).join('|') === '~/work/investor-relations|~/work/investor-relations/共享资料|~/work/compute-deal', s1 && s1.rows.map((r) => r.path));
   ok('…the notes folder says so (chip notes), the others group', s1.rows[0].chip.key === 'group' && s1.rows[1].chip.key === 'notes' && s1.rows[2].chip.params.group === '算力合同谈判', s1.rows.map((r) => r.chip));
-  ok('② = one <group folder>/<name> per selected group, in order (+ the same-name folder, + ~/name)', s2 && s2.rows.map((r) => r.path).join('|') === '~/work/payments|~/work/investor-relations/payments|~/work/compute-deal/payments|~/payments', s2 && s2.rows.map((r) => r.path));
+  ok('② = one <group folder>/<name> per selected group, in order (+ the same-name folder, + ~/name)', gateOf(s2) && s2.rows.map((r) => r.path).join('|') === '~/work/payments|~/work/investor-relations/payments|~/work/compute-deal/payments|~/payments', s2 && s2.rows.map((r) => r.path));
   const b = inputs({ groups: ['g-cd', 'g-ir'] }).bases.map((x) => x.path).join('|');
   ok('bases follow the selection order (算力 first when picked first)', b === '~/work/compute-deal|~/work/investor-relations|~/work|~', b);
   const sec2 = (mm) => (mm.sections.find((s) => s.sec === 2) || { rows: [] }).rows.map((r) => r.path + (r.isNew ? '+' : ''));
@@ -180,7 +180,7 @@ console.log('\n── ② two / three Task Groups selected (投资者关系, the
   const ws = (w.sections.find((s) => s.sec === 2) || { rows: [], title: { params: {} } });
   ok('name empty + a bare word typed → the word plays the name: one 新建 per group + ~/word', ws.rows.map((r) => r.path).join('|') === '~/work/investor-relations/路演|~/work/compute-deal/路演|~/路演' && ws.title.params.word === true && w.word === '路演', [ws.title, ws.rows.map((r) => r.path)]);
   const r1 = ws.rows[0];
-  ok('…its chips say 新建 + 任务组「X」 (name-group, the group\'s name and colour)', r1 && r1.isNew && r1.chip.key === 'name-group' && r1.chip.params.group === '投资者关系' && r1.chip.params.color === COLORS[0], r1 && r1.chip);
+  ok('…its chips say 新建 + 任务组「X」 (name-group, the group\'s name and colour)', gateOf(r1) && gateOf(r1.isNew) && r1.chip.key === 'name-group' && r1.chip.params.group === '投资者关系' && r1.chip.params.color === COLORS[0], r1 && r1.chip);
   const pth = api.rankCandidates('~/wo', inputs({ groups: ['g-ir'] }));
   ok('a path (not a bare word) never makes name rows', !pth.sections.some((s) => s.sec === 2), pth.sections.map((s) => s.sec));
 }
@@ -188,11 +188,11 @@ console.log('\n── ② two / three Task Groups selected (投资者关系, the
 console.log('\n── ③ files (a field that takes a file or a folder) ──');
 {
   const r = api.resolveRelative('handbook.md', [{ path: '~/work/investor-relations/共享资料', label: '上一行的文件夹' }, { path: '~', label: '主目录' }], L, { files: true });
-  ok('handbook.md resolves against the row above, as a file', r.resolved[0] && r.resolved[0].path === '~/work/investor-relations/共享资料/handbook.md' && r.resolved[0].kind === 'file' && r.resolved[0].base === '上一行的文件夹', r);
+  ok('handbook.md resolves against the row above, as a file', gateOf(r.resolved[0]) && r.resolved[0].path === '~/work/investor-relations/共享资料/handbook.md' && r.resolved[0].kind === 'file' && r.resolved[0].base === '上一行的文件夹', r);
   const r2 = api.resolveRelative('handbook.md', [{ path: '~/work/investor-relations/共享资料', label: '' }], L, { files: false });
   ok('…a folder-only field does not take it', !r2.resolved.length, r2);
   const m = api.rankCandidates('handb', { bases: [{ path: '~/work/investor-relations/共享资料', label: '上一行的文件夹' }, { path: '~', label: '主目录' }], groups: [], recent: [], listing: L, name: '', files: true });
-  ok('fuzzy over files finds handbook.md first', m.best && m.best.path === '~/work/investor-relations/共享资料/handbook.md' && m.best.file && m.best.chip.key === 'file', m.best);
+  ok('fuzzy over files finds handbook.md first', gateOf(m.best) && m.best.path === '~/work/investor-relations/共享资料/handbook.md' && gateOf(m.best.file) && m.best.chip.key === 'file', m.best);
 }
 
 console.log('\n── ④ a remote machine gets the SAME recommendations, computed for it ──');
@@ -213,7 +213,7 @@ console.log('\n── ④ a remote machine gets the SAME recommendations, comput
   const s5 = m.sections.find((s) => s.sec === 5).rows.map((r) => r.path);
   ok('⑤ = the machine\'s volumes', s5.join('|') === '/Volumes/工作盘', s5);
   const doc = api.rankCandidates('文稿', { ...inp, name: '' });
-  ok('文稿 finds ~/Documents through the OS display name (an alias, computed on that machine)', doc.best && doc.best.path === '~/Documents' && doc.best.alias && doc.best.alias.from.key === 'os-name', doc.best);
+  ok('文稿 finds ~/Documents through the OS display name (an alias, computed on that machine)', gateOf(doc.best) && doc.best.path === '~/Documents' && gateOf(doc.best.alias) && doc.best.alias.from.key === 'os-name', doc.best);
 }
 
 console.log('\n── ⑤ never offered unasked: the instance\'s own checkout, its data dir, dot-folders (ADDENDUM) ──');
@@ -229,17 +229,17 @@ console.log('\n── ⑤ never offered unasked: the instance\'s own checkout, i
   ok('isExcludedPath: the checkout and anything under it = self; a dot segment = dot; ~/work = free', api.isExcludedPath('~/vibespace', self) === 'self' && api.isExcludedPath('/home/me/vibespace/data', self) === 'self' && api.isExcludedPath('~/.config/vibespace', self) === 'dot' && api.isExcludedPath('~/work', self) === '' && api.isExcludedPath('/home/me/work', self) === '', ['~/vibespace', '~/.config/vibespace', '~/work'].map((p) => api.isExcludedPath(p, self)));
   const base = { bases: [{ path: '~', label: '主目录' }], groups: [], recent: [], listing: P, name: '' };
   const list = api.rankCandidates('~/', { ...base, self }).rows.map((r) => r.path);
-  ok('~/ lists the home WITHOUT ~/vibespace and ~/.config', !list.includes('~/vibespace') && !list.includes('~/.config') && list.includes('~/work'), list);
+  ok('~/ lists the home WITHOUT ~/vibespace and ~/.config', !list.includes('~/vibespace') && !list.includes('~/.config') && verdictOf(list.includes('~/work')), list);
   const ctl = api.rankCandidates('~/', base).rows.map((r) => r.path);
-  ok('RED CONTROL: without `self` the checkout IS offered (the study\'s preselect)', ctl.includes('~/vibespace'), ctl);
+  ok('RED CONTROL: without `self` the checkout IS offered (the study\'s preselect)', verdictOf(ctl.includes('~/vibespace')), ctl);
   const vib = api.rankCandidates('vibe', { ...base, self });
-  ok('fuzzy `vibe` never offers the checkout or ~/.config/vibespace (the mounts folder ~/vibespace-mounts is the person\'s, offered)', !vib.rows.some((r) => r.path === '~/vibespace' || r.path.startsWith('~/vibespace/') || r.path.startsWith('~/.config')) && vib.rows.some((r) => r.path.startsWith('~/vibespace-mounts/')), vib.rows.map((r) => r.path));
+  ok('fuzzy `vibe` never offers the checkout or ~/.config/vibespace (the mounts folder ~/vibespace-mounts is the person\'s, offered)', !vib.rows.some((r) => r.path === '~/vibespace' || r.path.startsWith('~/vibespace/') || r.path.startsWith('~/.config')) && verdictOf(vib.rows.some((r) => r.path.startsWith('~/vibespace-mounts/'))), vib.rows.map((r) => r.path));
   const typed = api.rankCandidates('~/vibespace', { ...base, self });
-  ok('typed explicitly (~/vibespace) it resolves, and the listing row shows', typed.resolved[0] && typed.resolved[0].path === '~/vibespace' && typed.rows.some((r) => r.path === '~/vibespace'), [typed.resolved, typed.rows.map((r) => r.path)]);
+  ok('typed explicitly (~/vibespace) it resolves, and the listing row shows', gateOf(typed.resolved[0]) && typed.resolved[0].path === '~/vibespace' && verdictOf(typed.rows.some((r) => r.path === '~/vibespace')), [typed.resolved, typed.rows.map((r) => r.path)]);
   const dot = api.rankCandidates('~/.co', { ...base, self });
-  ok('a typed "." segment lists dot-folders (~/.co → ~/.config)', dot.rows.some((r) => r.path === '~/.config'), dot.rows.map((r) => r.path));
+  ok('a typed "." segment lists dot-folders (~/.co → ~/.config)', verdictOf(dot.rows.some((r) => r.path === '~/.config')), dot.rows.map((r) => r.path));
   const own = api.rankCandidates('', { ...base, self, recent: [{ path: '~/vibespace', count: 4, when: '昨天' }], groups: [{ id: 'g-dev', name: 'dev', folders: ['~/vibespace'], context: null, selected: true }] });
-  ok('a Task Group folder / a recent one the person made stays theirs', own.rows.some((r) => r.path === '~/vibespace' && r.sec === 1), own.rows.map((r) => [r.path, r.sec]));
+  ok('a Task Group folder / a recent one the person made stays theirs', verdictOf(own.rows.some((r) => r.path === '~/vibespace' && r.sec === 1)), own.rows.map((r) => [r.path, r.sec]));
   const mounts = { ...P, mounts: ['~/vibespace/data/mounts/x'] };
   mounts.dirs['~/vibespace/data/mounts/x'] = { n: 1, kids: [], files: [] };
   ok('a mount under the data dir is not offered', !api.rankCandidates('', { ...base, listing: mounts, self }).rows.some((r) => r.path.startsWith('~/vibespace')), api.rankCandidates('', { ...base, listing: mounts, self }).rows.map((r) => r.path));
@@ -259,11 +259,11 @@ console.log('\n── ⑥ the resolution line, missingVerdict, groupOn here, fuz
   const mi = api.resolveRelative('新项目', B, L);
   ok('新项目 = missing, where it WOULD be (the first base whose folder exists)', mi.line.key === 'missing' && mi.missing.path === '~/work/investor-relations/新项目' && mi.missing.base === 'IR', mi);
   const ab = api.resolveRelative('/home/me/work', B, L);
-  ok('an absolute path resolves in ~ form against nothing', ab.resolved[0] && ab.resolved[0].path === '~/work' && ab.resolved[0].base === 'abs' && !ab.resolved[0].relative, ab);
+  ok('an absolute path resolves in ~ form against nothing', gateOf(ab.resolved[0]) && ab.resolved[0].path === '~/work' && ab.resolved[0].base === 'abs' && !ab.resolved[0].relative, ab);
   const se = api.resolveRelative('ir q3', B, L);
   ok('a few words with a space = a search, not a path', se.line.key === 'search' && !se.resolved.length && !se.missing, se);
   const v1 = api.missingVerdict('~/work/新项目', L);
-  ok('missingVerdict: the parent is there ⇒ create', v1.parentExists && v1.line.key === 'missing-create' && v1.parent === '~/work', v1);
+  ok('missingVerdict: the parent is there ⇒ create', gateOf(v1.parentExists) && v1.line.key === 'missing-create' && v1.parent === '~/work', v1);
   const v2 = api.missingVerdict('~/nope/新项目', L);
   ok('missingVerdict: the parent is missing ⇒ said (no create)', !v2.parentExists && v2.line.key === 'missing-parent' && v2.line.params.parent === '~/nope', v2);
   const here = api.groupOn(G.find((g) => g.id === 'g-cd'), L);
@@ -320,12 +320,12 @@ console.log('\n── ⑦ the text\'s VERDICT, its fourth shape (B-d833) ──'
     ok('⑦ a group folder that machine has NOT YET answered for is a plain row — never «does not exist · create?» — CONTROL the raw view: greyed absent at once', !!ru && !ru.absent && !(ru.why && ru.why.key === 'absent') && !!rc && rc.absent === true && rc.why.key === 'absent', { unknown: ru, control: rc });
     // (r174, the (b) law) one the machine was ASKED for and did not answer is said by its name: an «unsaid» row, never absent, never 新建
     const rs = api.rankCandidates('', inpU({ ...gb, absent: [], unknown: ['~/work/a'], unsaid: ['~/work/a'] })).rows.find((r) => r.path === '~/work/a');
-    ok('⑦ an unknown folder the machine did not answer for says so by the machine\'s name (why «unsaid», host my-mac) — never absent, never new; CONTROL the unknown row not asked carries no word', !!rs && rs.unsaid === true && rs.why && rs.why.key === 'unsaid' && rs.why.params.host === 'my-mac' && !rs.absent && !rs.isNew && !ru.unsaid && !(ru.why && ru.why.key === 'unsaid'), { unsaid: rs, control: ru });
+    ok('⑦ an unknown folder the machine did not answer for says so by the machine\'s name (why «unsaid», host my-mac) — never absent, never new; CONTROL the unknown row not asked carries no word', !!rs && rs.unsaid === true && gateOf(rs.why) && rs.why.key === 'unsaid' && rs.why.params.host === 'my-mac' && !rs.absent && !rs.isNew && !ru.unsaid && !(ru.why && ru.why.key === 'unsaid'), { unsaid: rs, control: ru });
   }
   // (the fresh read's N8) a FILE keeps its flag through the verdict (a file field): exact, and the one name a prefix completes to — CONTROL: dropped
   const fv = api.textVerdict([{ path: '~/n.txt', ...api.lineAnswerOf({ exists: true, isDir: false }, { files: true }) }]), fc = api.textVerdict([{ path: '~/n', ...api.lineAnswerOf({ exists: false, names: ['n.txt'], one: { path: '/h/n.txt', exists: true, isDir: false } }, { files: true }) }]);
   const fvC = load(edit(SRC, [["    if (c.answer === 'listed' && !c.completed) return end() || { kind: 'exists', path: c.path, ...(c.file ? { file: true } : {}) };", "    if (c.answer === 'listed' && !c.completed) return end() || { kind: 'exists', path: c.path };"]])).textVerdict([{ path: '~/n.txt', ...api.lineAnswerOf({ exists: true, isDir: false }, { files: true }) }]);
-  ok('⑦ a FILE in a file field keeps its flag: «exists» with file — and the one name a prefix completes to — CONTROL dropped: no flag (Tab would write «~/n.txt/»)', fv.kind === 'exists' && fv.file === true && fc.kind === 'exists' && fc.completed && fc.file === true && !fvC.file, { fv, fc, fvC });
+  ok('⑦ a FILE in a file field keeps its flag: «exists» with file — and the one name a prefix completes to — CONTROL dropped: no flag (Tab would write «~/n.txt/»)', fv.kind === 'exists' && fv.file === true && fc.kind === 'exists' && gateOf(fc.completed) && fc.file === true && !fvC.file, { fv, fc, fvC });
   const SLk = { home: '/h', probes: [{ path: '/h/合同', exists: true, isDir: true, link: '/h/work/contracts' }] };
   const sl = api.sliceListing(SLk), slc = load(edit(SRC, [["    if (p.link) { link(p.path, p.link); continue; }   // a stated symlink to a folder: a LINK, never a second row\n", '']])).sliceListing(SLk);
   ok('⑦ sliceListing: the line\'s stat of a symlink to a folder (its `link`) is a LINK — ~/合同 → ~/work/contracts, the target kept, never a second row — CONTROL: without it the link is a folder row of its own', sl.links['~/合同'] === '~/work/contracts' && !sl.dirs['~/合同'] && !!sl.dirs['~/work/contracts'] && !!slc.dirs['~/合同'] && !slc.links['~/合同'], { sl, slc });
@@ -374,4 +374,4 @@ console.log('\n── ⑦ the text\'s VERDICT, its fourth shape (B-d833) ──'
 }
 
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);
-process.exit(bad ? 1 : 0);
+process.exit(bad ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -124,7 +124,7 @@ const LIVE_SID = 'f01d0000-0000-4000-8000-0000000ab2fe';
 const FLOOD_SID = 'f01d0000-0000-4000-8000-0000000ab30f'; // a second stopped fixture whose agent flooded the inbox (chunk 4)
 const FLOOD_N = 30;
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -342,21 +342,21 @@ try {
   check('a live claude chat session is created through the real spawn path (stub CLI behind the real wrapper)', !!sid, frames.slice(-3).map((f) => JSON.stringify(f).slice(0, 200)).join('\n'));
   let token = null;
   for (let i = 0; i < 80 && !token; i++) { token = stubToken(); if (!token) await sleep(250); }
-  check('the stub received its session token in its env (vsst_)', !!token && token.startsWith('vsst_'), token);
+  check('the stub received its session token in its env (vsst_)', !!token && verdictOf(token.startsWith('vsst_')), token);
   const plan = await fileItem(token, { text: 'Tell me the plan', urgency: 'high' });
   const third = await fileItem(token, { text: 'Third ask — keep typing here', urgency: 'normal' });
   const choose = await fileItem(token, { text: 'Which way?', urgency: 'normal', options: ['Run now', 'Wait for backup'] });
   const pick = await fileItem(token, { text: 'Pick a region for the bucket', urgency: 'normal', options: ['eu-west', 'us-east'] }); // lane foryou-folds: a band-4 decision the title-bar legs count
-  check('four items filed by the agent route (two with option chips)', plan?.success && third?.success && choose?.success && pick?.success && Array.isArray(choose.item?.options), { plan, third, choose, pick });
+  check('four items filed by the agent route (two with option chips)', gateOf(plan?.success) && gateOf(third?.success) && gateOf(choose?.success) && gateOf(pick?.success) && verdictOf(Array.isArray(choose.item?.options)), { plan, third, choose, pick });
   const liveKey = plan.item.sessionKey;
   await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'live stub', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
-  check('the live chat window attaches (composer present)', await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000));
+  check('the live chat window attaches (composer present)', verdictOf(await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000)));
   await sleep(500);
 
   // ── ① XSS ──
   console.log('① hostile strings render as text');
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
-  check('the popup opens with the seeded hostile row', await waitFor(`!!document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))})`));
+  check('the popup opens with the seeded hostile row', verdictOf(await waitFor(`!!document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))})`)));
   await evalJs(`(() => { const d = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-detail-exp')}); if (d) d.open = true; return true; })()`);
   await sleep(400);
   const x1 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); return { xss: window.__xss, text: r.querySelector('.ut-text').textContent, chips: [...r.querySelectorAll('.ut-opt')].map((c) => c.getAttribute('aria-label') || c.textContent), detail: r.querySelector('.ut-detail')?.textContent, imgs: r.querySelectorAll('img, svg:not(.ut-act svg), script').length }; })()`);
@@ -366,14 +366,14 @@ try {
   // ── ③ stopped ⇒ NOTHING disabled: the fact is said, the send reopens (lane inbox-reply-dead-session) ──
   console.log('③ a stopped session: no control disabled — the box says the conversation ended and its send reopens it');
   const x3 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); const b = r.querySelector('.ut-reply-btn'); const dot = document.querySelector('#user-todos-popup .ut-live-dot[data-key=' + JSON.stringify(${JSON.stringify('claude:' + STOPPED_SID)}) + ']'); return { has: !!b, disabled: b?.disabled, title: b?.title, anyChipDisabled: [...r.querySelectorAll('.ut-opt')].some((c) => c.disabled), chipTitles: [...r.querySelectorAll('.ut-opt')].map((c) => c.title), dot: dot?.dataset.state, dotTitle: dot?.title }; })()`);
-  check(`the reply button is ENABLED, its title the fact: "${x3.title}"`, x3.has && x3.disabled === false && x3.title === REPLY_WHY_ENDED, x3);
-  check('its option chips stay pressable, each titled "Reopen and send …"; the group dot says not running', !x3.anyChipDisabled && x3.chipTitles.length === 2 && x3.chipTitles.every((tt) => tt.startsWith('Reopen and send')) && x3.dot === 'off' && x3.dotTitle === 'not running', x3);
+  check(`the reply button is ENABLED, its title the fact: "${x3.title}"`, gateOf(x3.has) && x3.disabled === false && x3.title === REPLY_WHY_ENDED, x3);
+  check('its option chips stay pressable, each titled "Reopen and send …"; the group dot says not running', !x3.anyChipDisabled && x3.chipTitles.length === 2 && gateOf(x3.chipTitles.every((tt) => tt.startsWith('Reopen and send'))) && x3.dot === 'off' && x3.dotTitle === 'not running', x3);
   await evalJs(`document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-reply-btn')}).click(); true`);
-  check('the reply button opens its box, the textarea focused (typeable)', await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-reply textarea')})`, 3000));
+  check('the reply button opens its box, the textarea focused (typeable)', verdictOf(await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-reply textarea')})`, 3000)));
   const x3b = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); const n = r.querySelector('.ut-reply-why'); const s = r.querySelector('.ut-reply-send'); return { note: n && n.textContent, shown: !!n && n.getClientRects().length > 0, label: s && (s.querySelector('.ut-reply-send-label') || {}).textContent, aria: s && s.getAttribute('aria-label'), sendDisabled: s && s.disabled }; })()`);
-  check('…its note says 「the conversation ended — sending reopens it」 and its send reads "Reopen and send" (pressable)', x3b.note === REPLY_WHY_ENDED && x3b.shown && x3b.label === 'Reopen and send' && x3b.aria === 'Reopen and send' && x3b.sendDisabled === false, x3b);
+  check('…its note says 「the conversation ended — sending reopens it」 and its send reads "Reopen and send" (pressable)', x3b.note === REPLY_WHY_ENDED && gateOf(x3b.shown) && x3b.label === 'Reopen and send' && x3b.aria === 'Reopen and send' && x3b.sendDisabled === false, x3b);
   await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); r.querySelector('.ut-reply textarea').value = ''; r.querySelector('.ut-reply-btn').click(); return true; })()`);
-  check('(the empty box folds again — nothing sent here; ㉑ sends for real)', await waitFor(`!document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-reply')})`, 2000));
+  check('(the empty box folds again — nothing sent here; ㉑ sends for real)', verdictOf(await waitFor(`!document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-reply')})`, 2000)));
 
   // ── ② reply to a live item ──
   console.log('② reply from the box: the typing path, quoted, resolved in place');
@@ -385,36 +385,36 @@ try {
   const dotOf = async (id) => { const key = await keyNow(id); const dot = key ? await evalJs(`(() => { const d = document.querySelector(${JSON.stringify('#user-todos-popup .ut-live-dot[data-key=')} + JSON.stringify(${JSON.stringify(key)}) + ']'); return d ? { state: d.dataset.state, title: d.title } : null; })()`) : null; return { id, key, dot }; };
   const dotIs = async (id, state, ms) => { const t0 = Date.now(); let last = await dotOf(id); while (!(last.dot && last.dot.state === state) && Date.now() - t0 < ms) { await sleep(150); last = await dotOf(id); } return { ok: !!(last.dot && last.dot.state === state), ms: Date.now() - t0, ...last }; };
   const d1 = await dotIs(plan.item.id, 'idle', 8000);
-  check('the live session\'s group dot is idle (hollow green), titled "running, idle" — under the plan row\'s key NOW', d1.ok, d1);   console.log(`    · the dot judged: ${JSON.stringify(d1)}`);
+  check('the live session\'s group dot is idle (hollow green), titled "running, idle" — under the plan row\'s key NOW', verdictOf(d1.ok), d1);   console.log(`    · the dot judged: ${JSON.stringify(d1)}`);
   const planSel = rowSel(plan.item.id);
-  check('its reply button is ENABLED', await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(planSel + ' .ut-reply-btn')}); return !!b && !b.disabled && b.getAttribute('aria-label') === 'Reply'; })()`));   // its NAME (lane ui-controls-and-bugs pick 6: a title that only repeated the drawn word is the aria-label now)
+  check('its reply button is ENABLED', verdictOf(await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(planSel + ' .ut-reply-btn')}); return !!b && !b.disabled && b.getAttribute('aria-label') === 'Reply'; })()`)));   // its NAME (lane ui-controls-and-bugs pick 6: a title that only repeated the drawn word is the aria-label now)
   await evalJs(`document.querySelector(${JSON.stringify(planSel + ' .ut-reply-btn')}).click(); true`);
-  check('the reply button opens a box under the row with the textarea focused', await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(planSel + ' .ut-reply textarea')})`, 3000));
+  check('the reply button opens a box under the row with the textarea focused', verdictOf(await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(planSel + ' .ut-reply textarea')})`, 3000)));
   const before = stdinFrames().length;
   await cdp('Input.insertText', { text: 'B — wait' });
   await pressEnter();
   const got = await waitFrames(before + 1, 5000);
   const frame = stdinFrames()[before] || '';
-  check(`within 5 s the stub's stdin holds ONE user frame opening with [For you reply #${plan.item.id}] and ending with the reply`, got && frame.startsWith(`[For you reply #${plan.item.id}]`) && frame.endsWith('B — wait'), frame.slice(0, 300));
-  check('…the quote carries the item\'s own text', frame.includes('> Tell me the plan'), frame.slice(0, 300));
-  check('a toast says "Reply sent"', await waitFor(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('Reply sent'))`, 4000));
-  check('the row resolves IN PLACE (ut-item-inplace) with "You replied" in its meta, the box gone', await waitFor(`(() => { const r = document.querySelector(${JSON.stringify(planSel)}); return !!r && r.classList.contains('ut-item-inplace') && r.querySelector('.ut-meta').textContent.includes('You replied: B — wait') && r.querySelector('.ut-meta').textContent.includes('by your reply') && !r.querySelector('.ut-reply'); })()`, 5000),
+  check(`within 5 s the stub's stdin holds ONE user frame opening with [For you reply #${plan.item.id}] and ending with the reply`, gateOf(got) && gateOf(frame.startsWith(`[For you reply #${plan.item.id}]`)) && verdictOf(frame.endsWith('B — wait')), frame.slice(0, 300));
+  check('…the quote carries the item\'s own text', verdictOf(frame.includes('> Tell me the plan')), frame.slice(0, 300));
+  check('a toast says "Reply sent"', verdictOf(await waitFor(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('Reply sent'))`, 4000)));
+  check('the row resolves IN PLACE (ut-item-inplace) with "You replied" in its meta, the box gone', verdictOf(await waitFor(`(() => { const r = document.querySelector(${JSON.stringify(planSel)}); return !!r && r.classList.contains('ut-item-inplace') && r.querySelector('.ut-meta').textContent.includes('You replied: B — wait') && r.querySelector('.ut-meta').textContent.includes('by your reply') && !r.querySelector('.ut-reply'); })()`, 5000)),
     await evalJs(`document.querySelector(${JSON.stringify(planSel)})?.outerHTML.slice(0, 600)`));
-  check('the chat window shows the reply card: head naming the item, quote in a COLLAPSED <details>, the reply as body', await waitFor(`(() => { const c = [...document.querySelectorAll('.chat-msg-inbox-reply')].pop(); if (!c) return false; const d = c.querySelector('details.chat-inbox-quote'); return !!d && !d.open && c.textContent.includes(${JSON.stringify('#' + plan.item.id)}) && c.querySelector('.chat-text')?.textContent.trim() === 'B — wait'; })()`, 6000),
+  check('the chat window shows the reply card: head naming the item, quote in a COLLAPSED <details>, the reply as body', verdictOf(await waitFor(`(() => { const c = [...document.querySelectorAll('.chat-msg-inbox-reply')].pop(); if (!c) return false; const d = c.querySelector('details.chat-inbox-quote'); return !!d && !d.open && c.textContent.includes(${JSON.stringify('#' + plan.item.id)}) && c.querySelector('.chat-text')?.textContent.trim() === 'B — wait'; })()`, 6000)),
     await evalJs(`[...document.querySelectorAll('.chat-msg-inbox-reply')].map((c) => c.outerHTML.slice(0, 300))`));
 
   // ── ⑧ the dot follows the turn through the broadcast ──
   console.log('⑧ the running dot: running after a chat-input, idle after the result, rows untouched');
   const d2 = await dotIs(third.item.id, 'idle', 8000);   // the plan row is resolved now (a resolved row draws no dot): an open row of the same session carries it
-  check('(the stub answered the reply turn: the dot is idle again — under the open row\'s key NOW)', d2.ok, d2);   console.log(`    · the dot judged: ${JSON.stringify(d2)}`);
+  check('(the stub answered the reply turn: the dot is idle again — under the open row\'s key NOW)', verdictOf(d2.ok), d2);   console.log(`    · the dot judged: ${JSON.stringify(d2)}`);
   await evalJs(`window.__rowsBefore = [...document.querySelectorAll('#user-todos-popup .ut-item')]; true`);
   await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'hello there', msgId: 'dot-1' }); true`);
   const t0 = Date.now();
   const r8 = await dotIs(third.item.id, 'running', 2000);   // the 2 s bound stays
-  check(`the dot flips to "running" within 2 s (${Date.now() - t0} ms) titled "running (mid-turn)"`, r8.ok && r8.dot.title === 'running (mid-turn)', r8);   console.log(`    · the dot judged: ${JSON.stringify(r8)}`);
+  check(`the dot flips to "running" within 2 s (${Date.now() - t0} ms) titled "running (mid-turn)"`, gateOf(r8.ok) && r8.dot.title === 'running (mid-turn)', r8);   console.log(`    · the dot judged: ${JSON.stringify(r8)}`);
   const d8 = await dotIs(third.item.id, 'idle', 8000);
-  check('…and back to "idle" after the stub\'s result', d8.ok, d8);   console.log(`    · the dot judged: ${JSON.stringify(d8)}`);
-  check('…with every row the SAME node (a live-fact broadcast patches, never re-renders)', await evalJs(`(() => { const now = [...document.querySelectorAll('#user-todos-popup .ut-item')]; return now.length === window.__rowsBefore.length && now.every((r, i) => r === window.__rowsBefore[i]); })()`));
+  check('…and back to "idle" after the stub\'s result', verdictOf(d8.ok), d8);   console.log(`    · the dot judged: ${JSON.stringify(d8)}`);
+  check('…with every row the SAME node (a live-fact broadcast patches, never re-renders)', verdictOf(await evalJs(`(() => { const now = [...document.querySelectorAll('#user-todos-popup .ut-item')]; return now.length === window.__rowsBefore.length && now.every((r, i) => r === window.__rowsBefore[i]); })()`)));
 
   // ── ④ a box being typed into survives a broadcast ──
   console.log('④ the reply box survives a broadcast');
@@ -427,11 +427,11 @@ try {
   const n4 = await evalJs(`(() => { const f = ${fold5}; window.__fold4 = f; window.__rows4 = [...document.querySelectorAll('#user-todos-popup .ut-item')]; return f ? Number((f.textContent.match(/\\d+/) || [0])[0]) : -1; })()`);
   check(`(band 5 is folded: its head holds ${n4} rows back)`, n4 > 0, n4);
   const fourth = await fileItem(token, { text: 'A fourth ask arrives', urgency: 'low' });
-  check('a fourth item is filed through the agent route meanwhile', fourth?.success, fourth);
-  check(`the broadcast lands: band 5's fold counts it (${n4} → ${n4 + 1} more — the same node), the row joins the fold`, await waitFor(`(() => { const f = ${fold5}; return f === window.__fold4 && f.textContent === ${JSON.stringify(`${n4 + 1} more — expand`)}; })()`, 5000), await evalJs(`${fold5}?.textContent`));
+  check('a fourth item is filed through the agent route meanwhile', verdictOf(fourth?.success), fourth);
+  check(`the broadcast lands: band 5's fold counts it (${n4} → ${n4 + 1} more — the same node), the row joins the fold`, verdictOf(await waitFor(`(() => { const f = ${fold5}; return f === window.__fold4 && f.textContent === ${JSON.stringify(`${n4 + 1} more — expand`)}; })()`, 5000)), await evalJs(`${fold5}?.textContent`));
   const x4 = await evalJs(`(() => { const ta = document.querySelector(${JSON.stringify(thirdSel + ' .ut-reply textarea')}); const rows = [...document.querySelectorAll('#user-todos-popup .ut-item')]; return { same: ta === window.__ta, connected: window.__ta.isConnected, value: ta && ta.value, focused: document.activeElement === ta, drawn: !!document.querySelector(${JSON.stringify(rowSel(fourth.item.id))}), rows: rows.length === window.__rows4.length && rows.every((r, i) => r === window.__rows4[i]) }; })()`);
-  check('the SAME textarea is still in the DOM, with its text and its focus', x4.same && x4.connected && x4.value === 'half-typed draft' && x4.focused, x4);
-  check('the new row is not drawn (it waits in the fold) and every shown row is the same node — nothing moved', !x4.drawn && x4.rows, x4);
+  check('the SAME textarea is still in the DOM, with its text and its focus', gateOf(x4.same) && gateOf(x4.connected) && x4.value === 'half-typed draft' && verdictOf(x4.focused), x4);
+  check('the new row is not drawn (it waits in the fold) and every shown row is the same node — nothing moved', !x4.drawn && verdictOf(x4.rows), x4);
 
   // ── ⑤ an option chip ──
   console.log('⑤ an option chip replies with its label');
@@ -441,9 +441,9 @@ try {
   await waitFrames(before5 + 1, 5000);
   const f5 = stdinFrames()[before5] || '';
   const reply5 = f5.split('\n\n').pop();
-  check('the next frame is a quoted reply to that item whose reply line IS the label', f5.startsWith(`[For you reply #${choose.item.id}]`) && reply5 === 'Wait for backup' && f5.includes('> options: Run now | Wait for backup'), f5.slice(0, 400));
-  check('…and the row resolves in place', await waitFor(`document.querySelector(${JSON.stringify(chooseSel)})?.classList.contains('ut-item-inplace')`, 5000));
-  check('…while the half-typed box on the other row is still there', await evalJs(`window.__ta.isConnected && window.__ta.value === 'half-typed draft'`));
+  check('the next frame is a quoted reply to that item whose reply line IS the label', gateOf(f5.startsWith(`[For you reply #${choose.item.id}]`)) && reply5 === 'Wait for backup' && verdictOf(f5.includes('> options: Run now | Wait for backup')), f5.slice(0, 400));
+  check('…and the row resolves in place', verdictOf(await waitFor(`document.querySelector(${JSON.stringify(chooseSel)})?.classList.contains('ut-item-inplace')`, 5000)));
+  check('…while the half-typed box on the other row is still there', verdictOf(await evalJs(`window.__ta.isConnected && window.__ta.value === 'half-typed draft'`)));
 
   // ── ⑤g THE GRANT ASK (lane controls-that-lie, naive study round 4 R1 on 2.369.344: the tray's «Granted access» only
   // TYPED those words — no grant changed, the profile stayed invisible to the chat) ──
@@ -460,21 +460,21 @@ try {
     const mineIn = (u) => !!(u && u.use && u.use.mode === 'only' && (u.use.who || []).some((w) => w.kind === 'session' && w.sessionId === sid));
     check('…«Who can use it» of Lark does not list this conversation before the press', !mineIn(await getUse(LARK)), await getUse(LARK));
     const g = await fileItem(token, { text: "Share 'Lark (company login)' with me so I can message the vendor", urgency: 'normal', grant: 'browser:Lark (company login)', options: ['Send it myself'] });
-    check('the agent route files it WITH the grant (action browser-grant on Lark\'s id)', g.item && g.item.action && g.item.action.type === 'browser-grant' && g.item.action.profileId === LARK, g);
+    check('the agent route files it WITH the grant (action browser-grant on Lark\'s id)', gateOf(g.item) && gateOf(g.item.action) && g.item.action.type === 'browser-grant' && g.item.action.profileId === LARK, g);
     const gSel = rowSel(g.item.id);
     await waitFor(`!!document.querySelector(${JSON.stringify(gSel + ' .ut-action-grant')})`, 6000);
     const face = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(gSel)}); return r ? { grant: r.querySelector('.ut-action-grant')?.textContent || null, chips: [...r.querySelectorAll('.ut-opt')].map((c) => c.getAttribute('aria-label') || c.textContent) } : null; })()`);
-    check('the row: ONE button naming the grant («Let this conversation use Lark (company login)»), its option a «Reply: …»', face && face.grant === 'Let this conversation use Lark (company login)' && face.chips.length === 1 && face.chips[0] === 'Reply: Send it myself', face);
+    check('the row: ONE button naming the grant («Let this conversation use Lark (company login)»), its option a «Reply: …»', gateOf(face) && face.grant === 'Let this conversation use Lark (company login)' && face.chips.length === 1 && face.chips[0] === 'Reply: Send it myself', face);
     const before5g = stdinFrames().length;
     await sleep(900);   // press-arm: a button is pressable once it sat still ARM_MS (700 ms)
-    check('a REAL click lands on the grant button', await realClick(gSel + ' .ut-action-grant'));
+    check('a REAL click lands on the grant button', verdictOf(await realClick(gSel + ' .ut-action-grant')));
     await waitFrames(before5g + 1, 8000);
     const f5g = stdinFrames()[before5g] || '';
     const useAfter = await getUse(LARK);
-    check('«Who can use it» of Lark now lists THIS conversation (the owner\'s own door: GET …/use + the whole-list PATCH) — the Task Group row kept', mineIn(useAfter) && (useAfter.use.who || []).some((w) => w.kind === 'task' && w.id === taskId), useAfter.use);
-    check('…and THEN the agent was answered: the quoted reply says «Granted» and the door it now has', f5g.startsWith(`[For you reply #${g.item.id}]`) && f5g.split('\n\n').pop() === `Granted — this conversation may now use the browser profile «Lark (company login)» (${LARK}). Attach it with \`vibespace-browser use ${LARK}\`.`, f5g.slice(-400));
-    check('…the row resolves in place, and the toast names the grant (not just «Reply sent»)', await waitFor(`document.querySelector(${JSON.stringify(gSel)})?.classList.contains('ut-item-inplace')`, 5000)
-      && await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((x) => x.textContent.includes('Lark (company login): this conversation may use it now — the agent was told'))`, 5000));
+    check('«Who can use it» of Lark now lists THIS conversation (the owner\'s own door: GET …/use + the whole-list PATCH) — the Task Group row kept', gateOf(mineIn(useAfter)) && verdictOf((useAfter.use.who || []).some((w) => w.kind === 'task' && w.id === taskId)), useAfter.use);
+    check('…and THEN the agent was answered: the quoted reply says «Granted» and the door it now has', gateOf(f5g.startsWith(`[For you reply #${g.item.id}]`)) && f5g.split('\n\n').pop() === `Granted — this conversation may now use the browser profile «Lark (company login)» (${LARK}). Attach it with \`vibespace-browser use ${LARK}\`.`, f5g.slice(-400));
+    check('…the row resolves in place, and the toast names the grant (not just «Reply sent»)', gateOf(await waitFor(`document.querySelector(${JSON.stringify(gSel)})?.classList.contains('ut-item-inplace')`, 5000))
+      && verdictOf(await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((x) => x.textContent.includes('Lark (company login): this conversation may use it now — the agent was told'))`, 5000)));
     // the 2.369.344 shape — the agent's own words as an option: a REPLY (it says so), which grants nothing
     const p = await fileItem(token, { text: "Share 'Gmail (company login)' with me", urgency: 'normal', options: ['Granted access', 'Send it myself'] });
     const pSel = rowSel(p.item.id);
@@ -485,7 +485,7 @@ try {
     await evalJs(`[...document.querySelectorAll(${JSON.stringify(pSel + ' .ut-opt')})].find((c) => (c.getAttribute('aria-label') || c.textContent) === 'Reply: Granted access').click(); true`);
     await waitFrames(beforeP + 1, 5000);
     const fP = stdinFrames()[beforeP] || '';
-    check('…pressing it posts exactly its label as the reply (what it says it does) — and Gmail\'s «Who can use it» is unchanged (a reply grants nothing)', fP.startsWith(`[For you reply #${p.item.id}]`) && fP.split('\n\n').pop() === 'Granted access' && !mineIn(await getUse(GMAIL)), fP.slice(-200));
+    check('…pressing it posts exactly its label as the reply (what it says it does) — and Gmail\'s «Who can use it» is unchanged (a reply grants nothing)', gateOf(fP.startsWith(`[For you reply #${p.item.id}]`)) && fP.split('\n\n').pop() === 'Granted access' && !mineIn(await getUse(GMAIL)), fP.slice(-200));
   }
 
   // ── ⑨–⑭ THE TITLE-BAR MINI INBOX (chunk 3) ──
@@ -506,16 +506,16 @@ try {
   // «needs you · N» says the same), the COLOUR its loud rows (bands 1–4)
   await waitFor(`(${badgeOf(liveWin)})?.n === ${JSON.stringify(String(all9.length))}`, 6000);
   const b9 = await evalJs(badgeOf(liveWin));
-  check(`the live window's title bar shows .win-inbox-badge = ${all9.length} (EVERY open action row — the honest count: its decision + its ${all9.length - open9.length} band-5 asks), data-urgency = the worst LOUD row (${WORST(open9)})`, open9.length === 1 && open9[0].id === pick.item.id && all9.length > open9.length && b9 && b9.n === String(all9.length) && b9.urgency === WORST(open9), { b9, open9: open9.map((i) => [i.id, i.urgency]) });
-  check('…a <button> after the title, labelled in plain words, its SVG icon aria-hidden', b9 && b9.tag === 'BUTTON' && b9.label === `${all9.length} items from this agent` && b9.title === b9.label && b9.iconHidden === 'true' && b9.afterTitle, b9);
+  check(`the live window's title bar shows .win-inbox-badge = ${all9.length} (EVERY open action row — the honest count: its decision + its ${all9.length - open9.length} band-5 asks), data-urgency = the worst LOUD row (${WORST(open9)})`, open9.length === 1 && open9[0].id === pick.item.id && all9.length > open9.length && gateOf(b9) && b9.n === String(all9.length) && b9.urgency === WORST(open9), { b9, open9: open9.map((i) => [i.id, i.urgency]) });
+  check('…a <button> after the title, labelled in plain words, its SVG icon aria-hidden', gateOf(b9) && b9.tag === 'BUTTON' && b9.label === `${all9.length} items from this agent` && b9.title === b9.label && b9.iconHidden === 'true' && verdictOf(b9.afterTitle), b9);
   const viewWin = await evalJs(`app.viewSession(${JSON.stringify(STOPPED_SID)}, ${JSON.stringify(CWD)}, 'stopped fixture', { backend: 'claude' })?.id || null`);
   check('the stopped fixture conversation opens as a view-only window', !!viewWin, viewWin);
-  check('…whose title bar shows ITS OWN count (1, high — the hostile item)', await waitFor(`(() => { const b = (${badgeOf(viewWin)}); return !!b && b.n === '1' && b.urgency === 'high'; })()`, 6000), await evalJs(badgeOf(viewWin)));
+  check('…whose title bar shows ITS OWN count (1, high — the hostile item)', verdictOf(await waitFor(`(() => { const b = (${badgeOf(viewWin)}); return !!b && b.n === '1' && b.urgency === 'high'; })()`, 6000)), await evalJs(badgeOf(viewWin)));
   await evalJs(`app.wm.focusWindow(${JSON.stringify(liveWin)}); true`);
   await sleep(200);
 
   console.log('⑩ the badge opens a popover of THIS session\'s rows');
-  check('(the For-you panel is still open from ①)', await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  check('(the For-you panel is still open from ①)', verdictOf(await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`)));
   const clickBadge = async (winId) => {
     const r = await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(winId)}); const b = w && w.titleBar.querySelector(':scope > .win-inbox-badge'); if (!b) return null; const q = b.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; })()`);
     if (!r) return false;
@@ -533,15 +533,15 @@ try {
   const longPath = '/tmp/fixturehome/workspace/averylongprojectname/docs/designdesktopappsseamlessandthensome/section/five/six/seven/eight.zh.md';
   const wide = await fileItem(token, { text: 'Decision needed (the design is at ' + longPath + longPath.replace('/tmp', '/again') + ' §5-§6)', urgency: 'normal' });
   check('⑩w a wide item is filed for the live session', !!(wide && wide.item && wide.item.id), wide);
-  check('a real click on the badge', await clickBadge(liveWin));
-  check('…opens .ut-mini-popover[data-popover]', await waitFor(`!!document.querySelector('.ut-mini-popover[data-popover]')`, 3000));
+  check('a real click on the badge', verdictOf(await clickBadge(liveWin)));
+  check('…opens .ut-mini-popover[data-popover]', verdictOf(await waitFor(`!!document.querySelector('.ut-mini-popover[data-popover]')`, 3000)));
   const ids10 = await evalJs(miniIds);
   const want10 = (await storeNow()).open.filter((i) => LIVE_KEYS.includes(i.sessionKey)).map((i) => i.id);
-  check(`…listing EXACTLY this session's open rows (${want10.length}), nothing from another session`, ids10.length === want10.length && want10.every((id) => ids10.includes(id)) && !ids10.includes(HOSTILE_ID), { ids10, want10 });
-  check('…headed "Inbox for this session" with the session\'s running dot', await evalJs(`(() => { const p = document.querySelector('.ut-mini-popover'); return !!p && p.querySelector('.ut-mini-title')?.textContent === 'Inbox for this session' && !!p.querySelector('.ut-live-dot[data-key=' + JSON.stringify(${JSON.stringify(`claude:${LIVE_SID}`)}) + ']'); })()`));
-  check('…and the badge\'s mousedown did NOT close the For-you panel or drag the window', await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  check(`…listing EXACTLY this session's open rows (${want10.length}), nothing from another session`, ids10.length === want10.length && gateOf(want10.every((id) => ids10.includes(id))) && !ids10.includes(HOSTILE_ID), { ids10, want10 });
+  check('…headed "Inbox for this session" with the session\'s running dot', verdictOf(await evalJs(`(() => { const p = document.querySelector('.ut-mini-popover'); return !!p && p.querySelector('.ut-mini-title')?.textContent === 'Inbox for this session' && !!p.querySelector('.ut-live-dot[data-key=' + JSON.stringify(${JSON.stringify(`claude:${LIVE_SID}`)}) + ']'); })()`)));
+  check('…and the badge\'s mousedown did NOT close the For-you panel or drag the window', verdictOf(await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`)));
   const wideId = wide && wide.item ? wide.item.id : '';
-  check('⑩w the wide item is listed in the popover', await waitFor(`!!document.querySelector(${JSON.stringify('.ut-mini-popover .ut-item[data-id="' + wideId + '"]')})`, 4000), { wideId });
+  check('⑩w the wide item is listed in the popover', verdictOf(await waitFor(`!!document.querySelector(${JSON.stringify('.ut-mini-popover .ut-item[data-id="' + wideId + '"]')})`, 4000)), { wideId });
   const measure = `(() => { const p = document.querySelector('.ut-mini-popover'); const row = p && p.querySelector(${JSON.stringify('.ut-item[data-id="' + wideId + '"]')}); const t = row && row.querySelector('.ut-text'); const b = row && row.querySelector(':scope > .ut-body'); const a = row && row.querySelector('.ut-actions'); if (!p || !t || !b || !a) return null; const tr = t.getBoundingClientRect(), br = b.getBoundingClientRect(), ar = a.getBoundingClientRect(), rr = row.getBoundingClientRect(); return { popOver: p.scrollWidth - p.clientWidth, textOver: t.scrollWidth - t.clientWidth, lines: Math.round(tr.height / parseFloat(getComputedStyle(t).lineHeight)), textShare: tr.width / br.width, actionsTop: ar.top - rr.top, actionsRight: rr.right - ar.right, textBelowActions: tr.bottom - ar.bottom }; })()`;
   const m10 = await evalJs(measure);
   check('⑩w …its long path WRAPS: the text and the popover have no horizontal overflow, the row spans more than one line', !!m10 && m10.popOver <= 1 && m10.textOver <= 1 && m10.lines >= 2, m10);
@@ -560,19 +560,19 @@ try {
   await evalJs(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); true`);
   await sleep(150);
   const x11 = await evalJs(`({ mini: !!document.querySelector('.ut-mini-popover'), panel: !document.getElementById('user-todos-popup').classList.contains('hidden') })`);
-  check('the first Escape removes the popover and leaves the panel open', !x11.mini && x11.panel, x11);
+  check('the first Escape removes the popover and leaves the panel open', !x11.mini && verdictOf(x11.panel), x11);
   await evalJs(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); true`);
   await sleep(150);
-  check('the second Escape closes the panel', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  check('the second Escape closes the panel', verdictOf(await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)));
 
   console.log('⑪b a modal above the panel (a createModalShell dialog) takes ONE Escape; the panel the next');
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
-  check('(the panel reopens)', await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden') && !!document.querySelector('#user-todos-popup .ut-item .ut-view')`, 3000));
+  check('(the panel reopens)', verdictOf(await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden') && !!document.querySelector('#user-todos-popup .ut-item .ut-view')`, 3000)));
   // the ⤢ viewer is retired (design-user-inbox-reply §9: the row's ⤢ opens the For-you WINDOW, test-inbox-window-ui ①);
   // the rule under test is the panel's Escape deferring to ANY visible .dialog-overlay — a createModalShell DECISION (lane
   // dialog-yield: Restore a previous layout is a FORM window now, no overlay; Update VibeSpace is a decision — a consent)
   await evalJs(`app._showUpdateConfirmDialog(); true`);
-  check('a createModalShell modal opens above the panel (#update-confirm-dialog, focused)', await waitFor(`document.activeElement === document.getElementById('update-confirm-dialog')`, 3000), await evalJs(`document.activeElement?.id || document.activeElement?.className`));
+  check('a createModalShell modal opens above the panel (#update-confirm-dialog, focused)', verdictOf(await waitFor(`document.activeElement === document.getElementById('update-confirm-dialog')`, 3000)), await evalJs(`document.activeElement?.id || document.activeElement?.className`));
   const realEsc = async () => {
     await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -580,58 +580,58 @@ try {
   };
   await realEsc();
   const x11b = await evalJs(`({ viewer: !!document.getElementById('update-confirm-dialog'), panel: !document.getElementById('user-todos-popup').classList.contains('hidden') })`);
-  check('ONE real Escape closes the modal only — the panel stays open', !x11b.viewer && x11b.panel, x11b);
+  check('ONE real Escape closes the modal only — the panel stays open', !x11b.viewer && verdictOf(x11b.panel), x11b);
   if (x11b.panel) {
     await evalJs(`document.getElementById('user-todos-popup').focus?.(); true`);
     await realEsc();
-    check('the next Escape closes the panel', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
+    check('the next Escape closes the panel', verdictOf(await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)));
   }
 
   console.log('⑩b replying from the popover: the typing path, resolved in place, the badge counts down');
   await clickBadge(liveWin);
-  check('(the popover reopens)', await waitFor(`(() => { const p = document.querySelector('.ut-mini-popover[data-popover]'); return !!p && !!p.querySelector('.ut-item') && getComputedStyle(p).visibility === 'visible'; })()`, 3000)); // createPopover reveals on the next frame — a focus() before that lands nowhere
+  check('(the popover reopens)', verdictOf(await waitFor(`(() => { const p = document.querySelector('.ut-mini-popover[data-popover]'); return !!p && !!p.querySelector('.ut-item') && getComputedStyle(p).visibility === 'visible'; })()`, 3000))); // createPopover reveals on the next frame — a focus() before that lands nowhere
   const target10 = pick.item.id; // lane foryou-folds: the band-4 decision — the row the badge counts
   const miniRow = (id) => `.ut-mini-popover .ut-item[data-id=${JSON.stringify(id)}]`;
   const n10 = Number((await evalJs(badgeOf(liveWin)))?.n || 0);
   await evalJs(`document.querySelector(${JSON.stringify(miniRow(target10) + ' .ut-reply-btn')}).click(); true`);
-  check('the row\'s reply button opens the box in the popover, focused', await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(miniRow(target10) + ' .ut-reply textarea')})`, 3000),
+  check('the row\'s reply button opens the box in the popover, focused', verdictOf(await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(miniRow(target10) + ' .ut-reply textarea')})`, 3000)),
     await evalJs(`({ row: document.querySelector(${JSON.stringify(miniRow(target10))})?.outerHTML.slice(0, 900), active: document.activeElement?.className, mini: document.querySelector('.ut-mini-popover .ut-mini-head')?.outerHTML })`));
   const before10 = stdinFrames().length;
   await cdp('Input.insertText', { text: 'from the title bar' });
   await pressEnter();
   await waitFrames(before10 + 1, 5000);
   const f10 = stdinFrames()[before10] || '';
-  check(`the stub's stdin gets [For you reply #${target10}] … from the title bar`, f10.startsWith(`[For you reply #${target10}]`) && f10.endsWith('from the title bar'), f10.slice(0, 300));
-  check('…the popover row resolves IN PLACE (still listed, struck through)', await waitFor(`document.querySelector(${JSON.stringify(miniRow(target10))})?.classList.contains('ut-item-inplace')`, 5000));
-  check(`…and the badge counts down ${n10} → ${n10 - 1}`, await waitFor(`(() => { const b = (${badgeOf(liveWin)}); return ${n10 - 1} === 0 ? !b : (!!b && b.n === ${JSON.stringify(String(n10 - 1))}); })()`, 5000), await evalJs(badgeOf(liveWin)));
+  check(`the stub's stdin gets [For you reply #${target10}] … from the title bar`, gateOf(f10.startsWith(`[For you reply #${target10}]`)) && verdictOf(f10.endsWith('from the title bar')), f10.slice(0, 300));
+  check('…the popover row resolves IN PLACE (still listed, struck through)', verdictOf(await waitFor(`document.querySelector(${JSON.stringify(miniRow(target10))})?.classList.contains('ut-item-inplace')`, 5000)));
+  check(`…and the badge counts down ${n10} → ${n10 - 1}`, verdictOf(await waitFor(`(() => { const b = (${badgeOf(liveWin)}); return ${n10 - 1} === 0 ? !b : (!!b && b.n === ${JSON.stringify(String(n10 - 1))}); })()`, 5000)), await evalJs(badgeOf(liveWin)));
   for (const id of await evalJs(`[...document.querySelectorAll('.ut-mini-popover .ut-item:not(.ut-item-resolved)')].map((r) => r.dataset.id)`)) {
     await evalJs(`document.querySelector(${JSON.stringify(miniRow(id) + ' .ut-done')}).click(); true`);
     await waitFor(`document.querySelector(${JSON.stringify(miniRow(id))})?.classList.contains('ut-item-inplace')`, 4000);
   }
-  check('marking the rest done from the popover removes the badge at 0', await waitFor(`!(${badgeOf(liveWin)})`, 5000), await evalJs(badgeOf(liveWin)));
-  check('…while the popover keeps every row in its slot (append-only while open)', await evalJs(`${miniIds}.length === ${ids10.length}`), await evalJs(miniIds));
+  check('marking the rest done from the popover removes the badge at 0', verdictOf(await waitFor(`!(${badgeOf(liveWin)})`, 5000)), await evalJs(badgeOf(liveWin)));
+  check('…while the popover keeps every row in its slot (append-only while open)', verdictOf(await evalJs(`${miniIds}.length === ${ids10.length}`)), await evalJs(miniIds));
   await evalJs(`document.querySelectorAll('.ut-mini-popover').forEach((p) => p.remove()); true`);
   const notice9 = await fileItem(token, { text: 'FYI: nothing to decide', urgency: 'normal', kind: 'notice' });
-  check('a NOTICE filed by the same session (kind notice)', notice9?.success && notice9.item?.kind === 'notice', notice9);
+  check('a NOTICE filed by the same session (kind notice)', gateOf(notice9?.success) && notice9.item?.kind === 'notice', notice9);
   await sleep(1200);
   check('⑨ …a session with only notices shows NO badge', !(await evalJs(badgeOf(liveWin))), await evalJs(badgeOf(liveWin)));
 
   console.log('⑫ in a tab chain the badge rides the tab');
   const after12 = await fileItem(token, { text: 'After the merge', urgency: 'urgent' });
-  check('an urgent ask is filed', after12?.success, after12);
-  check('(the live badge is back: 1, urgent)', await waitFor(`(() => { const b = (${badgeOf(liveWin)}); return !!b && b.n === '1' && b.urgency === 'urgent'; })()`, 5000));
+  check('an urgent ask is filed', verdictOf(after12?.success), after12);
+  check('(the live badge is back: 1, urgent)', verdictOf(await waitFor(`(() => { const b = (${badgeOf(liveWin)}); return !!b && b.n === '1' && b.urgency === 'urgent'; })()`, 5000)));
   await evalJs(`app.wm.createTabChain(app.wm.windows.get(${JSON.stringify(viewWin)}), app.wm.windows.get(${JSON.stringify(liveWin)})); true`);
   await sleep(300);
   const tabBadge = (hostId, winId) => `(() => { const h = app.wm.windows.get(${JSON.stringify(hostId)}); const b = h && h.titleBar.querySelector('.tab-item[data-win-id=' + JSON.stringify(${JSON.stringify(winId)}) + '] .win-inbox-badge'); return b ? { n: b.textContent.trim(), urgency: b.dataset.urgency, label: b.getAttribute('aria-label') } : null; })()`;
   const x12 = await evalJs(`({ live: ${tabBadge(viewWin, liveWin)}, view: ${tabBadge(viewWin, viewWin)}, hostBar: !!app.wm.windows.get(${JSON.stringify(viewWin)}).titleBar.querySelector(':scope > .win-inbox-badge'), guestBar: !!app.wm.windows.get(${JSON.stringify(liveWin)}).titleBar.querySelector(':scope > .win-inbox-badge') })`);
-  check('merged: each window\'s badge is on ITS tab item (live 1 urgent, stopped 1 high) and on no standalone bar', x12.live && x12.live.n === '1' && x12.live.urgency === 'urgent' && x12.view && x12.view.n === '1' && x12.view.urgency === 'high' && !x12.hostBar && !x12.guestBar, x12);
+  check('merged: each window\'s badge is on ITS tab item (live 1 urgent, stopped 1 high) and on no standalone bar', gateOf(x12.live) && x12.live.n === '1' && x12.live.urgency === 'urgent' && gateOf(x12.view) && x12.view.n === '1' && x12.view.urgency === 'high' && !x12.hostBar && !x12.guestBar, x12);
   await evalJs(`(() => { const h = app.wm.windows.get(${JSON.stringify(viewWin)}); h.titleBar.querySelector('.tab-item[data-win-id=' + JSON.stringify(${JSON.stringify(liveWin)}) + '] .win-inbox-badge').click(); return true; })()`);
-  check('the tab\'s badge opens the popover of ITS session', await waitFor(`${miniIds}.includes(${JSON.stringify(after12.item.id)}) && !${miniIds}.includes(${JSON.stringify(HOSTILE_ID)})`, 3000), await evalJs(miniIds));
+  check('the tab\'s badge opens the popover of ITS session', verdictOf(await waitFor(`${miniIds}.includes(${JSON.stringify(after12.item.id)}) && !${miniIds}.includes(${JSON.stringify(HOSTILE_ID)})`, 3000)), await evalJs(miniIds));
   await evalJs(`document.querySelectorAll('.ut-mini-popover').forEach((p) => p.remove()); true`);
   await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(liveWin)}); app.wm._detachFromChain(w._tabChain, w.id); return true; })()`);
   await sleep(300);
   const x12b = await evalJs(`({ live: ${badgeOf(liveWin)}, view: ${badgeOf(viewWin)}, tabs: document.querySelectorAll('.tab-item .win-inbox-badge').length })`);
-  check('un-tabbed: both standalone title bars show their badges again, no tab badge left', x12b.live && x12b.live.n === '1' && x12b.view && x12b.view.n === '1' && x12b.tabs === 0, x12b);
+  check('un-tabbed: both standalone title bars show their badges again, no tab badge left', gateOf(x12b.live) && x12b.live.n === '1' && gateOf(x12b.view) && x12b.view.n === '1' && x12b.tabs === 0, x12b);
 
   console.log('⑬ a hostile session name stays text');
   const HOSTILE_NAME = '<b onmouseover=window.__xss=3>';
@@ -639,7 +639,7 @@ try {
   await evalJs(`app.wm.focusWindow(${JSON.stringify(liveWin)}); true`); // the detached window sits exactly over the host — bring the live one up
   await sleep(300);
   await clickBadge(liveWin);
-  check('the popover head names the session by its (hostile) name, as TEXT', await waitFor(`document.querySelector('.ut-mini-popover .ut-mini-name')?.textContent === ${JSON.stringify(HOSTILE_NAME)}`, 6000), await evalJs(`document.querySelector('.ut-mini-popover .ut-mini-head')?.outerHTML`));
+  check('the popover head names the session by its (hostile) name, as TEXT', verdictOf(await waitFor(`document.querySelector('.ut-mini-popover .ut-mini-name')?.textContent === ${JSON.stringify(HOSTILE_NAME)}`, 6000)), await evalJs(`document.querySelector('.ut-mini-popover .ut-mini-head')?.outerHTML`));
   const x13 = await evalJs(`(() => { const p = document.querySelector('.ut-mini-popover'); const w = app.wm.windows.get(${JSON.stringify(liveWin)}); const b = w.titleBar.querySelector(':scope > .win-inbox-badge'); for (const el of [p, b, w.titleBar, ...(p ? p.querySelectorAll('*') : [])]) el && el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); return { xss: window.__xss, bInPop: p ? p.querySelectorAll('b').length : -1, bInBar: w.titleBar.querySelectorAll('b').length, label: b ? b.getAttribute('aria-label') : null }; })()`);
   check('no <b> element was made from the name (popover or title bar), window.__xss stays undefined after mouseover', x13.xss === undefined && x13.bInPop === 0 && x13.bInBar === 0, x13);
   check('the badge\'s aria-label is plain text (no name, no markup)', x13.label === '1 items from this agent', x13);
@@ -649,13 +649,13 @@ try {
   {
     const src = fs.readFileSync(path.join(repo, 'src/lib/user-todos-layout.js'), 'utf8');
     const FILTER = 'ks.has(i.sessionKey)';
-    check('the PURE module carries the key filter the panel calls (miniInboxEntries)', src.includes(FILTER) && fs.readFileSync(path.join(repo, 'src/lib/user-todos-panel.js'), 'utf8').includes('miniInboxEntries('));
+    check('the PURE module carries the key filter the panel calls (miniInboxEntries)', gateOf(src.includes(FILTER)) && verdictOf(fs.readFileSync(path.join(repo, 'src/lib/user-todos-panel.js'), 'utf8').includes('miniInboxEntries(')));
     // both copies live OUTSIDE the checkout (scripts/mutant-copy.mjs, test-architecture §51); their
     // relative imports (inbox-reply.js, inbox-origin.js) are rewritten to the real files' URLs
     const MUT = mutantCopies('inbox-reply-ui-14', repo);
     const realF = MUT.write('src/lib/user-todos-layout.js', src, 'real', { same: true });
     const patchedF = MUT.write('src/lib/user-todos-layout.js', editAnchor(src, FILTER, 'true', "src/lib/user-todos-layout.js", 'join'), 'patched');
-    for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2, label: '⑭ ' })) check(row.name, row.pass, row.detail);
+    for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2, label: '⑭ ' })) check(row.name, verdictOf(row.pass), row.detail);
     {
       const real = await import(realF);
       const patched = await import(patchedF);
@@ -664,7 +664,7 @@ try {
       const r = real.miniInboxEntries(null, todos, keys).entries.map((e) => e.item.id);
       const p = patched.miniInboxEntries(null, todos, keys).entries.map((e) => e.item.id);
       check('the real filter lists only this session\'s rows', r.length >= 1 && !r.includes(HOSTILE_ID), r);
-      check('a patched copy WITHOUT the key filter lists another session\'s row (the hostile item) — ⑩ can go red', p.includes(HOSTILE_ID), p);
+      check('a patched copy WITHOUT the key filter lists another session\'s row (the hostile item) — ⑩ can go red', verdictOf(p.includes(HOSTILE_ID)), p);
     }
   }
 
@@ -675,16 +675,16 @@ try {
     const floodWin = await evalJs(`app.viewSession(${JSON.stringify(FLOOD_SID)}, ${JSON.stringify(CWD)}, 'flood fixture', { backend: 'claude' })?.id || null`);
     check('the flood fixture conversation opens as a view-only window', !!floodWin, floodWin);
     await sleep(800);
-    check(`…whose title-bar badge SAYS its ${FLOOD_N} low asks — quiet (band 5 is counted, never loud: lane foryou-honest)`, await waitFor(`(() => { const b = (${badgeOf(floodWin)}); return !!b && b.n === ${JSON.stringify(String(FLOOD_N))} && b.urgency === 'quiet'; })()`, 4000), await evalJs(badgeOf(floodWin)));
+    check(`…whose title-bar badge SAYS its ${FLOOD_N} low asks — quiet (band 5 is counted, never loud: lane foryou-honest)`, verdictOf(await waitFor(`(() => { const b = (${badgeOf(floodWin)}); return !!b && b.n === ${JSON.stringify(String(FLOOD_N))} && b.urgency === 'quiet'; })()`, 4000)), await evalJs(badgeOf(floodWin)));
     const taskbarN = `[...document.querySelectorAll('#taskbar-user-todos .ut-count:not(.ut-seg-notice)')].reduce((a, e) => a + Number(e.textContent || 0), 0)`;
     const tb0 = await evalJs(taskbarN);
     await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); document.getElementById('taskbar-user-todos').click(); return true; })()`);
     const bSel = '#user-todos-popup .ut-band[data-band="5"]';
-    check('the For-you panel opens with band 5', await waitFor(`!!document.querySelector(${JSON.stringify(bSel)})`, 5000));
+    check('the For-you panel opens with band 5', verdictOf(await waitFor(`!!document.querySelector(${JSON.stringify(bSel)})`, 5000)));
     const rowsOf = `[...document.querySelectorAll(${JSON.stringify(bSel + ' > .ut-item')})]`;
     const x15 = await evalJs(`(() => { const g = document.querySelector(${JSON.stringify(bSel)}); const rows = ${rowsOf}; const f = g.querySelector('.ut-fold'); const all = document.querySelectorAll('#user-todos-popup .ut-bands .ut-item').length; return { n: rows.length, all, ids: rows.map((r) => r.dataset.id), fold: f ? f.textContent : null, foldLast: !!f && (g.lastElementChild === f || f.parentNode === g.firstElementChild), count: g.querySelector('.ut-band-n').textContent }; })()`);
     const open15 = (await storeNow()).open.filter((i) => i.sessionKey === floodKey).length;
-    check(`the first screen draws ${x15.all} rows (≤ 6); band 5 shows its NEWEST ${x15.n} and ONE head "${x15.fold}" for the rest`, x15.all <= 6 && x15.n >= 1 && x15.fold === `${open15 - x15.n} more — expand` && x15.foldLast && JSON.stringify(x15.ids) === JSON.stringify(FLOOD_IDS.slice(0, x15.n)), x15);
+    check(`the first screen draws ${x15.all} rows (≤ 6); band 5 shows its NEWEST ${x15.n} and ONE head "${x15.fold}" for the rest`, x15.all <= 6 && x15.n >= 1 && x15.fold === `${open15 - x15.n} more — expand` && gateOf(x15.foldLast) && JSON.stringify(x15.ids) === JSON.stringify(FLOOD_IDS.slice(0, x15.n)), x15);
     check(`…while the band's bar counts all its open rows (${open15})`, x15.count === String(open15), x15);
     await evalJs(`window.__f5 = ${rowsOf}; window.__f5top = window.__f5.map((r) => r.offsetTop); true`);
     // lane attention-predicate-shared (the owner 2026-10-19 on the .318 tray, 「很容易误触」): the fold is a TOGGLE in the bar's last
@@ -704,13 +704,13 @@ try {
     const READ15 = `(() => { const real = document.querySelector('#user-todos-popup:not(.zz-decoy-15)'), p = real.getBoundingClientRect(); const st = document.getElementById('global-toasts'); const all = st ? [...st.querySelectorAll(':scope > .global-toast')] : []; const ts = all.filter((t) => getComputedStyle(t).display !== 'none' && getComputedStyle(st).visibility !== 'hidden').map((t) => t.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0); return { toasts: ts.length, held: all.filter((t) => t.classList.contains('global-toast-held')).length, open: !real.classList.contains('hidden'), meet: ts.filter((r) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top).length, out: ts.filter((r) => r.left < 0 || r.right > innerWidth || r.top < 0 || r.bottom > innerHeight).length }; })()`;
     await evalJs(PLACED15);
     const clear15 = await evalJs(READ15);
-    check(`B-7a51: ${clear15 && clear15.toasts} toast(s) drawn while the panel is open (at 1280 there is room beside it: ${clear15 && clear15.held} held) — none stands on the panel (${clear15 && clear15.meet} meet it), none off screen (${clear15 && clear15.out})`, !!clear15 && clear15.open && clear15.toasts >= 3 && clear15.held === 0 && clear15.meet === 0 && clear15.out === 0, clear15);
+    check(`B-7a51: ${clear15 && clear15.toasts} toast(s) drawn while the panel is open (at 1280 there is room beside it: ${clear15 && clear15.held} held) — none stands on the panel (${clear15 && clear15.meet} meet it), none off screen (${clear15 && clear15.out})`, !!clear15 && gateOf(clear15.open) && clear15.toasts >= 3 && clear15.held === 0 && clear15.meet === 0 && clear15.out === 0, clear15);
     // RED CONTROL — THE PLANT PROVES ITSELF (its round's MUST): would these three toasts stand ON the panel without B-7a51's step? A
     // hidden decoy `#user-todos-popup` first in <body> is the panel the step reads (getElementById: the first in the tree) — the
     // real panel stays open, untouched; the decoy's arrival re-places the stack (the body's child list is watched) at its own place:
     // the same toasts MEET the panel there. The decoy gone, the stack is placed clear again before the point is read
     const plant15 = await evalJs(`(async () => { const d = document.createElement('div'); d.id = 'user-todos-popup'; d.className = 'hidden zz-decoy-15'; document.body.prepend(d); await ${PLACED15}; const r = ${READ15}; d.remove(); return r; })()`);
-    check(`CONTROL PROVES ITS PLANT: the panel unseen by the step (a hidden decoy first in the tree), the same ${plant15 && plant15.toasts} toast(s) stand ON the open panel (${plant15 && plant15.meet} meet it) — the check above is RED without B-7a51`, !!plant15 && plant15.open && plant15.toasts >= 3 && plant15.meet >= 1, plant15);
+    check(`CONTROL PROVES ITS PLANT: the panel unseen by the step (a hidden decoy first in the tree), the same ${plant15 && plant15.toasts} toast(s) stand ON the open panel (${plant15 && plant15.meet} meet it) — the check above is RED without B-7a51`, !!plant15 && gateOf(plant15.open) && plant15.toasts >= 3 && plant15.meet >= 1, plant15);
     await evalJs(PLACED15);
     const back15 = await evalJs(READ15), gone15 = await evalJs(`!document.querySelector('.zz-decoy-15')`);
     check(`…the decoy gone (${gone15}), the stack is placed clear again (${back15 && back15.meet} meet the panel)`, gone15 === true && !!back15 && back15.toasts >= 3 && back15.meet === 0, back15);
@@ -722,19 +722,19 @@ try {
     // and only then reads the step's verdict; the plant is gone again before the real step reads the point
     await evalJs(`(() => { const t = document.createElement('div'); t.className = 'global-toast zz-plant-15'; t.style.cssText = 'position:fixed;left:${Math.round(fb.x) - 20}px;top:${Math.round(fb.y) - 10}px;width:40px;height:20px;margin:0;padding:0;z-index:2147483647;animation:none;transform:none;opacity:1'; t.appendChild(document.createTextNode('Marked done · ')); const u = document.createElement('button'); u.className = 'global-toast-action'; u.textContent = 'Undo'; u.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;margin:0;padding:0'; t.appendChild(u); document.body.appendChild(t); return true; })()`);
     const proof15 = await evalJs(`(() => { const u = document.querySelector('.zz-plant-15 .global-toast-action'); if (!u) return { planted: false }; const q = u.getBoundingClientRect(); return { planted: true, inside: ${fb.x} >= q.left && ${fb.x} <= q.right && ${fb.y} >= q.top && ${fb.y} <= q.bottom, top: document.elementFromPoint(${fb.x}, ${fb.y}) === u, rect: [Math.round(q.left), Math.round(q.top), Math.round(q.width), Math.round(q.height)] }; })()`);
-    check(`CONTROL PROVES ITSELF FIRST: the planted toast's button stands AT the point — the point inside its own rect and the top element there IS that button (${JSON.stringify(proof15)})`, !!proof15 && proof15.planted && proof15.inside && proof15.top, proof15);
+    check(`CONTROL PROVES ITSELF FIRST: the planted toast's button stands AT the point — the point inside its own rect and the top element there IS that button (${JSON.stringify(proof15)})`, !!proof15 && gateOf(proof15.planted) && gateOf(proof15.inside) && verdictOf(proof15.top), proof15);
     const planted15 = await evalJs(topAt(fb.x, fb.y));
     await evalJs(`document.querySelectorAll('.zz-plant-15').forEach((el) => el.remove()); true`);
-    check(`CONTROL: a toast's action button left over the point — the step is RED and names the toast (${planted15 && planted15.what})`, !!planted15 && !planted15.fold && /^a toast: global-toast-action «Marked done/.test(planted15.what), planted15);
+    check(`CONTROL: a toast's action button left over the point — the step is RED and names the toast (${planted15 && planted15.what})`, !!planted15 && !planted15.fold && verdictOf(/^a toast: global-toast-action «Marked done/.test(planted15.what)), planted15);
     check('…the plant is gone before the real step reads the point', await evalJs(`!document.querySelector('.zz-plant-15')`) === true);
     const at15 = await evalJs(topAt(fb.x, fb.y));
-    check(`the point the presses below use is the TOGGLE inside the panel — no toast over it (what stands there: ${at15 && at15.what})`, !!at15 && at15.fold, at15);
+    check(`the point the presses below use is the TOGGLE inside the panel — no toast over it (what stands there: ${at15 && at15.what})`, !!at15 && verdictOf(at15.fold), at15);
     const rBefore = await evalJs(rectsOf);
     await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
-    check(`a real click on the head opens the band IN PLACE: all ${open15} rows (the panel stays open)`, await waitFor(`${rowsOf}.length === ${open15} && !document.getElementById('user-todos-popup').classList.contains('hidden')`, 3000), await evalJs(`${rowsOf}.length`));
+    check(`a real click on the head opens the band IN PLACE: all ${open15} rows (the panel stays open)`, verdictOf(await waitFor(`${rowsOf}.length === ${open15} && !document.getElementById('user-todos-popup').classList.contains('hidden')`, 3000)), await evalJs(`${rowsOf}.length`));
     const x15b = await evalJs(`(() => { const rows = ${rowsOf}; return { same: window.__f5.every((r, i) => rows[i] === r), tops: window.__f5.map((r) => r.offsetTop), before: window.__f5top, fold: !!document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}), order: JSON.stringify(rows.map((r) => r.dataset.id).filter((id) => id.startsWith('ut-f100d'))) === ${JSON.stringify(JSON.stringify(FLOOD_IDS))} }; })()`);
-    check("…the shown rows are the SAME nodes at the SAME offsetTop, the rest below them in the list's order; the toggle stays (「收起」)", x15b.same && JSON.stringify(x15b.tops) === JSON.stringify(x15b.before) && x15b.fold && x15b.order && (await evalJs(`document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}).textContent`)) === 'Show less', x15b);
+    check("…the shown rows are the SAME nodes at the SAME offsetTop, the rest below them in the list's order; the toggle stays (「收起」)", gateOf(x15b.same) && JSON.stringify(x15b.tops) === JSON.stringify(x15b.before) && gateOf(x15b.fold) && gateOf(x15b.order) && (await evalJs(`document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}).textContent`)) === 'Show less', x15b);
     const rAfter = await evalJs(rectsOf);
     check('THE SLOTS HOLD: 「全部标为已看」 and the toggle have the SAME rect after 展开 as before it (nothing destructive slid into the spot just pressed)', JSON.stringify(rAfter) === JSON.stringify(rBefore) && !!rBefore.seen && !!rBefore.fold, { rBefore, rAfter });
     const hit = await evalJs(`(() => { const e = document.elementFromPoint(${fb.x}, ${fb.y}); return e ? (e.closest('.ut-fold') ? 'fold' : e.closest('.ut-seen-all') ? 'seen-all' : e.className) : null; })()`);
@@ -742,24 +742,24 @@ try {
     const open15a = (await storeNow()).open.filter((i) => i.sessionKey === floodKey).length;
     await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
-    check(`a SECOND press at the same spot collapses the band back to ${x15.n} rows and marks nothing (${open15a} open in the store)`, await waitFor(`${rowsOf}.length === ${x15.n} && !document.getElementById('user-todos-popup').classList.contains('hidden')`, 3000) && (await storeNow()).open.filter((i) => i.sessionKey === floodKey).length === open15a && open15a === open15, await evalJs(`${rowsOf}.length`));
+    check(`a SECOND press at the same spot collapses the band back to ${x15.n} rows and marks nothing (${open15a} open in the store)`, gateOf(await waitFor(`${rowsOf}.length === ${x15.n} && !document.getElementById('user-todos-popup').classList.contains('hidden')`, 3000)) && (await storeNow()).open.filter((i) => i.sessionKey === floodKey).length === open15a && open15a === open15, await evalJs(`${rowsOf}.length`));
     check('…the toggle reads 「还有 N 条 — 展开」 again in the same rect; 「全部标为已看」 never moved', JSON.stringify(await evalJs(rectsOf)) === JSON.stringify(rBefore) && (await evalJs(`document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}).textContent`)) === `${open15 - x15.n} more — expand`, await evalJs(rectsOf));
     await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
-    check(`…and a third opens it again (all ${open15} rows — the legs below act on the open band)`, await waitFor(`${rowsOf}.length === ${open15}`, 3000), await evalJs(`${rowsOf}.length`));
+    check(`…and a third opens it again (all ${open15} rows — the legs below act on the open band)`, verdictOf(await waitFor(`${rowsOf}.length === ${open15}`, 3000)), await evalJs(`${rowsOf}.length`));
     const saSel = bSel + ' > .ut-band-bar > .ut-seen-all';
-    check('the band bar carries "Mark all seen" (≥ 2 open rows) — and 紧急 has none', await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(saSel)}); return !!b && b.textContent === 'Mark all seen' && getComputedStyle(b).display !== 'none' && !document.querySelector('#user-todos-popup .ut-band[data-band="1"] .ut-seen-all'); })()`));
+    check('the band bar carries "Mark all seen" (≥ 2 open rows) — and 紧急 has none', verdictOf(await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(saSel)}); return !!b && b.textContent === 'Mark all seen' && getComputedStyle(b).display !== 'none' && !document.querySelector('#user-todos-popup .ut-band[data-band="1"] .ut-seen-all'); })()`)));
     await evalJs(`window.__f30 = ${rowsOf}; true`);
     const utu0 = frames.filter((m) => m && m.type === 'user-todos-updated').length;
     await evalJs(`document.querySelector(${JSON.stringify(saSel)}).click(); true`);
-    check('every row of the band strikes IN PLACE (.ut-item-inplace, the text line-through)', await waitFor(`(() => { const rows = ${rowsOf}; return rows.length === ${open15} && rows.every((r) => r.classList.contains('ut-item-inplace') && getComputedStyle(r.querySelector('.ut-text')).textDecorationLine.includes('line-through')); })()`, 5000),
+    check('every row of the band strikes IN PLACE (.ut-item-inplace, the text line-through)', verdictOf(await waitFor(`(() => { const rows = ${rowsOf}; return rows.length === ${open15} && rows.every((r) => r.classList.contains('ut-item-inplace') && getComputedStyle(r.querySelector('.ut-text')).textDecorationLine.includes('line-through')); })()`, 5000)),
       await evalJs(`${rowsOf}.map((r) => r.className).slice(0, 3)`));
-    check('…the SAME nodes in the same order (nothing moved, nothing re-rendered)', await evalJs(`(() => { const rows = ${rowsOf}; return rows.length === window.__f30.length && rows.every((r, i) => r === window.__f30[i]); })()`));
+    check('…the SAME nodes in the same order (nothing moved, nothing re-rendered)', verdictOf(await evalJs(`(() => { const rows = ${rowsOf}; return rows.length === window.__f30.length && rows.every((r, i) => r === window.__f30[i]); })()`)));
     const st15 = await storeNow();
-    check(`the store holds all ${FLOOD_N} dismissed by the user`, FLOOD_IDS.every((id) => { const i = st15.resolved.find((x) => x.id === id) || st15.open.find((x) => x.id === id); return !i || (i.status === 'dismissed'); }) && !st15.open.some((i) => i.sessionKey === floodKey), st15.open.filter((i) => i.sessionKey === floodKey).length);
+    check(`the store holds all ${FLOOD_N} dismissed by the user`, gateOf(FLOOD_IDS.every((id) => { const i = st15.resolved.find((x) => x.id === id) || st15.open.find((x) => x.id === id); return !i || (i.status === 'dismissed'); })) && !st15.open.some((i) => i.sessionKey === floodKey), st15.open.filter((i) => i.sessionKey === floodKey).length);
     const left15 = (await storeNow()).open.filter((i) => i.kind !== 'notice').length;
-    check(`the taskbar count drops with the band (${tb0} → ${left15}): it counts every open item — band 5 too (lane foryou-honest)`, await waitFor(`(${taskbarN}) === ${left15}`, 3000) && left15 <= tb0 - FLOOD_N, await evalJs(taskbarN));
-    check('"Mark all seen" hides itself (no open row left in the band)', await evalJs(`getComputedStyle(document.querySelector(${JSON.stringify(saSel)})).display === 'none'`));
+    check(`the taskbar count drops with the band (${tb0} → ${left15}): it counts every open item — band 5 too (lane foryou-honest)`, gateOf(await waitFor(`(${taskbarN}) === ${left15}`, 3000)) && left15 <= tb0 - FLOOD_N, await evalJs(taskbarN));
+    check('"Mark all seen" hides itself (no open row left in the band)', verdictOf(await evalJs(`getComputedStyle(document.querySelector(${JSON.stringify(saSel)})).display === 'none'`)));
     await sleep(1200);
     const utu = frames.filter((m) => m && m.type === 'user-todos-updated').length - utu0;
     check('a SECOND client (the node ws) saw exactly ONE user-todos-updated for the whole batch', utu === 1, utu);
@@ -769,31 +769,31 @@ try {
     const live15b = await fileItem(token, { text: 'Flood check two', urgency: 'low' });
     await waitFor(`!!document.querySelector(${JSON.stringify(saSel)}) && getComputedStyle(document.querySelector(${JSON.stringify(saSel)})).display !== 'none'`, 5000);
     await evalJs(`document.querySelector(${JSON.stringify(saSel)}).click(); true`);
-    check('a failed "Mark all seen" is a toast naming the count and the reason', await waitFor(`[...document.querySelectorAll('.global-toast')].some((e) => /Could not update \\d+ items: the store is read-only/.test(e.textContent))`, 4000),
+    check('a failed "Mark all seen" is a toast naming the count and the reason', verdictOf(await waitFor(`[...document.querySelectorAll('.global-toast')].some((e) => /Could not update \\d+ items: the store is read-only/.test(e.textContent))`, 4000)),
       await evalJs(`[...document.querySelectorAll('.global-toast')].map((e) => e.textContent).slice(-3)`));
     await evalJs(`window.fetch = window.__of; true`);
-    check('…and nothing was resolved', !!live15?.success && !!live15b?.success && (await storeNow()).open.some((i) => i.id === live15.item.id));
+    check('…and nothing was resolved', !!live15?.success && !!live15b?.success && verdictOf((await storeNow()).open.some((i) => i.id === live15.item.id)));
   }
 
   // ── ⑯ THE BOARD CHIP (chunk 4) ──
   console.log('⑯ the board chip left the tray (lane foryou-folds): a status broadcast paints no chip and rebuilds no row');
   {
     const rowSel16 = rowSel(after12.item.id);
-    check('(the live urgent row is in band 1, its reply button drawn)', await waitFor(`!!document.querySelector('#user-todos-popup .ut-band[data-band="1"] .ut-item[data-id=' + ${JSON.stringify(JSON.stringify(after12.item.id))} + '] .ut-reply-btn')`, 5000));
+    check('(the live urgent row is in band 1, its reply button drawn)', verdictOf(await waitFor(`!!document.querySelector('#user-todos-popup .ut-band[data-band="1"] .ut-item[data-id=' + ${JSON.stringify(JSON.stringify(after12.item.id))} + '] .ut-reply-btn')`, 5000)));
     await evalJs(`document.querySelector(${JSON.stringify(rowSel16 + ' .ut-reply-btn')}).click(); true`);
     await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(rowSel16 + ' .ut-reply textarea')})`, 3000);
     await cdp('Input.insertText', { text: 'typing while the board moves' });
     await evalJs(`window.__ta16 = document.querySelector(${JSON.stringify(rowSel16 + ' .ut-reply textarea')}); window.__rows16 = [...document.querySelectorAll('#user-todos-popup .ut-item')]; true`);
     const st = async (body) => (await fetch(`http://127.0.0.1:${PORT}/api/agent/session-status`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) })).json();
     const s1 = await st({ state: 'needs-input', reason: 'which region?', detail: 'us-east or eu-west — I recommend eu-west' });
-    check('the agent reports needs-input through its own route', s1 && s1.success, s1);
+    check('the agent reports needs-input through its own route', gateOf(s1) && verdictOf(s1.success), s1);
     await sleep(1500);
-    check('no board chip anywhere in the tray (a blocked board PLACES a row in band 2 now — the pass\'s facts, not a chip)', await evalJs(`!document.querySelector('#user-todos-popup .ut-board')`));
+    check('no board chip anywhere in the tray (a blocked board PLACES a row in band 2 now — the pass\'s facts, not a chip)', verdictOf(await evalJs(`!document.querySelector('#user-todos-popup .ut-board')`)));
     const x16 = await evalJs(`(() => { const ta = document.querySelector(${JSON.stringify(rowSel16 + ' .ut-reply textarea')}); const rows = [...document.querySelectorAll('#user-todos-popup .ut-item')]; return { same: ta === window.__ta16, value: ta && ta.value, focused: document.activeElement === ta, rows: rows.length === window.__rows16.length && rows.every((r, i) => r === window.__rows16[i]) }; })()`);
-    check('…no row was rebuilt: the SAME reply textarea with its text and focus, every row the same node', x16.same && x16.value === 'typing while the board moves' && x16.focused && x16.rows, x16);
+    check('…no row was rebuilt: the SAME reply textarea with its text and focus, every row the same node', gateOf(x16.same) && x16.value === 'typing while the board moves' && gateOf(x16.focused) && verdictOf(x16.rows), x16);
     const s2 = await st({ clear: true });
-    check('the agent clears its status', s2 && s2.success, s2);
-    check('…the reply box still holds its text', await evalJs(`window.__ta16.isConnected && window.__ta16.value === 'typing while the board moves'`));
+    check('the agent clears its status', gateOf(s2) && verdictOf(s2.success), s2);
+    check('…the reply box still holds its text', verdictOf(await evalJs(`window.__ta16.isConnected && window.__ta16.value === 'typing while the board moves'`)));
   }
 
   // ── ⑰ NOTICES BY ORIGIN (B-328d) ──
@@ -801,25 +801,25 @@ try {
   {
   try { // a leg that throws (a reverted panel has no strip) fails BY NAME and the battery goes on
     const P = '#user-todos-popup';
-    check('(the panel is open with the half-typed reply box from ⑯)', await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden') && window.__ta16?.isConnected && window.__ta16.value === 'typing while the board moves'`));
+    check('(the panel is open with the half-typed reply box from ⑯)', verdictOf(await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden') && window.__ta16?.isConnected && window.__ta16.value === 'typing while the board moves'`)));
     const n0 = await evalJs(`(() => { const n = document.querySelector('${P} .ut-notices'); return { open: n.classList.contains('ut-notices-open'), strip: getComputedStyle(n.querySelector(':scope > .ut-chips')).display, groups: getComputedStyle(n.querySelector(':scope > .ut-notice-groups')).display, head: n.querySelector(':scope > .ut-notice-head').textContent, tag: n.querySelector(':scope > .ut-notice-head').tagName }; })()`);
-    check('lane foryou-folds: the notices start as ONE grey line — a button head with the count; the strip and the groups not drawn', !n0.open && n0.strip === 'none' && n0.groups === 'none' && n0.tag === 'BUTTON' && /for your information/.test(n0.head), n0);
-    check('…a real click on the head opens them in place (the asks untouched)', await realClick(`${P} .ut-notices > .ut-notice-head`) && await waitFor(`document.querySelector('${P} .ut-notices').classList.contains('ut-notices-open') && getComputedStyle(document.querySelector('${P} .ut-notices > .ut-notice-groups')).display !== 'none' && window.__ta16?.isConnected`, 3000));
+    check('lane foryou-folds: the notices start as ONE grey line — a button head with the count; the strip and the groups not drawn', !n0.open && n0.strip === 'none' && n0.groups === 'none' && n0.tag === 'BUTTON' && verdictOf(/for your information/.test(n0.head)), n0);
+    check('…a real click on the head opens them in place (the asks untouched)', gateOf(await realClick(`${P} .ut-notices > .ut-notice-head`)) && verdictOf(await waitFor(`document.querySelector('${P} .ut-notices').classList.contains('ut-notices-open') && getComputedStyle(document.querySelector('${P} .ut-notices > .ut-notice-groups')).display !== 'none' && window.__ta16?.isConnected`, 3000)));
     const st = await storeNow();
     const openNotices = st.open.filter((i) => i.kind === 'notice');
     const agentN = openNotices.filter((i) => i.sessionKey !== 'accounts' && i.sessionKey !== 'channels').map((i) => i.id);
     const want = { spend: ['ut-5bed000001', 'ut-5bed000002', 'ut-5bed000003'], login: ['ut-10910000a1'], channels: ['ut-c4a0000001'], agent: agentN };
-    check(`(the store holds the six seeded notices + the agent's own — agent group = ${agentN.length}: the ⑨ notice and the forged-origin seed)`, agentN.length >= 2 && agentN.includes('ut-f0e6000001') && openNotices.length === 5 + agentN.length, openNotices.map((i) => [i.id, i.origin]));
+    check(`(the store holds the six seeded notices + the agent's own — agent group = ${agentN.length}: the ⑨ notice and the forged-origin seed)`, agentN.length >= 2 && gateOf(agentN.includes('ut-f0e6000001')) && openNotices.length === 5 + agentN.length, openNotices.map((i) => [i.id, i.origin]));
     const chipsNow = `[...document.querySelectorAll('${P} .ut-notices > .ut-chips > .ut-chip')].map((c) => ({ o: c.dataset.origin, label: c.querySelector('.ut-chip-label').textContent, n: c.querySelector('.ut-chip-n').textContent, on: c.classList.contains('on'), pressed: c.getAttribute('aria-pressed') }))`;
     const groupsNow = `[...document.querySelectorAll('${P} .ut-notices > .ut-notice-groups > .ut-notice-group')].map((g) => ({ o: g.dataset.origin, name: g.querySelector('.ut-group-name').textContent, n: g.querySelector('.ut-group-n').textContent, shown: getComputedStyle(g).display !== 'none', ids: [...g.querySelectorAll(':scope > .ut-item')].map((r) => r.dataset.id) }))`;
     const x17 = await evalJs(`({ chips: ${chipsNow}, groups: ${groupsNow}, strip: (() => { const e = document.querySelector('${P} .ut-notices > .ut-chips'); return e ? getComputedStyle(e).display : 'absent'; })(), xss: window.__xss })`);
     const total = Object.values(want).reduce((a, v) => a + v.length, 0);
     check(`the chip strip shows: All ${total} · Spending 3 · Accounts and sign-ins 1 · Channels 1 · Agents ${agentN.length} (in the set's order, All first, "All" active)`,
-      x17.strip !== 'none' && JSON.stringify(x17.chips.map((c) => [c.o, c.label, c.n])) === JSON.stringify([['all', 'All', String(total)], ['spend', 'Spending', '3'], ['login', 'Accounts and sign-ins', '1'], ['channels', 'Channels', '1'], ['agent', 'Agents', String(agentN.length)]]) && x17.chips[0].on && x17.chips[0].pressed === 'true' && x17.chips.slice(1).every((c) => !c.on && c.pressed === 'false'), x17.chips);
+      x17.strip !== 'none' && JSON.stringify(x17.chips.map((c) => [c.o, c.label, c.n])) === JSON.stringify([['all', 'All', String(total)], ['spend', 'Spending', '3'], ['login', 'Accounts and sign-ins', '1'], ['channels', 'Channels', '1'], ['agent', 'Agents', String(agentN.length)]]) && gateOf(x17.chips[0].on) && x17.chips[0].pressed === 'true' && verdictOf(x17.chips.slice(1).every((c) => !c.on && c.pressed === 'false')), x17.chips);
     check('one group per origin in the same order, each head naming its producer with its OPEN count, every group shown',
       JSON.stringify(x17.groups.map((g) => [g.o, g.name, g.n, g.shown])) === JSON.stringify([['spend', 'Spending', '3', true], ['login', 'Accounts and sign-ins', '1', true], ['channels', 'Channels', '1', true], ['agent', 'Agents', String(agentN.length), true]]), x17.groups);
     const byO = Object.fromEntries(x17.groups.map((g) => [g.o, g.ids]));
-    check('each group lists exactly its producer\'s notices — the LEGACY spend notice (no origin) under Spending, the forged origin under Agents', Object.entries(want).every(([o, ids]) => (byO[o] || []).length === ids.length && ids.every((id) => byO[o].includes(id))), { byO, want });
+    check('each group lists exactly its producer\'s notices — the LEGACY spend notice (no origin) under Spending, the forged origin under Agents', verdictOf(Object.entries(want).every(([o, ids]) => (byO[o] || []).length === ids.length && ids.every((id) => byO[o].includes(id)))), { byO, want });
     // lane ci-337-reds: `data-origin` is not For-you's alone — the New Session dialog's browser-profile <select> keeps its
     // provenance word there ('' | 'task-group' | 'instance' | 'chosen', the client's own), filled at BOOT since the .337
     // pick new-session-account-follows-backend (applyBackend 'boot'). So: For-you's origin attributes are plain keys, and
@@ -835,7 +835,7 @@ try {
     const WORSTSEG = loudActs.length ? { urgent: 'ut-seg-urgent', high: 'ut-seg-high', normal: 'ut-seg-norm', low: 'ut-seg-norm' }[WORST(loudActs)] : 'ut-seg-quiet';
     const t17 = await evalJs(`(() => { const a = ${tabSpan('inbox', 'action')}, n = ${tabSpan('inbox', 'notice')}, b = document.getElementById('taskbar-user-todos'); return { a: a && a.textContent, aShown: a && getComputedStyle(a).display !== 'none', aCls: a && a.className, aTitle: a && a.title, n: n && n.textContent, nCls: n && n.className, nTitle: n && n.title, btnTitle: b.title, label: a && a.parentElement.getAttribute('aria-label') }; })()`);
     check(`the Inbox tab carries the honest count (${openActs.length}, coloured by the worst LOUD tier: ${WORSTSEG}) and the grey notice count (${openNotices.length})`,
-      t17.aShown && t17.a === String(openActs.length) && t17.aCls.includes(WORSTSEG) && t17.n === String(openNotices.length) && t17.nCls.includes('ut-seg-notice'), t17);
+      gateOf(t17.aShown) && t17.a === String(openActs.length) && gateOf(t17.aCls.includes(WORSTSEG)) && t17.n === String(openNotices.length) && verdictOf(t17.nCls.includes('ut-seg-notice')), t17);
     check('…in the taskbar badge\'s own words (badge title = the ask words · the notice words)', t17.btnTitle === `${t17.aTitle} · ${t17.nTitle}` && t17.label === `Inbox, ${t17.aTitle}, ${t17.nTitle}`, t17);
     await evalJs(`document.querySelector('${P} .ut-notices')?.scrollIntoView({ block: 'start' }); true`);
     await shot('b328d-desktop-all', '#user-todos-popup');
@@ -843,23 +843,23 @@ try {
     // a REAL click on the Spending chip
     await evalJs(`window.__act17 = [...document.querySelectorAll('${P} .ut-groups .ut-item')]; window.__chip17 = [...document.querySelectorAll('${P} .ut-chips > .ut-chip')]; window.__nt17 = ${tabSpan('inbox', 'notice')}; window.__tabs17 = document.querySelector('${P} > .ut-tabs'); true`);
     const chipSel = (o) => `${P} .ut-chips > .ut-chip[data-origin="${o}"]`;
-    check('a real click on the Spending chip', await realClick(chipSel('spend')));
-    check('…only the Spending group is shown; the chip is .on + aria-pressed, All is not', await waitFor(`(() => { const g = ${groupsNow}; const c = ${chipsNow}; return g.every((x) => x.shown === (x.o === 'spend')) && c.find((x) => x.o === 'spend').on && c.find((x) => x.o === 'spend').pressed === 'true' && !c.find((x) => x.o === 'all').on; })()`, 3000), await evalJs(`({ g: ${groupsNow}, c: ${chipsNow} })`));
+    check('a real click on the Spending chip', verdictOf(await realClick(chipSel('spend'))));
+    check('…only the Spending group is shown; the chip is .on + aria-pressed, All is not', verdictOf(await waitFor(`(() => { const g = ${groupsNow}; const c = ${chipsNow}; return g.every((x) => x.shown === (x.o === 'spend')) && c.find((x) => x.o === 'spend').on && c.find((x) => x.o === 'spend').pressed === 'true' && !c.find((x) => x.o === 'all').on; })()`, 3000)), await evalJs(`({ g: ${groupsNow}, c: ${chipsNow} })`));
     const x17b = await evalJs(`(() => { const act = [...document.querySelectorAll('${P} .ut-groups .ut-item')]; const chips = [...document.querySelectorAll('${P} .ut-chips > .ut-chip')]; return { acts: act.length === window.__act17.length && act.every((r, i) => r === window.__act17[i]), actShown: act.filter((r) => r.getClientRects().length).length, chips: chips.length === window.__chip17.length && chips.every((c, i) => c === window.__chip17[i]), ta: window.__ta16.isConnected && window.__ta16.value, tabs: document.querySelector('${P} > .ut-tabs') === window.__tabs17, open: !document.getElementById('user-todos-popup').classList.contains('hidden'), stored: localStorage.getItem('vibespace.ut-notice-filter') }; })()`);
-    check('…the ask rows are the SAME nodes and still shown, every chip the same node, the tabs untouched, the panel still open', x17b.acts && x17b.actShown === await evalJs(`window.__act17.length`) && x17b.chips && x17b.tabs && x17b.open, x17b);
+    check('…the ask rows are the SAME nodes and still shown, every chip the same node, the tabs untouched, the panel still open', gateOf(x17b.acts) && x17b.actShown === await evalJs(`window.__act17.length`) && gateOf(x17b.chips) && gateOf(x17b.tabs) && verdictOf(x17b.open), x17b);
     check('…the half-typed reply box on an ask is the SAME node with its text', x17b.ta === 'typing while the board moves', x17b);
     check('…and the filter is stored per device (localStorage vibespace.ut-notice-filter = spend)', x17b.stored === 'spend', x17b);
     await shot('b328d-desktop-spend', '#user-todos-popup');
 
     // a broadcast while filtered: an agent notice lands HIDDEN in its group
     const filtered = await fileItem(token, { text: 'FYI: filed while the filter is on', urgency: 'low', kind: 'notice' });
-    check('an agent notice is filed through the agent route while Spending is the filter', filtered?.success && filtered.item?.origin === 'agent', filtered);
-    check('…the Agents chip counts it IN PLACE (same node), still inactive', await waitFor(`(() => { const c = document.querySelector('${chipSel('agent')}'); return !!c && c === window.__chip17.find((x) => x.dataset.origin === 'agent') && c.querySelector('.ut-chip-n').textContent === ${JSON.stringify(String(agentN.length + 1))} && !c.classList.contains('on'); })()`, 5000), await evalJs(chipsNow));
+    check('an agent notice is filed through the agent route while Spending is the filter', gateOf(filtered?.success) && filtered.item?.origin === 'agent', filtered);
+    check('…the Agents chip counts it IN PLACE (same node), still inactive', verdictOf(await waitFor(`(() => { const c = document.querySelector('${chipSel('agent')}'); return !!c && c === window.__chip17.find((x) => x.dataset.origin === 'agent') && c.querySelector('.ut-chip-n').textContent === ${JSON.stringify(String(agentN.length + 1))} && !c.classList.contains('on'); })()`, 5000)), await evalJs(chipsNow));
     const x17c = await evalJs(`(() => { const row = document.querySelector('${P} .ut-notice-group[data-origin="agent"] > .ut-item[data-id=${JSON.stringify(filtered.item.id)}]'); const g = ${groupsNow}; const act = [...document.querySelectorAll('${P} .ut-groups .ut-item')]; return { row: !!row, rowHidden: !!row && !row.getClientRects().length, onlySpend: g.every((x) => x.shown === (x.o === 'spend')), acts: act.length === window.__act17.length && act.every((r, i) => r === window.__act17[i]), ta: window.__ta16.isConnected && window.__ta16.value, nt: ${tabSpan('inbox', 'notice')} === window.__nt17 && window.__nt17.textContent }; })()`);
-    check('…its row is in the (hidden) Agents group, only Spending still shows', x17c.row && x17c.rowHidden && x17c.onlySpend, x17c);
-    check('…the ask rows and the typed reply box survived the broadcast (same nodes, same text)', x17c.acts && x17c.ta === 'typing while the board moves', x17c);
+    check('…its row is in the (hidden) Agents group, only Spending still shows', gateOf(x17c.row) && gateOf(x17c.rowHidden) && verdictOf(x17c.onlySpend), x17c);
+    check('…the ask rows and the typed reply box survived the broadcast (same nodes, same text)', gateOf(x17c.acts) && x17c.ta === 'typing while the board moves', x17c);
     check(`…and the Inbox tab's grey count ticked to ${openNotices.length + 1} in place (same span)`, x17c.nt === String(openNotices.length + 1), x17c);
-    check('a click on the active Spending chip again = All', await realClick(chipSel('spend')) && await waitFor(`(() => { const g = ${groupsNow}; const c = ${chipsNow}; return g.every((x) => x.shown) && c.find((x) => x.o === 'all').on && localStorage.getItem('vibespace.ut-notice-filter') === 'all'; })()`, 3000), await evalJs(`({ g: ${groupsNow}, c: ${chipsNow} })`));
+    check('a click on the active Spending chip again = All', gateOf(await realClick(chipSel('spend'))) && verdictOf(await waitFor(`(() => { const g = ${groupsNow}; const c = ${chipsNow}; return g.every((x) => x.shown) && c.find((x) => x.o === 'all').on && localStorage.getItem('vibespace.ut-notice-filter') === 'all'; })()`, 3000)), await evalJs(`({ g: ${groupsNow}, c: ${chipsNow} })`));
   } catch (e) { check('⑰ ran to its end', false, e.message); }
   }
 
@@ -876,31 +876,31 @@ try {
     // lane foryou-folds: a band-5 ask files SILENTLY — no toast, the Notifications count unchanged; lane foryou-honest: the Inbox tab COUNTS it
     const quiet18 = await fileItem(token, { text: 'A plain ask moves only the list', urgency: 'normal' });
     await sleep(1500);
-    check(`a band-5 ask files silently: no toast, the Notifications count unchanged (only bands 1–2 toast) — and the Inbox tab counts it (${a0} → ${a0 + 1}, the honest count)`, quiet18?.success && !(await evalJs(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('A plain ask moves only the list'))`)) && (await evalJs(unread)) === u0 && await waitFor(`Number(window.__ac18.textContent || 0) === ${a0 + 1}`, 3000), { quiet18: !!quiet18?.success, u: await evalJs(unread), a: await evalJs(`window.__ac18.textContent`) });
+    check(`a band-5 ask files silently: no toast, the Notifications count unchanged (only bands 1–2 toast) — and the Inbox tab counts it (${a0} → ${a0 + 1}, the honest count)`, gateOf(quiet18?.success) && !(await evalJs(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('A plain ask moves only the list'))`)) && (await evalJs(unread)) === u0 && verdictOf(await waitFor(`Number(window.__ac18.textContent || 0) === ${a0 + 1}`, 3000)), { quiet18: !!quiet18?.success, u: await evalJs(unread), a: await evalJs(`window.__ac18.textContent`) });
     const ask18 = await fileItem(token, { text: 'A new ask makes a toast', urgency: 'urgent' });
-    check('an URGENT ask is filed (band 1 — its arrival is a real toast: "For you · …")', ask18?.success && await waitFor(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('A new ask makes a toast'))`, 5000), ask18);
-    check(`the Notifications tab's unread count ticks ${u0} → ${u0 + 1} in place (same span, same tabs node)`, await waitFor(`${unread} === ${u0 + 1} && ${tabSpan('history', 'unread')} === window.__un18 && document.querySelector('${P} > .ut-tabs') === window.__tabs18`, 4000), await evalJs(unread));
-    check(`…and the Inbox tab's ask count ${a0 + 1} → ${a0 + 2} (same span)`, await waitFor(`${tabSpan('inbox', 'action')} === window.__ac18 && window.__ac18.textContent === ${JSON.stringify(String(a0 + 2))}`, 4000), await evalJs(`window.__ac18.textContent`));
+    check('an URGENT ask is filed (band 1 — its arrival is a real toast: "For you · …")', gateOf(ask18?.success) && verdictOf(await waitFor(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('A new ask makes a toast'))`, 5000)), ask18);
+    check(`the Notifications tab's unread count ticks ${u0} → ${u0 + 1} in place (same span, same tabs node)`, verdictOf(await waitFor(`${unread} === ${u0 + 1} && ${tabSpan('history', 'unread')} === window.__un18 && document.querySelector('${P} > .ut-tabs') === window.__tabs18`, 4000)), await evalJs(unread));
+    check(`…and the Inbox tab's ask count ${a0 + 1} → ${a0 + 2} (same span)`, verdictOf(await waitFor(`${tabSpan('inbox', 'action')} === window.__ac18 && window.__ac18.textContent === ${JSON.stringify(String(a0 + 2))}`, 4000)), await evalJs(`window.__ac18.textContent`));
     const seen0 = Date.now();
-    check('a real click on Notifications shows the history page with the toast on top', await realClick(`${P} > .ut-tabs > .ut-tab[data-tab="history"]`) && await waitFor(`(() => { const h = document.querySelector('${P} > .ut-hist'); return !!h && !document.querySelector('${P} > .ut-inbox') && (h.querySelector('.ut-hist-msg')?.textContent || '').includes('A new ask makes a toast'); })()`, 3000));
+    check('a real click on Notifications shows the history page with the toast on top', gateOf(await realClick(`${P} > .ut-tabs > .ut-tab[data-tab="history"]`)) && verdictOf(await waitFor(`(() => { const h = document.querySelector('${P} > .ut-hist'); return !!h && !document.querySelector('${P} > .ut-inbox') && (h.querySelector('.ut-hist-msg')?.textContent || '').includes('A new ask makes a toast'); })()`, 3000)));
     const x18 = await evalJs(`(() => { const tabs = document.querySelector('${P} > .ut-tabs'); const h = tabs.querySelector('.ut-tab[data-tab="history"]'); return { same: tabs === window.__tabs18 && ${tabSpan('history', 'unread')} === window.__un18, unread: ${unread}, on: h.classList.contains('on') && h.getAttribute('aria-pressed') === 'true', inboxOff: !tabs.querySelector('.ut-tab[data-tab="inbox"]').classList.contains('on'), seen: Number(localStorage.getItem('vibespace.ut-history-seen')) }; })()`);
-    check('…the unread count is gone, the history tab .on, the tabs node never rebuilt, the last look stamped', x18.same && x18.unread === 0 && x18.on && x18.inboxOff && x18.seen >= seen0 - 2000, x18);
+    check('…the unread count is gone, the history tab .on, the tabs node never rebuilt, the last look stamped', gateOf(x18.same) && x18.unread === 0 && gateOf(x18.on) && gateOf(x18.inboxOff) && x18.seen >= seen0 - 2000, x18);
     const ask18b = await fileItem(token, { text: 'A toast while the history is read', urgency: 'urgent' });
-    check('a toast while the page is being read lands on it and never counts as unread', ask18b?.success && await waitFor(`(document.querySelector('${P} > .ut-hist .ut-hist-msg')?.textContent || '').includes('A toast while the history is read')`, 5000) && (await evalJs(unread)) === 0, await evalJs(unread));
-    check('back on Inbox: the page returns under the SAME tabs node', await realClick(`${P} > .ut-tabs > .ut-tab[data-tab="inbox"]`) && await waitFor(`!!document.querySelector('${P} > .ut-inbox .ut-notice-group') && document.querySelector('${P} > .ut-tabs') === window.__tabs18 && document.querySelector('${P} > .ut-tabs > .ut-tab[data-tab="inbox"]').classList.contains('on')`, 3000));
+    check('a toast while the page is being read lands on it and never counts as unread', gateOf(ask18b?.success) && gateOf(await waitFor(`(document.querySelector('${P} > .ut-hist .ut-hist-msg')?.textContent || '').includes('A toast while the history is read')`, 5000)) && (await evalJs(unread)) === 0, await evalJs(unread));
+    check('back on Inbox: the page returns under the SAME tabs node', gateOf(await realClick(`${P} > .ut-tabs > .ut-tab[data-tab="inbox"]`)) && verdictOf(await waitFor(`!!document.querySelector('${P} > .ut-inbox .ut-notice-group') && document.querySelector('${P} > .ut-tabs') === window.__tabs18 && document.querySelector('${P} > .ut-tabs > .ut-tab[data-tab="inbox"]').classList.contains('on')`, 3000)));
     const after12Row = rowSel(after12.item.id);
     await evalJs(`document.querySelector(${JSON.stringify(after12Row + ' .ut-reply-btn')})?.click(); true`);
-    check('…and the reply typed before the page switch comes back as the box\'s draft', await waitFor(`document.querySelector(${JSON.stringify(after12Row + ' .ut-reply textarea')})?.value === 'typing while the board moves'`, 3000), await evalJs(`document.querySelector(${JSON.stringify(after12Row + ' .ut-reply textarea')})?.value`));
+    check('…and the reply typed before the page switch comes back as the box\'s draft', verdictOf(await waitFor(`document.querySelector(${JSON.stringify(after12Row + ' .ut-reply textarea')})?.value === 'typing while the board moves'`, 3000)), await evalJs(`document.querySelector(${JSON.stringify(after12Row + ' .ut-reply textarea')})?.value`));
     console.log('⑱b the filter is per DEVICE: it survives a close and an open');
     const clickChip = (o) => realClick(`${P} .ut-chips > .ut-chip[data-origin="${o}"]`);
-    check('a click on the Accounts and sign-ins chip', await clickChip('login') && await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'login'`, 3000));
+    check('a click on the Accounts and sign-ins chip', gateOf(await clickChip('login')) && verdictOf(await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'login'`, 3000)));
     await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
     await sleep(200);
     await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
     await openNotices();
-    check('closed and reopened: only the Accounts and sign-ins group shows, its chip active', await waitFor(`(() => { const p = document.getElementById('user-todos-popup'); if (p.classList.contains('hidden')) return false; const gs = [...p.querySelectorAll('.ut-notice-group')]; return gs.length >= 4 && gs.every((g) => (getComputedStyle(g).display !== 'none') === (g.dataset.origin === 'login')) && p.querySelector('.ut-chip[data-origin="login"]').classList.contains('on'); })()`, 3000),
+    check('closed and reopened: only the Accounts and sign-ins group shows, its chip active', verdictOf(await waitFor(`(() => { const p = document.getElementById('user-todos-popup'); if (p.classList.contains('hidden')) return false; const gs = [...p.querySelectorAll('.ut-notice-group')]; return gs.length >= 4 && gs.every((g) => (getComputedStyle(g).display !== 'none') === (g.dataset.origin === 'login')) && p.querySelector('.ut-chip[data-origin="login"]').classList.contains('on'); })()`, 3000)),
       await evalJs(`[...document.querySelectorAll('#user-todos-popup .ut-notice-group')].map((g) => [g.dataset.origin, getComputedStyle(g).display])`));
-    check('(back to All)', await clickChip('all') && await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'all' && [...document.querySelectorAll('#user-todos-popup .ut-notice-group')].every((g) => getComputedStyle(g).display !== 'none')`, 3000));
+    check('(back to All)', gateOf(await clickChip('all')) && verdictOf(await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'all' && [...document.querySelectorAll('#user-todos-popup .ut-notice-group')].every((g) => getComputedStyle(g).display !== 'none')`, 3000)));
   } catch (e) { check('⑱ ran to its end', false, e.message); }
   }
 
@@ -916,24 +916,24 @@ try {
     const state = `({ shown: ${shownNow}, order: ${orderNow}, on: ${onNow}, stored: localStorage.getItem('vibespace.ut-notice-filter') })`;
     // another device's action: the panel's own cookie route (auth off in the scratch server)
     const setStatus = async (id, status) => (await fetch(`http://127.0.0.1:${PORT}/api/user-todos/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) })).json();
-    check('(the panel is open on All)', await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden') && JSON.stringify(${onNow}) === '["all"]'`), await evalJs(state));
+    check('(the panel is open on All)', verdictOf(await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden') && JSON.stringify(${onNow}) === '["all"]'`)), await evalJs(state));
     await openNotices();
-    check('a real click on the Accounts and sign-ins chip: the device stores login', await realClick(`${P} .ut-chips > .ut-chip[data-origin="login"]`) && await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'login'`, 3000), await evalJs(state));
+    check('a real click on the Accounts and sign-ins chip: the device stores login', gateOf(await realClick(`${P} .ut-chips > .ut-chip[data-origin="login"]`)) && verdictOf(await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'login'`, 3000)), await evalJs(state));
     const d = await setStatus(LOGIN, 'dismissed');
-    check('the only login notice is dismissed elsewhere (POST /api/user-todos/:id) — its row resolves in place, the chip at 0', d?.success && d.item?.status === 'dismissed' && await waitFor(`document.querySelector('${P} .ut-chip[data-origin="login"] > .ut-chip-n')?.textContent === '0'`, 4000), d);
+    check('the only login notice is dismissed elsewhere (POST /api/user-todos/:id) — its row resolves in place, the chip at 0', gateOf(d?.success) && d.item?.status === 'dismissed' && verdictOf(await waitFor(`document.querySelector('${P} .ut-chip[data-origin="login"] > .ut-chip-n')?.textContent === '0'`, 4000)), d);
     await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
     await sleep(200);
     await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
     await openNotices();
     check('closed and reopened: no login group (a resolved row is not in an open\'s layout), every group shown, All the active chip — and the device now STORES all (the strip and the store agree; r1 left login stored)',
-      await waitFor(`(() => { if (document.getElementById('user-todos-popup').classList.contains('hidden')) return false; const s = ${state}; return !('login' in s.shown) && s.order.length >= 3 && Object.values(s.shown).every(Boolean) && JSON.stringify(s.on) === '["all"]' && s.stored === 'all'; })()`, 3000), await evalJs(state));
+      verdictOf(await waitFor(`(() => { if (document.getElementById('user-todos-popup').classList.contains('hidden')) return false; const s = ${state}; return !('login' in s.shown) && s.order.length >= 3 && Object.values(s.shown).every(Boolean) && JSON.stringify(s.on) === '["all"]' && s.stored === 'all'; })()`, 3000)), await evalJs(state));
     await evalJs(`window.__g18c = Object.fromEntries([...document.querySelectorAll('${P} .ut-notice-group')].map((g) => [g.dataset.origin, g])); window.__o18c = ${orderNow}; true`);
     const r = await setStatus(LOGIN, 'open');
-    check('the login notice is reopened elsewhere (a notice of the formerly chosen origin ARRIVES by broadcast)', r?.success && r.item?.status === 'open', r);
+    check('the login notice is reopened elsewhere (a notice of the formerly chosen origin ARRIVES by broadcast)', gateOf(r?.success) && r.item?.status === 'open', r);
     check('…its group APPENDS and EVERY group stays shown: All is still the active chip, login is not — nothing was clicked',
-      await waitFor(`(() => { const s = ${state}; return s.shown.login === true && Object.values(s.shown).every(Boolean) && JSON.stringify(s.on) === '["all"]' && s.stored === 'all' && !!document.querySelector('${P} .ut-notice-group[data-origin="login"] > .ut-item[data-id="${LOGIN}"]'); })()`, 4000), await evalJs(state));
+      verdictOf(await waitFor(`(() => { const s = ${state}; return s.shown.login === true && Object.values(s.shown).every(Boolean) && JSON.stringify(s.on) === '["all"]' && s.stored === 'all' && !!document.querySelector('${P} .ut-notice-group[data-origin="login"] > .ut-item[data-id="${LOGIN}"]'); })()`, 4000)), await evalJs(state));
     const x18c = await evalJs(`(() => { const now = [...document.querySelectorAll('${P} .ut-notice-group')]; return { order: now.map((g) => g.dataset.origin), same: window.__o18c.every((o) => window.__g18c[o] && window.__g18c[o].isConnected && now.includes(window.__g18c[o])) }; })()`);
-    check('…the groups already drawn keep their nodes and slots, login joins at the END', x18c.same && JSON.stringify(x18c.order) === JSON.stringify([...await evalJs('window.__o18c'), 'login']), x18c);
+    check('…the groups already drawn keep their nodes and slots, login joins at the END', gateOf(x18c.same) && JSON.stringify(x18c.order) === JSON.stringify([...await evalJs('window.__o18c'), 'login']), x18c);
   } catch (e) { check('⑱c ran to its end', false, e.message); }
   }
 
@@ -942,11 +942,11 @@ try {
   {
     const src = fs.readFileSync(path.join(repo, 'src/lib/user-todos-layout.js'), 'utf8');
     const FILTER = "shown: f === 'all' || f === origin";
-    check('the PURE module carries the filter the panel hides by', src.includes(FILTER) && fs.readFileSync(path.join(repo, 'src/lib/user-todos-panel.js'), 'utf8').includes("const disp = g.shown ? '' : 'none';"));
+    check('the PURE module carries the filter the panel hides by', gateOf(src.includes(FILTER)) && verdictOf(fs.readFileSync(path.join(repo, 'src/lib/user-todos-panel.js'), 'utf8').includes("const disp = g.shown ? '' : 'none';")));
     const MUT = mutantCopies('inbox-reply-ui-19', repo); // outside the checkout (§51), as ⑭
     const realF = MUT.write('src/lib/user-todos-layout.js', src, 'real', { same: true });
     const patchedF = MUT.write('src/lib/user-todos-layout.js', editAnchor(src, FILTER, 'shown: true', "src/lib/user-todos-layout.js", 'join'), 'patched');
-    for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2, label: '⑲ ' })) check(row.name, row.pass, row.detail);
+    for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2, label: '⑲ ' })) check(row.name, verdictOf(row.pass), row.detail);
     {
       const real = await import(realF);
       const patched = await import(patchedF);
@@ -981,7 +981,7 @@ try {
     // on each, 2 of 8 with option chips)
     const ids0 = (await storeNow()).open.filter((i) => i.kind !== 'notice').map((i) => i.id);
     const rm = await (await fetch(`http://127.0.0.1:${PORT}/api/user-todos/resolve-many`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids0, status: 'dismissed' }) })).json();
-    check(`(the slate is cleared: ${ids0.length} open rows dismissed)`, !!rm && (rm.ok || rm.success), rm);
+    check(`(the slate is cleared: ${ids0.length} open rows dismissed)`, !!rm && (verdictOf(rm.ok) || verdictOf(rm.success)), rm);
     const EN = 'Should the nightly export run against the staging bucket or the archive bucket? The staging one is faster but keeps only thirty days of history, ';
     const ZH = '要不要把夜间导出改到归档桶？暂存桶更快但只保留三十天，归档桶慢一些但不会丢历史记录，你决定后我就改配置并重跑一次。';
     const words = (n, k) => { let x = ''; let i = 0; while (x.length < n) x += (i++ + k) % 5 < 2 ? ZH : EN; return x.slice(0, n); };
@@ -989,7 +989,7 @@ try {
     await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`); // closed while the asks arrive (an arrival into an OPEN popup appends — the slot law)
     const filed20 = [];
     for (let k = 0; k < LENS.length; k++) filed20.push(await fileItem(token, { text: words(LENS[k], k), detail: words(LENS[(k + 3) % 8] + 50, k + 1), urgency: 'normal', ...(k === 1 || k === 4 ? { options: ['Run now', 'Wait for backup'] } : {}) }));
-    check('8 production-shaped asks are filed (2 decisions with chips, 6 plain asks)', filed20.every((r) => r && r.success), filed20.map((r) => r && r.error));
+    check('8 production-shaped asks are filed (2 decisions with chips, 6 plain asks)', verdictOf(filed20.every((r) => r && r.success)), filed20.map((r) => r && r.error));
     // a FRESH open once the page holds all 8 (the broadcasts of the filings may trail the route's answers). The page's OWN copy
     // of the store is read BEFORE each open (lane chat-needs-you-card, acceptance round 3): the band counts read AFTER it
     // cannot tell a fresh open from one that landed among the broadcasts and appended the rest (the slot law — an arrival
@@ -1003,8 +1003,8 @@ try {
     }
     await sleep(400);
     const m20 = await evalJs(MEASURE);
-    check(`the desktop popup (max-height ${m20.maxH} — anchorFixedPopup's room above the taskbar) draws ${m20.rows.length} rows [${m20.rows.map((x) => x.h).join(', ')} px] and ${m20.bars.length} band heads + ${m20.folds.length} fold head(s), every one inside the popup at scrollTop 0`, m20.rows.length === 6 && inside(m20), m20);
-    check('…the band-5 fold names what it holds back ("2 more — expand")', m20.folds.some((f) => f.text === '2 more — expand'), m20.folds);
+    check(`the desktop popup (max-height ${m20.maxH} — anchorFixedPopup's room above the taskbar) draws ${m20.rows.length} rows [${m20.rows.map((x) => x.h).join(', ')} px] and ${m20.bars.length} band heads + ${m20.folds.length} fold head(s), every one inside the popup at scrollTop 0`, m20.rows.length === 6 && verdictOf(inside(m20)), m20);
+    check('…the band-5 fold names what it holds back ("2 more — expand")', verdictOf(m20.folds.some((f) => f.text === '2 more — expand')), m20.folds);
     await shot('ff-first-screen-desktop', '#user-todos-popup');
     // CONTROL: without the two-line preview the same six rows do NOT fit (the measured reason the preview exists)
     await evalJs(`(() => { const st = document.createElement('style'); st.id = 'x20-control'; st.textContent = '#user-todos-popup .ut-bands .ut-item > .ut-body > .ut-text { display: block !important; -webkit-line-clamp: none !important; overflow: visible !important; }'; document.head.appendChild(st); return true; })()`);
@@ -1025,7 +1025,7 @@ try {
   // ── ⑥ the phone sheet ──
   console.log('⑥ the phone sheet (375×812 — the same list inside the sheet)');
   const phoneAsk = await fileItem(token, { text: 'Phone ask', urgency: 'high', options: ['Yes', 'No'] });
-  check('a phone-sized item is filed', phoneAsk?.success, phoneAsk);
+  check('a phone-sized item is filed', verdictOf(phoneAsk?.success), phoneAsk);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });
   await cdp('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', platform: 'iPhone' });
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
@@ -1033,35 +1033,35 @@ try {
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await waitApp();
   await sleep(1200);
-  check('the page is a phone (app.isMobile, the nav inbox button present)', await evalJs(`app.isMobile && !!document.getElementById('mobile-nav-todos')`));
+  check('the page is a phone (app.isMobile, the nav inbox button present)', verdictOf(await evalJs(`app.isMobile && !!document.getElementById('mobile-nav-todos')`)));
   // lane foryou-honest: the nav badge on a phone opens its first-screen PAGE (one surface) — the sheet is reached through its own
   // door (the taskbar's, hidden on a phone: the page with no row to show falls back to it); the rows are the page's rows
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   const phoneSel = rowSel(phoneAsk.item.id);
-  check('the sheet opens on the phone listing the phone item', await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden') && !!document.querySelector(${JSON.stringify(phoneSel)})`, 6000));
+  check('the sheet opens on the phone listing the phone item', verdictOf(await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden') && !!document.querySelector(${JSON.stringify(phoneSel)})`, 6000)));
   await sleep(400);
   const m6 = await evalJs(MEASURE);
-  check(`⑳ the 375×812 sheet draws the SAME first screen: ${m6.rows.length} rows [${m6.rows.map((x) => x.h).join(', ')} px] + every band / fold head inside the sheet at scrollTop 0`, m6.rows.length === 6 && inside(m6), m6);
+  check(`⑳ the 375×812 sheet draws the SAME first screen: ${m6.rows.length} rows [${m6.rows.map((x) => x.h).join(', ')} px] + every band / fold head inside the sheet at scrollTop 0`, m6.rows.length === 6 && verdictOf(inside(m6)), m6);
   await shot('ff-first-screen-phone', '#user-todos-popup');
   await waitFor(`!!document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply-btn')}) && !document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply-btn')}).disabled`, 8000);
   await evalJs(`document.querySelector(${JSON.stringify(phoneSel + ' > .ut-body > .ut-text')}).click(); true`); // lane foryou-honest: a touch screen's row is FOLDED — the tap opens it (its verbs, its chips) before Reply
   await evalJs(`document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply-btn')}).click(); true`);
-  check('the same reply box opens on the phone', await waitFor(`!!document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply textarea')})`, 3000));
+  check('the same reply box opens on the phone', verdictOf(await waitFor(`!!document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply textarea')})`, 3000)));
   const sizes = await evalJs(`[...document.querySelectorAll('#user-todos-popup .ut-opt, #user-todos-popup .ut-reply-btn, #user-todos-popup .ut-act, #user-todos-popup .ut-reply textarea')].filter((el) => el.getClientRects().length).map((el) => { const r = el.getBoundingClientRect(); return { c: el.className.split(' ').pop(), w: Math.round(r.width), h: Math.round(r.height) }; })`);
-  check(`every .ut-opt / .ut-reply-btn / .ut-act / the reply textarea is ≥ 36 px tall, the buttons ≥ 36 wide (${sizes.length} targets)`, sizes.length >= 8 && sizes.every((s) => s.h >= 36) && sizes.filter((s) => s.c !== 'ut-opt' && s.c !== 'ut-reply-input').every((s) => s.w >= 36), sizes);
+  check(`every .ut-opt / .ut-reply-btn / .ut-act / the reply textarea is ≥ 36 px tall, the buttons ≥ 36 wide (${sizes.length} targets)`, sizes.length >= 8 && gateOf(sizes.every((s) => s.h >= 36)) && verdictOf(sizes.filter((s) => s.c !== 'ut-opt' && s.c !== 'ut-reply-input').every((s) => s.w >= 36)), sizes);
   // B-328d on the phone: the same chip strip + origin groups, the chips ≥ 36 px, the tab counts (lane foryou-folds: one tap on the notices' head opens them)
-  check('the notices open with one tap on their head', await openNotices());
+  check('the notices open with one tap on their head', verdictOf(await openNotices()));
   const phone17 = await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); const chips = [...p.querySelectorAll('.ut-chips > .ut-chip')].filter((c) => c.getClientRects().length).map((c) => ({ o: c.dataset.origin, h: Math.round(c.getBoundingClientRect().height) })); const tabs = [...p.querySelectorAll('.ut-tabs > .ut-tab')].map((b) => ({ t: b.dataset.tab, h: Math.round(b.getBoundingClientRect().height), n: [...b.querySelectorAll('.ut-tab-n')].filter((s) => getComputedStyle(s).display !== 'none').map((s) => s.textContent) })); return { chips, groups: [...p.querySelectorAll('.ut-notice-group')].map((g) => g.dataset.origin), tabs }; })()`);
-  check(`the phone sheet carries the chip strip (${phone17.chips.length} chips, each ≥ 36 px) and the four origin groups`, phone17.chips.length >= 5 && phone17.chips[0].o === 'all' && phone17.chips.every((c) => c.h >= 36) && ['spend', 'login', 'channels', 'agent'].every((o) => phone17.groups.includes(o)), phone17);
-  check('…and both tabs (≥ 36 px) carry their counts', phone17.tabs.length === 2 && phone17.tabs.every((b) => b.h >= 36) && phone17.tabs[0].n.length >= 1, phone17.tabs);
+  check(`the phone sheet carries the chip strip (${phone17.chips.length} chips, each ≥ 36 px) and the four origin groups`, phone17.chips.length >= 5 && phone17.chips[0].o === 'all' && gateOf(phone17.chips.every((c) => c.h >= 36)) && verdictOf(['spend', 'login', 'channels', 'agent'].every((o) => phone17.groups.includes(o))), phone17);
+  check('…and both tabs (≥ 36 px) carry their counts', phone17.tabs.length === 2 && gateOf(phone17.tabs.every((b) => b.h >= 36)) && phone17.tabs[0].n.length >= 1, phone17.tabs);
   await evalJs(`document.querySelector('#user-todos-popup .ut-notices')?.scrollIntoView({ block: 'start' }); true`);
   await shot('b328d-phone-sheet');
   await evalJs(`document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply textarea')}).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); true`);
   await sleep(150);
-  check('Escape inside the box FOLDS the box and the sheet stays open', await evalJs(`!document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply')}) && !document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  check('Escape inside the box FOLDS the box and the sheet stays open', verdictOf(await evalJs(`!document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply')}) && !document.getElementById('user-todos-popup').classList.contains('hidden')`)));
   await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); true`);
   await sleep(150);
-  check('the next Escape closes the sheet', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  check('the next Escape closes the sheet', verdictOf(await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)));
   check('no uncaught page exceptions on the phone', pageErrors.length === 0, pageErrors.slice(0, 3));
 
   // ── ㉑ A REPLY TO A CONVERSATION THAT ENDED REOPENS IT (lane inbox-reply-dead-session, userW inc-mvfuzlom-nwav) ──
@@ -1082,7 +1082,7 @@ try {
     // an earlier leg resolved the stopped fixture's item (a band's 「全部标为已看」): the owner's own ↺ Reopen brings it back open
     const was = [...(await storeNow()).resolved, ...(await storeNow()).open].find((i) => i.id === HOSTILE_ID);
     if (was && was.status !== 'open') await fetch(`http://127.0.0.1:${PORT}/api/user-todos/${HOSTILE_ID}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'open' }) });
-    check(`(the stopped fixture's item is OPEN for this leg — it was ${was ? was.status + (was.resolvedBy ? ' by ' + was.resolvedBy : '') : 'missing'}; reopened by the owner's ↺ if needed)`, (await storeNow()).open.some((i) => i.id === HOSTILE_ID));
+    check(`(the stopped fixture's item is OPEN for this leg — it was ${was ? was.status + (was.resolvedBy ? ' by ' + was.resolvedBy : '') : 'missing'}; reopened by the owner's ↺ if needed)`, verdictOf((await storeNow()).open.some((i) => i.id === HOSTILE_ID)));
     const openBoxOn = async () => {
       await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p || p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
       // the row may sit in its band's fold by now (every earlier leg filed asks): open the folds that hold rows back, one by one
@@ -1104,11 +1104,11 @@ try {
       await sleep(1200);
       const b = await openBoxOn();
       const w = WORDS[lang];
-      check(`${lang}: the box on the ended conversation is TYPEABLE (no control disabled), its note ABOVE it says 「${w.note}」, its send reads 「${w.send}」`, !!b && b.note === w.note && b.shown && b.above && b.send === w.send && b.taDisabled === false && b.sendDisabled === false && b.btnDisabled === false, b);
+      check(`${lang}: the box on the ended conversation is TYPEABLE (no control disabled), its note ABOVE it says 「${w.note}」, its send reads 「${w.send}」`, !!b && b.note === w.note && gateOf(b.shown) && gateOf(b.above) && b.send === w.send && b.taDisabled === false && b.sendDisabled === false && b.btnDisabled === false, b);
     }
     // en: a REAL click into the box, real typing, Enter — 重新打开并发送
     const taSel = hostileSel + ' .ut-reply textarea';
-    check('a REAL click into the ended conversation\'s box focuses it (the incident\'s ten presses landed on a disabled box)', await realClick(taSel) && await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(taSel)})`, 2000));
+    check('a REAL click into the ended conversation\'s box focuses it (the incident\'s ten presses landed on a disabled box)', gateOf(await realClick(taSel)) && verdictOf(await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(taSel)})`, 2000)));
     const REOPEN_REPLY = 'reopen it and carry on — from the tray';
     await cdp('Input.insertText', { text: REOPEN_REPLY });
     check('…and the typed words land in it', (await evalJs(`document.querySelector(${JSON.stringify(taSel)}).value`)) === REOPEN_REPLY);
@@ -1120,14 +1120,14 @@ try {
       if (fs.existsSync(resumedLog)) { for (const l of fs.readFileSync(resumedLog, 'utf8').split('\n').filter(Boolean)) { let m = null; try { m = JSON.parse(l); } catch { } if (m && m.type === 'user') { const c = m.message && m.message.content; firstUser = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x.text || '').join('') : ''; break; } } }
       if (!firstUser) await sleep(200);
     }
-    check(`within 30 s the RESUMED conversation's CLI (--resume ${STOPPED_SID.slice(0, 8)}…) reads the reply as its FIRST user input: [For you reply #${HOSTILE_ID}] … ${REOPEN_REPLY}`, !!firstUser && firstUser.startsWith(`[For you reply #${HOSTILE_ID}]`) && firstUser.endsWith('\n\n' + REOPEN_REPLY), (firstUser || '(none)').slice(0, 300));
+    check(`within 30 s the RESUMED conversation's CLI (--resume ${STOPPED_SID.slice(0, 8)}…) reads the reply as its FIRST user input: [For you reply #${HOSTILE_ID}] … ${REOPEN_REPLY}`, !!firstUser && gateOf(firstUser.startsWith(`[For you reply #${HOSTILE_ID}]`)) && verdictOf(firstUser.endsWith('\n\n' + REOPEN_REPLY)), (firstUser || '(none)').slice(0, 300));
     const live = await evalJs(`fetch('/api/active').then((r) => r.json()).then((j) => (Array.isArray(j) ? j : j.sessions || []).filter((s) => s.backendSessionId === ${JSON.stringify(STOPPED_SID)}).map((s) => s.id))`);
-    check('the conversation is LIVE again under ONE session (the resume road: the same conversation id, never a fresh one)', Array.isArray(live) && live.length === 1, live);
+    check('the conversation is LIVE again under ONE session (the resume road: the same conversation id, never a fresh one)', gateOf(Array.isArray(live)) && live.length === 1, live);
     const wid = live && live[0];
-    check('its conversation window OPENS on this page and shows the reply as a user message', await waitFor(`(() => { const v = [...app.sessions.values()].find((x) => x && x.sessionId === ${JSON.stringify(wid)}); const el = v && (v.container || v.el || v.root); return !!v && !!document.querySelector('.chat-view') && [...document.querySelectorAll('.chat-view')].some((cv) => (cv.textContent || '').includes(${JSON.stringify(REOPEN_REPLY)})); })()`, 15000));
-    check('the toast says it: "Reopened the conversation and sent your reply"', await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((e) => (e.textContent || '').includes('Reopened the conversation and sent your reply'))`, 5000));
+    check('its conversation window OPENS on this page and shows the reply as a user message', verdictOf(await waitFor(`(() => { const v = [...app.sessions.values()].find((x) => x && x.sessionId === ${JSON.stringify(wid)}); const el = v && (v.container || v.el || v.root); return !!v && !!document.querySelector('.chat-view') && [...document.querySelectorAll('.chat-view')].some((cv) => (cv.textContent || '').includes(${JSON.stringify(REOPEN_REPLY)})); })()`, 15000)));
+    check('the toast says it: "Reopened the conversation and sent your reply"', verdictOf(await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((e) => (e.textContent || '').includes('Reopened the conversation and sent your reply'))`, 5000)));
     const store21 = await storeNow();
-    check('the item is resolved by the reply (the reply kept on it)', store21.resolved.some((i) => i.id === HOSTILE_ID && i.resolvedBy === 'reply' && i.reply && i.reply.text === REOPEN_REPLY), store21.resolved.find((i) => i.id === HOSTILE_ID));
+    check('the item is resolved by the reply (the reply kept on it)', verdictOf(store21.resolved.some((i) => i.id === HOSTILE_ID && i.resolvedBy === 'reply' && i.reply && i.reply.text === REOPEN_REPLY)), store21.resolved.find((i) => i.id === HOSTILE_ID));
     check('no uncaught page exceptions through the reopen', pageErrors.length === 0, pageErrors.slice(0, 3));
     try { if (wid) liveWs.send(JSON.stringify({ type: 'kill', sessionId: wid })); } catch {}
   }
@@ -1140,4 +1140,4 @@ try {
 
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

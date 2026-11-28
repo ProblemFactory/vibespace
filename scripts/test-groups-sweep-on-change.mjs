@@ -31,7 +31,7 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-sweep-on-change-'));
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 let passed = 0, failed = 0;
 const say = console.log.bind(console);
-function ok(c, name, detail) { if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + String(detail).slice(0, 700)}`); } return !!c; }
+function ok(c, name, detail) { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + String(detail).slice(0, 700)}`); } return !!c; }
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -271,7 +271,7 @@ async function bench(T) {
 
 const run = async (name, T) => { const t = performance.now(); try { const r = await LEGS[name](T); r.detail += ` [${(performance.now() - t).toFixed(0)} ms]`; return r; } catch (e) { return { ok: false, detail: `threw: ${(e && e.stack) || e}`.slice(0, 600) }; } };
 say('this tree');
-for (const leg of Object.keys(LEGS)) { const r = await run(leg, REPO); ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of Object.keys(LEGS)) { const r = await run(leg, REPO); ok(verdictOf(r.ok), `${leg}: ${r.detail}`); }
 const B = archive(BASE);
 say(`RED CONTROLS — the same legs on ${BASE} (master under this pair)`);
 let skipped = 0;
@@ -312,4 +312,4 @@ say(`THE BENCH at the owner's shape (358 groups, 724 member rows, 561 ended ids,
 ok(!!before && before.sweeps > 0 && after.sweeps === 0, 'the patch the suite carries (the gate taken out) sweeps on every quiet write — the bench measures the gate');
 ok(after.sweeps === 0, `the bench's quiet writes start no sweep on this tree (${after.sweeps})`);
 say(failed ? `\n${failed} FAILED (${passed} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${passed}${skipped ? `; ${skipped} red controls SKIPPED — not in this clone` : ''})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

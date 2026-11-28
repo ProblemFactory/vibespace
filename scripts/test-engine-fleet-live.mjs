@@ -28,7 +28,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const ti = process.argv.indexOf('--tree'), TREE = ti > 0 ? path.resolve(process.argv[ti + 1]) : null;
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e === undefined ? '' : ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600))); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e === undefined ? '' : ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600))); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms) => { const t0 = Date.now(); for (;;) { let v = null; try { v = await fn(); } catch { v = null; } if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(200); } };
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
@@ -94,24 +94,24 @@ const row = async () => { const m = await manifests(); return m ? { p: (m.plugin
 console.log('— H1 boot: the Secret pins sha1');
 const h1 = await until(async () => { const r = await row(); return r && r.p && r.p.trustedBy === 'fleet' && r.p.install && r.p.install.sha === sha1 ? r : null; }, 45000);
 const f1 = h1 ? BM.fleetPluginWords(h1.p, h1.fleet, tW).fact : null;
-ok(!!h1 && h1.p.enabled && f1 === `Installed and trusted by the cluster · ${short(sha1)}`, `H1: the boot job installed the cluster's pin, trusted by the cluster — the row reads «${f1}»`, h1 ? h1.p.install : { exit: srv.exitCode, said: journal.filter((l) => /presets\]|plugins\]|fleet|rror|listening/i.test(l)).slice(-14) });
+ok(!!h1 && gateOf(h1.p.enabled) && f1 === `Installed and trusted by the cluster · ${short(sha1)}`, `H1: the boot job installed the cluster's pin, trusted by the cluster — the row reads «${f1}»`, h1 ? h1.p.install : { exit: srv.exitCode, said: journal.filter((l) => /presets\]|plugins\]|fleet|rror|listening/i.test(l)).slice(-14) });
 
 console.log('— H2 the kubelet swaps the Secret to sha2 (the admin\'s edit) — the same server process');
 const t2 = Date.now();
 project(secretAt(sha2));
 const h2 = await until(async () => { const r = await row(); return r && r.p && r.p.install && r.p.install.sha === sha2 && r.p.trustedBy === 'fleet' ? r : null; }, 30000);
 const f2 = h2 ? BM.fleetPluginWords(h2.p, h2.fleet, tW, () => 'WHEN').fact : null;
-ok(!!h2 && srv.pid === pid0 && srv.exitCode === null && h2.p.version === '0.2.2' && h2.fleet && h2.fleet.outcome === 'updated' && h2.fleet.why === 'change',
+ok(!!h2 && srv.pid === pid0 && srv.exitCode === null && h2.p.version === '0.2.2' && gateOf(h2.fleet) && h2.fleet.outcome === 'updated' && h2.fleet.why === 'change',
   `H2: the presets watch ran the job — updated to sha2 and trusted at it in ${Math.round((Date.now() - t2) / 100) / 10} s, the server never restarted (pid ${pid0})`, h2 ? { install: h2.p.install, fleet: h2.fleet } : { last: journal.filter((l) => /presets|fleet/.test(l)).slice(-6) });
 ok(f2 === `Updated by the cluster · ${short(sha1)} → ${short(sha2)} · WHEN`, `H2: the row reads «${f2}»`);
-ok(journal.some((l) => /\[presets\] changed .*browser engine changed/.test(l)) && journal.some((l) => l.includes(`fleet plugin: cluster pins ${short(sha2)} — updating ${EID} from ${short(sha1)}`)),
+ok(gateOf(journal.some((l) => /\[presets\] changed .*browser engine changed/.test(l))) && verdictOf(journal.some((l) => l.includes(`fleet plugin: cluster pins ${short(sha2)} — updating ${EID} from ${short(sha1)}`))),
   'H2: the journal names each step («[presets] changed …: browser engine changed», «fleet plugin: cluster pins <sha2> — updating … from <sha1>»)', journal.filter((l) => /presets\]|fleet plugin/.test(l)).slice(-6));
 
 console.log('— H3 the Secret names a tag');
 project(secretAt('v0.2.1'));
 const h3 = await until(async () => { const r = await row(); return r && r.p && r.fleet && r.fleet.outcome === 'unpinned' && r.p.install && r.p.install.ref === 'v0.2.1' ? r : null; }, 30000);
 const l3 = h3 ? BM.fleetPluginWords(null, h3.fleet, tW).line : null;
-ok(!!h3 && !h3.p.trusted && h3.p.consentRequired && l3 === `The cluster names ${EID} at «v0.2.1» — not a full commit sha, so the cluster does not trust it; review it, then turn ${EID} on in this list · waiting for your consent — its kernel is not fetched`,
+ok(!!h3 && !h3.p.trusted && gateOf(h3.p.consentRequired) && l3 === `The cluster names ${EID} at «v0.2.1» — not a full commit sha, so the cluster does not trust it; review it, then turn ${EID} on in this list · waiting for your consent — its kernel is not fetched`,
   `H3: a tag ⇒ installed, never trusted; the panel line reads «${l3}»`, h3 ? { trusted: h3.p.trusted, fleet: h3.fleet } : null);
 try { srv.kill('SIGTERM'); } catch { /* gone */ }
 await until(() => srv.exitCode !== null || srv.signalCode !== null, 10000);
@@ -141,7 +141,7 @@ console.log('— H4 in-process: the REAL in-use check (a program running from th
   kj('k2', '150.2.2.2-fx');
   let r2 = null; try { r2 = await ED.installKernel(EID, { by: 'fleet', wait: true }); } catch (e) { r2 = { ok: false, code: e.code }; }
   const alive = sleeper.exitCode === null && fs.existsSync(prog);
-  ok(receipt() === sha(K['/k1.tar.zst']) && alive && r2 && r2.staged === true && fs.existsSync(path.join(path.dirname(path.dirname(KP)), '.next-linux-x64', 'chrome')),
+  ok(receipt() === sha(K['/k1.tar.zst']) && gateOf(alive) && gateOf(r2) && r2.staged === true && verdictOf(fs.existsSync(path.join(path.dirname(path.dirname(KP)), '.next-linux-x64', 'chrome'))),
     'H4: a new kernel downloaded while a program runs from the kernel\'s place (seen in /proc/<pid>/exe — no seam) waits at .next-<tag>; the place and the running program untouched', { r2, receipt: receipt() && short(receipt()), alive });
   const landedWhileRunning = typeof ED.landNext === 'function' ? await ED.landNext(EID) : null;
   try { sleeper.kill('SIGKILL'); } catch { /* gone */ }
@@ -151,4 +151,4 @@ console.log('— H4 in-process: the REAL in-use check (a program running from th
   host.close();
 }
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

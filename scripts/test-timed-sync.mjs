@@ -17,27 +17,27 @@ import { scratch } from './scratch.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 const T = require(path.join(REPO, 'src/timed-sync.js'));
 
 console.log('§1 the fixed buckets');
 {
   const B = T.BUCKETS_MS;
-  ok(Object.isFrozen(B) && B.length === 12 && B.every((v, i) => i === 0 || v > B[i - 1]), `12 ascending frozen bounds (${B.join(',')})`);
+  ok(gateOf(Object.isFrozen(B)) && B.length === 12 && verdictOf(B.every((v, i) => i === 0 || v > B[i - 1])), `12 ascending frozen bounds (${B.join(',')})`);
   const cases = [[0, 0], [0.4, 0], [1, 0], [1.01, 1], [2, 1], [4.9, 2], [10, 3], [50, 5], [999, 9], [1000, 9], [1001, 10], [5000, 11], [5001, 12], [1e9, 12]];
   const bad = cases.filter(([ms, b]) => T.bucketOf(ms) !== b);
   ok(bad.length === 0, `each bound is inclusive; past 5000 ms = the overflow bucket ${B.length}${bad.length ? ' — wrong: ' + JSON.stringify(bad) : ''}`);
   T.reset(); T.enable(true);
   T.record('jobs.write', 3, 0); T.record('jobs.write', 7000, 0); T.record('jobs.write', -5, 0); T.record('jobs.write', NaN, 0);
   const s = T.snapshot()['jobs.write'];
-  ok(s && s.n === 4 && s.buckets.length === 13 && s.buckets[2] === 1 && s.buckets[12] === 1 && s.buckets[0] === 2 && s.max === 7000,
+  ok(gateOf(s) && s.n === 4 && s.buckets.length === 13 && s.buckets[2] === 1 && s.buckets[12] === 1 && s.buckets[0] === 2 && s.max === 7000,
     `a negative / NaN duration counts as 0, never a bucket below 0 (${JSON.stringify(s)})`);
 }
 
 console.log('§2 the closed names');
 {
   const S = T.STORES;
-  ok(Object.isFrozen(S) && Object.values(S).every(Object.isFrozen) && Object.isFrozen(T.NAMES) && T.NAMES.length === Object.keys(S).length, 'the table, every row and NAMES are frozen');
+  ok(gateOf(Object.isFrozen(S)) && gateOf(Object.values(S).every(Object.isFrozen)) && gateOf(Object.isFrozen(T.NAMES)) && T.NAMES.length === Object.keys(S).length, 'the table, every row and NAMES are frozen');
   const shape = Object.entries(S).filter(([n, r]) => !(/^[a-z-]+\.(write|read|append)$/.test(n) && (r.kind === 'read') === n.endsWith('.read')
     && typeof r.store === 'string' && r.store && fs.existsSync(path.join(REPO, r.file)) && (r.kind === 'read' || r.sites.length > 0)));
   ok(shape.length === 0, `every row is <store>.write|read|append, its kind matches, its source file exists, a write names its sites${shape.length ? ' — bad: ' + shape.map((x) => x[0]).join(' ') : ''}`);
@@ -50,7 +50,7 @@ console.log('§2 the closed names');
   ok(v === 42 && ran === 1 && T.unknownCount() === 1 && !('nope.write' in T.snapshot()) && T.record('__proto__', 5) === false && T.record('constructor', 5) === false,
     'an unknown name (or a prototype key) still runs its fn once and returns its value — and is counted as unknown, never recorded');
   try { S['jobs.write'] = null; } catch { }
-  ok(S['jobs.write'] && S['jobs.write'].kind === 'write', 'a row cannot be replaced at run time');
+  ok(gateOf(S['jobs.write']) && S['jobs.write'].kind === 'write', 'a row cannot be replaced at run time');
 }
 
 console.log('§3 zero overhead when off');
@@ -69,7 +69,7 @@ console.log('§3 zero overhead when off');
   ok(clocks === 0, `off: NO clock is read (performance.now / Date.now calls: ${clocks})`);
   ok(Object.keys(T.snapshot()).length === 0 && Object.keys(T.takeWindow()).length === 0 && T.slowest({ now: realDate() }).length === 0, 'off: nothing is recorded');
   const src = fs.readFileSync(path.join(REPO, 'src/timed-sync.js'), 'utf8');
-  ok(/function timedSync\(name, fn\) \{\n  if \(!on\) return fn\(\);\n/.test(src), 'the off path is the first statement: `if (!on) return fn();`');
+  ok(verdictOf(/function timedSync\(name, fn\) \{\n  if \(!on\) return fn\(\);\n/.test(src)), 'the off path is the first statement: `if (!on) return fn();`');
   ok(!/\brequire\s*\(|\bimport\b|\bprocess\.|\bconsole\./.test(src.replace(/^\s*\/\/.*$/gm, '')), 'PURE: no require, no process, no console — a clock and counters only');
   // the on path's cost stays a pair of clock reads: one sample per call
   T.enable(true);
@@ -85,7 +85,7 @@ console.log('§4 on: samples, the last hour, the window');
   let threw = false;
   try { T.timedSync('task-groups.write', () => { const t = performance.now(); while (performance.now() - t < 3); throw new Error('x'); }); } catch { threw = true; }
   const s = T.snapshot()['task-groups.write'];
-  ok(threw && s && s.n === 1 && s.max >= 3, `a write that throws is still timed, and rethrown (${s && s.max} ms)`);
+  ok(gateOf(threw) && gateOf(s) && s.n === 1 && s.max >= 3, `a write that throws is still timed, and rethrown (${s && s.max} ms)`);
   T.reset();
   const H = 3600000, now = 100 * H;
   T.record('jobs.write', 40, now - 59 * 60000);      // inside the hour
@@ -103,7 +103,7 @@ console.log('§4 on: samples, the last hour, the window');
   const later = T.slowest({ now: now + 60 * 60000, limit: 10 });
   ok(later.length === 1 && later[0].name === 'session-meta.write' && later[0].ms === 2, `an hour later only the new minute counts (${JSON.stringify(later)})`);
   const w1 = T.takeWindow(), w2 = T.takeWindow();
-  ok(w1['jobs.write'] && w1['jobs.write'].n === 2 && w1['jobs.write'].max === 900 && Object.keys(w2).length === 0 && T.snapshot()['jobs.write'].n === 2,
+  ok(gateOf(w1['jobs.write']) && w1['jobs.write'].n === 2 && w1['jobs.write'].max === 900 && Object.keys(w2).length === 0 && T.snapshot()['jobs.write'].n === 2,
     'takeWindow(): the samples since the last take, then a fresh window — the lifetime counters stay');
 }
 
@@ -133,9 +133,9 @@ console.log('§5 the real stores record under their names');
     ok(got.length === want.length, `a scratch data dir's real stores land under their names (${got.join(', ')})${got.length < want.length ? ' — missing: ' + want.filter((n) => !got.includes(n)).join(' ') : ''}`);
     T.enable(false); T.reset();
     ss._state.statuses.k2 = { state: 'done', at: 2 }; ss._save(); ss.flush();
-    ok(Object.keys(T.snapshot()).length === 0 && JSON.parse(fs.readFileSync(path.join(dir, 'session-status.json'), 'utf8')).statuses.k2, 'off: the store still writes, and nothing is timed');
+    ok(Object.keys(T.snapshot()).length === 0 && verdictOf(JSON.parse(fs.readFileSync(path.join(dir, 'session-status.json'), 'utf8')).statuses.k2), 'off: the store still writes, and nothing is timed');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

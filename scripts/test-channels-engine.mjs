@@ -49,7 +49,7 @@ const ixFamily = (chDir) => require(path.join(path.resolve(new URL('..', import.
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let BYPASS_COPY = null;   // ⑫: the (h) control copy — a receipt started outside the ONE door
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -148,7 +148,7 @@ function dayStartClock() {
   const vb0 = eng.conversationView(A, C);
   const byA = await eng.noteHandedOver('cid-a', [{ source: 'channel', kind: 'notification', text: 'a recall note about C', about: { keys: [`${A}/${C}`] } }, { source: 'channel', kind: 'notification', text: 'a held block for A', about: { keys: [`${A}/${C}`], wake: true } }]);
   const vb1 = eng.conversationView(A, C);
-  ok(vb0 && vb0.held === true && byA.length === 0 && vb1 && vb1.held === true && !lastWake().lw.handedOverAt,
+  ok(gateOf(vb0) && vb0.held === true && byA.length === 0 && gateOf(vb1) && vb1.held === true && !lastWake().lw.handedOverAt,
     'r2 TWO AGENTS: B\'s wake on C was refused; A\'s hand-over of a recall note about C (and even of a wake block of its own) clears NOTHING — C still reads «last wake held»', JSON.stringify({ byA, held: vb1 && vb1.held }));
   const byB = await eng.noteHandedOver('cid-b', [{ source: 'channel', kind: 'notification', text: 'a recall note about C', about: { keys: [`${A}/${C}`] } }]);
   ok(byB.length === 0 && eng.conversationView(A, C).held === true, 'r2 …and B\'s hand-over of a note that is NOT the refused wake\'s block clears nothing either');
@@ -161,15 +161,15 @@ function dayStartClock() {
   const v0 = eng.conversationView(A, C), w0 = lastWake();
   const stamped = await eng.noteHandedOver('cid-x', [{ source: 'channel', kind: 'notification', text: 'a held block', about: { keys: [`${A}/${C}`], wake: true } }, { source: 'agent', kind: 'peer', text: 'a peer', about: { keys: [`${A}/elsewhere`] } }]);
   const v1 = eng.conversationView(A, C), w1 = lastWake();
-  ok(v0 && v0.held === true && v1 && v1.held === false && JSON.stringify(stamped) === JSON.stringify([`${A}/${C}`]) && w1.n === w0.n && w1.lw.ok === false && w1.lw.handedOverAt > 0 && w1.lw.handedOverTo === 'cid-x',
+  ok(gateOf(v0) && v0.held === true && gateOf(v1) && v1.held === false && JSON.stringify(stamped) === JSON.stringify([`${A}/${C}`]) && w1.n === w0.n && w1.lw.ok === false && w1.lw.handedOverAt > 0 && w1.lw.handedOverTo === 'cid-x',
     'R4 a refused wake reads «last wake held»; the hand-over that DELIVERED its block clears it — the wake row stamped handedOverAt (still ok:false, no row added), a non-channel entry ignored',
     JSON.stringify({ v0: v0 && v0.held, v1: v1 && v1.held, stamped, w0, w1 }));
   const again = await eng.noteHandedOver('cid-x', [{ source: 'channel', about: { keys: [`${A}/${C}`], wake: true } }]);
   ok(again.length === 0 && lastWake().lw.handedOverTo === 'cid-x', 'R4 …a second hand-over stamps nothing (the first one is the fact)');
   const src0 = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
   const sh = src0('src/server/stash-handover.js');
-  ok(/const tookStashed = shownStashed\.length \? d\.drainStash\(cid, new Set\(shownStashed\)\) : \[\];\n[^\n]*\n[^\n]*\n\s*try \{ const ch = getChannels\(\); if \(ch && typeof ch\.noteHandedOver === 'function'\) ch\.noteHandedOver\(cid, tookStashed\)/.test(sh)
-    && /getChannels: \(\) => \{ try \{ return channelsWiring\.channels; \} catch \{ return null; \} \}/.test(src0('server.js')),
+  ok(gateOf(/const tookStashed = shownStashed\.length \? d\.drainStash\(cid, new Set\(shownStashed\)\) : \[\];\n[^\n]*\n[^\n]*\n\s*try \{ const ch = getChannels\(\); if \(ch && typeof ch\.noteHandedOver === 'function'\) ch\.noteHandedOver\(cid, tookStashed\)/.test(sh))
+    && verdictOf(/getChannels: \(\) => \{ try \{ return channelsWiring\.channels; \} catch \{ return null; \} \}/.test(src0('server.js'))),
     'R4 wiring: the hand-over tells the engine exactly what it drained (server.js hands it the channels engine)');
 }
 
@@ -205,7 +205,7 @@ function dayStartClock() {
     `THE NEXT PASS WRITES EVERY MESSAGE the failed one was carrying (${lines}/${held})`, JSON.stringify(p2));
   // unread counts what arrived after the account was LINKED (§5 invariant 6 as rewritten)
   ok(after2.unread > 0 && after2.unread === eng.store.countSince(A, C, after2.readAt), '…and the panel draws the ones after the link as unread', String(after2.unread));
-  ok(after2.anchor, '…and only NOW does the cursor advance', String(after2.anchor));
+  ok(verdictOf(after2.anchor), '…and only NOW does the cursor advance', String(after2.anchor));
 }
 
 // ① NEGATIVE CONTROL — the same scenario against a PRE-FIX copy of the store
@@ -308,7 +308,7 @@ function dayStartClock() {
     for (let i = 0; i < 5; i++) await eng.pass('broken', { force: true });
     await eng.store.adapters.landed();   // channel-store-off-loop: a pass's stamp is PACED (memory first, the writer's turn) — the disk is read once it landed
     const r = rowOf(dataDir, 'broken');
-    ok(r.consecutiveFailures === 5 && r.lastPass && r.lastPass.code === 'auth-expired',
+    ok(r.consecutiveFailures === 5 && gateOf(r.lastPass) && r.lastPass.code === 'auth-expired',
       'CONTROL: five failing passes alone persist 5 consecutive failures and the vendor\'s own code', JSON.stringify(r.lastPass));
     ok(r.consecutiveFailures >= 3, '…which is what the panel draws amber on');
   }
@@ -318,9 +318,9 @@ function dayStartClock() {
     for (let i = 0; i < 5; i++) await Promise.all([eng.pass('broken', { force: true }), eng.pass('slow', { force: true })]);
     await eng.store.adapters.landed();   // channel-store-off-loop: a pass's stamp is PACED (memory first, the writer's turn) — the disk is read once it landed
     const b = rowOf(dataDir, 'broken'), s = rowOf(dataDir, 'slow');
-    ok(b.consecutiveFailures === 5 && b.lastPass && b.lastPass.code === 'auth-expired',
+    ok(b.consecutiveFailures === 5 && gateOf(b.lastPass) && b.lastPass.code === 'auth-expired',
       'the SAME five failures survive a healthy neighbour passing beside them — the panel still says why', JSON.stringify({ fails: b.consecutiveFailures, code: b.lastPass && b.lastPass.code }));
-    ok(s.lastPass && s.lastPass.ok === true, '…and the healthy row kept its own lastPass too (neither clobbers the other)', JSON.stringify(s.lastPass));
+    ok(gateOf(s.lastPass) && s.lastPass.ok === true, '…and the healthy row kept its own lastPass too (neither clobbers the other)', JSON.stringify(s.lastPass));
     ok(eng.digest().adapters.find((a) => a.id === 'broken')?.consecutiveFailures === 5,
       'and the DIGEST the panel reads carries it', JSON.stringify(eng.digest().adapters.map((a) => ({ id: a.id, f: a.consecutiveFailures }))));
   }
@@ -337,7 +337,7 @@ function dayStartClock() {
              "rec.lastPass = { at: now(), ok: true, code: null }; rec.consecutiveFailures = 0; await store.adapters.update((live) => { live.adapters = recs.adapters; });")
     .replace("await store.adapters.update(() => { rec.lastPass = { at: now(), ok: false, code }; rec.consecutiveFailures = e.failures; });",
              "rec.lastPass = { at: now(), ok: false, code }; rec.consecutiveFailures = e.failures; await store.adapters.update((live) => { live.adapters = recs.adapters; });");
-  ok(PRE !== esrc && /JSON.parse\(JSON.stringify\(store.adapters.live\(\)\)\)/.test(PRE),
+  ok(PRE !== esrc && verdictOf(/JSON.parse\(JSON.stringify\(store.adapters.live\(\)\)\)/.test(PRE)),
     'NEGATIVE CONTROL setup: the pre-fix engine (a private re-parsed copy per call, written whole back) was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
   writeCopy(engCopy, PRE);
@@ -437,7 +437,7 @@ function dayStartClock() {
     .replace("      const newest = store.readTail(adapterId, convId, { limit: 1 })[0];\n      const stamp = Number.isFinite(at) ? at : (newest ? (Number(newest.at) || 0) : (en.readAt || 0));",
              "      const stamp = Number.isFinite(at) ? at : now();")
     .replace("    if (changed) notify([`${adapterId}/${convId}`]);", "    notify([`${adapterId}/${convId}`]);");   // B-f32b: the broadcast names the key
-  ok(PRE !== esrc && !/const newest = store.readTail/.test(PRE) && /\n    notify\(\[`\$\{adapterId\}\/\$\{convId\}`\]\);/.test(PRE),
+  ok(PRE !== esrc && !/const newest = store.readTail/.test(PRE) && verdictOf(/\n    notify\(\[`\$\{adapterId\}\/\$\{convId\}`\]\);/.test(PRE)),
     'NEGATIVE CONTROL setup: the pre-fix markRead (now() + an unconditional notify) was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
   writeCopy(engCopy, PRE);
@@ -509,12 +509,12 @@ function dayStartClock() {
     req.params = url.params;
     Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((e) => resolve({ status: 500, body: { error: String(e && e.message) } }));
   });
-  ok(eng.digest().conversations.some((c) => c.id === 'fake-poll-ops'), 'the discovery pass announced a real conversation for the positive control below');
+  ok(verdictOf(eng.digest().conversations.some((c) => c.id === 'fake-poll-ops')), 'the discovery pass announced a real conversation for the positive control below');
   const track = await call('PUT', { path: '/api/channels/:adapterId/:convId/refresh', params: { adapterId: 'nope', convId: 'nope' } }, { every: 60 });
-  ok(track.status === 404 && /No such conversation/.test(track.body.error), 'PUT /refresh on an unknown id is a 404 (2026-09-26: the /track route is gone)', JSON.stringify(track));
+  ok(track.status === 404 && verdictOf(/No such conversation/.test(track.body.error)), 'PUT /refresh on an unknown id is a 404 (2026-09-26: the /track route is gone)', JSON.stringify(track));
   ok(!routes.router.stack.some((l) => l.route && /\/track$/.test(l.route.path)), 'there is NO /track route any more — a linked account is fetched whole');
   const read = await call('POST', { path: '/api/channels/:adapterId/:convId/read', params: { adapterId: 'nope', convId: 'nope' } }, {});
-  ok(read.status === 404 && /No such conversation/.test(read.body.error), 'POST /read answers the same rather than 200-with-a-mint', JSON.stringify(read));
+  ok(read.status === 404 && verdictOf(/No such conversation/.test(read.body.error)), 'POST /read answers the same rather than 200-with-a-mint', JSON.stringify(read));
   const good = await call('PUT', { path: '/api/channels/:adapterId/:convId/refresh', params: { adapterId: 'fake-poll', convId: 'fake-poll-ops' } }, { every: 'paused' });
   ok(good.status === 200 && good.body.ok === true && good.body.refresh.every === 'paused', 'POSITIVE CONTROL: a real conversation still answers 200');
   // (the messages route's `beforeId` pin: MOVED to the fast scripts/test-channels-engine-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -526,18 +526,18 @@ function dayStartClock() {
   await eng.pass('fake-poll', { force: true });   // discovery, or the census below walks nothing
   const d = eng.digest();
   ok(d.adapters.length === 3, 'the three fake adapters are in the digest', String(d.adapters.length));
-  ok(d.adapters.every((a) => a.auth.state === 'unknown'),
+  ok(verdictOf(d.adapters.every((a) => a.auth.state === 'unknown')),
     'an adapter that has never authenticated is published as `unknown`, NEVER as `connected` (the digest used to carry a ternary whose two branches were the same string)',
     JSON.stringify(d.adapters.map((a) => a.auth)));
-  ok(d.adapters.every((a) => a.auth.why === 'never-authenticated'), '…and it says which rung answered', JSON.stringify(d.adapters.map((a) => a.auth.why)));
+  ok(verdictOf(d.adapters.every((a) => a.auth.why === 'never-authenticated')), '…and it says which rung answered', JSON.stringify(d.adapters.map((a) => a.auth.why)));
   ok(d.conversations.length > 0, 'the digest carries conversations for the claims below (a census over nothing proves nothing)', String(d.conversations.length));
-  ok(d.conversations.every((c) => c.freshness && !('text' in c.freshness)),
+  ok(verdictOf(d.conversations.every((c) => c.freshness && !('text' in c.freshness))),
     'no conversation carries a server-composed SENTENCE — the language is per DEVICE and this payload is broadcast to every client',
     JSON.stringify(d.conversations[0] && d.conversations[0].freshness));
   // 2026-09-26: the identity warning rides the FULL view (the composer's), not the slim list row
   const fulls = d.conversations.map((c) => eng.conversationView(c.adapterId, c.id));
-  ok(fulls.every((c) => c && c.identityWarning && !('text' in c.identityWarning)), '…and neither does the identity warning (on the full view)', JSON.stringify(fulls[0] && fulls[0].identityWarning));
-  ok(d.conversations.every((c) => c.freshness.state), 'every claim NAMES its state, so the client knows which sentence to render');
+  ok(verdictOf(fulls.every((c) => c && c.identityWarning && !('text' in c.identityWarning))), '…and neither does the identity warning (on the full view)', JSON.stringify(fulls[0] && fulls[0].identityWarning));
+  ok(verdictOf(d.conversations.every((c) => c.freshness.state)), 'every claim NAMES its state, so the client knows which sentence to render');
 }
 
 // ── ⑥ THE SCAN LANE INGESTS ONLY THROUGH A SOURCE THE RESOLVER GAVE IT (r3) ──
@@ -555,7 +555,7 @@ function dayStartClock() {
   const A = 'fake-scan', C = 'fake-scan-ops';
   const p0 = await eng.pass(A, { force: true });
   const row0 = eng.adapterRecords().adapters.find((r) => r.id === A);
-  ok(p0.ok === true && row0.scan && row0.scan.hostFacts && row0.scan.hostFacts.platform === process.platform && Number.isFinite(row0.scan.hostFacts.at),
+  ok(p0.ok === true && gateOf(row0.scan) && gateOf(row0.scan.hostFacts) && row0.scan.hostFacts.platform === process.platform && verdictOf(Number.isFinite(row0.scan.hostFacts.at)),
     'TRIGGER ③: a scan pass PRODUCES `scan.hostFacts` (platform + a fresh stamp) — the field had no producer anywhere in the product', JSON.stringify(row0.scan));
   const d = eng.digest();
   const row = d.conversations.find((c) => c.id === C);
@@ -569,7 +569,7 @@ function dayStartClock() {
   // ingested and there is no first record to read `raw` off.
   const first = eng.store.readTail(A, C, { limit: 1 })[0];
   const synthetic = first && first.raw ? first.raw.synthetic : null;
-  ok(first && synthetic === (row.lane.source === 'ui'), 'the records carry the provenance of the source the RESOLVER chose (synthetic keys iff `ui`) — handed down, not re-derived', JSON.stringify({ synthetic, source: row.lane.source }));
+  ok(gateOf(first) && synthetic === (row.lane.source === 'ui'), 'the records carry the provenance of the source the RESOLVER chose (synthetic keys iff `ui`) — handed down, not re-derived', JSON.stringify({ synthetic, source: row.lane.source }));
 
   // Stale facts are refreshed by the next pass (the TTL is what makes them a
   // cache; the trigger is what keeps a stale record from being read around).
@@ -596,7 +596,7 @@ function dayStartClock() {
     'a machine with no client is a NAMED refusal on the chip', JSON.stringify({ lane: ar.lane, freshness: ar.freshness }));
   ok(an === 0 && !aen.anchor, '…and NOTHING is ingested through it — the log agrees with the chip in the refusing direction too', JSON.stringify({ an, anchor: aen.anchor }));
   const arow = ab.adapterRecords().adapters[0];
-  ok(arow.lastPass && arow.lastPass.ok === true && arow.consecutiveFailures === 0,
+  ok(gateOf(arow.lastPass) && arow.lastPass.ok === true && arow.consecutiveFailures === 0,
     'a refused lane is NOT a failed pass (with the gate removed the registry refuses the page and the row goes amber instead — this assert is what tells the two apart)', JSON.stringify(arow.lastPass));
 
   // THE LANE DECISION READS NO `caps.receive` — it is asked of the resolver.
@@ -606,10 +606,10 @@ function dayStartClock() {
   const esrc = engineSource(REPO).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const between = (a, b) => { const i = esrc.indexOf(a), j = esrc.indexOf(b, i); return i >= 0 && j > i ? esrc.slice(i, j) : null; };
   const laneFn = between('function laneOrScan(', 'async function pass('), ingestFn = between('async function ingest(', 'function digest(');
-  ok(laneFn && ingestFn && !/\.receive\b/.test(laneFn) && !/\.receive\b/.test(ingestFn),
+  ok(gateOf(laneFn) && gateOf(ingestFn) && !/\.receive\b/.test(laneFn) && !/\.receive\b/.test(ingestFn),
     '`laneOrScan` and `ingest` read `caps.receive` NOWHERE — the lane is asked of `laneState` and its `via` is followed (r2 read it in both, once to label a lane it had just been told was unavailable)');
-  ok(/\.receive === 'scan' \? scanFor\(rec\) : laneFor\(rec, entry\)/.test("    return c.receive === 'scan' ? scanFor(rec) : laneFor(rec, entry);"), 'POSITIVE CONTROL: the pin matches the retired r2 `laneOrScan`');
-  ok(/opts\.source = lane\.source/.test(esrc) && /e\.adapter\.scanHost\(/.test(esrc), 'the resolved source is handed to history() and scanHost() has a caller');
+  ok(verdictOf(/\.receive === 'scan' \? scanFor\(rec\) : laneFor\(rec, entry\)/.test("    return c.receive === 'scan' ? scanFor(rec) : laneFor(rec, entry);")), 'POSITIVE CONTROL: the pin matches the retired r2 `laneOrScan`');
+  ok(gateOf(/opts\.source = lane\.source/.test(esrc)) && verdictOf(/e\.adapter\.scanHost\(/.test(esrc)), 'the resolved source is handed to history() and scanHost() has a caller');
 }
 
 // ⑥ NEGATIVE CONTROL — the r2 shape needs all three pre-fix pieces back:
@@ -766,7 +766,7 @@ function dayStartClock() {
     return { silent, said, onDisk, budgetHit };
   };
   const r = await drive(ENG, 'override-budget');
-  ok(r.budgetHit, 'FIXTURE: the account\'s vendor budget really was exhausted before the overrides (a zero below would otherwise be vacuous)');
+  ok(verdictOf(r.budgetHit), 'FIXTURE: the account\'s vendor budget really was exhausted before the overrides (a zero below would otherwise be vacuous)');
   ok(r.onDisk === 30, 'FIXTURE: all 30 overrides are persisted', String(r.onDisk));
   ok(r.silent === 0 && r.said === 30, 'EVERY override broadcast a digest showing the row\'s new period — a persisted change never depends on whether a pass was affordable', JSON.stringify(r));
   const esrc = engineSource(REPO);
@@ -793,7 +793,7 @@ function dayStartClock() {
     'a discovered row claims the cadence the scheduler keeps for it (no tracked flag, no "not polling")', JSON.stringify({ freshness: u.freshness, cadence: u.cadence }));
   await eng.setRefresh('fake-poll', 'fake-poll-ops', 'paused');
   const pz = eng.digest().conversations.find((c) => c.id === 'fake-poll-ops');
-  ok(pz.freshness.state === 'paused' && pz.cadence.paused, 'a PAUSED override says "paused" on the chip', JSON.stringify(pz.freshness));
+  ok(pz.freshness.state === 'paused' && verdictOf(pz.cadence.paused), 'a PAUSED override says "paused" on the chip', JSON.stringify(pz.freshness));
   const rec = eng.adapterRecords().adapters.find((r) => r.id === 'fake-poll');
   await eng.store.adapters.update(() => { rec.enabled = false; });
   const dd = eng.digest();
@@ -916,7 +916,7 @@ console.log('⑤ a burst day pages to the anchor newest-first; the anchor moves 
   for (let i = 340; i < 660; i++) world.records.push(mkRec(i));
   clock += 61e3; world.calls = 0; world.walks = 0;
   const r2 = await eng.pass('burst', { force: true });
-  ok(r2.ok === true && r2.changed.includes('burst/burst-ops'), 'the pass completed and named the conversation that grew');
+  ok(r2.ok === true && verdictOf(r2.changed.includes('burst/burst-ops')), 'the pass completed and named the conversation that grew');
   ok(logCount() === 661 && distinctIds() === 661, `day 2's 320 landed whole on top of day 1 — 661 lines, 661 distinct, ZERO duplicates (${logCount()}/${distinctIds()})`);
   ok(anchorOf() === 'b-m00659', `the anchor moved to day 2's newest (${anchorOf()})`);
   ok(world.calls === 7 && world.walks === 1, `320 new + the anchor on the 7th page ⇒ 7 vendor pages, one continuation (calls ${world.calls}, walks ${world.walks})`);
@@ -1016,21 +1016,21 @@ console.log('⑥ (P2) assign, filter, wake');
   const K1 = `${A}/${CID}`;
   const userGrant = JSON.stringify(ownRows(eng, K1)[0]);
   const a1 = await eng.setAssignment(A, CID, { ...agent, mode: 'all', notify: 'wake', dailyWakeCap: 100 });
-  ok(a1.ok && a1.assignment.principal.id === 'agent-1' && a1.assignment.authority === 'draft', 'assign: accepted with defaults (draft)');
-  ok(ownRows(eng, K1).length === 2 && ownRows(eng, K1).filter((g) => g.origin === 'access').length === 1 && ownRows(eng, K1).every((g) => g.level === 'visible'), 'the compatibility write (R4: one access row + one watcher row) IMPLIES reach: exactly one grant with origin:access beside the user\'s own');
+  ok(gateOf(a1.ok) && a1.assignment.principal.id === 'agent-1' && a1.assignment.authority === 'draft', 'assign: accepted with defaults (draft)');
+  ok(ownRows(eng, K1).length === 2 && ownRows(eng, K1).filter((g) => g.origin === 'access').length === 1 && verdictOf(ownRows(eng, K1).every((g) => g.level === 'visible')), 'the compatibility write (R4: one access row + one watcher row) IMPLIES reach: exactly one grant with origin:access beside the user\'s own');
   await eng.setAssignment(A, CID, null);
   ok(!ownRows(eng, K1).some((g) => g.origin === 'access') && en().watchers.length === 0 && ownRows(eng, K1).length === 1 && JSON.stringify(ownRows(eng, K1)[0]) === userGrant, 'unassign (null: both lists emptied) removes ONLY the origin:access row — the user\'s grant is byte-identical');
 
   // (b) authority:'send' is capped by BOTH caps, and clamped at read time
   await eng.refreshConvCaps(A, CID);
   const byPolicy = await eng.setAssignment(A, CID, { ...agent, authority: 'send' });
-  ok(!byPolicy.ok && byPolicy.code === 'authority-capped' && /review/.test(byPolicy.error), 'authority:send refused while the channel requires review (decision 9 default)');
+  ok(!byPolicy.ok && byPolicy.code === 'authority-capped' && verdictOf(/review/.test(byPolicy.error)), 'authority:send refused while the channel requires review (decision 9 default)');
   await eng.store.index.update(() => { eng.store.index.entry(A, CID, { create: false }).policy = { mode: 'direct' }; });
   const okSend = await eng.setAssignment(A, CID, { ...agent, authority: 'send' });
-  ok(okSend.ok && okSend.assignment.authority === 'send' && !okSend.assignment.authorityClamped, 'authority:send accepted once policy is direct AND the conversation offers send');
+  ok(gateOf(okSend.ok) && okSend.assignment.authority === 'send' && !okSend.assignment.authorityClamped, 'authority:send accepted once policy is direct AND the conversation offers send');
   await eng.store.index.update(() => { eng.store.index.entry(A, CID, { create: false }).policy = { mode: 'review' }; });
   const view = eng.digest().conversations.find((c) => c.key === `${A}/${CID}`);
-  ok(view.assignment.authority === 'draft' && view.assignment.authorityClamped && /review/.test(view.assignment.authorityWhy) && view.assignment.authorityStored === 'send' && eng.conversationView(A, CID).own.access[0].authorityStored === 'send', 'READ-TIME CLAMP: the stored send reads as draft with the reason once policy tightens; the bytes are untouched');
+  ok(view.assignment.authority === 'draft' && gateOf(view.assignment.authorityClamped) && gateOf(/review/.test(view.assignment.authorityWhy)) && view.assignment.authorityStored === 'send' && eng.conversationView(A, CID).own.access[0].authorityStored === 'send', 'READ-TIME CLAMP: the stored send reads as draft with the reason once policy tightens; the bytes are untouched');
   const fullView = eng.conversationView(A, CID);
   ok(fullView.authorityCaps.policyRequiresReview === true && fullView.authorityCaps.offersSend === true && fullView.wakeLatency.lane === 'poll' && fullView.wakeLatency.seconds === eng.cadenceOf(A, CID).seconds, 'the FULL view publishes both caps and the honest poll-lane latency (the row\'s own cadence)', JSON.stringify(fullView.wakeLatency));
   await eng.store.index.update(() => { eng.store.index.entry(A, CID, { create: false }).policy = null; });
@@ -1040,21 +1040,21 @@ console.log('⑥ (P2) assign, filter, wake');
   ok((await eng.setFilter(A, CID, { rules: [{ kind: 'glob', value: 'x' }] })).code === 'bad-filter', 'a filter with an unknown rule kind is refused by name');
   await ingest('GPU down', 'lunch?', 'GPU back', 'ok');
   const est = eng.estimateFilter(A, CID, { rules: [{ kind: 'keyword', value: 'gpu' }] });
-  ok(est.ok && est.estimate.total === 4 && est.estimate.matched === 2 && !est.estimate.sampled, `the estimate runs over the stored log (${est.estimate.matched} of ${est.estimate.total})`);
+  ok(gateOf(est.ok) && est.estimate.total === 4 && est.estimate.matched === 2 && !est.estimate.sampled, `the estimate runs over the stored log (${est.estimate.matched} of ${est.estimate.total})`);
   ok(eng.estimateFilter(A, CID, null).estimate.matched === 4, 'a null filter estimates all messages');
   const fr = await eng.setFilter(A, CID, { rules: [{ kind: 'keyword', value: 'gpu' }] }, { estimate: est.estimate });
-  ok(fr.ok && fr.filter.id && fr.filter.estimateAtSet && fr.filter.estimateAtSet.matchedPerDay === est.estimate.matchedPerDay, 'the filter is saved with the estimate it was set on');
+  ok(gateOf(fr.ok) && gateOf(fr.filter.id) && gateOf(fr.filter.estimateAtSet) && fr.filter.estimateAtSet.matchedPerDay === est.estimate.matchedPerDay, 'the filter is saved with the estimate it was set on');
   ok((await eng.setAssignment(A, CID, { ...agent, mode: 'filtered', filterId: 'f-nope' })).code === 'no-such-filter', 'a filtered assignment naming a missing filter is refused');
 
   // (d) digest batching: hits go PENDING on the index, ONE delivery per window
   ladder.calls.length = 0;
   const dg = await eng.setAssignment(A, CID, { ...agent, mode: 'filtered', filterId: fr.filter.id, notify: 'digest', digestMinutes: 5, dailyWakeCap: 100 });
-  ok(dg.ok, 'digest assignment accepted');
+  ok(verdictOf(dg.ok), 'digest assignment accepted');
   await ingest('GPU one', 'noise', 'GPU two');
-  ok(ladder.calls.length === 0 && en().pending.length === 2 && eng.pendingWindows().some((w) => w.key === `${A}/${CID}` && w.kind === 'digest'), 'digest mode: 2 hits pending on the index, a digest window armed, nothing delivered yet');
+  ok(ladder.calls.length === 0 && en().pending.length === 2 && verdictOf(eng.pendingWindows().some((w) => w.key === `${A}/${CID}` && w.kind === 'digest')), 'digest mode: 2 hits pending on the index, a digest window armed, nothing delivered yet');
   const before = en().stats.hits7d;
   const flushed = await eng.flushPending(A, CID, { kind: 'digest' });
-  ok(flushed.ok && ladder.calls.length === 1 && /^### Channel digest — fake-poll · Ops room — 2 messages in the last 5 min/.test(ladder.calls[0].text) && en().pending.length === 0 && en().stats.wakes.length === 1, 'the window flushes ONE digest delivery listing both hits and clears pending');
+  ok(gateOf(flushed.ok) && ladder.calls.length === 1 && gateOf(/^### Channel digest — fake-poll · Ops room — 2 messages in the last 5 min/.test(ladder.calls[0].text)) && en().pending.length === 0 && en().stats.wakes.length === 1, 'the window flushes ONE digest delivery listing both hits and clears pending');
   ok(before === 2 && en().stats.hits7d === 2, 'hits are counted at the match, not at the delivery');
 
   // (e) the pacing cap HOLDS the hits (never drops), and says why — the
@@ -1062,20 +1062,20 @@ console.log('⑥ (P2) assign, filter, wake');
   //     room for exactly one more
   ladder.calls.length = 0;
   const wk = await eng.setAssignment(A, CID, { ...agent, mode: 'filtered', filterId: fr.filter.id, notify: 'wake', dailyWakeCap: 2 });
-  ok(wk.ok, 'wake assignment with a daily cap of 2 (one already spent by the digest)');
+  ok(verdictOf(wk.ok), 'wake assignment with a daily cap of 2 (one already spent by the digest)');
   await ingest('GPU three');
-  ok(ladder.calls.length === 1 && /matched: keyword "gpu"/.test(ladder.calls[0].text), 'first wake delivered and it says why');
+  ok(ladder.calls.length === 1 && verdictOf(/matched: keyword "gpu"/.test(ladder.calls[0].text)), 'first wake delivered and it says why');
   await ingest('GPU four', 'GPU five');
-  ok(ladder.calls.length === 1 && en().pending.length === 2 && /daily wake cap reached \(2 of 2/.test(en().stats.lastRefusal.why), `at the cap the hits are HELD (pending 2) and the refusal names the numbers: ${en().stats.lastRefusal.why}`);
+  ok(ladder.calls.length === 1 && en().pending.length === 2 && verdictOf(/daily wake cap reached \(2 of 2/.test(en().stats.lastRefusal.why)), `at the cap the hits are HELD (pending 2) and the refusal names the numbers: ${en().stats.lastRefusal.why}`);
 
   // (f) a refused delivery is stashed through the ladder's own durable stash —
   //     and the two HELD hits ride along with the new one (a hold is a delay)
   await eng.setAssignment(A, CID, { ...agent, mode: 'filtered', filterId: fr.filter.id, notify: 'wake', dailyWakeCap: 100 });
   ladder.refuse = 'spend budget: per-identity-hour';
   await ingest('GPU six');
-  ok(ladder.stash.length === 1 && ladder.stash[0].cid === 'agent-1' && ladder.stash[0].source === 'channel' && /GPU six/.test(ladder.stash[0].text) && /GPU four/.test(ladder.stash[0].text) && /GPU five/.test(ladder.stash[0].text) && en().pending.length === 0, 'a refused delivery is stashed for the agent\'s next turn WITH the hits held earlier (nothing is lost) and pending is cleared');
+  ok(ladder.stash.length === 1 && ladder.stash[0].cid === 'agent-1' && ladder.stash[0].source === 'channel' && gateOf(/GPU six/.test(ladder.stash[0].text)) && gateOf(/GPU four/.test(ladder.stash[0].text)) && gateOf(/GPU five/.test(ladder.stash[0].text)) && en().pending.length === 0, 'a refused delivery is stashed for the agent\'s next turn WITH the hits held earlier (nothing is lost) and pending is cleared');
   const last = en().stats.wakes[en().stats.wakes.length - 1];
-  ok(last.ok === false && last.lane === 'stash' && /spend budget/.test(last.why) && last.refused === 'spend', 'the ledger records the refused attempt with the ladder\'s reason');
+  ok(last.ok === false && last.lane === 'stash' && gateOf(/spend budget/.test(last.why)) && last.refused === 'spend', 'the ledger records the refused attempt with the ladder\'s reason');
   ladder.refuse = null;
 
   // (f′) THE DRAIN CARRIES EVERY HIT (the P4 verifier's medium): the only
@@ -1092,17 +1092,17 @@ console.log('⑥ (P2) assign, filter, wake');
     ok(Buffer.byteLength(block) > 1200 && (block.match(/^from Ada at/gm) || []).length === 6, `fixture: a 6-hit block is ${Buffer.byteLength(block)} bytes (the pre-fix clip at 400 chars kept one hit)`);
     const drained = [{ source: 'channel', fromName: 'Channels · fake-poll', text: block, ts: base }, ...ladder.stash.map((s) => ({ ...s, ts: base + 1 }))];
     const r1 = AR.renderMsgStash(drained);
-    ok((r1.text.match(/^from Ada at/gm) || []).length === 9 && /GPU four/.test(r1.text) && /GPU five/.test(r1.text) && /GPU six/.test(r1.text) && r1.rest.length === 0 && r1.shown.length === 2, 'ladder refuses ⇒ drainStash ⇒ renderMsgStash: all 6 + 3 hits reach the agent, nothing held back');
-    ok(/vibespace-channels reply/.test(r1.text) && !/^\(reply with vibespace-msg/m.test(r1.text), 'the hint names vibespace-channels for a channel entry (the block\'s own reply line rides too)');
+    ok((r1.text.match(/^from Ada at/gm) || []).length === 9 && gateOf(/GPU four/.test(r1.text)) && gateOf(/GPU five/.test(r1.text)) && gateOf(/GPU six/.test(r1.text)) && r1.rest.length === 0 && r1.shown.length === 2, 'ladder refuses ⇒ drainStash ⇒ renderMsgStash: all 6 + 3 hits reach the agent, nothing held back');
+    ok(gateOf(/vibespace-channels reply/.test(r1.text)) && !/^\(reply with vibespace-msg/m.test(r1.text), 'the hint names vibespace-channels for a channel entry (the block\'s own reply line rides too)');
     const r2 = AR.renderMsgStash([{ source: 'agent', fromName: 'Peer', text: 'z'.repeat(1000), ts: base }]);
-    ok(!/z{401}/.test(r2.text) && new RegExp(`z{${AR.MSG_STASH_LINE_MAX}}`).test(r2.text) && /vibespace-msg send/.test(r2.text) && !/vibespace-channels/.test(r2.text), `CONTROL: an agent message is still one ≤${AR.MSG_STASH_LINE_MAX}-char line with the vibespace-msg hint only`);
+    ok(!/z{401}/.test(r2.text) && gateOf(new RegExp(`z{${AR.MSG_STASH_LINE_MAX}}`).test(r2.text)) && gateOf(/vibespace-msg send/.test(r2.text)) && !/vibespace-channels/.test(r2.text), `CONTROL: an agent message is still one ≤${AR.MSG_STASH_LINE_MAX}-char line with the vibespace-msg hint only`);
     const big = [];
     for (let i = 0; i < 4; i++) big.push({ source: 'channel', fromName: 'Channels · fake-poll', text: F.renderWakeBlock({ adapterLabel: 'fake-poll', title: `room ${i}`, convId: CID, hits: six }), ts: base + i });
     const r3 = AR.renderMsgStash(big);
-    ok(r3.shown.length >= 1 && r3.shown.length < 4 && r3.rest.length === 4 - r3.shown.length && r3.rest[0].text === big[0].text && /room 3/.test(r3.text) && !/room 0/.test(r3.text) && new RegExp(`\\(${r3.rest.length} older message\\(s\\) held for your next turn\\)`).test(r3.text), `over the section budget the NEWEST entries render and the oldest ${r3.rest.length} are handed back for the next drain (never dropped), and the block says so`);
+    ok(r3.shown.length >= 1 && r3.shown.length < 4 && r3.rest.length === 4 - r3.shown.length && r3.rest[0].text === big[0].text && gateOf(/room 3/.test(r3.text)) && !/room 0/.test(r3.text) && verdictOf(new RegExp(`\\(${r3.rest.length} older message\\(s\\) held for your next turn\\)`).test(r3.text)), `over the section budget the NEWEST entries render and the oldest ${r3.rest.length} are handed back for the next drain (never dropped), and the block says so`);
     ok(Buffer.byteLength(r3.text) <= AR.MSG_STASH_MAX_BYTES + 256, `the rendered section stays near its budget (${Buffer.byteLength(r3.text)} B ≤ ${AR.MSG_STASH_MAX_BYTES} + head)`);
     const rc = AR.renderMsgStash([{ source: 'channel-receipt', fromName: 'Channels · Outbox', text: 'Channel receipt — x\n' + 'final text:\n' + 'w'.repeat(1500), ts: base }]);
-    ok(/w{1500}/.test(rc.text), 'a receipt block (up to 2000 chars of final text) is rendered whole too');
+    ok(verdictOf(/w{1500}/.test(rc.text)), 'a receipt block (up to 2000 chars of final text) is rendered whole too');
   }
 
   // (g) a group rotates over its LIVE members, and holds with none
@@ -1116,17 +1116,17 @@ console.log('⑥ (P2) assign, filter, wake');
   ok(eng.store.index.snapshot().rotations.g1 === 1, `the rotation cursor lives in the index, wrapped over the member list (${eng.store.index.snapshot().rotations.g1})`);
   live = [];
   await ingest('GPU ten');
-  ok(ladder.calls.length === 3 && en().pending.length === 1 && /no live session in group On-call/.test(en().stats.lastRefusal.why), 'no live member ⇒ the hit is HELD for the next turn, never "wake them all"');
+  ok(ladder.calls.length === 3 && en().pending.length === 1 && verdictOf(/no live session in group On-call/.test(en().stats.lastRefusal.why)), 'no live member ⇒ the hit is HELD for the next turn, never "wake them all"');
   live = [{ cid: 'agent-2', name: 'Worker 2', groups: ['g1'] }];
 
   // (h) leftovers survive a restart: the new engine schedules a boot flush and delivers ONE digest
   eng.stop();
   const eng2 = mkP2();
   eng2.start();
-  ok(eng2.pendingWindows().some((w) => w.key === `${A}/${CID}` && w.kind === 'boot'), 'after a restart the pending hit gets a boot window');
+  ok(verdictOf(eng2.pendingWindows().some((w) => w.key === `${A}/${CID}` && w.kind === 'boot')), 'after a restart the pending hit gets a boot window');
   const boot = await eng2.flushPending(A, CID, { kind: 'boot' });
   const en2 = eng2.store.index.snapshot().conversations[`${A}/${CID}`];
-  ok(boot.ok && ladder.calls.length === 4 && ladder.calls[3].cid === 'agent-2' && /^### Channel digest/.test(ladder.calls[3].text) && /GPU ten/.test(ladder.calls[3].text) && en2.pending.length === 0, 'the leftover is delivered as one digest to the now-live member and cleared');
+  ok(gateOf(boot.ok) && ladder.calls.length === 4 && ladder.calls[3].cid === 'agent-2' && gateOf(/^### Channel digest/.test(ladder.calls[3].text)) && gateOf(/GPU ten/.test(ladder.calls[3].text)) && en2.pending.length === 0, 'the leftover is delivered as one digest to the now-live member and cleared');
 
   // (i) THE BOOT RACE (the P4 verifier's low): after a restart the boot flush
   //     and the first tick's pass both fire at 5 s; both read `pending` before
@@ -1142,7 +1142,7 @@ console.log('⑥ (P2) assign, filter, wake');
   const eng3 = mkP2();
   eng3.start();
   const en3 = () => eng3.store.index.snapshot().conversations[`${A}/${CID}`];
-  ok(eng3.pendingWindows().some((w) => w.key === `${A}/${CID}` && w.kind === 'boot'), 'the boot window is armed');
+  ok(verdictOf(eng3.pendingWindows().some((w) => w.key === `${A}/${CID}` && w.kind === 'boot')), 'the boot window is armed');
   const c0 = ladder.calls.length;
   let release; ladder.hang = new Promise((r) => { release = r; });
   const flushP = eng3.flushPending(A, CID, { kind: 'boot' });       // what the boot timer does
@@ -1162,7 +1162,7 @@ console.log('⑥ (P2) assign, filter, wake');
   //     A wake clears ONLY what it carried.
   await eng3.setAssignment(A, CID, { principal: { kind: 'agent', id: 'agent-2', name: 'Worker 2' }, mode: 'filtered', filterId: fr.filter.id, notify: 'digest', digestMinutes: 5, dailyWakeCap: 100 });
   offset += 61e3; world.records.push(mint('GPU thirteen')); await eng3.pass(A, { force: true }); await eng3.settleWakes();
-  ok(en3().pending.length === 1 && eng3.pendingWindows().some((w) => w.key === `${A}/${CID}` && w.kind === 'digest'), 'fixture: one hit pending under a digest window');
+  ok(en3().pending.length === 1 && verdictOf(eng3.pendingWindows().some((w) => w.key === `${A}/${CID}` && w.kind === 'digest')), 'fixture: one hit pending under a digest window');
   let release2; ladder.hang = new Promise((r) => { release2 = r; });
   const fp2 = eng3.flushPending(A, CID, { kind: 'digest' });
   await sleep(20);
@@ -1170,10 +1170,10 @@ console.log('⑥ (P2) assign, filter, wake');
   ok(en3().pending.length === 2, `a second hit joined pending while the flush is in flight (${en3().pending.length})`);
   ladder.hang = null; release2();
   await fp2; await eng3.settleWakes();
-  ok(en3().pending.length === 1 && /GPU fourteen/.test(en3().pending[0].record.text), 'the wake cleared ONLY the hit it carried — the one that arrived meanwhile is still pending');
+  ok(en3().pending.length === 1 && verdictOf(/GPU fourteen/.test(en3().pending[0].record.text)), 'the wake cleared ONLY the hit it carried — the one that arrived meanwhile is still pending');
   const c1 = ladder.calls.length;
   const fp3 = await eng3.flushPending(A, CID, { kind: 'digest' });
-  ok(fp3.ok && ladder.calls.length === c1 + 1 && /GPU fourteen/.test(ladder.calls[c1].text) && !/GPU thirteen/.test(ladder.calls[c1].text) && en3().pending.length === 0, 'the next flush delivers it once, without the one already delivered');
+  ok(gateOf(fp3.ok) && ladder.calls.length === c1 + 1 && gateOf(/GPU fourteen/.test(ladder.calls[c1].text)) && !/GPU thirteen/.test(ladder.calls[c1].text) && en3().pending.length === 0, 'the next flush delivers it once, without the one already delivered');
   eng3.stop();
 }
 
@@ -1219,19 +1219,19 @@ console.log('⑩ the inline filter at the account and pattern grains (the owner\
   // R4: the compatibility write = ONE access row + ONE watcher row; the inline
   // filter is minted per (grain, principal) BEFORE the validator runs
   const FID = `f-account-${A}|group:tg-work`;
-  ok(a1.filterId === FID && a1.filter && a1.filter.rules.length === 2 && a1.filter.rules.every((r) => r.kind === 'time-window'), `the filter is stored under the id the engine minted (${FID}) and the answer carries its two rules`, JSON.stringify({ filterId: a1.filterId, filter: a1.filter }));
+  ok(a1.filterId === FID && gateOf(a1.filter) && a1.filter.rules.length === 2 && verdictOf(a1.filter.rules.every((r) => r.kind === 'time-window')), `the filter is stored under the id the engine minted (${FID}) and the answer carries its two rules`, JSON.stringify({ filterId: a1.filterId, filter: a1.filter }));
   const st1 = (ix().accountAssignments || {})[A] || {};
   const w1 = (st1.watchers || [])[0] || {};
   const acc1 = ((eng.effectiveForAccount(A) || { access: [] }).access || []).map((x) => x.row);   // lane grants-unify: the account grain's access is its grants-store row
   const fs1 = (ix().filters || {})[FID] || null;
-  ok(w1.filterId === FID && w1.mode === 'filtered' && w1.principal && w1.principal.kind === 'group' && w1.principal.id === 'tg-work' && w1.principal.name === '工作' && w1.notify === 'digest' && acc1.length === 1 && acc1[0].authority === 'draft' && acc1[0].principal.id === 'tg-work' && !('principal' in st1), 'the STORED account grain holds ONE access row (the group, draft) and ONE watcher (filtered, digest) carrying that filterId — no pre-split fields', JSON.stringify(st1));
-  ok(fs1 && fs1.rules.length === 2 && fs1.rules[0].from === '09:00' && fs1.rules[1].to === '18:00' && fs1.estimateAtSet && fs1.estimateAtSet.matchedPerDay === 3.4, 'the filter RECORD is in the filters table with both windows and the estimate the user saw', JSON.stringify(fs1));
-  ok(w1.estimateAtSet && w1.estimateAtSet.matchedPerDay === 3.4 && w1.estimateAtSet.conversations === 2, 'the watcher keeps estimateAtSet (the measurement is compared against it later)', JSON.stringify(w1.estimateAtSet));
+  ok(w1.filterId === FID && w1.mode === 'filtered' && gateOf(w1.principal) && w1.principal.kind === 'group' && w1.principal.id === 'tg-work' && w1.principal.name === '工作' && w1.notify === 'digest' && acc1.length === 1 && acc1[0].authority === 'draft' && acc1[0].principal.id === 'tg-work' && !('principal' in st1), 'the STORED account grain holds ONE access row (the group, draft) and ONE watcher (filtered, digest) carrying that filterId — no pre-split fields', JSON.stringify(st1));
+  ok(gateOf(fs1) && fs1.rules.length === 2 && fs1.rules[0].from === '09:00' && fs1.rules[1].to === '18:00' && gateOf(fs1.estimateAtSet) && fs1.estimateAtSet.matchedPerDay === 3.4, 'the filter RECORD is in the filters table with both windows and the estimate the user saw', JSON.stringify(fs1));
+  ok(gateOf(w1.estimateAtSet) && w1.estimateAtSet.matchedPerDay === 3.4 && w1.estimateAtSet.conversations === 2, 'the watcher keeps estimateAtSet (the measurement is compared against it later)', JSON.stringify(w1.estimateAtSet));
   ok(w1.digestMinutes === F.MAX_DIGEST_MINUTES && w1.dailyWakeCap === F.MAX_DAILY_WAKE_CAP, `9999 is held to the validator's bounds (window ${F.MAX_DIGEST_MINUTES} min, cap ${F.MAX_DAILY_WAKE_CAP}) — the Notify dialog says so before saving (R4)`, JSON.stringify([w1.digestMinutes, w1.dailyWakeCap]));
   ok(acc1.length === 1, 'the account grain wrote its ONE access grant');
   const dg = eng.digest();
   const acctView = (dg.adapters || []).find((x) => x.id === A);
-  ok(acctView && acctView.accountGrain && acctView.accountGrain.watchers[0].filterId === FID && acctView.accountGrain.watchers[0].filter && acctView.accountGrain.watchers[0].filter.rules.length === 2 && acctView.assignment && acctView.assignment.filterId === FID, 'the digest the panel draws carries the account grain with its watcher\'s filter (what the Notify dialog prefills on the next open)', JSON.stringify(acctView && acctView.accountGrain));
+  ok(gateOf(acctView) && gateOf(acctView.accountGrain) && acctView.accountGrain.watchers[0].filterId === FID && gateOf(acctView.accountGrain.watchers[0].filter) && acctView.accountGrain.watchers[0].filter.rules.length === 2 && gateOf(acctView.assignment) && acctView.assignment.filterId === FID, 'the digest the panel draws carries the account grain with its watcher\'s filter (what the Notify dialog prefills on the next open)', JSON.stringify(acctView && acctView.accountGrain));
   // (b) the EDIT: the dialog re-opens prefilled and re-sends the inline filter
   const r2 = await call('PUT', ACCT, ownerBody({ filter: { match: 'every', rules: [{ kind: 'time-window', from: '10:00', to: '11:00' }] } }));
   const fs2 = (ix().filters || {})[FID] || {};
@@ -1240,7 +1240,7 @@ console.log('⑩ the inline filter at the account and pattern grains (the owner\
   // (c) THE PATTERN GRAIN — create, then edit
   const p1 = await call('POST', PATS, ownerBody({ pattern: { match: 'any', rules: [{ kind: 'title', value: 'announce' }] } }));
   const pid = p1.body.assignment && p1.body.assignment.scope && p1.body.assignment.scope.id;
-  ok(p1.status === 200 && p1.body.ok === true && /^pa-/.test(pid || ''), 'the same save at the PATTERN grain is accepted', JSON.stringify(p1.body));
+  ok(p1.status === 200 && p1.body.ok === true && verdictOf(/^pa-/.test(pid || '')), 'the same save at the PATTERN grain is accepted', JSON.stringify(p1.body));
   const PFID = `f-pattern-${pid}|group:tg-work`;
   ok(p1.body.assignment.filterId === PFID && ((ix().filters || {})[PFID] || { rules: [] }).rules.length === 2 && ((((ix().patternAssignments || {})[pid] || {}).watchers || [])[0] || {}).filterId === PFID, `its filter is stored as f-pattern-<id>|<principal> and the stored rule's watcher carries that filterId (${pid})`, JSON.stringify(p1.body.assignment));
   const p2 = await call('PUT', PAT(pid), ownerBody({ pattern: { match: 'any', rules: [{ kind: 'title', value: 'announce' }] }, filter: { match: 'any', rules: [{ kind: 'keyword', value: 'gpu' }] } }));
@@ -1279,9 +1279,9 @@ console.log('⑩ the inline filter at the account and pattern grains (the owner\
   const ruleCodes = [...new Set([...FSRC.matchAll(/refuse\('([a-z-]+)'/g)].map((m) => m[1]))];
   const rawBack = Wd.RULE_PROBLEM_CODES.filter((c) => !ruleCodes.includes(c) || F.filterProblemText({ ok: false, code: c, error: 'RAW-SENTENCE' }) === 'RAW-SENTENCE');
   ok(ruleCodes.length >= 10 && rawBack.length === 0, `every rule code the dialog's typing can cause (${Wd.RULE_PROBLEM_CODES.length} of the ${ruleCodes.length} refuse codes) is one filterProblemText words; the rest answer the stale-client sentence`, rawBack.join());
-  ok(ruleCodes.every((c) => !Wd.ruleRefusalText({ why: c, rule: 'keyword', error: 'RAW-SENTENCE' }, 'filter').includes('RAW-SENTENCE')), 'no rule code in channel-filter.js makes the toast print the contract sentence');
+  ok(verdictOf(ruleCodes.every((c) => !Wd.ruleRefusalText({ why: c, rule: 'keyword', error: 'RAW-SENTENCE' }, 'filter').includes('RAW-SENTENCE'))), 'no rule code in channel-filter.js makes the toast print the contract sentence');
   // CONTROL (the words half): a route that DROPPED the code would print the sentence — what the owner saw
-  ok(Wd.routeErrorText({ code: 'bad-assignment', error: "mode 'filtered' needs a filterId" }).includes("mode 'filtered' needs a filterId"), 'CONTROL: without its code the refusal still falls back to the English sentence — the census above would see it');
+  ok(verdictOf(Wd.routeErrorText({ code: 'bad-assignment', error: "mode 'filtered' needs a filterId" }).includes("mode 'filtered' needs a filterId")), 'CONTROL: without its code the refusal still falls back to the English sentence — the census above would see it');
 
   // (e) NEGATIVE CONTROL — the pre-fix engine (validate FIRST, mint after) reproduces the toast
   const esrc = engineSource(REPO);
@@ -1371,24 +1371,24 @@ const isReceipt = (o) => !!o && (o.spendReason === 'channel-receipt' || o.spendR
 
   // (a) NOTIFICATION NEEDS ACCESS — refused by name; removing access removes the watcher
   const w0 = await eng.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake' }]);
-  ok(!w0.ok && w0.code === 'watcher-needs-access' && w0.principal.id === 'agent-A' && /grant access first/.test(w0.error) && !(en().watchers || []).length, 'a notification for an agent with NO access here is refused BY NAME (watcher-needs-access) and nothing is written', JSON.stringify(w0));
+  ok(!w0.ok && w0.code === 'watcher-needs-access' && w0.principal.id === 'agent-A' && gateOf(/grant access first/.test(w0.error)) && !(en().watchers || []).length, 'a notification for an agent with NO access here is refused BY NAME (watcher-needs-access) and nothing is written', JSON.stringify(w0));
   const a1 = await eng.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }, { principal: BE }, { principal: WORK }]);
-  ok(a1.ok && a1.access.length === 3 && a1.watchers.length === 0 && ownRows(eng, `${A}/${OPS}`).filter((g) => g.origin === 'access').length === 3, 'GRANT ACCESS (the first operation): three rows, three origin:access grants, no watcher');
+  ok(gateOf(a1.ok) && a1.access.length === 3 && a1.watchers.length === 0 && ownRows(eng, `${A}/${OPS}`).filter((g) => g.origin === 'access').length === 3, 'GRANT ACCESS (the first operation): three rows, three origin:access grants, no watcher');
   const w1 = await eng.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake' }, { principal: BE, notify: 'digest', digestMinutes: 30 }]);
-  ok(w1.ok && w1.watchers.map((w) => `${w.principal.id}:${w.notify}`).join() === 'agent-A:wake,agent-B:digest', 'NOTIFY (the second operation): Alpha wake, Beta digest — both hold access, so both are accepted');
+  ok(gateOf(w1.ok) && w1.watchers.map((w) => `${w.principal.id}:${w.notify}`).join() === 'agent-A:wake,agent-B:digest', 'NOTIFY (the second operation): Alpha wake, Beta digest — both hold access, so both are accepted');
   // (b) ONE conversation, TWO watchers: independent windows, tagged pending, access-only never delivered
   await ingest(eng, OPS, 'GPU one', 'GPU two');
   const toA = ladder.calls.filter((c) => c.cid === 'agent-A');
-  ok(toA.length === 1 && /GPU one/.test(toA[0].text) && /also on this conversation: .*Beta \(digest, drafts\)/.test(toA[0].text) && /工作 \(access only, drafts\)/.test(toA[0].text), 'Alpha (wake) is woken ONCE for the batch, and its block names the others on the conversation — Beta watching by digest, 工作 with access only', toA[0] && toA[0].text.split('\n').slice(0, 3).join(' | '));
-  ok(ladder.calls.filter((c) => c.cid !== 'agent-A').length === 0 && (en().pending || []).filter((p) => p.for === 'agent:agent-B').length === 2 && eng.pendingWindows().some((w) => w.key === `${A}/${OPS}` && w.principal === 'agent:agent-B' && w.kind === 'digest'), 'Beta (digest) holds its 2 hits PENDING under its OWN window (tagged agent:agent-B), nothing delivered to it yet');
+  ok(toA.length === 1 && gateOf(/GPU one/.test(toA[0].text)) && gateOf(/also on this conversation: .*Beta \(digest, drafts\)/.test(toA[0].text)) && verdictOf(/工作 \(access only, drafts\)/.test(toA[0].text)), 'Alpha (wake) is woken ONCE for the batch, and its block names the others on the conversation — Beta watching by digest, 工作 with access only', toA[0] && toA[0].text.split('\n').slice(0, 3).join(' | '));
+  ok(ladder.calls.filter((c) => c.cid !== 'agent-A').length === 0 && (en().pending || []).filter((p) => p.for === 'agent:agent-B').length === 2 && verdictOf(eng.pendingWindows().some((w) => w.key === `${A}/${OPS}` && w.principal === 'agent:agent-B' && w.kind === 'digest')), 'Beta (digest) holds its 2 hits PENDING under its OWN window (tagged agent:agent-B), nothing delivered to it yet');
   const fB = await eng.flushPending(A, OPS, { kind: 'digest', pk: 'agent:agent-B' });
-  ok(fB.ok && ladder.calls.filter((c) => c.cid === 'agent-B').length === 1 && /^### Channel digest/.test(ladder.calls.find((c) => c.cid === 'agent-B').text) && !(en().pending || []).some((p) => p.for === 'agent:agent-B'), 'Beta\'s window flushes ONE digest for Beta and clears ONLY Beta\'s pending');
-  ok(ladder.calls.every((c) => c.cid !== 'agent-W') && !(en().watchers || []).some((w) => w.principal.id === 'tg-work') && !(en().pending || []).some((p) => p.for === 'group:tg-work'), 'group 工作 (ACCESS ONLY) was never delivered, holds no watcher, no ledger, no pending hit');
+  ok(gateOf(fB.ok) && ladder.calls.filter((c) => c.cid === 'agent-B').length === 1 && gateOf(/^### Channel digest/.test(ladder.calls.find((c) => c.cid === 'agent-B').text)) && !(en().pending || []).some((p) => p.for === 'agent:agent-B'), 'Beta\'s window flushes ONE digest for Beta and clears ONLY Beta\'s pending');
+  ok(gateOf(ladder.calls.every((c) => c.cid !== 'agent-W')) && !(en().watchers || []).some((w) => w.principal.id === 'tg-work') && !(en().pending || []).some((p) => p.for === 'group:tg-work'), 'group 工作 (ACCESS ONLY) was never delivered, holds no watcher, no ledger, no pending hit');
   const wA = (en().watchers || []).find((w) => w.principal.id === 'agent-A'), wB = (en().watchers || []).find((w) => w.principal.id === 'agent-B');
   ok(wA.stats.wakes.length === 1 && wB.stats.wakes.length === 1 && wA.stats.wakes[0].p === 'agent:agent-A', 'each watcher carries ITS OWN pace ledger (one wake each), the conversation history names the watcher of each wake');
   // (c) REMOVING ACCESS REMOVES THE WATCHER (same write)
   const a2 = await eng.setAccess(A, OPSC, [{ principal: AL }, { principal: WORK }]);
-  ok(a2.ok && !(en().watchers || []).some((w) => w.principal.id === 'agent-B') && !ownRows(eng, `${A}/${OPS}`).some((g) => g.principal.id === 'agent-B') && eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations.length === 0, 'removing Beta\'s ACCESS removes its notification and its grant in the same write — Beta sees nothing any more');
+  ok(gateOf(a2.ok) && !(en().watchers || []).some((w) => w.principal.id === 'agent-B') && !ownRows(eng, `${A}/${OPS}`).some((g) => g.principal.id === 'agent-B') && eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations.length === 0, 'removing Beta\'s ACCESS removes its notification and its grant in the same write — Beta sees nothing any more');
   // CONTROL: a copy that keeps the watcher when its access goes
   {
     const esrc = engineSource(REPO);
@@ -1401,7 +1401,7 @@ const isReceipt = (o) => !!o && (o.spendReason === 'channel-receipt' || o.spendR
     await ek.setAccess(A, OPSC, [{ principal: AL }, { principal: BE }]);
     await ek.setWatchers(A, OPSC, [{ principal: BE, notify: 'wake' }]);
     await ek.setAccess(A, OPSC, [{ principal: AL }]);
-    ok((ek.store.index.snapshot().conversations[`${A}/${OPS}`].watchers || []).some((w) => w.principal.id === 'agent-B'), 'CONTROL: that copy leaves a watcher with NO access (Beta would still be woken on a conversation it cannot see) — the leg above would go red');
+    ok(verdictOf((ek.store.index.snapshot().conversations[`${A}/${OPS}`].watchers || []).some((w) => w.principal.id === 'agent-B')), 'CONTROL: that copy leaves a watcher with NO access (Beta would still be woken on a conversation it cannot see) — the leg above would go red');
     ek.stop();
   }
   // (d) ONE BATCH NEVER BILLS ONE SESSION TWICE: Alpha named directly + group Ops whose only live member is Alpha
@@ -1410,45 +1410,45 @@ const isReceipt = (o) => !!o && (o.spendReason === 'channel-receipt' || o.spendR
   const c0 = ladder.calls.length;
   await ingest(eng, OPS, 'GPU three');
   const batch = ladder.calls.slice(c0).filter((c) => c.cid === 'agent-A');
-  ok(batch.length === 1 && /GPU three/.test(batch[0].text) && !(en().pending || []).some((p) => p.for === 'group:tg-ops'), `Alpha named directly AND the Ops group (Alpha its only live member): ONE wake for the batch (${batch.length}), the group's copy counted delivered — never two billed turns`);
+  ok(batch.length === 1 && gateOf(/GPU three/.test(batch[0].text)) && !(en().pending || []).some((p) => p.for === 'group:tg-ops'), `Alpha named directly AND the Ops group (Alpha its only live member): ONE wake for the batch (${batch.length}), the group's copy counted delivered — never two billed turns`);
   // (e) RECEIPTS (2026-09-27, owner ruling "收件箱里的 approve 动作需要在账号-level 的通知配置里控制行为有点反直觉"):
   // how the drafter hears of a decision is the DECIDER's choice AT the Approve / Reject — the per-watcher
   // `receiptWake` opt-in is DEPRECATED and IGNORED (a stored true no longer wakes anybody)
   await eng.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake', receiptWake: true }]);
-  ok(eng.deprecatedReceiptWakes().some((d) => d.principal === 'agent:agent-A' && d.grain === 'conversation'), 'the boot census names the watcher that still carries receiptWake:true (one boot line says it is ignored)');
+  ok(verdictOf(eng.deprecatedReceiptWakes().some((d) => d.principal === 'agent:agent-A' && d.grain === 'conversation')), 'the boot census names the watcher that still carries receiptWake:true (one boot line says it is ignored)');
   const pr = await eng.propose({ kind: 'agent', id: 'agent-A', name: 'Alpha', groups: ['tg-ops'] }, A, OPS, { text: 'on it' });
-  ok(pr.ok && pr.proposal.state === 'awaiting-approval', 'Alpha (draft authority) proposes — awaiting approval');
+  ok(gateOf(pr.ok) && pr.proposal.state === 'awaiting-approval', 'Alpha (draft authority) proposes — awaiting approval');
   const c1 = ladder.calls.length;
   await eng.approve(pr.proposal.id, {});
   const rcA = ladder.calls.slice(c1).find((c) => c.cid === 'agent-A' && isReceipt(c.opts));
-  ok(rcA && rcA.opts.noWake === true, 'Alpha\'s watcher still carries receiptWake:true — IGNORED: a plain approve (no choice ⇒ next-turn) rides its next turn (noWake true)');
+  ok(gateOf(rcA) && rcA.opts.noWake === true, 'Alpha\'s watcher still carries receiptWake:true — IGNORED: a plain approve (no choice ⇒ next-turn) rides its next turn (noWake true)');
   const pr2 = await eng.propose({ kind: 'agent', id: 'agent-W', name: 'Worker', groups: ['tg-work'] }, A, OPS, { text: 'noted' });
   const c2 = ladder.calls.length;
   await eng.approve(pr2.proposal.id, { deliver: 'wake-now' });
   const rcW = ladder.calls.slice(c2).find((c) => c.cid === 'agent-W' && isReceipt(c.opts));
   const q2 = eng.store.outbox.snapshot().proposals[pr2.proposal.id];
-  ok(rcW && rcW.opts.noWake === false && q2.receiptChoice === 'wake-now' && q2.receiptWake && q2.receiptWake.ok === true && q2.receiptWake.reserved === false, 'Worker has NO watcher at all — the decider chose "wake it now" ⇒ its receipt WAKES it (noWake false), the proposal holds its ONE wake row', JSON.stringify(q2.receiptWake));
+  ok(gateOf(rcW) && rcW.opts.noWake === false && q2.receiptChoice === 'wake-now' && gateOf(q2.receiptWake) && q2.receiptWake.ok === true && q2.receiptWake.reserved === false, 'Worker has NO watcher at all — the decider chose "wake it now" ⇒ its receipt WAKES it (noWake false), the proposal holds its ONE wake row', JSON.stringify(q2.receiptWake));
   const pr3 = await eng.propose({ kind: 'agent', id: 'agent-A', name: 'Alpha', groups: ['tg-ops'] }, A, OPS, { text: 'again' });
   const c3 = ladder.calls.length;
   await eng.approve(pr3.proposal.id, { deliver: 'next-turn' });
   const rcG = ladder.calls.slice(c3).find((c) => c.cid === 'agent-A' && isReceipt(c.opts));
-  ok(rcG && rcG.opts.noWake === true && !eng.store.outbox.snapshot().proposals[pr3.proposal.id].receiptWake, '"tell it with its next message" ⇒ noWake, no wake row — whatever the watcher config says');
+  ok(gateOf(rcG) && rcG.opts.noWake === true && !eng.store.outbox.snapshot().proposals[pr3.proposal.id].receiptWake, '"tell it with its next message" ⇒ noWake, no wake row — whatever the watcher config says');
   // (f) the AUTHORITY is the access row's, per principal, finest grain
   const capped = await eng.setAccess(A, { kind: 'account' }, [{ principal: BE, authority: 'send' }]);
   ok(!capped.ok && capped.code === 'authority-capped' && capped.principal.id === 'agent-B', '`send` on the account is refused while the account policy is review (the cap is the ACCESS row\'s), naming the row');
   const fa = await eng.setAccess(A, { kind: 'account' }, [{ principal: BE, authority: 'draft' }]);
   const listB = eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations;
-  ok(fa.ok && listB.length === 2 && listB.every((c) => c.access && c.access.via === 'account' && c.access.authority === 'draft' && !c.watched), 'Beta has ACCESS to the WHOLE account — every row says so (drafts), watched by nothing', JSON.stringify(listB.map((c) => [c.key, c.access, c.watched])));
+  ok(gateOf(fa.ok) && listB.length === 2 && verdictOf(listB.every((c) => c.access && c.access.via === 'account' && c.access.authority === 'draft' && !c.watched)), 'Beta has ACCESS to the WHOLE account — every row says so (drafts), watched by nothing', JSON.stringify(listB.map((c) => [c.key, c.access, c.watched])));
   // (g) THE AGENT'S SEARCH — filtered by reach
   await ingest(eng, LOUNGE, 'secret lounge gossip');
   const sA = await eng.searchFor({ kind: 'agent', id: 'agent-W', groups: ['tg-work'] }, 'gossip');
   const sB = await eng.searchFor({ kind: 'agent', id: 'agent-B', groups: [] }, 'gossip');
-  ok(sA.ok && sA.results.length === 0 && sB.ok && sB.results.length === 1 && sB.results[0].convId === LOUNGE, 'search: Worker (access to Ops only) finds nothing in the Lounge; Beta (the whole account) finds it — a hit you cannot see is simply absent', JSON.stringify([sA.results.length, sB.results.map((r) => r.key), eng.store.readTail(A, LOUNGE, { limit: 5 }).map((r) => r.text), eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations.map((c) => c.key)]));
+  ok(gateOf(sA.ok) && sA.results.length === 0 && gateOf(sB.ok) && sB.results.length === 1 && sB.results[0].convId === LOUNGE, 'search: Worker (access to Ops only) finds nothing in the Lounge; Beta (the whole account) finds it — a hit you cannot see is simply absent', JSON.stringify([sA.results.length, sB.results.map((r) => r.key), eng.store.readTail(A, LOUNGE, { limit: 5 }).map((r) => r.text), eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations.map((c) => c.key)]));
   ok((await eng.searchFor({ kind: 'agent', id: 'agent-B', groups: [] }, 'x')).code === 'bad-request', 'a one-letter search is refused by name');
   // (h) COMPOSE (B-6acc)
   const W = { kind: 'agent', id: 'agent-W', name: 'Worker', groups: ['tg-work'] };
   const nf = await eng.compose(W, A, { to: 'a@example.com', subject: 'Hi', text: 'hello' });
-  ok(!nf.ok && nf.code === 'not-found' && /no access to the whole account/.test(nf.error), 'compose: an agent WITHOUT access to the whole account gets the uniform not-found');
+  ok(!nf.ok && nf.code === 'not-found' && verdictOf(/no access to the whole account/.test(nf.error)), 'compose: an agent WITHOUT access to the whole account gets the uniform not-found');
   const Bc = { kind: 'agent', id: 'agent-B', name: 'Beta', groups: [] };
   const badTo = await eng.compose(Bc, A, { to: 'Bob <b@example.com>', subject: 'Hi', text: 'hello' });
   ok(!badTo.ok && badTo.code === 'bad-proposal' && badTo.why === 'address', 'compose: a recipient that is not a plain address is refused by name (a header injection never reaches the MIME)', JSON.stringify(badTo));
@@ -1457,27 +1457,27 @@ const isReceipt = (o) => !!o && (o.spendReason === 'channel-receipt' || o.spendR
   ok(!ns.ok && ns.code === 'send-not-available' && ns.why === 'send-scope-not-granted' && !Object.values(eng.store.outbox.snapshot().proposals).some((p) => p.compose), 'compose: an account without the send permission answers send-not-available (send-scope-not-granted) and creates NOTHING');
   flags.noScope = false;
   const cm = await eng.compose(Bc, A, { to: 'a@example.com, c@example.com', cc: 'd@example.com', subject: 'Weekly report', text: 'numbers inside' });
-  ok(cm.ok && cm.proposal.state === 'awaiting-approval' && cm.proposal.compose.to.join() === 'a@example.com,c@example.com' && cm.proposal.convId === null && cm.proposal.policy.reasons.includes('channel-policy'), 'compose: a NEW message is a PROPOSAL awaiting approval (the account policy is review by default)', JSON.stringify(cm.proposal && cm.proposal.policy));
-  ok(todos.some((x) => x.status === 'open' && /New messages awaiting approval on R4 mail/.test(x.text)), 'compose: ONE For-you pointer for the account names the new message');
+  ok(gateOf(cm.ok) && cm.proposal.state === 'awaiting-approval' && cm.proposal.compose.to.join() === 'a@example.com,c@example.com' && cm.proposal.convId === null && verdictOf(cm.proposal.policy.reasons.includes('channel-policy')), 'compose: a NEW message is a PROPOSAL awaiting approval (the account policy is review by default)', JSON.stringify(cm.proposal && cm.proposal.policy));
+  ok(verdictOf(todos.some((x) => x.status === 'open' && /New messages awaiting approval on R4 mail/.test(x.text))), 'compose: ONE For-you pointer for the account names the new message');
   ok(composed.length === 0, 'nothing reached the adapter before the approval');
   const ap = await eng.approve(cm.proposal.id, {});
   const sent = eng.store.outbox.snapshot().proposals[cm.proposal.id];
-  ok(ap.ok && sent.state === 'sent' && composed.length === 1 && composed[0].to.join() === 'a@example.com,c@example.com' && composed[0].cc.join() === 'd@example.com' && composed[0].subject === 'Weekly report' && sent.convId === `t-${cm.proposal.id}` && sent.result.threadId === `t-${cm.proposal.id}`, 'approve ⇒ the adapter\'s compose (to / cc / subject / the idempotency key) and the proposal adopts the NEW thread id', JSON.stringify(sent.result));
-  ok(todos.filter((x) => /New messages awaiting approval/.test(x.text)).every((x) => x.status === 'done'), 'the pointer is retracted by the engine when nothing awaits');
+  ok(gateOf(ap.ok) && sent.state === 'sent' && composed.length === 1 && composed[0].to.join() === 'a@example.com,c@example.com' && composed[0].cc.join() === 'd@example.com' && composed[0].subject === 'Weekly report' && sent.convId === `t-${cm.proposal.id}` && sent.result.threadId === `t-${cm.proposal.id}`, 'approve ⇒ the adapter\'s compose (to / cc / subject / the idempotency key) and the proposal adopts the NEW thread id', JSON.stringify(sent.result));
+  ok(verdictOf(todos.filter((x) => /New messages awaiting approval/.test(x.text)).every((x) => x.status === 'done')), 'the pointer is retracted by the engine when nothing awaits');
   const audit = eng.store.auditTail().filter((l) => l.kind === 'outbox' && l.proposalId === cm.proposal.id).map((l) => l.op).join();
   ok(audit === 'propose,approve,attempt,outcome', `the audit carries propose → approve → attempt → outcome (${audit})`);
   const rcB = ladder.calls.find((c) => c.cid === 'agent-B' && isReceipt(c.opts));
-  ok(rcB && /Channel receipt — R4 mail · Weekly report/.test(rcB.text), 'the receipt reaches the drafter, named by its subject');
+  ok(gateOf(rcB) && verdictOf(/Channel receipt — R4 mail · Weekly report/.test(rcB.text)), 'the receipt reaches the drafter, named by its subject');
   // direct: the account policy says direct AND Beta's access holds send AND no guard fires
   await eng.setAccountPolicy(A, 'direct');
   const dr0 = await eng.compose(Bc, A, { to: 'a@example.com', subject: 'Draft only', text: 'plain words' });
-  ok(dr0.ok && dr0.proposal.state === 'awaiting-approval' && dr0.proposal.policy.reasons.join() === 'authority', 'compose: a direct account policy with DRAFT authority still waits for the user (reason: authority)');
+  ok(gateOf(dr0.ok) && dr0.proposal.state === 'awaiting-approval' && dr0.proposal.policy.reasons.join() === 'authority', 'compose: a direct account policy with DRAFT authority still waits for the user (reason: authority)');
   const fs2 = await eng.setAccess(A, { kind: 'account' }, [{ principal: BE, authority: 'send' }]);
-  ok(fs2.ok, 'with the account policy direct, `send` on Beta\'s account access is accepted');
+  ok(verdictOf(fs2.ok), 'with the account policy direct, `send` on Beta\'s account access is accepted');
   const dr = await eng.compose(Bc, A, { to: 'a@example.com', subject: 'Direct', text: 'plain words' });
-  ok(dr.ok && dr.proposal.state === 'sent' && composed.length === 2, 'compose: account policy direct + Beta\'s send authority + no guard ⇒ sent at once');
+  ok(gateOf(dr.ok) && dr.proposal.state === 'sent' && composed.length === 2, 'compose: account policy direct + Beta\'s send authority + no guard ⇒ sent at once');
   const lk = await eng.compose(Bc, A, { to: 'a@example.com', subject: 'Link', text: 'see https://example.com/x' });
-  ok(lk.ok && lk.proposal.state === 'awaiting-approval' && lk.proposal.policy.reasons.includes('links'), 'compose: a link in the text forces the approval whatever the policy (the guard applies)');
+  ok(gateOf(lk.ok) && lk.proposal.state === 'awaiting-approval' && verdictOf(lk.proposal.policy.reasons.includes('links')), 'compose: a link in the text forces the approval whatever the policy (the guard applies)');
   const wd = await eng.compose(W, A, { to: 'a@example.com', subject: 'x', text: 'y' });
   ok(!wd.ok && wd.code === 'not-found', 'compose: Worker still has no access to the whole account — the direct policy changes nothing about reach');
   // R4 verify (2026-09-27): THE FIRST DIRECT SEND ON A CONVERSATION WHOSE CAPS WERE NEVER RESOLVED —
@@ -1486,7 +1486,7 @@ const isReceipt = (o) => !!o && (o.spendReason === 'channel-receipt' || o.spendR
   // `authority`, and only the second went direct)
   await eng.store.index.update((ix) => { ix.conversations[`${A}/${LOUNGE}`].convCaps = null; });
   const first = await eng.propose(Bc, A, LOUNGE, { text: 'plain words', why: 'x' });
-  ok(first.ok && first.proposal.state === 'sent' && first.proposal.authority === 'send', 'the FIRST direct-policy proposal on a conversation with no cached caps resolves them and goes DIRECT (send authority judged on the resolved caps)', JSON.stringify(first.proposal && { state: first.proposal.state, authority: first.proposal.authority, policy: first.proposal.policy }));
+  ok(gateOf(first.ok) && first.proposal.state === 'sent' && first.proposal.authority === 'send', 'the FIRST direct-policy proposal on a conversation with no cached caps resolves them and goes DIRECT (send authority judged on the resolved caps)', JSON.stringify(first.proposal && { state: first.proposal.state, authority: first.proposal.authority, policy: first.proposal.policy }));
   // A P4-ERA GMAIL TOKEN (readonly + gmail.send): the reply path needs the drafts scope the token
   // lacks ⇒ refused BY NAME before anything is created, while compose (messages.send) still proposes
   flags.sendOnly = true;
@@ -1494,7 +1494,7 @@ const isReceipt = (o) => !!o && (o.spendReason === 'channel-receipt' || o.spendR
   const so = await eng.propose(Bc, A, LOUNGE, { text: 'a reply', why: 'x' });
   ok(!so.ok && so.code === 'send-not-available' && so.why === 'send-scope-not-granted' && !Object.values(eng.store.outbox.snapshot().proposals).some((p) => p.text === 'a reply'), 'a token that holds only gmail.send: a REPLY answers send-not-available (send-scope-not-granted) and creates nothing', JSON.stringify(so));
   const soC = await eng.compose(Bc, A, { to: 'a@example.com', subject: 'still composes', text: 'plain words' });
-  ok(soC.ok && soC.proposal.state === 'sent', '…and the same account still COMPOSES a new message (messages.send accepts gmail.send)', JSON.stringify(soC.proposal && soC.proposal.state));
+  ok(gateOf(soC.ok) && soC.proposal.state === 'sent', '…and the same account still COMPOSES a new message (messages.send accepts gmail.send)', JSON.stringify(soC.proposal && soC.proposal.state));
   flags.sendOnly = false;
   await eng.setAccountPolicy(A, null);
   // an adapter that declares no compose (the read-only fake-push; Lark declares none either) refuses BY NAME
@@ -1502,7 +1502,7 @@ const isReceipt = (o) => !!o && (o.spendReason === 'channel-receipt' || o.spendR
   await ef.pass('fake-poll', { force: true });
   const lk2 = require(path.join(REPO, 'src/channels/lark.js'));
   const nc = await ef.compose({ kind: 'user' }, 'fake-push', { to: 'a@example.com', subject: 's', text: 't' });
-  ok(!nc.ok && nc.code === 'compose-not-available' && /declares no compose/.test(nc.error) && lk2.caps.compose !== true && require(path.join(REPO, 'src/channels/gmail.js')).caps.compose === true, 'compose on an adapter that declares no compose answers compose-not-available BY NAME (fake-push; Lark declares none, Gmail declares it)', JSON.stringify(nc));
+  ok(!nc.ok && nc.code === 'compose-not-available' && gateOf(/declares no compose/.test(nc.error)) && lk2.caps.compose !== true && require(path.join(REPO, 'src/channels/gmail.js')).caps.compose === true, 'compose on an adapter that declares no compose answers compose-not-available BY NAME (fake-push; Lark declares none, Gmail declares it)', JSON.stringify(nc));
   // ── (f) R4 verify r2 (2026-09-27): THE LADDER IS AN AWAIT. The owner removes Alpha's access while
   // Alpha's wake sits inside the ladder (a spend hold, a remote peer-post); the ladder then REFUSES.
   // The refused block used to be filed into Alpha's durable stash — drained into a session that no
@@ -1528,8 +1528,8 @@ const esrc2 = engineSource(REPO);
     return { inside, rmOk: rm.ok, stashedForA: ladder.stash.slice(s0).filter((x) => x.cid === 'agent-A').length, lastWake: (en2.stats.wakes || []).slice(-1)[0] || null, pendingA: (en2.pending || []).filter((x) => x.for === 'agent:agent-A').length };
   }
   const mf = await midFlight(ENG, 'r4-midflight');
-  ok(mf.inside === 1 && mf.rmOk && mf.stashedForA === 0, `access removed while the wake is INSIDE the ladder, the ladder refuses ⇒ NOTHING is stashed for Alpha (stashed ${mf.stashedForA})`, JSON.stringify(mf));
-  ok(mf.lastWake && mf.lastWake.ok === false && mf.lastWake.refused === 'access-removed' && mf.pendingA === 0, `the ledger says why (refused: ${mf.lastWake && mf.lastWake.refused}) and nothing stays pending for Alpha (${mf.pendingA})`, JSON.stringify(mf.lastWake));
+  ok(mf.inside === 1 && gateOf(mf.rmOk) && mf.stashedForA === 0, `access removed while the wake is INSIDE the ladder, the ladder refuses ⇒ NOTHING is stashed for Alpha (stashed ${mf.stashedForA})`, JSON.stringify(mf));
+  ok(gateOf(mf.lastWake) && mf.lastWake.ok === false && mf.lastWake.refused === 'access-removed' && mf.pendingA === 0, `the ledger says why (refused: ${mf.lastWake && mf.lastWake.refused}) and nothing stays pending for Alpha (${mf.pendingA})`, JSON.stringify(mf.lastWake));
   {
     const LINE = 'const still = ok ? IN_EFFECT : stillInEffect(rec, convId, pk, target);';
     ok(esrc2.split(LINE).length === 2, 'the re-ask line is present once (the control patches exactly it)');
@@ -1578,7 +1578,7 @@ const esrc2 = engineSource(REPO);
   ok(rcp.billed === 5 && rcp.rows === 5, `five rejects, each "wake it now" ⇒ five billed receipt wakes, each on its proposal's ONE row (billed ${rcp.billed}, rows ${rcp.rows})`, JSON.stringify(rcp));
   ok(rcp.receipts === 8 && rcp.again === 3, `the SAME receipts asked again (twice for one, once for another, concurrently) are delivered (${rcp.receipts - 5} more) and NEVER wake twice (still ${rcp.billed} billed)`, JSON.stringify(rcp));
   ok(rcp.quiet === 0, '"tell it with its next message" never wakes (noWake on every ladder call)');
-  ok(rcp.goneCalls === 0 && rcp.goneStash === 1 && rcp.goneFate && rcp.goneFate.kind === 'gone' && !rcp.goneWake, `a drafter whose session is not live is NEVER woken: the stash keeps the receipt (ref = the proposal), the fate reads "gone" (${rcp.goneFate && rcp.goneFate.kind}), no wake row`, JSON.stringify(rcp));
+  ok(rcp.goneCalls === 0 && rcp.goneStash === 1 && gateOf(rcp.goneFate) && rcp.goneFate.kind === 'gone' && !rcp.goneWake, `a drafter whose session is not live is NEVER woken: the stash keeps the receipt (ref = the proposal), the fate reads "gone" (${rcp.goneFate && rcp.goneFate.kind}), no wake row`, JSON.stringify(rcp));
   {
     // CONTROL: a copy whose wake row is not checked (a second receipt re-reserves) wakes the same proposal again
     const LINE = "      try { await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q && !q.receiptWake) { q.receiptWake = { at: tR, reserved: true, bootId: BOOT_ID, pid: process.pid }; took = true; } }); got = took; }";
@@ -1602,8 +1602,8 @@ const esrc2 = engineSource(REPO);
     ladder.deliverToConversation = orig;
     const q = e.store.outbox.snapshot().proposals[pc.proposal.id];
     const fate = P.receiptFateOf(q);
-    ok(q.receiptDelivery && q.receiptDelivery.stashed && q.receiptDelivery.refused === 'spend' && ladder.stash.slice(s0).some((x) => x.ref === pc.proposal.id) && fate.kind === 'waiting' && fate.wakeRefused === 'spend' && /spend ceiling/.test(fate.why), `the ceiling refuses the wake BY NAME (${q.receiptDelivery && q.receiptDelivery.refused}) and the stash keeps the receipt — the fate line: "${P.receiptFateText(fate)}"`, JSON.stringify(q.receiptDelivery));
-    ok(q.receiptWake && q.receiptWake.ok === false && q.receiptWake.refused === 'spend', 'the proposal\'s ONE wake row records the refusal (never re-tried as a second wake)');
+    ok(gateOf(q.receiptDelivery) && gateOf(q.receiptDelivery.stashed) && q.receiptDelivery.refused === 'spend' && gateOf(ladder.stash.slice(s0).some((x) => x.ref === pc.proposal.id)) && fate.kind === 'waiting' && fate.wakeRefused === 'spend' && verdictOf(/spend ceiling/.test(fate.why)), `the ceiling refuses the wake BY NAME (${q.receiptDelivery && q.receiptDelivery.refused}) and the stash keeps the receipt — the fate line: "${P.receiptFateText(fate)}"`, JSON.stringify(q.receiptDelivery));
+    ok(gateOf(q.receiptWake) && q.receiptWake.ok === false && q.receiptWake.refused === 'spend', 'the proposal\'s ONE wake row records the refusal (never re-tried as a second wake)');
     e.stop();
   }
   // THE ROUTE (verify 2026-09-27): `deliver` is refused BY NAME, a wake-now needs the `expectWakes` echo (409,
@@ -1628,7 +1628,7 @@ const esrc2 = engineSource(REPO);
     const b0 = billedN();
     const bad = await call('POST', { path: '/api/channels/outbox/:id/approve', params: { id: pr.proposal.id } }, { deliver: 'wake' });
     const badR = await call('POST', { path: '/api/channels/outbox/:id/reject', params: { id: pr.proposal.id } }, { deliver: 'WAKE-NOW' });
-    ok(bad.status === 400 && bad.body.code === 'bad-request' && /deliver must be next-turn \| wake-now/.test(bad.body.error) && badR.status === 400 && st() === 'awaiting-approval', 'approve / reject with a `deliver` that is neither word ⇒ 400 by name, the proposal untouched', JSON.stringify(bad.body));
+    ok(bad.status === 400 && bad.body.code === 'bad-request' && gateOf(/deliver must be next-turn \| wake-now/.test(bad.body.error)) && badR.status === 400 && st() === 'awaiting-approval', 'approve / reject with a `deliver` that is neither word ⇒ 400 by name, the proposal untouched', JSON.stringify(bad.body));
     const noEcho = await call('POST', { path: '/api/channels/outbox/:id/approve', params: { id: pr.proposal.id } }, { deliver: 'wake-now', shown: SHOWN(pr.proposal) });
     ok(noEcho.status === 409 && noEcho.body.code === 'wake-count-mismatch' && noEcho.body.wakes === 1 && billedN() === b0 && st() === 'awaiting-approval', 'approve wake-now WITHOUT the expectWakes echo ⇒ 409 wake-count-mismatch (wakes: 1), nothing billed, still awaiting');
     const okA = await call('POST', { path: '/api/channels/outbox/:id/approve', params: { id: pr.proposal.id } }, { deliver: 'wake-now', expectWakes: 1, shown: SHOWN(pr.proposal) });
@@ -1718,24 +1718,24 @@ const esrc2 = engineSource(REPO);
   {
     const AR = require(path.join(REPO, 'src/agent-routes.js'));
     const g2 = await agentRouteLeg(AR, 'r4-agentroutes');
-    ok(g2.own === 200 && g2.ownState === 'awaiting-approval' && g2.made === 2 && g2.drafters.every((d) => d === 'agent-A' || d === 'thread-C'), 'the REAL reply route: a session WITH its conversation id proposes (drafter = the id; r3: the adopted codex fork\'s draft is the second)', JSON.stringify(g2));
-    ok(g2.noCid.every((x) => x === '409:bad-member') && /no conversation id yet — try again after its first turn/.test(g2.sentence), `reply / compose / withdraw from a session with NO conversation id yet ⇒ 409 bad-member by name (${g2.noCid.join(', ')}), nothing created, never a "webui:" drafter`, JSON.stringify(g2));
-    ok(g2.browser === '403:not-yours' && /reject it from the card/.test(g2.browserText) && g2.bare === 401, `a BROWSER on the withdraw route (a cookie, no agent token) is 403 not-yours by name — "${g2.browserText}"; a bare call stays 401`);
+    ok(g2.own === 200 && g2.ownState === 'awaiting-approval' && g2.made === 2 && verdictOf(g2.drafters.every((d) => d === 'agent-A' || d === 'thread-C')), 'the REAL reply route: a session WITH its conversation id proposes (drafter = the id; r3: the adopted codex fork\'s draft is the second)', JSON.stringify(g2));
+    ok(gateOf(g2.noCid.every((x) => x === '409:bad-member')) && verdictOf(/no conversation id yet — try again after its first turn/.test(g2.sentence)), `reply / compose / withdraw from a session with NO conversation id yet ⇒ 409 bad-member by name (${g2.noCid.join(', ')}), nothing created, never a "webui:" drafter`, JSON.stringify(g2));
+    ok(g2.browser === '403:not-yours' && gateOf(/reject it from the card/.test(g2.browserText)) && g2.bare === 401, `a BROWSER on the withdraw route (a cookie, no agent token) is 403 not-yours by name — "${g2.browserText}"; a bare call stays 401`);
     ok(g2.ownWithdraw === 200, 'the drafter\'s own withdraw through the real route still answers 200');
     // verify r3 (2026-09-27): A PENDING FORK CARRIES ITS PARENT'S ID — it withdrew the parent's draft (200), drafted AS the
     // parent (the receipt and a "wake now" turn landed on the parent), until the harness announced its own id
-    ok(g2.fork.every((x) => x === '409:bad-member') && /a fork that has not announced its own conversation id yet/.test(g2.forkSentence) && g2.stateAfterFork === 'awaiting-approval' && g2.madeBeforeCodex === 1, `a PENDING fork (its parent's conversation id): withdraw / reply / compose ⇒ 409 bad-member by name (${g2.fork.join(', ')}), the parent's draft stands, nothing created`, JSON.stringify(g2));
-    ok(g2.codex === '200:awaiting-approval' && g2.drafters.includes('thread-C'), `an ADOPTED codex fork (flag never cleared, adoption in forkedFrom) still drafts, as itself (${g2.codex})`, JSON.stringify(g2.drafters));
+    ok(gateOf(g2.fork.every((x) => x === '409:bad-member')) && gateOf(/a fork that has not announced its own conversation id yet/.test(g2.forkSentence)) && g2.stateAfterFork === 'awaiting-approval' && g2.madeBeforeCodex === 1, `a PENDING fork (its parent's conversation id): withdraw / reply / compose ⇒ 409 bad-member by name (${g2.fork.join(', ')}), the parent's draft stands, nothing created`, JSON.stringify(g2));
+    ok(g2.codex === '200:awaiting-approval' && verdictOf(g2.drafters.includes('thread-C')), `an ADOPTED codex fork (flag never cleared, adoption in forkedFrom) still drafts, as itself (${g2.codex})`, JSON.stringify(g2.drafters));
     ok(g2.forkArray === '400:bad-request', `\`replaces\` that is not a string (an array naming the id) ⇒ 400 by name (${g2.forkArray})`);
     // verify r4 (2026-09-27): a reach REQUEST records its principal — the pending fork (its parent's id) and the
     // newborn (a `webui:` placeholder) are refused by the same name; Alpha's own request is the ONLY row recorded
-    ok(g2.request[0] === '409:bad-member' && g2.request[1] === '409:bad-member' && /a fork that has not announced its own conversation id yet/.test(g2.requestSentence) && g2.request[2] === '200:ok' && g2.requests.length === 1 && g2.requests[0] === 'agent-A:Alpha', `a reach request from a PENDING fork / a session with NO id ⇒ 409 bad-member by name (${g2.request.join(', ')}); the recorded requests are Alpha's own only (${g2.requests.join(', ')})`, JSON.stringify(g2));
+    ok(g2.request[0] === '409:bad-member' && g2.request[1] === '409:bad-member' && gateOf(/a fork that has not announced its own conversation id yet/.test(g2.requestSentence)) && g2.request[2] === '200:ok' && g2.requests.length === 1 && g2.requests[0] === 'agent-A:Alpha', `a reach request from a PENDING fork / a session with NO id ⇒ 409 bad-member by name (${g2.request.join(', ')}); the recorded requests are Alpha's own only (${g2.requests.join(', ')})`, JSON.stringify(g2));
     const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     const G1 = "  const ownR = ownConversationIdOf(s);\n  if (!ownR.cid) return res.status(409).json({ error: ownR.why, code: 'bad-member' });\n  const cidR = ownR.cid;";
     const G2 = "  const ownC = ownConversationIdOf(s);\n  if (!ownC.cid) return res.status(409).json({ error: ownC.why, code: 'bad-member' });   // verify r2: no `webui:` drafter; r3: no borrowed (pending fork) id";
     const G3 = "  if (who.s && !who.job) { const ownW = ownConversationIdOf(who.s); if (!ownW.cid) return res.status(409).json({ error: ownW.why, code: 'bad-member' }); }";
     const G4 = "  const ownQ = ownConversationIdOf(s);\n  if (!ownQ.cid) return res.status(409).json({ error: ownQ.why, code: 'bad-member' });";
-    ok([G1, G2, G3, G4].every((g) => asrc.split(g).length === 2), 'the four own-conversation-id guards (reply / compose / withdraw / request) are present once each (the control removes exactly them)');
+    ok(verdictOf([G1, G2, G3, G4].every((g) => asrc.split(g).length === 2)), 'the four own-conversation-id guards (reply / compose / withdraw / request) are present once each (the control removes exactly them)');
     const cp = patchPath('src', 'agent-routes'); writeCopy(cp, asrc.replace(G1, "  const cidR = s.claudeSessionId || s.backendSessionId || null;").replace(G2, '').replace(G3, '').replace(G4, ''));
     const g2c = await agentRouteLeg(require(cp), 'r4-agentroutes-ctl');
     // lane bl-msg B-da74 (restack-411, the checkpoint's red): the REST route's own guard is a FIFTH row with its own control — the
@@ -1744,10 +1744,10 @@ const esrc2 = engineSource(REPO);
     ok(asrc.split(G5).length === 2 && g2.noCidResend === '409:bad-member', `the FIFTH own-conversation-id guard (the rest) is present once, and a rest asked by a session with no conversation id yet ⇒ 409 bad-member by name (${g2.noCidResend})`);
     const cp5 = patchPath('src', 'agent-routes'); writeCopy(cp5, asrc.replace(G5, ''));
     const g2c5 = await agentRouteLeg(require(cp5), 'r4-agentroutes-ctl5');
-    ok(asrc.split(G5).length === 2 && g2c5.noCidResend !== '409:bad-member' && g2c5.noCid.every((x) => x === '409:bad-member'), `CONTROL (the fifth guard alone removed): the rest asked with no conversation id is no longer refused by name (${g2c5.noCidResend}) while the four still answer 409 — the fifth row would go red`);
-    ok(g2c.noCid[0] === '200:undefined' && g2c.drafters.some((d) => /^webui:/.test(d)), `CONTROL: the routes without the guards create a draft whose drafter is "webui:<id>" (${g2c.drafters.find((d) => /^webui:/.test(d))}) — the leg would go red`, JSON.stringify(g2c));
+    ok(asrc.split(G5).length === 2 && g2c5.noCidResend !== '409:bad-member' && verdictOf(g2c5.noCid.every((x) => x === '409:bad-member')), `CONTROL (the fifth guard alone removed): the rest asked with no conversation id is no longer refused by name (${g2c5.noCidResend}) while the four still answer 409 — the fifth row would go red`);
+    ok(g2c.noCid[0] === '200:undefined' && verdictOf(g2c.drafters.some((d) => /^webui:/.test(d))), `CONTROL: the routes without the guards create a draft whose drafter is "webui:<id>" (${g2c.drafters.find((d) => /^webui:/.test(d))}) — the leg would go red`, JSON.stringify(g2c));
     ok(g2c.fork[0] === '200:undefined' && g2c.stateAfterFork === 'withdrawn' && g2c.fork[1] === '200:undefined', `CONTROL: without the guard the pending fork withdraws its parent's draft and drafts as the parent (${g2c.fork.join(', ')}) — the leg would go red`);
-    ok(g2c.request[0] === '200:ok' && g2c.requests.some((r) => r === 'agent-A:Alpha (fork)') && g2c.requests.some((r) => /^webui:/.test(r)), `CONTROL: without the request guard the pending fork asks AS Alpha under the fork's name and the newborn as webui:<id> (${g2c.requests.join(', ')}) — the leg would go red`);
+    ok(g2c.request[0] === '200:ok' && gateOf(g2c.requests.some((r) => r === 'agent-A:Alpha (fork)')) && verdictOf(g2c.requests.some((r) => /^webui:/.test(r))), `CONTROL: without the request guard the pending fork asks AS Alpha under the fork's name and the newborn as webui:<id> (${g2c.requests.join(', ')}) — the leg would go red`);
   }
   // ── (h) THE DOOR: the receipt still enters only through `billedWake` (the census ⑫ below reads the shipped
   // bytes); this copy starts it OUTSIDE the door — ⑫'s bypass control reddens on it
@@ -1761,7 +1761,7 @@ const esrc2 = engineSource(REPO);
     await e.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }]);
     const pb = await e.propose(Actx, A, OPS, { text: 'bypass', why: 'x' });
     const r = await e.reject(pb.proposal.id, { by: 'user', reason: 'no' });
-    ok(r.ok, 'the bypass copy still runs (the census, not a behaviour change, is what catches it)');
+    ok(verdictOf(r.ok), 'the bypass copy still runs (the census, not a behaviour change, is what catches it)');
     e.stop();
   }
   // ── (i) R4 verify r3: A DEAD GROUP MEMBER IS NOT A REMOVED NOTIFICATION. The member a group wake
@@ -1799,8 +1799,8 @@ const esrc2 = engineSource(REPO);
     return { gone, stashedForGone: ladder.stash.slice(s0).filter((x) => x.cid === gone).length, refused: last && last.refused, held, nextTo: next[0] && next[0].cid, nextN: next.length, nextCard: next[0] && next[0].opts.cardText, other: other && other.cid };
   }
   const mg = await memberGone(ENG, 'r4-membergone');
-  ok(mg.gone && mg.stashedForGone === 0 && mg.held === 1 && mg.refused === 'member-gone', `the member woken (${mg.gone}) died mid-wake ⇒ nothing stashed for it, the hit HELD for the group (pending ${mg.held}), the ledger says member-gone (${mg.refused})`, JSON.stringify(mg));
-  ok(mg.nextN === 1 && mg.nextTo && mg.nextTo !== mg.gone && /2 messages/.test(mg.nextCard || ''), `the next record wakes a live member (${mg.nextTo}) once, carrying both hits (${mg.nextCard})`, JSON.stringify(mg));
+  ok(gateOf(mg.gone) && mg.stashedForGone === 0 && mg.held === 1 && mg.refused === 'member-gone', `the member woken (${mg.gone}) died mid-wake ⇒ nothing stashed for it, the hit HELD for the group (pending ${mg.held}), the ledger says member-gone (${mg.refused})`, JSON.stringify(mg));
+  ok(mg.nextN === 1 && gateOf(mg.nextTo) && mg.nextTo !== mg.gone && verdictOf(/2 messages/.test(mg.nextCard || '')), `the next record wakes a live member (${mg.nextTo}) once, carrying both hits (${mg.nextCard})`, JSON.stringify(mg));
   {
     const LINE = 'return { watched: true, targetGone: !!(target && target.via === \'group\' && !groupStillHas(item.watcher, target.cid)) };';
     ok(esrc2.split(LINE).length === 2, 'the two-answer line is present once (the control patches exactly it)');
@@ -1932,9 +1932,9 @@ const esrc2 = engineSource(REPO);
       return { passOk: p.ok === true, ops: calls.filter((c) => c.cid === 'agent-A').length, lounge: calls.filter((c) => c.cid === 'agent-B').length };
     }
     const of = await onFreshThrow(engPoison, 'r4-onfresh');
-    ok(of.passOk && of.ops === 1 && of.lounge === 1, `a poison record is skipped: the good record still wakes Alpha (${of.ops}), the pass completes, and a second conversation wakes Beta regardless (${of.lounge})`, JSON.stringify(of));
+    ok(gateOf(of.passOk) && of.ops === 1 && of.lounge === 1, `a poison record is skipped: the good record still wakes Alpha (${of.ops}), the pass completes, and a second conversation wakes Beta regardless (${of.lounge})`, JSON.stringify(of));
     const ofc = await onFreshThrow(engPoison.replace(CATCH, '} catch (err) { throw err; }'), 'r4-onfresh-ctl');
-    ok(ofc.passOk && ofc.ops === 0 && ofc.lounge === 1, `CONTROL: the per-record guard reverted loses the poisoned conversation's GOOD record too (Alpha ${ofc.ops}); the pass still completes and the other conversation still wakes (${ofc.lounge}) — the leg above would go red`);
+    ok(gateOf(ofc.passOk) && ofc.ops === 0 && ofc.lounge === 1, `CONTROL: the per-record guard reverted loses the poisoned conversation's GOOD record too (Alpha ${ofc.ops}); the pass still completes and the other conversation still wakes (${ofc.lounge}) — the leg above would go red`);
   }
   // ── (m) R4 verify r5 (money): A CRASH'S STUCK WAKE RESERVATION IS RELEASED AT THE NEXT BOOT. A wake
   // reserves its ledger row before the ladder; if the process dies between the reservation and the
@@ -1999,9 +1999,9 @@ const esrc2 = engineSource(REPO);
     await e.pass(A, { force: true });
     await e.setAccess(A, { kind: 'account' }, [{ principal: AL }]);
     const bad = await e.setWatchers(A, { kind: 'account' }, [{ principal: AL, notify: 'digest', digestMinutes: 30, dailyWakeCap: 0 }]);
-    ok(!bad.ok && bad.code === 'bad-watcher' && bad.why === 'digest-cap-zero' && /at least 1/.test(bad.error), 'a NEW digest watcher with dailyWakeCap 0 is refused BY NAME (digest-cap-zero)', JSON.stringify(bad));
+    ok(!bad.ok && bad.code === 'bad-watcher' && bad.why === 'digest-cap-zero' && verdictOf(/at least 1/.test(bad.error)), 'a NEW digest watcher with dailyWakeCap 0 is refused BY NAME (digest-cap-zero)', JSON.stringify(bad));
     const okWake = await e.setWatchers(A, { kind: 'account' }, [{ principal: AL, notify: 'wake', dailyWakeCap: 0 }]);
-    ok(okWake.ok, 'a WAKE watcher with cap 0 is still accepted (it simply never opens a turn)');
+    ok(verdictOf(okWake.ok), 'a WAKE watcher with cap 0 is still accepted (it simply never opens a turn)');
     // a legacy cap-0 DIGEST stored directly (bypassing the validator) is read as cap 1 and named at boot
     await e.store.index.update((ix) => { const w = ix.accountAssignments[A].watchers[0]; w.notify = 'digest'; w.digestMinutes = 30; w.dailyWakeCap = 0; });
     const CF = require(path.join(REPO, 'src/channel-filter.js'));
@@ -2064,35 +2064,35 @@ function chainCensus(src) {
 }
 {
   const c = chainCensus(esrc12);
-  ok(c.sections.length === 3 && c.ranges.billedWake && c.ranges.serialWake && LEDGER_HELPERS.every((h) => c.ranges[h]), `the three section bodies, the door, the primitive and the two ledger helpers are found (${c.sections.join(', ')})`, JSON.stringify(c.ranges));
+  ok(c.sections.length === 3 && gateOf(c.ranges.billedWake) && gateOf(c.ranges.serialWake) && verdictOf(LEDGER_HELPERS.every((h) => c.ranges[h])), `the three section bodies, the door, the primitive and the two ledger helpers are found (${c.sections.join(', ')})`, JSON.stringify(c.ranges));
   const ladder = c.rows.filter((r) => r.kind === 'ladder');
-  ok(ladder.length === 3 && ladder.every((r) => r.section) && new Set(ladder.map((r) => r.section)).size === 3, `exactly three ladder calls carry a channel reason, one per section body (${ladder.map((r) => `${r.section}:${r.reason}@${r.line}`).join(' · ')})`);
+  ok(ladder.length === 3 && gateOf(ladder.every((r) => r.section)) && new Set(ladder.map((r) => r.section)).size === 3, `exactly three ladder calls carry a channel reason, one per section body (${ladder.map((r) => `${r.section}:${r.reason}@${r.line}`).join(' · ')})`);
   const writes = c.rows.filter((r) => r.kind === 'ledger-write');
-  ok(writes.length >= 6 && writes.every((r) => r.section), `every ledger write (${writes.length}) is inside a section body or a ledger helper`, JSON.stringify(writes));
+  ok(writes.length >= 6 && verdictOf(writes.every((r) => r.section)), `every ledger write (${writes.length}) is inside a section body or a ledger helper`, JSON.stringify(writes));
   const calls = c.rows.filter((r) => r.kind === 'section-call');
-  ok(calls.length >= 4 && calls.every((r) => r.door) && SECTIONS.every((n) => calls.some((r) => r.name === n)), `every section-body call (${calls.length}) is billedWake's fn, on its line (${calls.map((r) => `${r.name}@${r.line}`).join(' · ')})`, JSON.stringify(calls));
+  ok(calls.length >= 4 && gateOf(calls.every((r) => r.door)) && verdictOf(SECTIONS.every((n) => calls.some((r) => r.name === n))), `every section-body call (${calls.length}) is billedWake's fn, on its line (${calls.map((r) => `${r.name}@${r.line}`).join(' · ')})`, JSON.stringify(calls));
   const helpers = c.rows.filter((r) => r.kind === 'helper-call');
   // (2026-09-27: the receipt's wake row lives on the PROPOSAL — receiptNow no longer calls the watcher-ledger helpers)
-  ok(helpers.length >= 4 && helpers.every((r) => r.section), `the ledger helpers are called from section bodies only (${helpers.length} calls)`, JSON.stringify(helpers));
+  ok(helpers.length >= 4 && verdictOf(helpers.every((r) => r.section)), `the ledger helpers are called from section bodies only (${helpers.length} calls)`, JSON.stringify(helpers));
   ok(c.violations.length === 0, 'THE CENSUS: no billed-wake writer outside the ONE door', JSON.stringify(c.violations));
   console.log('    chain census rows: ' + c.rows.map((r) => `${r.kind}${r.name ? ':' + r.name : ''}${r.reason ? ':' + r.reason : ''}@${r.line}${r.section ? '→' + r.section : ''}`).join(' · '));
   // CONTROLS: each bypass the census exists to catch, planted in the shipped bytes (text-level; the (h) copy is also loaded above)
   const bypass = BYPASS_COPY ? fs.readFileSync(BYPASS_COPY, 'utf-8') : null;
   const cb = bypass ? chainCensus(bypass) : null;
-  ok(cb && cb.violations.some((v) => /receiptNow\(\) called outside billedWake/.test(v)), `CONTROL: the (h) copy — a receipt started outside the door — reddens the census (${cb && cb.violations.join('; ')})`);
+  ok(gateOf(cb) && verdictOf(cb.violations.some((v) => /receiptNow\(\) called outside billedWake/.test(v))), `CONTROL: the (h) copy — a receipt started outside the door — reddens the census (${cb && cb.violations.join('; ')})`);
   const ANCHOR = '    if (!per.length) return;';   // inside onFresh, outside every section
   ok(esrc12.split(ANCHOR).length === 2, 'the onFresh anchor line is present once (the controls plant after it)');
   const plant = (line) => chainCensus(esrc12.replace(ANCHOR, `${ANCHOR}\n${line}`));
   const c2 = plant("    if (!per.length) await deliver.deliverToConversation('x', 'y', { kind: 'notification', spendReason: 'channel-message' });");
-  ok(c2.violations.some((v) => /ladder call with a channel reason outside a section/.test(v)), `CONTROL: a second ladder site with a channel reason outside a section body reddens (${c2.violations.join('; ')})`);
+  ok(verdictOf(c2.violations.some((v) => /ladder call with a channel reason outside a section/.test(v))), `CONTROL: a second ladder site with a channel reason outside a section body reddens (${c2.violations.join('; ')})`);
   const c3 = plant("    const mine = serialWake('mine', () => null);");
-  ok(c3.violations.some((v) => /serialWake\(\) taken by hand/.test(v)), `CONTROL: a hand-rolled chain outside the door reddens (${c3.violations.join('; ')})`);
+  ok(verdictOf(c3.violations.some((v) => /serialWake\(\) taken by hand/.test(v))), `CONTROL: a hand-rolled chain outside the door reddens (${c3.violations.join('; ')})`);
   const c4 = plant("    if (!per.length) en.stats.wakes.push({ at: t, ok: true });");
-  ok(c4.violations.some((v) => /ledger write outside a section/.test(v)), `CONTROL: a ledger write outside a section body reddens (${c4.violations.join('; ')})`);
+  ok(verdictOf(c4.violations.some((v) => /ledger write outside a section/.test(v))), `CONTROL: a ledger write outside a section body reddens (${c4.violations.join('; ')})`);
   const c5 = plant("    if (!per.length) track(wakeNow(rec, convId, [], {}));");
-  ok(c5.violations.some((v) => /wakeNow\(\) called outside billedWake/.test(v)), `CONTROL: a section body called outside the door reddens (${c5.violations.join('; ')})`);
+  ok(verdictOf(c5.violations.some((v) => /wakeNow\(\) called outside billedWake/.test(v))), `CONTROL: a section body called outside the door reddens (${c5.violations.join('; ')})`);
   const c6 = plant("    if (!per.length) await reserveWake(rec, convId, null, {});");
-  ok(c6.violations.some((v) => /reserveWake\(\) called outside a section/.test(v)), `CONTROL: a reservation outside a section body reddens (${c6.violations.join('; ')})`);
+  ok(verdictOf(c6.violations.some((v) => /reserveWake\(\) called outside a section/.test(v))), `CONTROL: a reservation outside a section body reddens (${c6.violations.join('; ')})`);
   // lane bl-msg B-84b4: the anchor follows wakeNow's lines as they are now (the press's stamp sits between `let r = null;` and the ladder
   // check) — and a control whose anchor is gone fails BY NAME (RULES 06:25Z), never a census of the unchanged source
   const C7A = "    if (r) { /* held: the stamp is the send's precondition */ } else if (!deliver || typeof deliver.deliverToConversation !== 'function') {";
@@ -2153,13 +2153,13 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const lg = mm.oauthClientsFor('google');
   ok(JSON.stringify(lg.map((x) => x.name).sort()) === JSON.stringify(['mail archive', 'work drive']) && mm.oauthClientsFor('microsoft').length === 2 && mm.oauthClientsFor('').length === 0,
     `oauthClientsFor('google') lists the Gmail + Drive mounts that hold a custom client — never a preset one, never an id without its secret, never another vendor's (${JSON.stringify(lg.map((x) => x.name))})`);
-  ok(lg.every((x) => JSON.stringify(Object.keys(x).sort()) === JSON.stringify(['clientIdPrefix', 'email', 'mountId', 'name', 'type'])) && !JSON.stringify(lg).includes(CSEC) && !JSON.stringify(lg).includes(mountCipher) && !JSON.stringify(lg).includes(CID) && lg.find((x) => x.mountId === P).clientIdPrefix === CID.slice(0, 12),
+  ok(gateOf(lg.every((x) => JSON.stringify(Object.keys(x).sort()) === JSON.stringify(['clientIdPrefix', 'email', 'mountId', 'name', 'type']))) && !JSON.stringify(lg).includes(CSEC) && !JSON.stringify(lg).includes(mountCipher) && !JSON.stringify(lg).includes(CID) && lg.find((x) => x.mountId === P).clientIdPrefix === CID.slice(0, 12),
     'each row is {mountId, name, type, email, clientIdPrefix} — no secret, no ciphertext, not even the whole client id');
   const got = mm.oauthClientOf(P);
   ok(got.clientId === CID && got.clientSecret === CSEC && got.vendor === 'google', 'oauthClientOf (server-only) decrypts the mount\'s client with .mounts-key');
   const refusal = (fn) => { try { fn(); return null; } catch (e) { return e; } };
   const rs = [[PR, 'mount-no-client'], [NS, 'mount-no-client'], ['mnt-nope', 'mount-gone']].map(([id, code]) => { const e = refusal(() => mm.oauthClientOf(id)); return !!e && e.code === code && !String(e.message).includes(CSEC); });
-  ok(rs.every(Boolean), 'oauthClientOf refuses BY CODE: a preset record / an id without its secret = mount-no-client, an unknown id = mount-gone (no value in any message)', JSON.stringify(rs));
+  ok(verdictOf(rs.every(Boolean)), 'oauthClientOf refuses BY CODE: a preset record / an id without its secret = mount-no-client, an unknown id = mount-gone (no value in any message)', JSON.stringify(rs));
 
   // the fake Google: every token call records the client it received
   const calls = [];
@@ -2207,7 +2207,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   };
   // (b) the engine's list, per TYPE (Gmail borrows Google clients; Lark borrows none)
   const lm = eng.mountClientsFor('gmail');
-  ok(lm.vendor === 'google' && lm.clients.length === 2 && lm.clients.every((x) => !('clientId' in x) && !('clientSecret' in x)) && !JSON.stringify(lm).includes(CSEC), 'mountClientsFor(gmail): vendor google, the two mounts, re-whitelisted (no id, no secret)');
+  ok(lm.vendor === 'google' && lm.clients.length === 2 && gateOf(lm.clients.every((x) => !('clientId' in x) && !('clientSecret' in x))) && !JSON.stringify(lm).includes(CSEC), 'mountClientsFor(gmail): vendor google, the two mounts, re-whitelisted (no id, no secret)');
   const ll = eng.mountClientsFor('lark');
   ok(ll.vendor === null && ll.clients.length === 0, 'mountClientsFor(lark): no storage mount holds a Lark app — none offered');
 
@@ -2216,18 +2216,18 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   ok(st.credentialKey === 'custom' && new URL(st.url).searchParams.get('client_id') === CID && !JSON.stringify(st).includes(CSEC), `start {fromMount} begins the consent under the MOUNT's client id (${new URL(st.url).searchParams.get('client_id')}) — the answer carries no secret`);
   ok(!disk(edir).includes(CID), 'and NO record exists yet (the transient flow: Connect creates it)');
   const s1 = await land(st.flow, 'code-p');
-  ok(s1.done && s1.ok && s1.token === st.flowId, 'the redirect lands; the sign-in finished' + (s1.timedOut ? ` — THE STATE NEVER CAME: ${s1.timedOut}, so this red is that, not a verdict on the product` : ''), JSON.stringify(s1));
+  ok(gateOf(s1.done) && gateOf(s1.ok) && s1.token === st.flowId, 'the redirect lands; the sign-in finished' + (s1.timedOut ? ` — THE STATE NEVER CAME: ${s1.timedOut}, so this red is that, not a verdict on the product` : ''), JSON.stringify(s1));
   const ex = calls.find((c) => c.form && c.form.grant_type === 'authorization_code' && c.form.code === 'code-p');
-  ok(ex && ex.form.client_id === CID && ex.form.client_secret === CSEC, 'the code exchange carried the mount\'s id AND secret — the one place the secret leaves: the vendor call itself');
+  ok(gateOf(ex) && ex.form.client_id === CID && ex.form.client_secret === CSEC, 'the code exchange carried the mount\'s id AND secret — the one place the secret leaves: the vendor call itself');
   const c1 = await eng.connect('gmail', { flowId: st.flowId, name: 'borrowed mail', fromMount: P });
   const recOf = (dir, id) => JSON.parse(disk(dir)).adapters.find((r) => r.id === id);
   const rec = recOf(edir, c1.adapter.id);
   const sealedOk = (dir, r) => { try { return !!r && r.credentialKey === 'custom' && !!r.credential && r.credential.appId === CID && SB.secretBox(path.join(dir, ENG.KEY_FILE)).dec(r.credential.appSecretEnc) === CSEC; } catch { return false; } };
   const opensWithMounts = (() => { try { return SB.secretBox(path.join(mdir, '.mounts-key')).dec(rec.credential.appSecretEnc) === CSEC; } catch { return false; } })();
-  ok(sealedOk(edir, rec) && rec.credential.appSecretEnc !== mountCipher && !opensWithMounts, 'Connect {flowId, fromMount} creates the account: `custom` + {appId: the mount\'s id, appSecretEnc} RE-SEALED under .channels-key (a new blob — the mounts ciphertext is NOT copied and does not open with .mounts-key)');
+  ok(gateOf(sealedOk(edir, rec)) && rec.credential.appSecretEnc !== mountCipher && !opensWithMounts, 'Connect {flowId, fromMount} creates the account: `custom` + {appId: the mount\'s id, appSecretEnc} RE-SEALED under .channels-key (a new blob — the mounts ciphertext is NOT copied and does not open with .mounts-key)');
   const plainOnDisk = (dir) => disk(dir).includes(CSEC);
   ok(!plainOnDisk(edir) && !disk(edir).includes(mountCipher), 'the plaintext secret (and the mounts ciphertext) appear nowhere in adapters.json');
-  ok(c1.adapter.auth.tokenHeld && c1.adapter.credentialKey === 'custom' && c1.adapter.customClient.appId === CID && c1.adapter.customClient.secretSet === true && !JSON.stringify(c1.adapter).includes(CSEC.slice(-6)), 'the account is connected — an ordinary Custom client (the card says its secret is held; no tail — the write-only law)');
+  ok(gateOf(c1.adapter.auth.tokenHeld) && c1.adapter.credentialKey === 'custom' && c1.adapter.customClient.appId === CID && c1.adapter.customClient.secretSet === true && !JSON.stringify(c1.adapter).includes(CSEC.slice(-6)), 'the account is connected — an ordinary Custom client (the card says its secret is held; no tail — the write-only law)');
   const au = eng.store.auditTail().filter((l) => l.kind === 'auth' && l.op === 'client-from-mount');
   ok(au.length === 1 && au[0].mountId === P && au[0].by === 'user' && au[0].adapterKind === 'gmail' && au[0].clientIdPrefix === CID.slice(0, 12) && !JSON.stringify(au).includes(CSEC), `ONE audit line {kind:'auth', op:'client-from-mount', mountId, by:'user'} for the copy (Connect's re-check of the same mount is not a second copy) (${JSON.stringify(au)})`);
   // (d) re-authorize under ANOTHER mount's client = a rebind (the mount semantics)
@@ -2252,18 +2252,18 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   ok(refs.length === 0, 'each refused choice answers its status + closed code (409 mount-no-client ×2, 400 mount-client-vendor, 404 mount-gone, 400 mount-client-unsupported, 400 ambiguous-client) with no value in the message', JSON.stringify(refs));
   ok(mountDecs === decsBefore, `verify r1: NONE of those refusals opened a mount's secret (${mountDecs - decsBefore} decrypts) — the vendor, the ambiguity and the lendability are judged before .mounts-key is used`);
   const eUnod = await (async () => { try { await eng.startOAuth({ kind: 'gmail', fromMount: UNOD }); return null; } catch (err) { return err; } })();
-  ok(eUnod && eUnod.status === 400 && eUnod.code === 'mount-client-vendor' && mountDecs === decsBefore, `verify r1: an UNDECRYPTABLE other-vendor mount in a Gmail body is 400 mount-client-vendor with no decrypt (${eUnod && eUnod.code}, ${mountDecs - decsBefore} decrypts) — the refusal names the vendor, never the key state`);
+  ok(gateOf(eUnod) && eUnod.status === 400 && eUnod.code === 'mount-client-vendor' && mountDecs === decsBefore, `verify r1: an UNDECRYPTABLE other-vendor mount in a Gmail body is 400 mount-client-vendor with no decrypt (${eUnod && eUnod.code}, ${mountDecs - decsBefore} decrypts) — the refusal names the vendor, never the key state`);
   // verify r1: Connect's own body obeys the ONE-client rule — the sign-in's mount beside a stale preset is refused, the flow stays pending
   const st5 = await eng.startOAuth({ kind: 'gmail', fromMount: P });
   await land(st5.flow, 'code-p5');
   const eAmb = await (async () => { try { await eng.connect('gmail', { flowId: st5.flowId, fromMount: P, credentialKey: 'cluster:org1' }); return null; } catch (err) { return err; } })();
-  ok(eAmb && eAmb.status === 400 && eAmb.code === 'ambiguous-client', `verify r1: Connect {flowId, fromMount: the sign-in's mount, credentialKey} is 400 ambiguous-client (${eAmb && eAmb.code}) — never accepted with the extra field ignored`);
+  ok(gateOf(eAmb) && eAmb.status === 400 && eAmb.code === 'ambiguous-client', `verify r1: Connect {flowId, fromMount: the sign-in's mount, credentialKey} is 400 ambiguous-client (${eAmb && eAmb.code}) — never accepted with the extra field ignored`);
   const c5 = await eng.connect('gmail', { flowId: st5.flowId, fromMount: P, name: 'after the refusal' });
-  ok(c5.adapter && c5.adapter.credentialKey === 'custom' && c5.adapter.customClient.appId === CID, 'and the flow was not taken by the refusal: Connect naming the mount alone lands');
+  ok(gateOf(c5.adapter) && c5.adapter.credentialKey === 'custom' && c5.adapter.customClient.appId === CID, 'and the flow was not taken by the refusal: Connect naming the mount alone lands');
   const bare = ENG.create({ dataDir: path.join(ROOT, 'cfm-bare'), env: {}, broadcast: () => {}, fetch: fetchG, log: capLog });
   engines.push(bare);
   const nb = await (async () => { try { await bare.startOAuth({ kind: 'gmail', fromMount: P }); return null; } catch (err) { return err; } })();
-  ok(nb && nb.status === 503 && nb.code === 'no-mounts' && bare.mountClientsFor('gmail').clients.length === 0, 'an engine with no mounts wired refuses `fromMount` 503 no-mounts and lists none');
+  ok(gateOf(nb) && nb.status === 503 && nb.code === 'no-mounts' && bare.mountClientsFor('gmail').clients.length === 0, 'an engine with no mounts wired refuses `fromMount` 503 no-mounts and lists none');
   const Wd = await import(path.join(REPO, 'src/lib/channel-words.js'));
   const unworded = ['mount-gone', 'mount-no-client', 'mount-client-vendor', 'mount-client-unsupported', 'mount-secret-undecryptable', 'no-mounts', 'ambiguous-client', 'agent-forbidden'].filter((c) => { const w = Wd.routeErrorText({ code: c, error: 'RAW-SENTENCE' }); return !w || w.includes('RAW-SENTENCE') || w === Wd.routeErrorText({ code: 'zz-unknown', error: 'RAW-SENTENCE' }); });
   ok(unworded.length === 0, 'every new refusal code has its own words in channel-words (the toast never prints the English contract sentence)', unworded.join());
@@ -2285,7 +2285,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   };
   const R1 = await serveWith(routes, eng);
   const gl = await R1.call('GET', '/api/channels/oauth/mount-clients?kind=gmail');
-  ok(gl.status === 200 && gl.body.clients.length === 2 && gl.body.clients.some((x) => x.mountId === P && x.name === 'mail archive' && x.email === 'archive.owner@example.com' && x.clientIdPrefix === CID.slice(0, 12)), 'GET /api/channels/oauth/mount-clients?kind=gmail → the list (declared before the conversation route)', gl.raw.slice(0, 300));
+  ok(gl.status === 200 && gl.body.clients.length === 2 && verdictOf(gl.body.clients.some((x) => x.mountId === P && x.name === 'mail archive' && x.email === 'archive.owner@example.com' && x.clientIdPrefix === CID.slice(0, 12))), 'GET /api/channels/oauth/mount-clients?kind=gmail → the list (declared before the conversation route)', gl.raw.slice(0, 300));
   const glk = await R1.call('GET', '/api/channels/oauth/mount-clients?kind=lark');
   ok(glk.status === 200 && glk.body.vendor === null && glk.body.clients.length === 0, '…?kind=lark → vendor null, none');
   const AG = { Authorization: 'Bearer vsst_fake-agent-token' };
@@ -2317,7 +2317,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   await new Promise((resolve) => http.get(`${s1c.flow.redirectUri}/?state=${cu1.searchParams.get('state')}&code=code-c1`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve));
   for (let i = 0; i < 40 && !e1.oauthStatus(s1c.flowId).done; i++) await sleep(10);
   const k1 = await e1.connect('gmail', { flowId: s1c.flowId, fromMount: P });
-  ok(plainOnDisk(d1) && !sealedOk(d1, recOf(d1, k1.adapter.id)), 'CONTROL: a copy that skips the seal writes the plaintext — the disk check above would be red');
+  ok(gateOf(plainOnDisk(d1)) && !sealedOk(d1, recOf(d1, k1.adapter.id)), 'CONTROL: a copy that skips the seal writes the plaintext — the disk check above would be red');
   // (2) a copy that echoes the copied client in the start answer
   const START = '    auditMountCopy(choice, mod);\n    return withMount({ ...r, url: r.flow && r.flow.consentUrl }, choice);';
   ok(esrc.split(START).length === 2, 'CONTROL setup: the start answer line is present once');
@@ -2326,7 +2326,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const e2 = mkCfm(require(p2), path.join(ROOT, 'cfm-ctl2'));
   const R2 = await serveWith(routes, e2);
   await R2.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: P });
-  ok(bodyLeak(R2.bodies), 'CONTROL: a copy whose start answer echoes the copied client leaks it — the body check above would be red');
+  ok(verdictOf(bodyLeak(R2.bodies)), 'CONTROL: a copy whose start answer echoes the copied client leaks it — the body check above would be red');
   await R2.close();
   // (3) a routes copy without the agent refusal
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
@@ -2350,9 +2350,9 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   let decs4 = 0; { const rd = mm4._box.dec.bind(mm4._box); mm4._box.dec = (b) => { decs4++; return rd(b); }; }
   const dReal = mountDecs;
   const eReal = (() => { try { mm.oauthClientOf(UNOD, { vendor: 'google' }); return null; } catch (err) { return err; } })();
-  ok(eReal && eReal.code === 'mount-client-vendor' && mountDecs === dReal, `the REAL oauthClientOf(UNOD, {vendor:'google'}) refuses mount-client-vendor with no decrypt (${eReal && eReal.code}, ${mountDecs - dReal})`);
+  ok(gateOf(eReal) && eReal.code === 'mount-client-vendor' && mountDecs === dReal, `the REAL oauthClientOf(UNOD, {vendor:'google'}) refuses mount-client-vendor with no decrypt (${eReal && eReal.code}, ${mountDecs - dReal})`);
   const eU4 = (() => { try { mm4.oauthClientOf(UNOD, { vendor: 'google' }); return null; } catch (err) { return err; } })();
-  ok(eU4 && eU4.code === 'mount-secret-undecryptable' && decs4 === 1, `CONTROL: a mounts copy that decrypts before judging the vendor answers mount-secret-undecryptable after 1 decrypt — the order checks above would be red (${eU4 && eU4.code}, ${decs4})`);
+  ok(gateOf(eU4) && eU4.code === 'mount-secret-undecryptable' && decs4 === 1, `CONTROL: a mounts copy that decrypts before judging the vendor answers mount-secret-undecryptable after 1 decrypt — the order checks above would be red (${eU4 && eU4.code}, ${decs4})`);
   // (5) an engine copy whose Connect skips the ONE-client rule (the pre-verify line)
   const ONE = '    const sameMount = namesMount(b) && !!p.choice.fromMount && p.choice.fromMount.mountId === b.fromMount;';
   ok(esrc.split(ONE).length === 2, 'CONTROL setup: Connect\'s one-client line is present once');
@@ -2363,7 +2363,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   { const cu5 = new URL(s5c.flow.consentUrl); await new Promise((resolve) => http.get(`${s5c.flow.redirectUri}/?state=${cu5.searchParams.get('state')}&code=code-c5`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve)); }
   for (let i = 0; i < 40 && !e5.oauthStatus(s5c.flowId).done; i++) await sleep(10);
   const k5 = await (async () => { try { return await e5.connect('gmail', { flowId: s5c.flowId, fromMount: P, credentialKey: 'cluster:org1' }); } catch (err) { return { err }; } })();
-  ok(k5.adapter && k5.adapter.credentialKey === 'custom', 'CONTROL: an engine copy whose Connect skips the one-client rule accepts the mount beside a stale preset — the ambiguity check above would be red');
+  ok(gateOf(k5.adapter) && k5.adapter.credentialKey === 'custom', 'CONTROL: an engine copy whose Connect skips the one-client rule accepts the mount beside a stale preset — the ambiguity check above would be red');
 
   // ── verify r2: EVERY refusal that needs no key comes before the key; a refusal never takes the flow ──
   // a google mount whose stored id the registry's rule refuses (the storage side never validated it), an
@@ -2401,20 +2401,20 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   }
   ok(refs2.length === 0 && mountDecs === d2, 'verify r2: a body refused on its OPTIONS, on a mount id the row refuses, on ANOTHER mount at Connect (compared by id — an undecryptable one answers flow-client-mismatch, never its key state), or on a malformed fromMount (400 bad-request, never the default client) opens NO mount secret', JSON.stringify(refs2));
   const stAfter = await R4.call('GET', `/api/channels/oauth/status?flowId=${encodeURIComponent(st6.flowId)}`);
-  ok(stAfter.status === 200 && stAfter.body.done && stAfter.body.ok, 'verify r2: the finished sign-in SURVIVED every refused Connect (a refusal never takes the flow — the options are judged before it is taken)', stAfter.raw.slice(0, 160));
+  ok(stAfter.status === 200 && gateOf(stAfter.body.done) && verdictOf(stAfter.body.ok), 'verify r2: the finished sign-in SURVIVED every refused Connect (a refusal never takes the flow — the options are judged before it is taken)', stAfter.raw.slice(0, 160));
   const c6 = await R4.call('POST', '/api/channels/adapters/gmail/connect', { flowId: st6.flowId, fromMount: P, name: 'after r2 refusals' });
   ok(c6.status === 200 && c6.body.adapter.credentialKey === 'custom', 'and Connect naming the mount alone still lands it');
   const cfgA = await R4.call('GET', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/config`, undefined, AG);
   ok(cfgA.status === 403 && cfgA.body.code === 'agent-forbidden' && !cfgA.raw.includes(CSEC), 'verify r2: the owner-only config refuses a self-identifying agent bearer 403 agent-forbidden (the plaintext prefill is the owner\'s)');
   const cfgO = await R4.call('GET', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/config`);
-  ok(cfgO.status === 200 && cfgO.body.config.client && cfgO.body.config.client.secretSet === true && !cfgO.raw.includes(CSEC), '…and the owner (no bearer) still reads the Edit prefill (D3) — the secret only as HELD (lane ui-controls-and-bugs, THE WRITE-ONLY LAW)');
+  ok(cfgO.status === 200 && gateOf(cfgO.body.config.client) && cfgO.body.config.client.secretSet === true && !cfgO.raw.includes(CSEC), '…and the owner (no bearer) still reads the Edit prefill (D3) — the secret only as HELD (lane ui-controls-and-bugs, THE WRITE-ONLY LAW)');
   R4.bodies.pop();   // the owner's config read is the D3 door — excluded from the leak census by design
   const gl2 = await R4.call('GET', '/api/channels/oauth/mount-clients?kind=gmail');
   const rowL = gl2.body.clients.find((x) => x.mountId === LONG), rowH = gl2.body.clients.find((x) => x.mountId === HN);
-  ok(rowL && rowL.name.length <= 60 && rowH && !rowH.name.includes('\n'), `verify r2: a stored 2 000-char name is bounded on the list (${rowL && rowL.name.length}) and a newline in a name is a space`);
+  ok(gateOf(rowL) && rowL.name.length <= 60 && gateOf(rowH) && !rowH.name.includes('\n'), `verify r2: a stored 2 000-char name is bounded on the list (${rowL && rowL.name.length}) and a newline in a name is a space`);
   const st7 = await eng.startOAuth({ kind: 'gmail', fromMount: HN });
   const forged = logs.filter((l) => l.includes('storage mount') && l.includes('\n'));
-  ok(forged.length === 0 && logs.some((l) => l.includes('(FORGED)') && !l.includes('\n')), 'verify r2: the copy\'s log line carries the name on ONE line (a newline in a name forged a second journal line)');
+  ok(forged.length === 0 && verdictOf(logs.some((l) => l.includes('(FORGED)') && !l.includes('\n'))), 'verify r2: the copy\'s log line carries the name on ONE line (a newline in a name forged a second journal line)');
   await eng.cancelAuth(c1.adapter.id).catch(() => {}); void st7;
   const nsl = await R4.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: (() => { const id = mm.add({ type: 'gmail', name: 'n', token: tok, clientId: 'nsl.apps.googleusercontent.com' }); mm._state.mounts.find((m) => m.id === id).name = 'N'.repeat(2000); return id; })() });
   ok(nsl.status === 409 && nsl.body.code === 'mount-no-client' && nsl.raw.length < 400, `verify r2: a refusal naming a 2 000-char mount is bounded on the wire (${nsl.raw.length} bytes)`);
@@ -2433,7 +2433,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   for (let i = 0; i < 40 && !e6.oauthStatus(s6.flowId).done; i++) await sleep(10);
   const k6 = await (async () => { try { await e6.connect('gmail', { flowId: s6.flowId, fromMount: P, options: { bogus: 'x' } }); return null; } catch (err) { return err; } })();
   const k6b = await (async () => { try { e6.oauthStatus(s6.flowId); return null; } catch (err) { return err; } })();
-  ok(k6 && k6.code === 'unknown-option' && k6b && k6b.code === 'no-flow', 'CONTROL: an engine copy that takes the flow first loses the finished sign-in on a refused option — the survival check above would be red');
+  ok(gateOf(k6) && k6.code === 'unknown-option' && gateOf(k6b) && k6b.code === 'no-flow', 'CONTROL: an engine copy that takes the flow first loses the finished sign-in on a refused option — the survival check above would be red');
   // (7) an engine copy whose Connect resolves ANOTHER mount through the DECRYPTING read (the pre-r2 line)
   const HEAD_CMP = "      const h = mountHead(mod, b.fromMount);\n      if (p.choice.credentialKey !== CUSTOM_KEY || String(h.clientId) !== String(p.choice.credential.appId)) throw mismatch(`the client of storage mount \"${h.name}\"`);\n      named = clientFromMount(mod, b.fromMount);   // the same id: the secrets are compared (needs the key)\n";
   ok(esrc.split(HEAD_CMP).length === 2, 'CONTROL setup: Connect\'s id-first comparison is present once');
@@ -2445,7 +2445,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   for (let i = 0; i < 40 && !e7.oauthStatus(s7.flowId).done; i++) await sleep(10);
   const d7 = mountDecs;
   const k7 = await (async () => { try { await e7.connect('gmail', { flowId: s7.flowId, fromMount: UNG }); return null; } catch (err) { return err; } })();
-  ok(k7 && k7.code === 'mount-secret-undecryptable' && mountDecs - d7 === 1, `CONTROL: an engine copy that resolves the other mount through the decrypting read answers mount-secret-undecryptable after 1 decrypt — the r2 table would be red (${k7 && k7.code}, ${mountDecs - d7})`);
+  ok(gateOf(k7) && k7.code === 'mount-secret-undecryptable' && mountDecs - d7 === 1, `CONTROL: an engine copy that resolves the other mount through the decrypting read answers mount-secret-undecryptable after 1 decrypt — the r2 table would be red (${k7 && k7.code}, ${mountDecs - d7})`);
   // (8) an engine copy whose head skips the registry's id rule
   const ID_RULE = "    if (!v.ok) throw httpErr(400, 'invalid-client', `the storage mount \"${h.name}\"'s client is not one ${row.label} can use — ${Object.entries(v.errors).map(([k, why]) => `${k}: ${why}`).join('; ')}`, { errors: v.errors });\n";
   ok(esrc.split(ID_RULE).length === 2, 'CONTROL setup: the head\'s id rule is present once');
@@ -2454,7 +2454,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const e8 = mkCfm(require(p8), path.join(ROOT, 'cfm-ctl8'));
   const d8 = mountDecs;
   const k8 = await (async () => { try { await e8.startOAuth({ kind: 'gmail', fromMount: BAD }); return null; } catch (err) { return err; } })();
-  ok(k8 && k8.code === 'invalid-client' && mountDecs - d8 === 1, `CONTROL: an engine copy without the head's id rule still refuses (the seal's belt) but only AFTER 1 decrypt — the r2 table would be red (${k8 && k8.code}, ${mountDecs - d8})`);
+  ok(gateOf(k8) && k8.code === 'invalid-client' && mountDecs - d8 === 1, `CONTROL: an engine copy without the head's id rule still refuses (the seal's belt) but only AFTER 1 decrypt — the r2 table would be red (${k8 && k8.code}, ${mountDecs - d8})`);
   // (9) a routes copy without the config refusal / (10) without the malformed-fromMount refusal
   const CFG = "  try { forHost(req); if (refuseAgentBearer(req, res)) return; res.json({ config: engine().adapterConfig(req.params.id) }); } catch (e) { fail(res, e); }";
   const MAL = "    if (refuseMalformedMount(req, res)) return;\n    const b = req.body || {};\n    res.json({ ok: true, ...(await engine().startOAuth(";
@@ -2470,12 +2470,12 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
 
   // ── verify r3: WHAT WAS COPIED IS SAID BACK; the list's prefix is a hint, the copy is the mount's client at START; the bounds ──
   const s10 = await eng.startOAuth({ kind: 'gmail', fromMount: P });
-  ok(s10.fromMount && s10.fromMount.mountId === P && s10.fromMount.name === 'mail archive' && s10.fromMount.clientIdPrefix === CID.slice(0, 12) && JSON.stringify(Object.keys(s10.fromMount).sort()) === JSON.stringify(['clientIdPrefix', 'mountId', 'name']) && !JSON.stringify(s10).includes(CSEC), 'verify r3: the start answer names the client copied — fromMount {mountId, name, clientIdPrefix}, never a secret');
+  ok(gateOf(s10.fromMount) && s10.fromMount.mountId === P && s10.fromMount.name === 'mail archive' && s10.fromMount.clientIdPrefix === CID.slice(0, 12) && JSON.stringify(Object.keys(s10.fromMount).sort()) === JSON.stringify(['clientIdPrefix', 'mountId', 'name']) && !JSON.stringify(s10).includes(CSEC), 'verify r3: the start answer names the client copied — fromMount {mountId, name, clientIdPrefix}, never a secret');
   await land(s10.flow, 'code-p10');
   const c10 = await eng.connect('gmail', { flowId: s10.flowId, fromMount: P, name: 'said back' });
-  ok(c10.fromMount && c10.fromMount.mountId === P && c10.fromMount.clientIdPrefix === CID.slice(0, 12), 'Connect from the flow says which mount the account was minted under');
+  ok(gateOf(c10.fromMount) && c10.fromMount.mountId === P && c10.fromMount.clientIdPrefix === CID.slice(0, 12), 'Connect from the flow says which mount the account was minted under');
   const ra10 = await eng.reauthorize(c10.adapter.id, { fromMount: D });
-  ok(ra10.rebind === true && ra10.fromMount && ra10.fromMount.mountId === D && ra10.fromMount.clientIdPrefix === DID.slice(0, 12), 'a rebind re-authorize names the mount it will sign in under');
+  ok(ra10.rebind === true && gateOf(ra10.fromMount) && ra10.fromMount.mountId === D && ra10.fromMount.clientIdPrefix === DID.slice(0, 12), 'a rebind re-authorize names the mount it will sign in under');
   await eng.cancelAuth(c10.adapter.id).catch(() => {});
   // TOCTOU: the Drive mount's client is EDITED between the list and the pick — the consent runs under the CURRENT
   // client, the answer + the audit line name THAT prefix (not the list's); Connect naming the same mount lands the flow's copy
@@ -2485,7 +2485,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const R10 = await serveWith(routes, eng);
   const s11 = await R10.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: D });
   const auLast = eng.store.auditTail().filter((l) => l.op === 'client-from-mount').pop();
-  ok(s11.status === 200 && new URL(s11.body.url).searchParams.get('client_id') === NEWID && s11.body.fromMount && s11.body.fromMount.clientIdPrefix === NEWID.slice(0, 12) && listed === DID.slice(0, 12) && auLast && auLast.clientIdPrefix === NEWID.slice(0, 12), `verify r3 (list freshness): a mount edited between the list (${listed}…) and the pick signs in under its CURRENT client — the answer and the audit line say ${NEWID.slice(0, 12)}…`);
+  ok(s11.status === 200 && new URL(s11.body.url).searchParams.get('client_id') === NEWID && gateOf(s11.body.fromMount) && s11.body.fromMount.clientIdPrefix === NEWID.slice(0, 12) && listed === DID.slice(0, 12) && gateOf(auLast) && auLast.clientIdPrefix === NEWID.slice(0, 12), `verify r3 (list freshness): a mount edited between the list (${listed}…) and the pick signs in under its CURRENT client — the answer and the audit line say ${NEWID.slice(0, 12)}…`);
   await mm.update(D, { clientId: '888800001111-third.apps.googleusercontent.com', clientSecret: 'GOCSPX-third-MOUNT-s3cret-8', token: tok });
   await land(s11.body.flow, 'code-p11');
   const c11 = await R10.call('POST', '/api/channels/adapters/gmail/connect', { flowId: s11.body.flowId, fromMount: D, name: 'toctou' });
@@ -2502,7 +2502,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const capRunning = capFlows.filter((f) => eCap.oauthStatus(f.flowId).running).length;
   // lane gmail-connect-wall (主开发's R5: at most ONE pending sign-in per kind): pending begins no longer pile up to the
   // loopback's cap — each supersedes the one before it BY NAME; the cap itself is the leg below and test-oauth-loopback's
-  ok(capFirst.running === false && /superseded/.test(capFirst.error || '') && capLast.running === true && capRunning === 1, `verify r3 (bounds) + lane gmail-connect-wall: ${OLMOD.MAX_RUNNING_FLOWS + 1} pending fromMount begins ⇒ ONE runs (the newest), every earlier one ended by name ("${capFirst.error}"), ${capRunning} running`);
+  ok(capFirst.running === false && gateOf(/superseded/.test(capFirst.error || '')) && capLast.running === true && capRunning === 1, `verify r3 (bounds) + lane gmail-connect-wall: ${OLMOD.MAX_RUNNING_FLOWS + 1} pending fromMount begins ⇒ ONE runs (the newest), every earlier one ended by name ("${capFirst.error}"), ${capRunning} running`);
   // (11) CONTROL: an engine copy whose answers omit the copied client (the pre-r3 shape)
   const SAID = '  const withMount = (answer, choice) => { const m = mountNamed(choice); return m ? { ...answer, fromMount: m } : answer; };';
   ok(esrc.split(SAID).length === 2, 'CONTROL setup: the said-back helper is present once');
@@ -2533,7 +2533,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   for (let i = 0; i < OLMOD.MAX_RUNNING_FLOWS; i++) await eSaid.oauth.begin({ id: `cap-filler-${i}`, mode: 'paste', label: 'filler', buildConsentUrl: () => 'https://consent.example.test/', exchange: async () => ({ ok: true }) });
   await sleep(40);
   const recS = recOf(path.join(ROOT, 'cfm-said'), kS); const cardS = eSaid.digest().adapters.find((a) => a.id === kS);
-  ok(eSaid.oauth.status(raS.flow.flowId).cancelled === OLMOD.CAUSE_OVER_LIMIT && /ended to keep the number of open sign-ins/.test(recS.lastAuthError || '') && recS.lastAuthAt !== baseAt && cardS.flow === null && frames.length > fr0 && !!(recS.auth && recS.auth.tokenEnc), `verify r4: a re-authorize ended by the cap is SAID on the account (lastAuthError "${recS.lastAuthError}", lastAuthAt moved, ${frames.length - fr0} frame(s)), its token kept`);
+  ok(eSaid.oauth.status(raS.flow.flowId).cancelled === OLMOD.CAUSE_OVER_LIMIT && gateOf(/ended to keep the number of open sign-ins/.test(recS.lastAuthError || '')) && recS.lastAuthAt !== baseAt && cardS.flow === null && frames.length > fr0 && !!(recS.auth && recS.auth.tokenEnc), `verify r4: a re-authorize ended by the cap is SAID on the account (lastAuthError "${recS.lastAuthError}", lastAuthAt moved, ${frames.length - fr0} frame(s)), its token kept`);
   // (13) a vendor error that ECHOES the secret we sent — through the rebind (pending) path, the record's own flow and the
   // token refresh: the string reaches no broadcast frame, no file under the engine dir, no For-you item, no log line;
   // the vendor's other words are kept
@@ -2554,11 +2554,11 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   // cfm-echo's index under a mutant, the DSEC census green)
   const sentD = String(((calls.filter((c) => c.form && c.form.code === 'code-echo-d').pop() || {}).form || {}).client_secret || '');
   const wD = whereIs(sentD || DSEC); const recE1 = recOf(path.join(ROOT, 'cfm-echo'), kE);
-  ok(sentD.length >= 8 && wD.frames === 0 && wD.disk.length === 0 && wD.logs === 0 && wD.inbox === 0 && /\[client_secret withheld\] was rejected \(fake vendor echo\)/.test(recE1.lastAuthError || ''), `verify r4 (rebind): the vendor's echo of the borrowed secret is WITHHELD by value — no frame, no file, no log line carries it; the vendor's other words stay ("${recE1.lastAuthError}")`, JSON.stringify({ sent: sentD ? `${sentD.slice(0, 7)}… (${sentD.length} chars)` : 'NO client_secret recorded for code-echo-d', ...wD }));
+  ok(sentD.length >= 8 && wD.frames === 0 && wD.disk.length === 0 && wD.logs === 0 && wD.inbox === 0 && verdictOf(/\[client_secret withheld\] was rejected \(fake vendor echo\)/.test(recE1.lastAuthError || '')), `verify r4 (rebind): the vendor's echo of the borrowed secret is WITHHELD by value — no frame, no file, no log line carries it; the vendor's other words stay ("${recE1.lastAuthError}")`, JSON.stringify({ sent: sentD ? `${sentD.slice(0, 7)}… (${sentD.length} chars)` : 'NO client_secret recorded for code-echo-d', ...wD }));
   const rsE = await eEcho.reauthorize(kE, { fromMount: P });   // the record's own flow (same id: the secret re-copied in place)
   await landOn(eEcho, rsE.flow, 'code-echo-p'); await sleep(60);
   const wP = whereIs(CSEC);
-  ok(wP.frames === 0 && wP.disk.length === 0 && wP.logs === 0 && /\[client_secret withheld\]/.test(recOf(path.join(ROOT, 'cfm-echo'), kE).lastAuthError || ''), 'verify r4 (the record\'s own flow): the same — withheld everywhere', JSON.stringify(wP));
+  ok(wP.frames === 0 && wP.disk.length === 0 && wP.logs === 0 && verdictOf(/\[client_secret withheld\]/.test(recOf(path.join(ROOT, 'cfm-echo'), kE).lastAuthError || '')), 'verify r4 (the record\'s own flow): the same — withheld everywhere', JSON.stringify(wP));
   echoSecret = false;
   ok(!frames.some((f) => JSON.stringify(f).includes(CSEC) || JSON.stringify(f).includes(DSEC) || (!!sentD && JSON.stringify(f).includes(sentD))), 'verify r4: no broadcast frame of this leg carried either secret (P\'s, and the one the rebind sent)');   // item 7 (store-writer follow-up): + the secret the rebind actually sent
   // (14) a SIGN-IN IS THE OWNER'S: a self-identifying agent bearer is 403 on every verb that begins or completes a consent,
@@ -2585,10 +2585,10 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   ];
   const agentGot = [];
   for (const [what, m, p_, body] of agentRows) { const r = await Ra.call(m, p_, body, AG); agentGot.push([what, r.status, r.body && r.body.code]); }
-  ok(agentGot.every((r) => r[1] === 403 && r[2] === 'agent-forbidden'), `verify r4 + r5: an agent bearer is 403 agent-forbidden on every consent verb and every account verb, whatever the body names (${agentGot.map((r) => r[0]).join('; ')})`, JSON.stringify(agentGot));
+  ok(verdictOf(agentGot.every((r) => r[1] === 403 && r[2] === 'agent-forbidden')), `verify r4 + r5: an agent bearer is 403 agent-forbidden on every consent verb and every account verb, whatever the body names (${agentGot.map((r) => r[0]).join('; ')})`, JSON.stringify(agentGot));
   ok(!!recOf(path.join(ROOT, 'cfm-eng'), c1.adapter.id) && !!recOf(path.join(ROOT, 'cfm-eng'), c1.adapter.id).auth.tokenEnc && !JSON.parse(disk(path.join(ROOT, 'cfm-eng'))).adapters.some((r) => r.label === 'dup'), 'verify r5: the refused verbs changed nothing — the account still holds its token, no duplicate was minted');
   const ownerStart = await Ra.call('POST', '/api/channels/oauth/start', { kind: 'gmail', clientId: '777788889999-agent.apps.googleusercontent.com', clientSecret: 'GOCSPX-agent-own-secret-x' });
-  ok(ownerStart.status === 200 && ownerStart.body.flowId, 'the same body without a bearer (the owner\'s cookie) begins');
+  ok(ownerStart.status === 200 && verdictOf(ownerStart.body.flowId), 'the same body without a bearer (the owner\'s cookie) begins');
   ok(!Ra.bodies.some((b) => b.includes(CSEC) || b.includes(DSEC) || b.includes('GOCSPX-agent-own-secret-x')), 'no route body of this leg carried a secret');
   await Ra.close();
   // CONTROL: a routes copy without r4's line on start answers the agent's own-client begin 200
@@ -2614,7 +2614,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const R15 = await serveWith(require(p15), eng);
   const a15 = await R15.call('POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/auth/cancel`, {}, AG);
   const a15s = await R15.call('GET', '/api/channels/oauth/status', undefined, AG);
-  ok(a15.status === 200 && a15.body && a15.body.ok === true && a15s.status !== 403, `CONTROL (r5): a routes copy without the courtesy lets an agent bearer cancel (${a15.status}) and poll the status (${a15s.status}) — the check above would be red`);
+  ok(a15.status === 200 && gateOf(a15.body) && a15.body.ok === true && a15s.status !== 403, `CONTROL (r5): a routes copy without the courtesy lets an agent bearer cancel (${a15.status}) and poll the status (${a15s.status}) — the check above would be red`);
   R15.bodies.length = 0;
   await R15.close();
   // (15) THE STORAGE SIDE THAT LENDS THE CLIENT (verify r5): its own consent routes (gdrive-auth/*, gmail-auth/*), the
@@ -2625,7 +2625,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const lendingCensus = (src) => LENDING.map((route) => { const i = src.indexOf(`'${route}'`); const head = i < 0 ? '' : src.slice(i, src.indexOf('\n', src.indexOf('\n', i) + 1) + 1); return [route, i >= 0 && /refuseAgentBearer\(req, res\)\) return;/.test(head)]; });
   const wsrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
   const lc = lendingCensus(wsrc);
-  ok(lc.every((r) => r[1]) && /code: 'agent-forbidden'/.test(wsrc), `verify r5: every storage route that lends or reveals the client refuses an agent bearer by name in its first line (${lc.map((r) => r[0].replace('/api/mounts/', '')).join(', ')})`, JSON.stringify(lc.filter((r) => !r[1])));
+  ok(gateOf(lc.every((r) => r[1])) && verdictOf(/code: 'agent-forbidden'/.test(wsrc)), `verify r5: every storage route that lends or reveals the client refuses an agent bearer by name in its first line (${lc.map((r) => r[0].replace('/api/mounts/', '')).join(', ')})`, JSON.stringify(lc.filter((r) => !r[1])));
   const lcm = lendingCensus(wsrc.replace(/^\s*if \(refuseAgentBearer\(req, res\)\) return;.*\n/gm, '').split('{ if (refuseAgentBearer(req, res)) return; ').join('{ '));
   ok(lcm.filter((r) => !r[1]).length === LENDING.length, `CONTROL: the wiring's text without the guards fails the census on all ${lcm.filter((r) => !r[1]).length} routes — the check above would be red`);
   // (16) THE HEAP AT EVERY STAGE (verify r5): over the REAL engine + machine + Gmail adapter and a fake Google that
@@ -2718,7 +2718,7 @@ process.exit(0);
     const held = (o) => !!o && Object.values(o).some((n) => n > 0);
     const after = ['exchanged', 'connected', 'refreshed', 'echoed', 'reborrowCancelled', 'disconnected', 'removed'];
     const real = runStages(path.join(REPO, 'src/server/channels-engine.js'), 'real');
-    ok(real.running.secret >= 1 && after.every((k) => !held(real[k])), `verify r5 (16): the borrowed secret is in the heap while the sign-in runs (${real.running.secret}) and neither it nor the refresh token is held after ANY later stage — ${after.map((k) => `${k}=${JSON.stringify(real[k])}`).join(' ')}`);
+    ok(real.running.secret >= 1 && verdictOf(after.every((k) => !held(real[k]))), `verify r5 (16): the borrowed secret is in the heap while the sign-in runs (${real.running.secret}) and neither it nor the refresh token is held after ANY later stage — ${after.map((k) => `${k}=${JSON.stringify(real[k])}`).join(' ')}`);
     // CONTROL 1 (adapter-held): a gmail copy that keeps every client it resolved, loaded by an engine copy
     const srcG16 = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
     const RES = "    return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };";
@@ -2772,17 +2772,17 @@ console.log('⑬ mirror-193: a whole-list write from a stale copy is refused by 
   const names = () => stored().access.map((r) => r.principal.name).sort().join();
   const STALE = F.grainStamp({ access: [], watchers: [] });   // the copy that had not heard of Xi
   const seed = await eng.setAccess(A, ACC, [{ principal: XI, authority: 'draft' }]);   // the route seed: no base = unconditional
-  ok(seed.ok && names() === 'Xi', 'FIXTURE: Xi holds access to the account (a write that states no base is unconditional, as before)', JSON.stringify(seed));
+  ok(gateOf(seed.ok) && names() === 'Xi', 'FIXTURE: Xi holds access to the account (a write that states no base is unconditional, as before)', JSON.stringify(seed));
   const r1 = await call(eng, 'PUT', ACCESS, { access: [{ principal: READER, authority: 'draft' }, { principal: WORK, authority: 'draft' }], base: STALE });
   ok(r1.status === 409 && r1.body.code === 'grain-changed' && names() === 'Xi', `THE MIRROR'S WRITE (the dialog's whole list [reader, 工作] from the copy that had not heard of Xi) is refused 409 grain-changed and NOTHING is written — Xi keeps access (stored: ${names()})`, JSON.stringify(r1));
   const vr = F.grainBaseVerdict(stored(), STALE);
   ok(!vr.ok && vr.added.join() === 'agent:agent-xi' && vr.removed.length === 0, 'the refusal names who arrived since the read (agent:agent-xi)', JSON.stringify(vr));
   const v1 = await call(eng, 'GET', VIEW);
-  ok(v1.status === 200 && v1.body.adapter && v1.body.adapter.id === A && v1.body.adapter.accountGrain && v1.body.adapter.accountGrain.access.map((r) => r.principal.name).join() === 'Xi', 'GET …/adapters/:id/view: the account as it stands NOW (the view the digest carries), Xi in its access', JSON.stringify(v1.body.adapter && v1.body.adapter.accountGrain));
+  ok(v1.status === 200 && gateOf(v1.body.adapter) && v1.body.adapter.id === A && gateOf(v1.body.adapter.accountGrain) && v1.body.adapter.accountGrain.access.map((r) => r.principal.name).join() === 'Xi', 'GET …/adapters/:id/view: the account as it stands NOW (the view the digest carries), Xi in its access', JSON.stringify(v1.body.adapter && v1.body.adapter.accountGrain));
   const fresh = F.grainStamp(v1.body.adapter.accountGrain);
   ok(fresh === F.grainStamp(stored()), 'the stamp of the VIEW the dialog draws equals the stamp of the STORED lists the engine judges (one function, both sides)');
   const r2 = await call(eng, 'PUT', ACCESS, { access: [{ principal: XI, authority: 'draft' }, { principal: WORK, authority: 'draft' }], base: fresh });
-  ok(r2.status === 200 && r2.body.ok && names() === 'Xi,工作', 'a write whose base is the fresh read is accepted: Xi + 工作', JSON.stringify(r2.body));
+  ok(r2.status === 200 && gateOf(r2.body.ok) && names() === 'Xi,工作', 'a write whose base is the fresh read is accepted: Xi + 工作', JSON.stringify(r2.body));
   const r3 = await call(eng, 'PUT', WATCH, { watchers: [{ principal: WORK, notify: 'wake' }], base: fresh });
   ok(r3.status === 409 && r3.body.code === 'grain-changed' && stored().watchers.length === 0, 'the NOTIFY write from the pre-grant read (工作 was added since) is refused the same way — nothing written', JSON.stringify(r3.body));
   const fresh2 = F.grainStamp((await call(eng, 'GET', VIEW)).body.adapter.accountGrain);
@@ -2844,15 +2844,15 @@ console.log('⑰ the generic messages reader answers only a KNOWN conversation (
   const { eng } = mkEngine({ name: 'messages-gate' });
   await eng.pass(A, { force: true });
   const known = eng.messages(A, C, { limit: 5 });
-  ok(Array.isArray(known) && known.length > 0, `a KNOWN conversation (an adapter record + its index row) reads its records (${Array.isArray(known) ? known.length : known})`);
+  ok(gateOf(Array.isArray(known)) && known.length > 0, `a KNOWN conversation (an adapter record + its index row) reads its records (${Array.isArray(known) ? known.length : known})`);
   eng.store.appendRecords(G.GROUP_ADAPTER_ID, gid, [groupRec()]);
   ok(eng.store.readTail(G.GROUP_ADAPTER_ID, gid, { limit: 5 }).length === 1, 'FIXTURE: the shared store holds the agent-group record (readable by path)');
   ok(eng.messages(G.GROUP_ADAPTER_ID, gid, { limit: 5 }) === null, 'messages() answers null for the group log — the engine knows no such conversation (the groups engine reads it, folded)');
   ok(eng.messages(A, 'no-such-conv', { limit: 5 }) === null && eng.messages('no-such-adapter', C, { limit: 5 }) === null, 'null for an unknown conversation of a known adapter and for an unknown adapter alike');
   const r = await call(eng, 'GET', MSG);
-  ok(r.status === 404 && /No such conversation/.test(String(r.body && r.body.error)), 'GET /api/channels/groups/<gid>/messages → 404 "No such conversation"', JSON.stringify(r));
+  ok(r.status === 404 && verdictOf(/No such conversation/.test(String(r.body && r.body.error))), 'GET /api/channels/groups/<gid>/messages → 404 "No such conversation"', JSON.stringify(r));
   const rk = await call(eng, 'GET', { path: MSG.path, params: { adapterId: A, convId: C } });
-  ok(rk.status === 200 && Array.isArray(rk.body.records) && rk.body.records.length > 0, '…and the known conversation\'s route still pages', JSON.stringify(rk.status));
+  ok(rk.status === 200 && gateOf(Array.isArray(rk.body.records)) && rk.body.records.length > 0, '…and the known conversation\'s route still pages', JSON.stringify(rk.status));
   // NEGATIVE CONTROL: the reader without the gate serves the group log's ORIGINAL line by path
   const esrc = engineSource(REPO);
   const GATE = '    if (!known(adapterId, convId)) return null;\n';
@@ -2866,7 +2866,7 @@ console.log('⑰ the generic messages reader answers only a KNOWN conversation (
   pre.store.appendRecords(G.GROUP_ADAPTER_ID, gid, [groupRec()]);
   const raw = pre.messages(G.GROUP_ADAPTER_ID, gid, { limit: 5 });
   const rp = await call(pre, 'GET', MSG);
-  ok(Array.isArray(raw) && raw.length === 1 && /FINANCE-MAILBOX/.test(raw[0].text) && rp.status === 200 && /FINANCE-MAILBOX/.test(JSON.stringify(rp.body)),
+  ok(gateOf(Array.isArray(raw)) && raw.length === 1 && gateOf(/FINANCE-MAILBOX/.test(raw[0].text)) && rp.status === 200 && verdictOf(/FINANCE-MAILBOX/.test(JSON.stringify(rp.body))),
     'NEGATIVE CONTROL: without the gate the reader (and its route) serve the group log\'s original words by path — the 404 leg above would go red', JSON.stringify({ raw: raw && raw.length, status: rp.status }));
   routes.setup({ getEngine: () => eng });
 }
@@ -2943,23 +2943,23 @@ async function reauthLeg(E, name, { pure = true } = {}) {
 }
 {
   const r = await reauthLeg(ENG, 'reauth');
-  ok(r.before.every((x) => !x.offered && x.why === 'send-scope-not-granted'), 'FIXTURE: both conversations were judged read-only (send-scope-not-granted) BEFORE the re-authorization', JSON.stringify(r.before));
-  ok(r.w && r.w.written === true, 'FIXTURE: the consent landed through the engine\'s own token door (scopes read + send)', JSON.stringify(r.w));
-  ok(r.onRead.every((x) => x.offered), 'STALE-ON-READ: right after the write — no pass, no consent hook yet — the conversation READ is writable for BOTH threads (a verdict older than the credential is re-judged on the way out)', JSON.stringify(r.onRead));
-  ok(r.whole === 1 && r.rows.length === 2 && r.rows.every(([, o]) => o === true), 'the consent hook broadcasts ONE whole digest, and its rows already carry the fresh verdicts', JSON.stringify([r.whole, r.rows]));
-  ok(r.disk.every((cc) => cc && cc.read === 'yes' && JSON.stringify(cc.sendAs) === '["user"]' && cc.why === null && cc.rejudged === 'scopes'), 'AT THE WRITE: both verdicts are re-judged and PERSISTED from the held scopes — the untouched thread too', JSON.stringify(r.disk));
+  ok(verdictOf(r.before.every((x) => !x.offered && x.why === 'send-scope-not-granted')), 'FIXTURE: both conversations were judged read-only (send-scope-not-granted) BEFORE the re-authorization', JSON.stringify(r.before));
+  ok(gateOf(r.w) && r.w.written === true, 'FIXTURE: the consent landed through the engine\'s own token door (scopes read + send)', JSON.stringify(r.w));
+  ok(verdictOf(r.onRead.every((x) => x.offered)), 'STALE-ON-READ: right after the write — no pass, no consent hook yet — the conversation READ is writable for BOTH threads (a verdict older than the credential is re-judged on the way out)', JSON.stringify(r.onRead));
+  ok(r.whole === 1 && r.rows.length === 2 && verdictOf(r.rows.every(([, o]) => o === true)), 'the consent hook broadcasts ONE whole digest, and its rows already carry the fresh verdicts', JSON.stringify([r.whole, r.rows]));
+  ok(verdictOf(r.disk.every((cc) => cc && cc.read === 'yes' && JSON.stringify(cc.sendAs) === '["user"]' && cc.why === null && cc.rejudged === 'scopes')), 'AT THE WRITE: both verdicts are re-judged and PERSISTED from the held scopes — the untouched thread too', JSON.stringify(r.disk));
   ok(r.vendorAsked === 0, `zero vendor calls — the send verdict is a pure function of the held scopes (${r.vendorAsked})`);
   ok(r.stampAfter === r.stampBefore, 'a refresh re-writing the SAME scopes does not move `scopesAt` (no re-judge churn every hour)', JSON.stringify([r.stampBefore, r.stampAfter]));
   const u = await reauthLeg(ENG, 'reauth-unscoped', { pure: false });
-  ok(u.onRead.every((x) => !x.offered && x.why === 'stale') && u.disk.every((cc) => cc && cc.rejudged === 'stale'), 'an adapter with NO pure rule: the old verdict is marked STALE (the next open / pass re-asks the vendor) — never the pre-consent "read-only" kept', JSON.stringify([u.onRead, u.disk]));
+  ok(gateOf(u.onRead.every((x) => !x.offered && x.why === 'stale')) && verdictOf(u.disk.every((cc) => cc && cc.rejudged === 'stale')), 'an adapter with NO pure rule: the old verdict is marked STALE (the next open / pass re-asks the vendor) — never the pre-consent "read-only" kept', JSON.stringify([u.onRead, u.disk]));
   // CONTROL: the engine that skips the invalidation — the incident, reproduced
   const esrc = engineSource(REPO);
   const GATE = '    const cc = en && en.convCaps;\n    if (!cc || !rec) return cc || null;\n';
-  ok(esrc.includes(GATE), 'CONTROL setup: the re-judge gate is spelled once');
+  ok(verdictOf(esrc.includes(GATE)), 'CONTROL setup: the re-judge gate is spelled once');
   const engCopy = patchPath('src/server', 'channels-engine');
   writeCopy(engCopy, esrc.replace(GATE, GATE + '    return cc;   // CONTROL: the pre-fix cache — nothing re-judges\n'));
   const c = await reauthLeg(require(engCopy), 'reauth-control');
-  ok(c.onRead.every((x) => !x.offered) && c.rows.every(([, o]) => o === false) && c.disk.every((cc) => cc.why === 'send-scope-not-granted'), 'CONTROL: the engine without the invalidation keeps BOTH threads read-only after the re-authorization — on read, in the digest and on disk (the owner\'s incident); the legs above would redden on it', JSON.stringify([c.onRead, c.rows]));
+  ok(gateOf(c.onRead.every((x) => !x.offered)) && gateOf(c.rows.every(([, o]) => o === false)) && verdictOf(c.disk.every((cc) => cc.why === 'send-scope-not-granted')), 'CONTROL: the engine without the invalidation keeps BOTH threads read-only after the re-authorization — on read, in the digest and on disk (the owner\'s incident); the legs above would redden on it', JSON.stringify([c.onRead, c.rows]));
   // wiring pins
   // ckpt61 hosted cure: the pin proves ORDER, not adjacency — the connect path's awaited re-judge comes BEFORE its first whole
   // digest and no notify / broadcast sits between them (an unrelated, never-awaited line may: B-166e's client-swap recount)
@@ -2976,8 +2976,8 @@ async function reauthLeg(E, name, { pure = true } = {}) {
   const movedNotify = anchored(esrc, /(    if \(r && r\.ok\) await rejudgeConvCaps\(rec, 'connected'\);\n)([\s\S]{0,600}?)(    if \(!engineCtx\.stopped\) notify\(\[\]\);\n)/, '$3$1$2', 'ckpt61 pin control: the whole digest above the re-judge');
   // CONTROL 2: a broadcast planted BETWEEN the re-judge and the digest (the forbidden set itself proven, not only the bound)
   const bcastBetween = anchored(esrc, RJ_CONNECTED, RJ_CONNECTED + '    notifyThreads(rec.id, null, []);\n', 'ckpt61 pin control: a broadcast between');
-  ok(orderPin(esrc) && !orderPin(movedNotify) && !orderPin(bcastBetween), 'PIN (order, not adjacency): the connect path re-judges BEFORE its one whole digest, nothing broadcast between — RED CONTROLS: the digest moved above the re-judge, and a broadcast planted between them, each fail it', JSON.stringify({ real: orderPin(esrc), moved: orderPin(movedNotify), between: orderPin(bcastBetween) }));
-  ok(/await rejudgeConvCaps\(rec, 're-authorized'\);/.test(esrc) && /await rejudgeConvCaps\(rec, 'disconnected'\);/.test(esrc) && /rejudgeConvCaps\(rec, 'boot'\)/.test(esrc), 'PIN: the consent hook, the switched-client rebind, the disconnect and the boot all re-judge BEFORE their one whole digest');
+  ok(gateOf(orderPin(esrc)) && !orderPin(movedNotify) && !orderPin(bcastBetween), 'PIN (order, not adjacency): the connect path re-judges BEFORE its one whole digest, nothing broadcast between — RED CONTROLS: the digest moved above the re-judge, and a broadcast planted between them, each fail it', JSON.stringify({ real: orderPin(esrc), moved: orderPin(movedNotify), between: orderPin(bcastBetween) }));
+  ok(gateOf(/await rejudgeConvCaps\(rec, 're-authorized'\);/.test(esrc)) && gateOf(/await rejudgeConvCaps\(rec, 'disconnected'\);/.test(esrc)) && verdictOf(/rejudgeConvCaps\(rec, 'boot'\)/.test(esrc)), 'PIN: the consent hook, the switched-client rebind, the disconnect and the boot all re-judge BEFORE their one whole digest');
   ok(!/caps\.offers\(c, en(?: && en)?\.convCaps/.test(esrc) && !/convCapsState\(en\.convCaps/.test(esrc), 'PIN: no reader of a cached verdict bypasses `effectiveConvCaps` (views AND send decisions)');
   // THE CONVERSE (verify round, 2026-09-27): a DISCONNECT drops the credential — every conversation of the account flips to
   // read-only on read AND on disk, and a send the composer would have offered a moment earlier is REFUSED BY NAME
@@ -3017,10 +3017,10 @@ async function reauthLeg(E, name, { pure = true } = {}) {
     const after = [offered('d1'), offered('d2')];
     const disk = ['d1', 'd2'].map((c) => eng.store.index.peek(`sd/${c}`).convCaps);
     const send = await eng.propose({ kind: 'user' }, 'sd', 'd1', { text: 'the reply typed before the disconnect', direct: true });
-    ok(before.every((x) => x.offered) && dis && dis.ok, 'FIXTURE: both conversations offered sending as you; the account is then DISCONNECTED', JSON.stringify([before, dis]));
-    ok(after.every((x) => !x.offered && x.why === 'send-scope-not-granted') && disk.every((cc) => cc && JSON.stringify(cc.sendAs) === '[]' && cc.why === 'send-scope-not-granted' && cc.rejudged === 'scopes'), 'THE CONVERSE: after the disconnect every conversation of the account is read-only — on read AND persisted — with the reason by name', JSON.stringify([after, disk]));
-    ok(send && send.ok === false && send.code === 'send-not-available' && send.why === 'send-scope-not-granted', 'a send of the reply typed a moment earlier is REFUSED BY NAME (send-not-available · send-scope-not-granted) — never sent on the old verdict', JSON.stringify(send));
-    ok(events.some((m) => m.type === 'channels-updated' && m.partial === false), 'the disconnect broadcasts ONE whole digest (the open windows flip their footer on it)');
+    ok(gateOf(before.every((x) => x.offered)) && gateOf(dis) && verdictOf(dis.ok), 'FIXTURE: both conversations offered sending as you; the account is then DISCONNECTED', JSON.stringify([before, dis]));
+    ok(gateOf(after.every((x) => !x.offered && x.why === 'send-scope-not-granted')) && verdictOf(disk.every((cc) => cc && JSON.stringify(cc.sendAs) === '[]' && cc.why === 'send-scope-not-granted' && cc.rejudged === 'scopes')), 'THE CONVERSE: after the disconnect every conversation of the account is read-only — on read AND persisted — with the reason by name', JSON.stringify([after, disk]));
+    ok(gateOf(send) && send.ok === false && send.code === 'send-not-available' && send.why === 'send-scope-not-granted', 'a send of the reply typed a moment earlier is REFUSED BY NAME (send-not-available · send-scope-not-granted) — never sent on the old verdict', JSON.stringify(send));
+    ok(verdictOf(events.some((m) => m.type === 'channels-updated' && m.partial === false)), 'the disconnect broadcasts ONE whole digest (the open windows flip their footer on it)');
   }
 }
 
@@ -3123,12 +3123,12 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
   const rs = await Promise.all(Array.from({ length: 20 }, () => B.post('deep', b1)));
   B.world.holdFor = 0;
   const srcs = rs.map((r) => r.json.source);
-  ok(B.world.older === 1 && rs.every((r) => r.status === 200 && r.json.ok && (r.json.records || []).length === 50 && !r.json.refused) && srcs.filter((x) => x === 'vendor').length === 1 && srcs.filter((x) => x === 'joined').length === 19 && B.localCount('deep') === 100, `① 20 concurrent /older at one boundary: the vendor asked ONCE (${B.world.older}), one answer \`vendor\`, nineteen \`joined\` — every one carries the 50-row page (100 local)`, JSON.stringify({ older: B.world.older, srcs, n: rs.map((r) => (r.json.records || []).length) }));
+  ok(B.world.older === 1 && gateOf(rs.every((r) => r.status === 200 && r.json.ok && (r.json.records || []).length === 50 && !r.json.refused)) && srcs.filter((x) => x === 'vendor').length === 1 && srcs.filter((x) => x === 'joined').length === 19 && B.localCount('deep') === 100, `① 20 concurrent /older at one boundary: the vendor asked ONCE (${B.world.older}), one answer \`vendor\`, nineteen \`joined\` — every one carries the 50-row page (100 local)`, JSON.stringify({ older: B.world.older, srcs, n: rs.map((r) => (r.json.records || []).length) }));
   // ② THE FLOOR: the next ask inside OLDER_FLOOR_MS is refused by name with the wait, the local page still answered; past it the vendor is asked
   B.world.delayMs = 0;
   B.tick(300);
   const f1 = await B.post('deep', B.boundary('deep'));
-  ok(f1.status === 200 && f1.json.ok && f1.json.refused === 'older-floor' && f1.json.code === 'older-floor' && f1.json.retryAfterMs > 0 && f1.json.retryAfterMs <= 1500 && f1.json.exhausted === false && Array.isArray(f1.json.records) && B.world.older === 1, `② an ask 300 ms after the flight is refused \`older-floor\` with the wait (${f1.json.retryAfterMs} ms), no vendor call, exhausted:false`, JSON.stringify(f1.json).slice(0, 300));
+  ok(f1.status === 200 && gateOf(f1.json.ok) && f1.json.refused === 'older-floor' && f1.json.code === 'older-floor' && f1.json.retryAfterMs > 0 && f1.json.retryAfterMs <= 1500 && f1.json.exhausted === false && gateOf(Array.isArray(f1.json.records)) && B.world.older === 1, `② an ask 300 ms after the flight is refused \`older-floor\` with the wait (${f1.json.retryAfterMs} ms), no vendor call, exhausted:false`, JSON.stringify(f1.json).slice(0, 300));
   B.tick(1300);
   const f2 = await B.post('deep', B.boundary('deep'));
   ok(f2.json.source === 'vendor' && !f2.json.refused && B.world.older === 2 && B.localCount('deep') === 150, `② …and past the floor the vendor is asked again (${B.world.older} calls, 150 local)`, JSON.stringify(f2.json).slice(0, 200));
@@ -3140,7 +3140,7 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
     ok(B.localCount('deep') === 260, `④ FIXTURE: paged to the dawn (${B.localCount('deep')} local)`);
     const calls0 = B.world.older; const rs2 = [];
     for (let i = 0; i < 5; i++) { B.tick(i % 2 ? 50 : 2000); rs2.push(await B.post('deep', B.boundary('deep'))); }
-    ok(B.world.older === calls0 && rs2.every((r) => r.json.ok && r.json.exhausted === true && r.json.source === 'memory' && !r.json.refused && r.json.vendorHasNoOlder === false), `④ five more asks at the dawn (inside and past the floor): ZERO vendor calls, each \`exhausted\` from memory (before the belt: 5 vendor calls answering nothing)`, JSON.stringify(rs2.map((r) => [r.json.source, r.json.exhausted, r.json.refused]))); }
+    ok(B.world.older === calls0 && verdictOf(rs2.every((r) => r.json.ok && r.json.exhausted === true && r.json.source === 'memory' && !r.json.refused && r.json.vendorHasNoOlder === false)), `④ five more asks at the dawn (inside and past the floor): ZERO vendor calls, each \`exhausted\` from memory (before the belt: 5 vendor calls answering nothing)`, JSON.stringify(rs2.map((r) => [r.json.source, r.json.exhausted, r.json.refused]))); }
   // ⑤ THE MEMORY IS FORGOTTEN by a record appended (an ingest), by the owner's Refresh, and by a rebuilt entry — the vendor asked once again each time
   { const calls0 = B.world.older;
     B.world.convs.get('deep').recs.push({ vendorId: 'deep-new-1', at: Date.now() + 1000, author: { id: 'u-0', name: 'Ada' }, text: 'a new record' });
@@ -3151,16 +3151,16 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
     ok(a2.json.source === 'memory' && B.world.older === calls0 + 1, '⑤ …and it is remembered again');
     B.tick(2000); const rf = await B.eng.refresh('sc', 'deep', { origin: 'refresh' }); await B.eng.settleWakes?.();
     B.tick(2000); const a3 = await B.post('deep', B.boundary('deep'));
-    ok(rf && rf.ok !== undefined && a3.json.source === 'vendor' && B.world.older === calls0 + 2, `⑤ the owner\'s Refresh forgets it: one vendor call (${B.world.older - calls0} in all)`, JSON.stringify([rf, a3.json.source]));
+    ok(gateOf(rf) && rf.ok !== undefined && a3.json.source === 'vendor' && B.world.older === calls0 + 2, `⑤ the owner\'s Refresh forgets it: one vendor call (${B.world.older - calls0} in all)`, JSON.stringify([rf, a3.json.source]));
     B.tick(2000); const dis = await B.eng.setEnabled?.('sc', false); const en = await B.eng.setEnabled?.('sc', true);
     B.tick(2000); const a4 = await B.post('deep', B.boundary('deep'));
-    ok((dis === undefined || dis) && a4.json.source === 'vendor' && B.world.older === calls0 + 3, `⑤ a REBUILT entry (disable + enable) starts with no memory: one vendor call (${B.world.older - calls0} in all)`, JSON.stringify([dis, en, a4.json.source])); }
+    ok((dis === undefined || gateOf(dis)) && a4.json.source === 'vendor' && B.world.older === calls0 + 3, `⑤ a REBUILT entry (disable + enable) starts with no memory: one vendor call (${B.world.older - calls0} in all)`, JSON.stringify([dis, en, a4.json.source])); }
   // ⑥ A FAILED FLIGHT remembers nothing: the joiners get the local page, the next ask past the floor reaches the vendor
   { const calls0 = B.world.older; B.world.failNext = 'vendor-error'; B.tick(2000); B.world.delayMs = 20;
     const b = B.boundary('flat');
     const [x1, x2] = await Promise.all([B.post('flat', b), B.post('flat', b)]);
     B.world.delayMs = 0;
-    ok(x1.status === 502 && x1.json.ok === false && x1.json.code === 'vendor-error' && x2.json.ok && x2.json.refused === 'older-floor' && Array.isArray(x2.json.records) && B.world.older === calls0 + 1, `⑥ a flight that failed: the asker gets the error, the joiner (whose local page is still short) the floor's refusal — no second call (${B.world.older - calls0})`, JSON.stringify({ x1: x1.json, x2: { ok: x2.json.ok, refused: x2.json.refused, recs: Array.isArray(x2.json.records) ? x2.json.records.length : x2.json.records }, calls: B.world.older - calls0 }));
+    ok(x1.status === 502 && x1.json.ok === false && x1.json.code === 'vendor-error' && gateOf(x2.json.ok) && x2.json.refused === 'older-floor' && gateOf(Array.isArray(x2.json.records)) && B.world.older === calls0 + 1, `⑥ a flight that failed: the asker gets the error, the joiner (whose local page is still short) the floor's refusal — no second call (${B.world.older - calls0})`, JSON.stringify({ x1: x1.json, x2: { ok: x2.json.ok, refused: x2.json.refused, recs: Array.isArray(x2.json.records) ? x2.json.records.length : x2.json.records }, calls: B.world.older - calls0 }));
     B.tick(2000); const x3 = await B.post('flat', b);
     ok(x3.json.source === 'vendor' && x3.json.exhausted === true && B.world.older === calls0 + 2, '⑥ …nothing was remembered: the next ask past the floor reaches the vendor'); }
   // ⑦ RULE 9 STAYS THE OUTER CAP: the budget is judged after the belt — a joined / remembered answer costs no unit
@@ -3182,10 +3182,10 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
     P.world.onState && P.world.onState({ state: 'live', at: Date.now() });   // the lane is live NOW (the injected clock moved past the heartbeat window)
     const pushed = await P.world.onEvent({ kind: 'record', eventId: 'ev-r7-1', convId: 'flat', record: makeRecord({ adapterId: 'sc', convId: 'flat', vendorId: 'flat-pushed-1', at: Date.now() + 5, author: { id: 'u-1', name: 'Brook', isSelf: false, isBot: false }, text: 'pushed', mentions: [], attachments: [], replyTo: null, threadKey: 'flat', raw: {} }), at: Date.now() });
     P.tick(2000); const m1 = await P.post('flat', P.boundary('flat'));
-    ok(pushed && pushed.persisted && pushed.appended === 1 && m1.json.source === 'vendor' && P.world.older === c0 + 1, `⑧ a record the PUSH lane appended (persisted, +1) forgets the end: the next ask reaches the vendor once (${P.world.older - c0}) — r6 answered it from memory`, JSON.stringify([pushed, m1.json.source, P.localCount('flat')]));
+    ok(gateOf(pushed) && gateOf(pushed.persisted) && pushed.appended === 1 && m1.json.source === 'vendor' && P.world.older === c0 + 1, `⑧ a record the PUSH lane appended (persisted, +1) forgets the end: the next ask reaches the vendor once (${P.world.older - c0}) — r6 answered it from memory`, JSON.stringify([pushed, m1.json.source, P.localCount('flat')]));
     P.close();
     const PC = await belt('belt-push-nochange', { receive: 'push', engineEdits: [["        if (w.appended) olderChanged(e, convId);   // rule 19 (verify r7): a record the PUSH lane appended forgets the \"nothing older\" memory, like the poll's\n", '']] });
-    ok(PC.setup, 'CONTROL setup · push-nochange: the push site\'s forget is spelled once');
+    ok(verdictOf(PC.setup), 'CONTROL setup · push-nochange: the push site\'s forget is spelled once');
     if (PC.setup) {
       await PC.eng.setPush('sc', { claimedExclusive: 'exclusive', enabled: true });
       for (let i = 0; i < 4; i++) { PC.tick(2000); const r = await PC.post('flat', PC.boundary('flat')); if (r.json.exhausted) break; }
@@ -3193,7 +3193,7 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
       PC.world.onState && PC.world.onState({ state: 'live', at: Date.now() });
       const pushed2 = await PC.world.onEvent({ kind: 'record', eventId: 'ev-r7-2', convId: 'flat', record: makeRecord({ adapterId: 'sc', convId: 'flat', vendorId: 'flat-pushed-2', at: Date.now() + 5, author: { id: 'u-1', name: 'Brook', isSelf: false, isBot: false }, text: 'pushed', mentions: [], attachments: [], replyTo: null, threadKey: 'flat', raw: {} }), at: Date.now() });
       PC.tick(2000); const m2 = await PC.post('flat', PC.boundary('flat'));
-      ok(pushed2 && pushed2.persisted && m2.json.source === 'memory' && PC.world.older === c1, 'CONTROL push-nochange: with the push site\'s forget removed the pushed record leaves the end remembered — ⑧ would redden', JSON.stringify([pushed2, m2.json.source]));
+      ok(gateOf(pushed2) && gateOf(pushed2.persisted) && m2.json.source === 'memory' && PC.world.older === c1, 'CONTROL push-nochange: with the push site\'s forget removed the pushed record leaves the end remembered — ⑧ would redden', JSON.stringify([pushed2, m2.json.source]));
     }
     PC.close();
   }
@@ -3206,10 +3206,10 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
     const at = ENGINE_SRC.indexOf('e.adapter.older(');
     const verdictAt = ENGINE_SRC.indexOf('Drain.olderVerdict(olderMemOf(e, convId), now())');
     const fnAt = ENGINE_SRC.indexOf('async function loadOlder(');
-    ok(sites.length === 1 && /^src\/server\/channels-engine\.js:/.test(sites[0]) && at > 0 && verdictAt > fnAt && at > verdictAt, `⑨ CENSUS: the vendor's older() has ONE caller in src/ (${sites.join(', ')}), inside loadOlder after the rule-19 verdict`, JSON.stringify({ sites, at, verdictAt, fnAt }));
+    ok(sites.length === 1 && gateOf(/^src\/server\/channels-engine\.js:/.test(sites[0])) && at > 0 && verdictAt > fnAt && at > verdictAt, `⑨ CENSUS: the vendor's older() has ONE caller in src/ (${sites.join(', ')}), inside loadOlder after the rule-19 verdict`, JSON.stringify({ sites, at, verdictAt, fnAt }));
     const BY = await belt('belt-bypass', { engineEdits: [['      let v = Drain.olderVerdict(olderMemOf(e, convId), now());\n', "      let v = { act: 'vendor' }; olderMemOf(e, convId);\n"]] });   // (the memory still minted: the verdict alone is skipped)
-    ok(BY.setup, 'CONTROL setup · bypass: the verdict is asked on one line');
-    if (BY.setup) { BY.world.delayMs = 30; BY.world.arrived = 0; BY.world.holdFor = 20; const rs = await Promise.all(Array.from({ length: 20 }, () => BY.post('deep', BY.boundary('deep')))); ok(BY.world.older >= 19 && rs.every((r) => r.status === 200), `CONTROL bypass: an engine that skips the verdict lets 20 concurrent asks reach the vendor ${BY.world.older} times — ① would redden`, JSON.stringify(rs.map((r) => [r.status, r.json.source || r.json.code, r.json.error]).slice(0, 3))); }
+    ok(verdictOf(BY.setup), 'CONTROL setup · bypass: the verdict is asked on one line');
+    if (BY.setup) { BY.world.delayMs = 30; BY.world.arrived = 0; BY.world.holdFor = 20; const rs = await Promise.all(Array.from({ length: 20 }, () => BY.post('deep', BY.boundary('deep')))); ok(BY.world.older >= 19 && verdictOf(rs.every((r) => r.status === 200)), `CONTROL bypass: an engine that skips the verdict lets 20 concurrent asks reach the vendor ${BY.world.older} times — ① would redden`, JSON.stringify(rs.map((r) => [r.status, r.json.source || r.json.code, r.json.error]).slice(0, 3))); }
     BY.close();
   }
   // CONTROLS: the engine over a patched drain, each clause reverted — the reproduction returns
@@ -3222,10 +3222,10 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
   ];
   for (const c of CTL) {
     const C = await belt(`belt-${c.name}`, { drainEdits: c.edits });
-    ok(C.setup, `CONTROL setup · ${c.name}: the clause is spelled once in the shipped drain`);
+    ok(verdictOf(C.setup), `CONTROL setup · ${c.name}: the clause is spelled once in the shipped drain`);
     if (!C.setup) { C.close(); continue; }
     const n = await c.leg(C);
-    ok(c.red(n), `CONTROL ${c.name}: with that clause reverted the reproduction returns — ${c.say(n)}${c.name === 'nojoin' ? '' : ` (the shipped belt: ${c.name === 'nomemory' ? 0 : 1})`}`);
+    ok(verdictOf(c.red(n)), `CONTROL ${c.name}: with that clause reverted the reproduction returns — ${c.say(n)}${c.name === 'nojoin' ? '' : ` (the shipped belt: ${c.name === 'nomemory' ? 0 : 1})`}`);
     C.close();
   }
 }
@@ -3240,29 +3240,29 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
   const page = eng.messages(A, C, { limit: 50 });
   const reply = page.find((r) => r.replyTo);
   const root = page.find((r) => r.place && r.place.thread && r.place.thread.isRoot && r.place.thread.count > 0);
-  ok(reply && reply.place && reply.place.quote && reply.place.quote.of === reply.replyTo && reply.place.quote.loaded === true && typeof reply.place.quote.text === 'string', 'messages() serves each reply WITH its place: the quote of what it answers (author + first line, loaded)', JSON.stringify(reply && reply.place));
-  ok(root && root.place.thread.kind && root.place.thread.separate === false, 'a root carries its thread fact (count, last, kind) — the chip\'s facts, derived at read time, never stored', JSON.stringify(root && root.place));
-  ok(page.every((r) => !('reactions' in r)), 'before any list was fetched, no record carries reactions (nothing invented)');
+  ok(gateOf(reply) && gateOf(reply.place) && gateOf(reply.place.quote) && reply.place.quote.of === reply.replyTo && reply.place.quote.loaded === true && typeof reply.place.quote.text === 'string', 'messages() serves each reply WITH its place: the quote of what it answers (author + first line, loaded)', JSON.stringify(reply && reply.place));
+  ok(gateOf(root) && gateOf(root.place.thread.kind) && root.place.thread.separate === false, 'a root carries its thread fact (count, last, kind) — the chip\'s facts, derived at read time, never stored', JSON.stringify(root && root.place));
+  ok(verdictOf(page.every((r) => !('reactions' in r))), 'before any list was fetched, no record carries reactions (nothing invented)');
   // RULE 20b through the engine: the visible rows' lists, one snapshot each, the broadcast carrying the RESULT
   const ids = page.slice(-12).map((r) => r.vendorId);
   events.length = 0;
   const rr = await eng.reactionsRefresh(A, C, ids);
-  ok(rr.ok && rr.asked.length === ids.length && rr.refused.length === 0, `the trickle asks the ${ids.length} visible rows once (${rr.asked.length})`, JSON.stringify(rr));
+  ok(gateOf(rr.ok) && rr.asked.length === ids.length && rr.refused.length === 0, `the trickle asks the ${ids.length} visible rows once (${rr.asked.length})`, JSON.stringify(rr));
   const again = await eng.reactionsRefresh(A, C, ids);
-  ok(again.ok && again.asked.length === 0 && again.refused.length === ids.length && again.refused.every((x) => x.code === 'reactions-floor'), 'the same rows again at once: every one refused reactions-floor — no vendor call (the local fold answers)');
+  ok(gateOf(again.ok) && again.asked.length === 0 && again.refused.length === ids.length && verdictOf(again.refused.every((x) => x.code === 'reactions-floor')), 'the same rows again at once: every one refused reactions-floor — no vendor call (the local fold answers)');
   await sleep(350);
   const patchMsg = events.find((m) => m.type === 'channels-updated' && m.patches && m.patches[`${A}/${C}`]);
   ok(!!patchMsg && Object.keys(patchMsg.patches[`${A}/${C}`]).length >= 1 && patchMsg.partial === true, 'ONE broadcast carries the folded lists (`patches`) for the conversation — the result, not a dirty signal', JSON.stringify(patchMsg && Object.keys(patchMsg.patches[`${A}/${C}`])));
   const withRx = eng.messages(A, C, { limit: 50 }).filter((r) => r.reactions);
   const mineOne = withRx.find((r) => r.reactions.some((x) => x.mine));
-  ok(withRx.length >= 1 && withRx.every((r) => r.reactions.every((x) => x.count > 0 && Array.isArray(x.by) && (x.glyph || x.customImage || x.label))), `the page now carries the folded reactions (${withRx.length} messages) with glyph / label from the vocabulary and the owner's by-list`);
-  ok(!mineOne || mineOne.reactions.find((x) => x.mine).by.some((b) => b.id === 'u-me'), '`mine` is the account\'s own user (selfId from the adapter), judged at fold time');
+  ok(withRx.length >= 1 && verdictOf(withRx.every((r) => r.reactions.every((x) => x.count > 0 && Array.isArray(x.by) && (x.glyph || x.customImage || x.label)))), `the page now carries the folded reactions (${withRx.length} messages) with glyph / label from the vocabulary and the owner's by-list`);
+  ok(!mineOne || verdictOf(mineOne.reactions.find((x) => x.mine).by.some((b) => b.id === 'u-me')), '`mine` is the account\'s own user (selfId from the adapter), judged at fold time');
   const read = eng.reactionsRead(A, C, ids);
-  ok(read.ok && Object.keys(read.reactions).length === ids.length && Object.values(read.asOf).every((x) => Number(x) > 0), 'GET reactions answers the LOCAL fold + when each list was fetched');
+  ok(gateOf(read.ok) && Object.keys(read.reactions).length === ids.length && verdictOf(Object.values(read.asOf).every((x) => Number(x) > 0)), 'GET reactions answers the LOCAL fold + when each list was fetched');
   // react / unreact as the user
   const target = page[page.length - 1].vendorId;
   const r1 = await eng.react(A, C, target, 'rocket');
-  ok(r1.ok && r1.reactions.some((x) => x.key === 'rocket' && x.mine && x.count >= 1), 'react: the vendor answered, the self delta written, the route answers the FOLDED list with our chip mine', JSON.stringify(r1));
+  ok(gateOf(r1.ok) && verdictOf(r1.reactions.some((x) => x.key === 'rocket' && x.mine && x.count >= 1)), 'react: the vendor answered, the self delta written, the route answers the FOLDED list with our chip mine', JSON.stringify(r1));
   const r2 = await eng.react(A, C, target, 'rocket');
   ok(!r2.ok && r2.code === 'already-reacted', 'a second add of the same key: the vendor\'s refusal worded already-reacted (never a double count)', JSON.stringify(r2));
   const r3 = await eng.react(A, C, target, 'not-in-the-set');
@@ -3271,7 +3271,7 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
   const r5 = await eng.react(A, C, 'no-such-message', 'rocket');
   ok(r5.code === 'not-found', 'a message the log does not hold ⇒ not-found');
   const u1 = await eng.unreact(A, C, target, 'rocket');
-  ok(u1.ok && !u1.reactions.some((x) => x.key === 'rocket' && x.mine), 'unreact: OUR reaction id (kept from the add) is removed; the chip is gone from the fold', JSON.stringify(u1));
+  ok(gateOf(u1.ok) && !u1.reactions.some((x) => x.key === 'rocket' && x.mine), 'unreact: OUR reaction id (kept from the add) is removed; the chip is gone from the fold', JSON.stringify(u1));
   const u2 = await eng.unreact(A, C, target, 'rocket');
   ok(!u2.ok && u2.code === 'reaction-not-mine', 'removing again ⇒ reaction-not-mine (a list first — none of ours)', JSON.stringify(u2));
   // attack 15: two clients add the SAME reaction in the same instant — one lands, the other is worded
@@ -3279,46 +3279,46 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
   const t15 = page[page.length - 2].vendorId;
   const both = await Promise.all([eng.react(A, C, t15, 'zap'), eng.react(A, C, t15, 'zap')]);
   const f15 = (eng.reactionsRead(A, C, [t15]).reactions[t15] || []).find((x) => x.key === 'zap');
-  ok(both.filter((x) => x.ok).length === 1 && both.filter((x) => !x.ok && x.code === 'already-reacted').length === 1 && f15 && f15.count === 1 && f15.mine, 'attack 15: two clients add the same reaction at once — one lands, the other answers already-reacted (worded by the window), the fold counts ONE', JSON.stringify([both.map((x) => x.code || 'ok'), f15]));
+  ok(both.filter((x) => x.ok).length === 1 && both.filter((x) => !x.ok && x.code === 'already-reacted').length === 1 && gateOf(f15) && f15.count === 1 && verdictOf(f15.mine), 'attack 15: two clients add the same reaction at once — one lands, the other answers already-reacted (worded by the window), the fold counts ONE', JSON.stringify([both.map((x) => x.code || 'ok'), f15]));
   const set = await eng.emojiSet(A);
-  ok(set.ok && set.keys.length === 42 && set.quick.length === 12 && set.custom === true, 'the emoji set: the adapter\'s vocabulary (42 keys, 2 custom), cached');
+  ok(gateOf(set.ok) && set.keys.length === 42 && set.quick.length === 12 && set.custom === true, 'the emoji set: the adapter\'s vocabulary (42 keys, 2 custom), cached');
   const img = await eng.emojiImage(A, 'party_parrot');
   const trav = await eng.emojiImage(A, '../../etc');
   const bogus = await eng.emojiImage(A, 'thumbsup');
-  ok(img.ok && fs.existsSync(img.file) && trav.code === 'not-found' && bogus.code === 'not-found', 'a CUSTOM emoji\'s picture is fetched into the account\'s cache; a traversal key and a non-custom key are not-found (attack 22) before any path');
+  ok(gateOf(img.ok) && gateOf(fs.existsSync(img.file)) && trav.code === 'not-found' && bogus.code === 'not-found', 'a CUSTOM emoji\'s picture is fetched into the account\'s cache; a traversal key and a non-custom key are not-found (attack 22) before any path');
   // the agent's copy: no `by`, the words
   const agentPage = eng.withView(A, C, eng.store.readTail(A, C, { limit: 50 }), { agent: true });
   const ar = agentPage.find((r) => r.reactions);
-  ok(ar && ar.reactions.every((x) => !('by' in x) && !('byTruncated' in x)) && typeof ar.reactionsText === 'string' && !JSON.stringify(agentPage).includes('"by"') && agentPage.every((r) => !r.blocks), 'the AGENT\'s copy (attack 12): reactions WITHOUT by / byTruncated, the words line, no render tree — "by" appears nowhere in its JSON');
-  ok(agentPage.some((r) => r.placeText && (r.placeText.line || r.placeText.tag)), 'the agent\'s copy words the place (↳ replying to … / [thread …])');
+  ok(gateOf(ar) && gateOf(ar.reactions.every((x) => !('by' in x) && !('byTruncated' in x))) && typeof ar.reactionsText === 'string' && !JSON.stringify(agentPage).includes('"by"') && verdictOf(agentPage.every((r) => !r.blocks)), 'the AGENT\'s copy (attack 12): reactions WITHOUT by / byTruncated, the words line, no render tree — "by" appears nowhere in its JSON');
+  ok(verdictOf(agentPage.some((r) => r.placeText && (r.placeText.line || r.placeText.tag))), 'the agent\'s copy words the place (↳ replying to … / [thread …])');
   // the patch bound: > 50 changed messages ⇒ a re-read hint, never a 51-entry broadcast
   events.length = 0;
   const many = eng.store.readTail(A, C, { limit: 60 }).map((r, i) => ({ k: 'rx', msg: r.vendorId, at: Date.now() + i, form: 'delta', op: 'add', key: 'fire', actor: { id: 'u-x' + i }, src: 'event' }));
   eng.appendSides(A, C, many.slice(0, Math.min(many.length, 60)));
   await sleep(350);
   const hint = events.find((m) => m.type === 'channels-updated' && (m.rereadReactions || m.patches));
-  ok(hint && (many.length > 50 ? (hint.rereadReactions || []).includes(`${A}/${C}`) && !(hint.patches && hint.patches[`${A}/${C}`]) : true), `a side burst over ${many.length} messages: ${many.length > 50 ? 'the re-read hint, not a patch per message (≤ 50 per broadcast)' : '(the fake room is smaller than the bound — the patch path)'}`, JSON.stringify(hint && Object.keys(hint)));
+  ok(gateOf(hint) && (many.length > 50 ? gateOf((hint.rereadReactions || []).includes(`${A}/${C}`)) && !(hint.patches && hint.patches[`${A}/${C}`]) : true), `a side burst over ${many.length} messages: ${many.length > 50 ? 'the re-read hint, not a patch per message (≤ 50 per broadcast)' : '(the fake room is smaller than the bound — the patch path)'}`, JSON.stringify(hint && Object.keys(hint)));
   // a hostile side record is refused by its LENGTH (attack 2)
   const bad = eng.appendSides(A, C, [{ k: 'rx', msg: target, at: Date.now(), form: 'delta', op: 'add', key: 'x'.repeat(65536), actor: { id: 'u' }, src: 'event' }]);
   ok(bad.appended === 0, 'a 64 KiB emoji name is refused by validateSide before the store sees it');
   // THE THREAD VIEW — local only
   const tk = root ? root.vendorId : null;
   const tv = tk ? eng.threadRead(A, C, tk) : null;
-  ok(tv && tv.ok && tv.records[0].vendorId === tk && tv.thread.count === tv.records.length - 1 && tv.thread.walked === true, 'threadRead: the root + its replies from the LOCAL log (an inline listing needs no walk)', JSON.stringify(tv && tv.thread));
+  ok(gateOf(tv) && gateOf(tv.ok) && tv.records[0].vendorId === tk && tv.thread.count === tv.records.length - 1 && tv.thread.walked === true, 'threadRead: the root + its replies from the LOCAL log (an inline listing needs no walk)', JSON.stringify(tv && tv.thread));
   const nl = eng.threadRead(A, C, 'om_not_loaded');
-  ok(nl.ok && nl.code === 'thread-not-loaded' && nl.records.length === 0, 'a message the log does not hold ⇒ thread-not-loaded (records [], walked false)');
+  ok(gateOf(nl.ok) && nl.code === 'thread-not-loaded' && nl.records.length === 0, 'a message the log does not hold ⇒ thread-not-loaded (records [], walked false)');
   const wr = await eng.threadRefresh(A, C, tk || 'x');
   ok(!wr.ok && wr.code === 'not-supported', 'a thread walk on an adapter whose replies ride the listing ⇒ not-supported (501) — nothing to walk');
   // THE MIGRATION: once, idempotent
   const m1 = eng.migrateThreads(); await m1.write;
   const m2 = eng.migrateThreads(); await m2.write;
-  ok(m1.stamped.length >= 3 && m2.stamped.length === 0 && m2.reset === 0 && eng.adapterRecords().adapters.every((r) => r.reactionPolicy === 'propose'), `the migration stamps reactionPolicy 'propose' on every account (${m1.stamped.length}) and a second run finds nothing`, JSON.stringify([m1.stamped, m1.reset, m2.stamped, m2.reset]));
+  ok(m1.stamped.length >= 3 && m2.stamped.length === 0 && m2.reset === 0 && verdictOf(eng.adapterRecords().adapters.every((r) => r.reactionPolicy === 'propose')), `the migration stamps reactionPolicy 'propose' on every account (${m1.stamped.length}) and a second run finds nothing`, JSON.stringify([m1.stamped, m1.reset, m2.stamped, m2.reset]));
   // the thread index survives a backfill (prependRecords drops the cache; the next read rebuilds it)
   const older = { ...eng.store.readTail(A, C, { limit: 1 })[0], vendorId: 'om_backfilled_0', at: 1000, replyTo: null, threadKey: null, id: `${A}:${C}:om_backfilled_0` };
   delete older.root;
   eng.store.prependRecords(A, C, [older]);
   const tv2 = tk ? eng.threadRead(A, C, tk) : null;
-  ok(tv2 && tv2.ok && tv2.thread.count === tv.thread.count, 'the thread index survives a backfill (the store\'s write hook drops the cache; the next read rebuilds it whole)');
+  ok(gateOf(tv2) && gateOf(tv2.ok) && tv2.thread.count === tv.thread.count, 'the thread index survives a backfill (the store\'s write hook drops the cache; the next read rebuilds it whole)');
 }
 // the THREAD WALK + the REACTION EVENT through a scripted adapter shaped like Lark (replies NOT in the listing,
 // reactions only per message, the event naming no conversation)
@@ -3351,9 +3351,9 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
   eng.store.appendRecords('th-poll', C, [REC.makeRecord({ adapterId: 'th-poll', convId: C, vendorId: 'om_head', at: Number(head.at) + 1, threadKey: 'omt_w', text: 'topic', author: { id: 'u-ada', name: 'Ada' } })]);
   for (let i = 1; i <= 3; i++) THR.push(REC.makeRecord({ adapterId: 'th-poll', convId: C, vendorId: `om_r${i}`, at: Number(head.at) + 1 + i, replyTo: 'om_head', root: 'om_head', threadKey: 'omt_w', text: `reply ${i}`, author: { id: 'u-cass', name: 'Cass' } }));
   const before = eng.threadRead('th-poll', C, 'om_head');
-  ok(before.ok && before.thread.count === 0 && before.thread.walked === false && before.thread.separate === true, 'a separately-listed thread never walked: count 0 and walked false — the chip says "open to load", never a number the vendor did not confirm');
+  ok(gateOf(before.ok) && before.thread.count === 0 && before.thread.walked === false && before.thread.separate === true, 'a separately-listed thread never walked: count 0 and walked false — the chip says "open to load", never a number the vendor did not confirm');
   const w1 = await eng.threadRefresh('th-poll', C, 'om_head');
-  ok(w1.ok && w1.appended === 3 && walkCalls === 1, 'the pane\'s open walks the thread ONCE (paced, metered) and appends its replies to the CONVERSATION\'s log', JSON.stringify(w1));
+  ok(gateOf(w1.ok) && w1.appended === 3 && walkCalls === 1, 'the pane\'s open walks the thread ONCE (paced, metered) and appends its replies to the CONVERSATION\'s log', JSON.stringify(w1));
   const w2 = await eng.threadRefresh('th-poll', C, 'om_head');
   ok(!w2.ok && w2.code === 'thread-floor' && w2.retryAfterSec > 0 && walkCalls === 1, 'a second open inside the floor: thread-floor with the wait, NO vendor call (attack 8)');
   const after = eng.threadRead('th-poll', C, 'om_head');
@@ -3361,7 +3361,7 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
   // (verify r1: the key must be one this conversation names — a topic head declaring `omt_other` is in the log)
   eng.store.appendRecords('th-poll', C, [REC.makeRecord({ adapterId: 'th-poll', convId: C, vendorId: 'om_head_other', at: Number(head.at) + 50, threadKey: 'omt_other', text: 'another topic', author: { id: 'u-ada', name: 'Ada' } })]);
   const conc = await Promise.all([eng.threadRefresh('th-poll', C, 'omt_other'), eng.threadRefresh('th-poll', C, 'omt_other')]);
-  ok(walkCalls === 2 && conc.some((x) => x.joined), 'two opens of one thread at once: ONE walk, the second JOINS it', JSON.stringify(conc));
+  ok(walkCalls === 2 && verdictOf(conc.some((x) => x.joined)), 'two opens of one thread at once: ONE walk, the second JOINS it', JSON.stringify(conc));
   // THE REACTION EVENT: no conversation named — the engine finds it; durable before the ack; a replay is one line
   await eng.syncPushLanes();
   ok(typeof liveOn === 'function', 'the push lane is armed');
@@ -3370,9 +3370,9 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
   const a2 = await liveOn(ev);
   const a3 = await liveOn({ ...ev, eventId: 'ev-rx-2' });
   const lines = eng.store.readSide('th-poll', C, { msgs: new Set(['om_r2']) });
-  ok(a1.ok && a1.persisted === true && a2.duplicate === true && a3.duplicate === true && lines.length === 1, 'a reaction event naming only its message: placed on its conversation, DURABLE before the ack; the vendor\'s redelivery (same event id, or a new id for the same fact) is ONE side line (attack 3)', JSON.stringify([a1, a2, a3, lines.length]));
+  ok(gateOf(a1.ok) && a1.persisted === true && a2.duplicate === true && a3.duplicate === true && lines.length === 1, 'a reaction event naming only its message: placed on its conversation, DURABLE before the ack; the vendor\'s redelivery (same event id, or a new id for the same fact) is ONE side line (attack 3)', JSON.stringify([a1, a2, a3, lines.length]));
   const a4 = await liveOn({ kind: 'side', eventId: 'ev-rx-3', messageId: 'om_nowhere', side: { ...ev.side, msg: 'om_nowhere' } });
-  ok(a4.ok && a4.dropped === 'message-unknown', 'a reaction on a message this account never stored is folded onto nothing and dropped (acked — never a crash, never a guess)');
+  ok(gateOf(a4.ok) && a4.dropped === 'message-unknown', 'a reaction on a message this account never stored is folded onto nothing and dropped (acked — never a crash, never a guess)');
   // verify r1 (MONEY / the event loop): an unknown message used to cost a search of the WHOLE account store PER EVENT
   // (every message log read and scanned; measured 14.3 MiB per event on a 12-conversation account) and a miss was
   // never remembered. A miss is remembered (TTL), the store search has a per-account budget per minute, every
@@ -3384,18 +3384,18 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
     eng.store.locateMessage = async (...a) => { locates++; return locate0(...a); };
     const again = [];
     for (let i = 0; i < 5; i++) again.push(await liveOn({ kind: 'side', eventId: `ev-again-${i}`, messageId: 'om_nowhere', side: { ...ev.side, msg: 'om_nowhere', at: Date.now() + i } }));
-    ok(locates === 0 && again.every((x) => x.ok && x.dropped === 'message-unknown' && x.why === 'remembered'), 'the SAME unknown message again: the miss is remembered — 0 store searches, every event acked as dropped', JSON.stringify([locates, again.map((x) => x.why)]));
+    ok(locates === 0 && verdictOf(again.every((x) => x.ok && x.dropped === 'message-unknown' && x.why === 'remembered')), 'the SAME unknown message again: the miss is remembered — 0 store searches, every event acked as dropped', JSON.stringify([locates, again.map((x) => x.why)]));
     const flood = [];
     for (let i = 0; i < 60; i++) flood.push(await liveOn({ kind: 'side', eventId: `ev-flood-${i}`, messageId: `om_unknown_${i}`, side: { ...ev.side, msg: `om_unknown_${i}`, at: Date.now() + i } }));
-    ok(locates <= 30 && flood.every((x) => x.ok && x.dropped === 'message-unknown') && flood.filter((x) => x.why === 'locate-budget').length >= 30, `a flood of 60 DISTINCT unknown ids: at most 30 store searches this minute (${locates}), the rest dropped by name (locate-budget), all acked`, JSON.stringify([locates, flood.filter((x) => x.why === 'locate-budget').length]));
+    ok(locates <= 30 && gateOf(flood.every((x) => x.ok && x.dropped === 'message-unknown')) && flood.filter((x) => x.why === 'locate-budget').length >= 30, `a flood of 60 DISTINCT unknown ids: at most 30 store searches this minute (${locates}), the rest dropped by name (locate-budget), all acked`, JSON.stringify([locates, flood.filter((x) => x.why === 'locate-budget').length]));
     // a message that arrives AFTER its reaction was missed is placed on the next event (the write hook's memo)
     eng.store.appendRecords('th-poll', C, [REC.makeRecord({ adapterId: 'th-poll', convId: C, vendorId: 'om_nowhere', at: Number(head.at) + 400, text: 'late', author: { id: 'u-ada', name: 'Ada' } })]);
     const late = await liveOn({ kind: 'side', eventId: 'ev-late', messageId: 'om_nowhere', side: { ...ev.side, msg: 'om_nowhere', at: Date.now() + 99 } });
-    ok(late.ok && late.persisted === true, 'the message stored later: its next reaction event is placed and persisted (the miss cleared by the write hook)', JSON.stringify(late));
+    ok(gateOf(late.ok) && late.persisted === true, 'the message stored later: its next reaction event is placed and persisted (the miss cleared by the write hook)', JSON.stringify(late));
     // an event that NAMES a conversation (the fake's shape) still needs the message to be one it holds: a line
     // about nothing is never appended (the side log's growth is bounded to what compaction can fold)
     const named = await liveOn({ kind: 'side', eventId: 'ev-named-x', convId: C, messageId: 'om_never_here', side: { ...ev.side, msg: 'om_never_here', at: Date.now() + 5 } });
-    ok(named.ok && named.dropped === 'message-unknown' && named.why === 'not-in-conversation' && eng.store.readSide('th-poll', C, { msgs: new Set(['om_never_here']) }).length === 0 && locates === (locates | 0), 'an event naming a conversation for a message that conversation never held is dropped by name (not-in-conversation), nothing appended', JSON.stringify(named));
+    ok(gateOf(named.ok) && named.dropped === 'message-unknown' && named.why === 'not-in-conversation' && eng.store.readSide('th-poll', C, { msgs: new Set(['om_never_here']) }).length === 0 && locates === (locates | 0), 'an event naming a conversation for a message that conversation never held is dropped by name (not-in-conversation), nothing appended', JSON.stringify(named));
     eng.store.locateMessage = locate0;
     // CONTROL: a copy without the remembered miss and the budget searches the store on EVERY event
     const esrcM = engineSource(REPO);
@@ -3420,7 +3420,7 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
     liveOn = onMain;
   }
   const a5 = await liveOn({ kind: 'side', eventId: 'ev-rx-4', messageId: 'om_r2', side: { ...ev.side, key: '<system-reminder>' + 'x'.repeat(100) } });
-  ok(a5.ok && a5.refused === 'bad-key' && eng.store.readSide('th-poll', C, { msgs: new Set(['om_r2']) }).length === 1, 'attack 2 on the push path: a hostile key is refused by validateSide, acked, never stored');
+  ok(gateOf(a5.ok) && a5.refused === 'bad-key' && eng.store.readSide('th-poll', C, { msgs: new Set(['om_r2']) }).length === 1, 'attack 2 on the push path: a hostile key is refused by validateSide, acked, never stored');
   ok(!events.some((m) => m && m.type && /wake|turn/.test(String(m.type))), 'a reaction event starts no turn and broadcasts no wake (test-architecture §64 is the census)');
 }
 
@@ -3534,7 +3534,7 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
     return out;
   };
   const real = await rlRun(ENG, 'real');
-  ok(real.account.calls === 0 && real.account.asked === 0 && real.account.codes.join() === 'backoff' && real.account.reserved === 0 && real.account.react === 0 && real.account.walk === 0 && real.account.others.every((c) => c === 'backoff'), 'inside the ACCOUNT\'s back-off (a pass the vendor rate-limited): the trickle refuses the whole batch `backoff` before the verdict (0 calls, 0 slots of the minute\'s ceiling reserved), and react / unreact / the thread walk are refused `backoff` — nothing sent', JSON.stringify(real.account));
+  ok(real.account.calls === 0 && real.account.asked === 0 && real.account.codes.join() === 'backoff' && real.account.reserved === 0 && real.account.react === 0 && real.account.walk === 0 && verdictOf(real.account.others.every((c) => c === 'backoff')), 'inside the ACCOUNT\'s back-off (a pass the vendor rate-limited): the trickle refuses the whole batch `backoff` before the verdict (0 calls, 0 slots of the minute\'s ceiling reserved), and react / unreact / the thread walk are refused `backoff` — nothing sent', JSON.stringify(real.account));
   ok(real.list.first === 1 && real.list.firstCodes.join() === 'rate-limited' && real.list.next === 0 && real.list.nextCodes.join() === 'backoff' && real.list.after === 3 && real.list.afterAsked === 3 && real.n >= 9, `a 429 answered to a reaction list: its batch stops at the first call (the rest named rate-limited), the NEXT batch inside the vendor's Retry-After is refused \`backoff\` with NO call, after the wait the rows (those the account's back-off refused — none floored) are asked (${real.list.after})`, JSON.stringify(real));
   const esrcR = engineSource(REPO);
   const NOTE = "        if (code === 'rate-limited' && !outlived(rec, e)) noteRxRateLimit(e, err);\n";
@@ -3579,11 +3579,11 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   ok(hid.code === 'not-found' && hidW.code === 'not-found' && walkCalls === 0, 'an agent without reach: the thread read AND the walk answer the uniform not-found — no vendor call');
   await eng.setReach('th-agent', C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, level: 'visible' });
   const t1 = eng.readThreadFor(AG, 'th-agent', C, 'om_head');
-  ok(t1.ok && t1.thread.walked === false && t1.thread.count === 0 && /thread not loaded here — the user's window loads it/.test(t1.note) && walkCalls === 0, 'attack 9: the agent\'s read of a never-walked thread says walked:false and NEVER walks it (0 vendor calls)', JSON.stringify(t1.thread));
+  ok(gateOf(t1.ok) && t1.thread.walked === false && t1.thread.count === 0 && gateOf(/thread not loaded here — the user's window loads it/.test(t1.note)) && walkCalls === 0, 'attack 9: the agent\'s read of a never-walked thread says walked:false and NEVER walks it (0 vendor calls)', JSON.stringify(t1.thread));
   const w1 = await eng.agentThreadRefresh(AG, 'th-agent', C, 'om_head');
-  ok(w1.ok && w1.appended === 3 && walkCalls === 1, '`refresh --thread` is the door: ONE walk, its replies appended', JSON.stringify(w1));
+  ok(gateOf(w1.ok) && w1.appended === 3 && walkCalls === 1, '`refresh --thread` is the door: ONE walk, its replies appended', JSON.stringify(w1));
   const t2 = eng.readThreadFor(AG, 'th-agent', C, 'om_head');
-  ok(t2.ok && t2.thread.walked === true && t2.records.length === 4 && t2.records.every((r) => !r.blocks) && t2.records.filter((r) => r.placeText && /↳ replying to Ada: "topic" \(id om_head\) · in thread omt_w/.test(r.placeText.line || '')).length === 3, 'after the walk the agent reads root + 3 replies, each reply with its place in words, no render tree', JSON.stringify(t2.records.map((r) => r.placeText)));
+  ok(gateOf(t2.ok) && t2.thread.walked === true && t2.records.length === 4 && gateOf(t2.records.every((r) => !r.blocks)) && t2.records.filter((r) => r.placeText && /↳ replying to Ada: "topic" \(id om_head\) · in thread omt_w/.test(r.placeText.line || '')).length === 3, 'after the walk the agent reads root + 3 replies, each reply with its place in words, no render tree', JSON.stringify(t2.records.map((r) => r.placeText)));
   const w2 = await eng.agentThreadRefresh(AG, 'th-agent', C, 'om_head');
   ok(!w2.ok && w2.code === 'thread-floor' && walkCalls === 1, 'a second agent walk inside the floor ⇒ thread-floor, no vendor call');
   // attack 18: a walk whose answer carries the ROOT itself (Lark's thread listing opens with the topic head) —
@@ -3594,7 +3594,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   for (let i = 1; i <= 2; i++) THR.push(REC.makeRecord({ adapterId: 'th-agent', convId: C, vendorId: `om_s${i}`, at: Number(head.at) + 100 + i, replyTo: 'om_head2', root: 'om_head2', threadKey: 'omt_w2', text: `answer ${i}`, author: { id: 'u-cass', name: 'Cass' } }));
   const w18 = await eng.agentThreadRefresh(AG, 'th-agent', C, 'om_head2');
   const t18 = eng.readThreadFor(AG, 'th-agent', C, 'om_head2');
-  ok(w18.ok && w18.appended === 2 && t18.thread.count === 2 && t18.records.filter((r) => r.vendorId === 'om_head2').length === 1, 'attack 18: a walk answer that includes the root dedups against the log\'s copy — 2 appended, count 2 (the root is not a reply), the root drawn once', JSON.stringify([w18.appended, t18.thread, t18.records.map((r) => r.vendorId)]));
+  ok(gateOf(w18.ok) && w18.appended === 2 && t18.thread.count === 2 && t18.records.filter((r) => r.vendorId === 'om_head2').length === 1, 'attack 18: a walk answer that includes the root dedups against the log\'s copy — 2 appended, count 2 (the root is not a reply), the root drawn once', JSON.stringify([w18.appended, t18.thread, t18.records.map((r) => r.vendorId)]));
   // verify r1 (IDENTITY, HIGH): ANOTHER CHAT'S THREAD KEY. Lark answers a thread listing by `container_id` whatever
   // chat the caller names, and its toRecord stamps the CALLER's convId — so `refresh C --thread <omt_ of chat Y>`
   // walked Y's replies INTO C's log, where an agent with reach on C alone read them (reproduced 2026-09-28). The key
@@ -3613,7 +3613,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   THR.push(REC.makeRecord({ adapterId: 'th-agent', convId: C, vendorId: 'om_k1', at: Number(head.at) + 301, replyTo: 'om_head3', root: 'om_head3', threadKey: 'omt_w3', text: 'ours', author: { id: 'u-cass', name: 'Cass' } }));
   THR.push(REC.makeRecord({ adapterId: 'th-agent', convId: 'oc_Y', vendorId: 'om_k2', at: Number(head.at) + 302, replyTo: 'om_head3', root: 'om_head3', threadKey: 'omt_w3', text: 'stamped with another conversation', author: { id: 'u-y', name: 'Y' } }));
   const wb = await eng.agentThreadRefresh(AG, 'th-agent', C, 'om_head3');
-  ok(wb.ok && wb.appended === 1 && wb.foreign === 1 && !eng.store.findRecord('th-agent', C, 'om_k2') && eng.store.findRecord('th-agent', C, 'om_k1'), 'verify r1 belt: a walk record stamped with another conversation is dropped (foreign:1) — the one of this conversation lands', JSON.stringify(wb));
+  ok(gateOf(wb.ok) && wb.appended === 1 && wb.foreign === 1 && !eng.store.findRecord('th-agent', C, 'om_k2') && verdictOf(eng.store.findRecord('th-agent', C, 'om_k1')), 'verify r1 belt: a walk record stamped with another conversation is dropped (foreign:1) — the one of this conversation lands', JSON.stringify(wb));
   // CONTROL: a copy with the raw-id fallback restored walks Y's thread into C and the agent reads it
   {
     const esrcX = engineSource(REPO);
@@ -3631,7 +3631,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
     await engX.setReach('th-agent', C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, level: 'visible' });
     const cw = await engX.agentThreadRefresh(AG, 'th-agent', C, 'omt_Y');
     const cr = engX.readFor(AG, 'th-agent', C, { limit: 200 });
-    ok(cw.ok && cw.appended === 2 && JSON.stringify(cr).includes('private reply'), 'CONTROL: the copy with the raw-id fallback walks chat Y\'s thread into C and the agent reads Y\'s replies — the leg above would be red', JSON.stringify(cw));
+    ok(gateOf(cw.ok) && cw.appended === 2 && verdictOf(JSON.stringify(cr).includes('private reply')), 'CONTROL: the copy with the raw-id fallback walks chat Y\'s thread into C and the agent reads Y\'s replies — the leg above would be red', JSON.stringify(cw));
   }
 }
 // (a') verify r2 (MONEY): a thread PAST THREAD_REPLIES_MAX (500). The walk's anchor is the index's `replies[last]`; the
@@ -3697,8 +3697,8 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
     return { first: c1, appended: w1.appended, rewalk: calls - c1 - (calls - c2), rewalkOk: w2.ok, lastOnPage: page.records[page.records.length - 1].vendorId, count: page.thread.count, afterRestart: calls - c2, afterRestartOk: w3.ok };
   };
   const real = await bigRun(ENG, 'real');
-  ok(real.appended === 600 && real.rewalkOk && real.rewalk === 1 && real.lastOnPage === 'b-000600' && real.count === 600, `verify r2: a 600-reply thread — the re-walk with nothing new is ONE vendor call (its anchor is the NEWEST reply), and the pane's first page ends at the newest reply`, JSON.stringify(real));
-  ok(real.afterRestartOk && real.afterRestart === 1, `verify r2: the walk's cursor across a RESTART (the adapter's in-memory walk state gone) is the log's newest reply — the next walk is ONE vendor call, never a re-walk from scratch (${real.afterRestart})`, JSON.stringify(real));
+  ok(real.appended === 600 && gateOf(real.rewalkOk) && real.rewalk === 1 && real.lastOnPage === 'b-000600' && real.count === 600, `verify r2: a 600-reply thread — the re-walk with nothing new is ONE vendor call (its anchor is the NEWEST reply), and the pane's first page ends at the newest reply`, JSON.stringify(real));
+  ok(gateOf(real.afterRestartOk) && real.afterRestart === 1, `verify r2: the walk's cursor across a RESTART (the adapter's in-memory walk state gone) is the log's newest reply — the next walk is ONE vendor call, never a re-walk from scratch (${real.afterRestart})`, JSON.stringify(real));
   // CONTROL: the engine bound to the pre-fix index (a closed world: an engine copy whose channel-thread is the copy)
   const thrSrc = fs.readFileSync(path.join(REPO, 'src/channel-thread.js'), 'utf-8');
   const L1 = "      replies: all.length > THREAD_REPLIES_MAX ? all.slice(all.length - THREAD_REPLIES_MAX) : all,";
@@ -3782,8 +3782,8 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   const { ChannelError } = CH;
   const r = await cutRun(ENG, 'real');
   ok(r.before === 100 && r.w1 === 'transport' && r.afterCut === 200 && r.cutOnDisk === 'c-00100', 'CONTROL setup: the log holds the oldest 100 replies; the walk is cut on its 3rd page (a transport error) after appending the newest 100 — and the walk\'s STOP is on disk (index.json, flushed, not waiting for the debounce)', JSON.stringify(r));
-  ok(r.w2 && r.afterWalk === 250 && r.second === 4 && !r.cutLeft, `after a RESTART (the adapter's continuation gone) the next walk pages back to the persisted stop: every one of the 250 replies is in the log (${r.afterWalk}) for ${r.second} vendor calls (the 2 cut pages re-read + the unread one + its last), and the complete walk clears the stop`, JSON.stringify(r));
-  ok(r.w3 && r.third === 1, 'with the stop cleared the next walk is ONE call again (the log\'s newest reply)', JSON.stringify(r));
+  ok(gateOf(r.w2) && r.afterWalk === 250 && r.second === 4 && !r.cutLeft, `after a RESTART (the adapter's continuation gone) the next walk pages back to the persisted stop: every one of the 250 replies is in the log (${r.afterWalk}) for ${r.second} vendor calls (the 2 cut pages re-read + the unread one + its last), and the complete walk clears the stop`, JSON.stringify(r));
+  ok(gateOf(r.w3) && r.third === 1, 'with the stop cleared the next walk is ONE call again (the log\'s newest reply)', JSON.stringify(r));
   const inproc = await cutRun(ENG, 'inproc', { restart: false });
   ok(inproc.afterWalk === 250 && inproc.second === 2 && !inproc.cutLeft, `in the SAME process the adapter's live continuation wins over the stop: ${inproc.second} calls (the unread page + its last), never a re-read`, JSON.stringify(inproc));
   // CONTROL: the engine copy that never writes the stop — after the restart the walk stops at the log's newest reply
@@ -3858,19 +3858,19 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   };
   const r180 = await olderRun(ENG, 'real180', 180);
   const [p1, p2, p3, p4, p5] = r180.presses;
-  ok(r180.early.ok && r180.early.refused === 'thread-floor' && r180.early.calls === 0, 'a press inside the per-thread floor is REFUSED by name (older-floor, 0 calls) — never read as the thread\'s start', JSON.stringify(r180.early));
+  ok(gateOf(r180.early.ok) && r180.early.refused === 'thread-floor' && r180.early.calls === 0, 'a press inside the per-thread floor is REFUSED by name (older-floor, 0 calls) — never read as the thread\'s start', JSON.stringify(r180.early));
   ok(p1.got === 50 && p1.held === 100 && p2.got === 50 && p2.held === 150 && p3.got === 30 && p3.held === 180, `a 180-reply thread whose pane opened on the newest 50: each older press brings the next 50 (${[p1, p2, p3].map((p) => p.held).join(' → ')}) — every reply reachable`, JSON.stringify(r180.presses));
-  ok(p1.calls === 2 && p2.calls === 3 && p3.calls === 4 && p4.calls === 0 && p5.calls === 0 && p4.none && !p4.beyond, `the cost is bounded — the walk from the newest past what is held (${[p1, p2, p3].map((p) => p.calls).join(' + ')} calls) — and the thread's START, once reached, is REMEMBERED: the next presses cost 0 calls (vendorHasNoOlder, no "beyond reach" words)`, JSON.stringify(r180.presses));
+  ok(p1.calls === 2 && p2.calls === 3 && p3.calls === 4 && p4.calls === 0 && p5.calls === 0 && gateOf(p4.none) && !p4.beyond, `the cost is bounded — the walk from the newest past what is held (${[p1, p2, p3].map((p) => p.calls).join(' + ')} calls) — and the thread's START, once reached, is REMEMBERED: the next presses cost 0 calls (vendorHasNoOlder, no "beyond reach" words)`, JSON.stringify(r180.presses));
   const r320 = await olderRun(ENG, 'real320', 320);
   const b = r320.presses;
-  ok(b[2].held === 200 && b[3].got === 0 && b[3].beyond && b[3].calls === 4 && b[4].calls === 0 && b[4].beyond, 'a 320-reply thread: the walk reaches the adapter\'s bound (the newest 200), then says `olderBeyondReach` ONCE for 4 calls and answers from memory after (0 calls) — the pane words it, never a silent "start of the thread"', JSON.stringify(b));
+  ok(b[2].held === 200 && b[3].got === 0 && gateOf(b[3].beyond) && b[3].calls === 4 && b[4].calls === 0 && verdictOf(b[4].beyond), 'a 320-reply thread: the walk reaches the adapter\'s bound (the newest 200), then says `olderBeyondReach` ONCE for 4 calls and answers from memory after (0 calls) — the pane words it, never a silent "start of the thread"', JSON.stringify(b));
   // CONTROL: the engine copy whose older walk has no depth (the r2 shape) — one call per press, nothing older, ever
   const esrcO = engineSource(REPO);
   const OW = '    const w = await threadRefresh(adapterId, convId, msg, { older: true, depth: held + n });';
   const OM = '    if (none && none.count === held && now() - none.at < Drain.OLDER_MEMORY_MS) return';
   ok(esrcO.split(OW).length === 2 && esrcO.split(OM).length === 2, 'CONTROL setup: the older walk asks its depth, and its memory is read, once each');
   const pre = await olderRun(MUTE.load('src/server/channels-engine.js', esrcO.replace(OW, '    const w = await threadRefresh(adapterId, convId, msg, { older: true });').replace(OM, '    if (false && none && none.count === held) return'), 'older-no-depth'), 'pre', 180);
-  ok(pre.presses.every((p) => p.got === 0 && p.calls === 1 && p.held === 50), `CONTROL: without the depth every press re-reads the newest page — ${pre.calls} calls for 6 presses, the thread stuck at its newest 50 — the leg above would be red`, JSON.stringify(pre.presses));
+  ok(verdictOf(pre.presses.every((p) => p.got === 0 && p.calls === 1 && p.held === 50)), `CONTROL: without the depth every press re-reads the newest page — ${pre.calls} calls for 6 presses, the thread stuck at its newest 50 — the leg above would be red`, JSON.stringify(pre.presses));
   // (the thread pane's refused-older-page pin: MOVED to the fast scripts/test-channels-engine-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 {
@@ -3923,15 +3923,15 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   const pr = await eng.propose(AG, A, CID, { text: 'green', replyTo: 'rp-1' });
   const ap = await eng.approve(pr.proposal.id);
   const en = () => eng.store.index.snapshot().conversations[`${A}/${CID}`];
-  ok(ap.ok && ap.proposal.result.vendorMessageId === 'sent-1' && (en().sentBy || {})['agent:agent-1'].includes('sent-1'), 'what an agent SENT is recorded under its drafter on the conversation (`sentBy`, bounded)', JSON.stringify(en().sentBy));
+  ok(gateOf(ap.ok) && ap.proposal.result.vendorMessageId === 'sent-1' && verdictOf((en().sentBy || {})['agent:agent-1'].includes('sent-1')), 'what an agent SENT is recorded under its drafter on the conversation (`sentBy`, bounded)', JSON.stringify(en().sentBy));
   const fr = await eng.setFilter(A, CID, { rules: [{ kind: 'reply-to-mine' }] });
   const acc = await eng.setAccess(A, { kind: 'conversation', convId: CID }, [{ principal: AGP, authority: 'draft' }]);
   const wat = await eng.setWatchers(A, { kind: 'conversation', convId: CID }, [{ principal: AGP, notify: 'wake', mode: 'filtered', filterId: fr.filter.id, dailyWakeCap: 100 }]);
-  ok(fr.ok && acc.ok && wat.ok, 'a Notify… watcher on the reply-to-mine rule', JSON.stringify([fr.code, acc.code, wat.code]));
+  ok(gateOf(fr.ok) && gateOf(acc.ok) && verdictOf(wat.ok), 'a Notify… watcher on the reply-to-mine rule', JSON.stringify([fr.code, acc.code, wat.code]));
   ladder.calls.length = 0;
   await ingest(mint('unrelated chatter'), mint('thanks for the green', { replyTo: 'sent-1' }));
   const wakes = ladder.calls.filter((c) => c.cid === 'agent-1');
-  ok(wakes.length === 1 && /thanks for the green/.test(wakes[0].text) && !/unrelated chatter/.test(wakes[0].text) && /quoted your message/.test(wakes[0].text), 'a peer\'s QUOTE of what the agent SENT (a reply outside any topic) wakes it — through the ONE wake door, naming the clause ("quoted your message", owner decision A); the unrelated message does not', JSON.stringify(wakes.map((w) => w.text.slice(0, 300))));
+  ok(wakes.length === 1 && gateOf(/thanks for the green/.test(wakes[0].text)) && !/unrelated chatter/.test(wakes[0].text) && verdictOf(/quoted your message/.test(wakes[0].text)), 'a peer\'s QUOTE of what the agent SENT (a reply outside any topic) wakes it — through the ONE wake door, naming the clause ("quoted your message", owner decision A); the unrelated message does not', JSON.stringify(wakes.map((w) => w.text.slice(0, 300))));
   ladder.calls.length = 0;
   await ingest(mint('owner speaking', { author: { id: 'u-owner', name: 'Owner', isSelf: true, isBot: false } }));
   await ingest(mint('replying to the owner', { replyTo: `rp-${seqNo}` }));
@@ -3942,7 +3942,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   eng.appendSides(A, CID, [rx('sent-1', 'THUMBSUP', 'u-b', 1), rx('sent-1', 'THUMBSUP', 'u-c', 2), rx('sent-1', 'PARTY', 'u-d', 3), rx('rp-1', 'THUMBSUP', 'u-e', 4)]);
   await sleep(400);
   const dg = ladder.stash.filter((x) => x.cid === 'agent-1');
-  ok(dg.length === 1 && dg[0].fromName === 'Channels · reactions' && /^:THUMBSUP: ×2 · :PARTY: ×1 on your reply in Ops room — message sent-1/.test(dg[0].text) && ladder.calls.length === 0, 'reactions on the agent\'s message ⇒ ONE digest line on its next-turn stash (counts, never who); a reaction on somebody else\'s message ⇒ nothing; NO ladder call, NO wake', JSON.stringify([dg.map((x) => x.text), ladder.calls.length]));
+  ok(dg.length === 1 && dg[0].fromName === 'Channels · reactions' && gateOf(/^:THUMBSUP: ×2 · :PARTY: ×1 on your reply in Ops room — message sent-1/.test(dg[0].text)) && ladder.calls.length === 0, 'reactions on the agent\'s message ⇒ ONE digest line on its next-turn stash (counts, never who); a reaction on somebody else\'s message ⇒ nothing; NO ladder call, NO wake', JSON.stringify([dg.map((x) => x.text), ladder.calls.length]));
   eng.appendSides(A, CID, [rx('sent-1', 'EYES', 'u-f', 5)]);
   await sleep(400);
   ok(ladder.stash.filter((x) => x.cid === 'agent-1').length === 1, 'a second change on the same message within the hour adds NO line (≤ 1 per message per hour)');
@@ -3983,7 +3983,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
     const head2 = mint('another topic', { threadKey: 'omt_other' });
     await ingest(head2, mint('a reply in the other topic', { threadKey: 'omt_other', replyTo: head2.vendorId, root: head2.vendorId }));
     const w4 = said(/a reply in the other topic/);
-    ok(!eng.store.findRecord(A, CID, 'sent-1') && w1.length === 1 && /quoted your message/.test(w1[0].text) && w2.length === 0 && w3.length === 1 && /in a thread you are in/.test(w3[0].text) && w4.length === 0,
+    ok(!eng.store.findRecord(A, CID, 'sent-1') && w1.length === 1 && gateOf(/quoted your message/.test(w1[0].text)) && w2.length === 0 && w3.length === 1 && gateOf(/in a thread you are in/.test(w3[0].text)) && w4.length === 0,
       'owner decision A (in-thread-with-me): a QUOTE of the agent\'s message wakes ("quoted your message"); a quote of that quote — a chain it started, not its message — does NOT; a reply in a real TOPIC the owner is in wakes ("in a thread you are in"); a topic without us does not',
       JSON.stringify({ w1: w1.length, w1why: w1[0] && w1[0].text.slice(-80), w2: w2.length, w3: w3.length, w4: w4.length }));
     // (5) THE CAP UNCHANGED: 30 topic replies, one per pass, under a daily cap of 5 ⇒ 5 wakes; the rest HELD (never dropped)
@@ -3993,7 +3993,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
     for (let i = 0; i < 30; i++) await ingest(mint(`burst reply ${i} in the topic`, { threadKey: 'omt_dec', replyTo: head.vendorId, root: head.vendorId }));
     const burst = ladder.calls.filter((c) => c.cid === 'agent-1');
     const pend = (en().pending || []).filter((x) => /burst reply/.test((x.record && x.record.text) || ''));
-    ok(burst.length === 5 && burst.every((c) => /in a thread you are in/.test(c.text)) && pend.length >= 20, `the wake cap is unchanged: 30 topic replies under a daily cap of 5 ⇒ ${burst.length} wakes, ${pend.length} replies held for later (a hold, never a drop)`, JSON.stringify({ wakes: burst.length, held: pend.length }));
+    ok(burst.length === 5 && gateOf(burst.every((c) => /in a thread you are in/.test(c.text))) && pend.length >= 20, `the wake cap is unchanged: 30 topic replies under a daily cap of 5 ⇒ ${burst.length} wakes, ${pend.length} replies held for later (a hold, never a drop)`, JSON.stringify({ wakes: burst.length, held: pend.length }));
   }
   const off = await eng.proposeReaction(AG, A, CID, { msg: 'rp-1', key: 'THUMBSUP' });
   ok(!off.ok && off.code === 'react-not-available' && off.why === 'react-not-declared', 'an adapter that reads reactions but cannot add them: react-not-available (react-not-declared) — nothing created', JSON.stringify(off));
@@ -4198,9 +4198,9 @@ async function revokeRun(EM, tag) {
   ok(real.react.code === 'not-found' && !real.react.created && !real.react.leaks, 'a revoke while a reaction draft resolves the conversation\'s caps: NOTHING is created, the answer quotes nothing', JSON.stringify(real.react));
   ok(real.propose.code === 'not-found' && !real.propose.created && !real.propose.leaks && real.drafts === 0, `a revoke while a reply-in-thread draft resolves the caps: NOTHING is created (the agent's drafts: ${real.drafts})`, JSON.stringify(real.propose));
   ok(real.search.n === 0 && !real.search.leaks, 'a revoke while the agent\'s SEARCH reads the logs: no hit from the revoked conversation', JSON.stringify(real.search));
-  ok(real.madeWithAccess.every(Boolean) && real.receipts.approved.every(Boolean) && real.receipts.n === 2 && real.receipts.fate && !real.receipts.leaks, 'proposals decided AFTER the revoke: the drafter still hears the FATE of each (SENT, "a reaction") — never the title, the vendor message / thread id minted after the revoke, or the reason\'s words', JSON.stringify(real.receipts));
-  ok(real.status.n >= 3 && real.status.withheld && !real.status.leaks, `\`status\` after the revoke: every proposal of that conversation is the fate only (accessRemoved, no title, no quote, no ids) — ${real.status.n} proposals`, JSON.stringify(real.status));
-  ok(real.withdraw.ok && real.withdraw.withheld && !real.withdraw.leaks, 'the agent may still WITHDRAW its own draft after the revoke — the answer is the fate only', JSON.stringify(real.withdraw));
+  ok(gateOf(real.madeWithAccess.every(Boolean)) && gateOf(real.receipts.approved.every(Boolean)) && real.receipts.n === 2 && gateOf(real.receipts.fate) && !real.receipts.leaks, 'proposals decided AFTER the revoke: the drafter still hears the FATE of each (SENT, "a reaction") — never the title, the vendor message / thread id minted after the revoke, or the reason\'s words', JSON.stringify(real.receipts));
+  ok(real.status.n >= 3 && gateOf(real.status.withheld) && !real.status.leaks, `\`status\` after the revoke: every proposal of that conversation is the fate only (accessRemoved, no title, no quote, no ids) — ${real.status.n} proposals`, JSON.stringify(real.status));
+  ok(gateOf(real.withdraw.ok) && gateOf(real.withdraw.withheld) && !real.withdraw.leaks, 'the agent may still WITHDRAW its own draft after the revoke — the answer is the fate only', JSON.stringify(real.withdraw));
   ok(real.ownerSees === true, 'the OWNER\'s Outbox still shows the whole proposals (the card is the owner\'s)');
   ok(real.read === 'not-found' && real.readThread === 'not-found' && real.list === 0 && real.searchAfter === 0 && real.walkAfter === 'not-found', 'after the revoke: read, read --thread, list, search and the walk verb give NOTHING (the uniform not-found / no rows)', JSON.stringify([real.read, real.readThread, real.list, real.searchAfter, real.walkAfter]));
   ok(real.afterRevoke.wakes === 0 && real.afterRevoke.stash === 0 && real.withAccessWakes === 1, 'after the revoke: a peer\'s reply to what the agent sent wakes and stashes nothing for it (its reply-to-mine watcher went with its access), and a reaction on that message adds no digest line — while with access the same reply wakes it once (the leg\'s positive control)', JSON.stringify([real.afterRevoke, real.withAccessWakes]));
@@ -4214,8 +4214,8 @@ async function revokeRun(EM, tag) {
   const DS = '    const withheld = !drafterSees(cur);';
   ok(esrc.split(DV).length === 2 && esrc.split(DS).length === 2, 'CONTROL setup: the drafter\'s view and the receipt\'s withholding are each present once');
   const ctl2 = (await revokeRun(MUTE.load('src/server/channels-engine.js', esrc.replace(DV, '    return proposalView(p);').replace(DS, '    const withheld = false;'), 'no-withhold'), 'nowithhold')).out;
-  ok(ctl2.receipts.leaks && ctl2.status.leaks && ctl2.withdraw.leaks, 'CONTROL: without the withholding the receipts, status and the withdraw answer hand the revoked agent the title, the vendor ids minted after the revoke and the quotes — the three asserts above would be red', JSON.stringify([ctl2.receipts, ctl2.status, ctl2.withdraw]));
-  ok(ctl.walk.code === 'ok' && ctl.walk.leaks && ctl.refresh.code === 'ok' && ctl.refresh.leaks && ctl.react.created && ctl.propose.created && ctl.drafts === 2 && ctl.search.n >= 1, `CONTROL: without the re-asks the walk and the refresh answer with the title, TWO drafts are created for an agent without access, and the search returns the revoked conversation's messages (${ctl.search.n}) — the asserts above would be red`, JSON.stringify(ctl));
+  ok(gateOf(ctl2.receipts.leaks) && gateOf(ctl2.status.leaks) && verdictOf(ctl2.withdraw.leaks), 'CONTROL: without the withholding the receipts, status and the withdraw answer hand the revoked agent the title, the vendor ids minted after the revoke and the quotes — the three asserts above would be red', JSON.stringify([ctl2.receipts, ctl2.status, ctl2.withdraw]));
+  ok(ctl.walk.code === 'ok' && gateOf(ctl.walk.leaks) && ctl.refresh.code === 'ok' && gateOf(ctl.refresh.leaks) && gateOf(ctl.react.created) && gateOf(ctl.propose.created) && ctl.drafts === 2 && ctl.search.n >= 1, `CONTROL: without the re-asks the walk and the refresh answer with the title, TWO drafts are created for an agent without access, and the search returns the revoked conversation's messages (${ctl.search.n}) — the asserts above would be red`, JSON.stringify(ctl));
 }
 
 // ⑲b the receipt judges a GROUP-granted drafter by its groups — the live session's, else the ones recorded at draft
@@ -4264,8 +4264,8 @@ async function revokeRun(EM, tag) {
   ladder.stash.length = 0;
   await eng.approve(p2.proposal.id);
   const fate = ladder.stash.filter((x) => x.cid === 'agent-g').map((x) => x.text);
-  ok(p1.ok && p2.ok && whole.length === 1 && /Group room/.test(whole[0]) && /vendor id g-sent-1/.test(whole[0]) && !/no longer have access/.test(whole[0]), 'a GROUP-granted drafter whose session ended before the decision: its stashed receipt is WHOLE (judged by the groups recorded at draft time) — never a false "no longer have access"', JSON.stringify(whole));
-  ok(fate.length === 1 && /no longer have access/.test(fate[0]) && !/Group room|g-sent-2/.test(fate[0]), '…and once the GROUP\'s access is removed, the next receipt is the fate only', JSON.stringify(fate));
+  ok(gateOf(p1.ok) && gateOf(p2.ok) && whole.length === 1 && gateOf(/Group room/.test(whole[0])) && gateOf(/vendor id g-sent-1/.test(whole[0])) && !/no longer have access/.test(whole[0]), 'a GROUP-granted drafter whose session ended before the decision: its stashed receipt is WHOLE (judged by the groups recorded at draft time) — never a false "no longer have access"', JSON.stringify(whole));
+  ok(fate.length === 1 && gateOf(/no longer have access/.test(fate[0])) && !/Group room|g-sent-2/.test(fate[0]), '…and once the GROUP\'s access is removed, the next receipt is the fate only', JSON.stringify(fate));
 }
 
 // ⑲c verify r3 (IDENTITY outside the gate): WHAT WAITS FOR THE AGENT'S NEXT TURN IS RE-JUDGED WHEN IT IS READ. A watcher's
@@ -4354,24 +4354,24 @@ async function stashRevokeRun(EM, DM, tag, { revoke = true } = {}) {
   const DLV = require(path.join(REPO, 'src/server/conversation-deliver.js'));
   const r = await stashRevokeRun(ENG, DLV, 'real');
   ok(r.filed === 3, `CONTROL setup: three entries wait for agent-1 (the held wake, its receipt, the reaction digest) — ${r.filed}`);
-  ok(r.read === 'not-found' && !r.leaks(r.injected) && /Channel receipt — proposal p-[^:]+: SENT — you no longer have access/.test(r.injected) && !/launch code|THUMBSUP/.test(r.injected), 'after the revoke the agent\'s NEXT PROMPT carries its receipt\'s FATE only — never the held wake\'s message text, the title, the vendor id or the reaction digest', JSON.stringify(r.injected).slice(0, 600));
+  ok(r.read === 'not-found' && !r.leaks(r.injected) && gateOf(/Channel receipt — proposal p-[^:]+: SENT — you no longer have access/.test(r.injected)) && !/launch code|THUMBSUP/.test(r.injected), 'after the revoke the agent\'s NEXT PROMPT carries its receipt\'s FATE only — never the held wake\'s message text, the title, the vendor id or the reaction digest', JSON.stringify(r.injected).slice(0, 600));
   ok(!r.leaks(r.peek) && r.stashLeft === 0, 'the stash itself holds nothing a revoke took (a read of it — the strip\'s, the hand-over\'s — sees the fate only; the withheld wake + digest are gone, said in the log)', r.peek.slice(0, 400));
-  ok(r.groupWhole.length === 1 && /Secret ops room/.test(r.groupWhole[0]) && /from the group|om-sent-2/.test(r.groupWhole[0] + JSON.stringify(r.groupWhole)) && !/no longer have access/.test(r.groupWhole[0]), 'a GROUP-granted drafter whose session is not live when its stash is read: judged by the groups recorded at filing — its receipt stays WHOLE while the group keeps access', JSON.stringify(r.groupWhole).slice(0, 300));
-  ok(!r.leaks(r.groupAfter) && /no longer have access/.test(r.groupAfter), '…and once the GROUP\'s access goes, the same receipt drains as the fate only', JSON.stringify(r.groupAfter).slice(0, 300));
+  ok(r.groupWhole.length === 1 && gateOf(/Secret ops room/.test(r.groupWhole[0])) && gateOf(/from the group|om-sent-2/.test(r.groupWhole[0] + JSON.stringify(r.groupWhole))) && !/no longer have access/.test(r.groupWhole[0]), 'a GROUP-granted drafter whose session is not live when its stash is read: judged by the groups recorded at filing — its receipt stays WHOLE while the group keeps access', JSON.stringify(r.groupWhole).slice(0, 300));
+  ok(!r.leaks(r.groupAfter) && verdictOf(/no longer have access/.test(r.groupAfter)), '…and once the GROUP\'s access goes, the same receipt drains as the fate only', JSON.stringify(r.groupAfter).slice(0, 300));
   const kept = await stashRevokeRun(ENG, DLV, 'kept', { revoke: false });
-  ok(/launch code is 0417/.test(kept.injected) && /Secret ops room/.test(kept.injected) && /THUMBSUP/.test(kept.injected) && /vendor id om-sent-1/.test(kept.injected), 'POSITIVE CONTROL: with access kept the same next prompt carries all three whole (the gate withholds only what a revoke took)', JSON.stringify(kept.injected).slice(0, 400));
+  ok(gateOf(/launch code is 0417/.test(kept.injected)) && gateOf(/Secret ops room/.test(kept.injected)) && gateOf(/THUMBSUP/.test(kept.injected)) && verdictOf(/vendor id om-sent-1/.test(kept.injected)), 'POSITIVE CONTROL: with access kept the same next prompt carries all three whole (the gate withholds only what a revoke took)', JSON.stringify(kept.injected).slice(0, 400));
   // CONTROLS: the ladder copy that never asks the gate, and the engine copy whose producers file no `about`
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   const G1 = '  function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).filter((e) => !isKept(cid, e)); }';   // B-f276: a kept entry is not handed out
   const G2 = "  function stashPeek(cid, { memory = false } = {}) { const hh = heldHold(); if (hh && !memory) hh.refuse('reading the messages waiting for this conversation'); gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }";   // r3919: the peek of memory for a road that needs a hit   // r3003 (a): the hold's refusal first (a held stash is «unknown»)
   ok(dsrc.split(G1).length === 2 && dsrc.split(G2).length === 2, 'CONTROL setup: both reads ask the gate, once each');
   const noGate = await stashRevokeRun(ENG, MUTE.load('src/server/conversation-deliver.js', editAnchor(editAnchor(dsrc, G1, '  function stashEntries(cid) { return (stash[cid] || []).slice(); }', "src/server/conversation-deliver.js"), G2, "  function stashPeek(cid, { memory = false } = {}) { const hh = heldHold(); if (hh && !memory) hh.refuse('reading the messages waiting for this conversation'); return (stash[cid] || []).map((e) => ({ ...e })); }", "src/server/conversation-deliver.js"), 'no-stash-gate'), 'nogate');
-  ok(noGate.read === 'not-found' && noGate.leaks(noGate.injected) && /launch code is 0417/.test(noGate.injected), 'CONTROL: a ladder that never asks the gate hands the revoked agent the message text, the title and the vendor id (the reproduction) — the asserts above would be red', JSON.stringify(noGate.injected).slice(0, 300));
+  ok(noGate.read === 'not-found' && gateOf(noGate.leaks(noGate.injected)) && verdictOf(/launch code is 0417/.test(noGate.injected)), 'CONTROL: a ladder that never asks the gate hands the revoked agent the message text, the title and the vendor id (the reproduction) — the asserts above would be red', JSON.stringify(noGate.injected).slice(0, 300));
   const esrc = engineSource(REPO);
   const aboutSites = esrc.match(/, about: stashAbout\(/g) || [];
   ok(aboutSites.length === 7, `CONTROL setup: the seven channel producers file \`about\` (${aboutSites.length}) — lane channel-agent-watch added the next-turn notification, lane channel-record-revisions the recall / edit note, lane judged-watch-state the once-a-day judged-rules line`);
   const noAbout = await stashRevokeRun(MUTE.load('src/server/channels-engine.js', esrc.replace(/, about: stashAbout\(\{[^)]*\}\)/g, ''), 'no-about'), DLV, 'noabout');
-  ok(noAbout.leaks(noAbout.injected), 'CONTROL: producers that file no `about` leave the gate nothing to judge — the revoked agent reads it all', JSON.stringify(noAbout.injected).slice(0, 300));
+  ok(verdictOf(noAbout.leaks(noAbout.injected)), 'CONTROL: producers that file no `about` leave the gate nothing to judge — the revoked agent reads it all', JSON.stringify(noAbout.injected).slice(0, 300));
   // THE CENSUS: every stashFor producer in the engine files `about`
   const producers = esrc.match(/deliver\.stashFor\(/g) || [];
   ok(producers.length === aboutSites.length, `every deliver.stashFor producer in the engine files \`about\` (${producers.length} producers, ${aboutSites.length} with about) — a new producer without it is red`);
@@ -4558,8 +4558,8 @@ async function capsRun(EM, tag) {
 }
 {
   const r = await capsRun(ENG, 'real');
-  ok(r.inFlight === 1 && r.storm === 1 && r.ok, `20 concurrent reaction refreshes on a conversation whose convCaps went stale: ONE chat lookup (${r.storm}), every caller answered`, JSON.stringify(r));
-  ok(r.during === 2 && r.approveOk, 'approve re-resolves on its OWN lookup (asked after the decision), and a refresh after it joins that one — 2 lookups for the three callers', JSON.stringify(r));
+  ok(r.inFlight === 1 && r.storm === 1 && verdictOf(r.ok), `20 concurrent reaction refreshes on a conversation whose convCaps went stale: ONE chat lookup (${r.storm}), every caller answered`, JSON.stringify(r));
+  ok(r.during === 2 && verdictOf(r.approveOk), 'approve re-resolves on its OWN lookup (asked after the decision), and a refresh after it joins that one — 2 lookups for the three callers', JSON.stringify(r));
   const esrc = engineSource(REPO);
   const SF = '    const f = join ? convCapsFlights.get(k) : null;';
   ok(esrc.split(SF).length === 2, 'CONTROL setup: the lookup joins the flight in one place');
@@ -4608,12 +4608,12 @@ console.log('\n㉑ verify r3 (money/memory): the per-account memories — the ce
   ok(lit.length > 0 && names.size >= 9 && !unlisted.length, `(a) the census: every per-account Map / Set on the live entry is on the table with its bound (${[...names].sort().join(', ')})${unlisted.length ? ' — UNLISTED: ' + unlisted.join(', ') : ''}`);
   const specs = {};
   for (const m of esrc.matchAll(/^    (\w+): Object\.freeze\(\{ max: (\d+), nested:/gm)) specs[m[1]] = Number(m[2]);
-  ok(specs.rx === 20000 && specs.myRids === 20000 && specs.th === 5000 && /const LIVE_MEM_KEEP_MS = 30 \* 86400e3;/.test(esrc), `(a) the LIVE_MEMS rows and their caps (rx ${specs.rx}, myRids ${specs.myRids}, th ${specs.th}) + the 30-day trim`, JSON.stringify(specs));
-  ok(['rx', 'myRids', 'th'].every((k) => TABLE[k].startsWith('LIVE_MEMS') && specs[k] > 0), '(a) every lane container the table names LIVE_MEMS is a row of it');
+  ok(specs.rx === 20000 && specs.myRids === 20000 && specs.th === 5000 && verdictOf(/const LIVE_MEM_KEEP_MS = 30 \* 86400e3;/.test(esrc)), `(a) the LIVE_MEMS rows and their caps (rx ${specs.rx}, myRids ${specs.myRids}, th ${specs.th}) + the 30-day trim`, JSON.stringify(specs));
+  ok(verdictOf(['rx', 'myRids', 'th'].every((k) => TABLE[k].startsWith('LIVE_MEMS') && specs[k] > 0)), '(a) every lane container the table names LIVE_MEMS is a row of it');
   const planted = esrc.replace('  const NO_MEM = new Map();', '  const NO_MEM = new Map();\n  const plantedMem = (e) => { if (!e.fooMemory) e.fooMemory = new Map(); return e.fooMemory; };');
   const pcode = planted.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l)).join('\n');
   const pn = new Set(); for (const m of pcode.matchAll(/if \(!e\.(\w+)\) e\.\1 = new (?:Map|Set)/g)) pn.add(m[1]);
-  ok(pn.has('fooMemory') && !TABLE.fooMemory, 'CONTROL: a new per-account map planted in a copy is found by the census and is not on the table (red)');
+  ok(gateOf(pn.has('fooMemory')) && !TABLE.fooMemory, 'CONTROL: a new per-account map planted in a copy is found by the census and is not on the table (red)');
 
   const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
   const memRun = async (EM, tag, { rows = 45, hold = false } = {}) => {
@@ -4668,12 +4668,12 @@ console.log('\n㉑ verify r3 (money/memory): the per-account memories — the ce
   };
   const real = await memRun(ENG, 'real');
   ok(real.beforeTrim.rx >= 45 && real.beforeTrim.myRids >= 1 && real.beforeTrim.th === 1, '(b) the real module: the three memories fill as a window lists reactions, the owner reacts and a thread is walked', JSON.stringify(real.beforeTrim));
-  ok(real.afterTrim.rx === 1 && real.afterTrim.myRids <= 1 && real.afterTrim.th === 0 && real.unreactAfterTrim.ok, '(b) 31 days on, the hourly sweep drops every row older than 30 days (only the row just listed stays); an unreact whose id was forgotten still works (it lists first)', JSON.stringify([real.afterTrim, real.unreactAfterTrim.ok]));
+  ok(real.afterTrim.rx === 1 && real.afterTrim.myRids <= 1 && real.afterTrim.th === 0 && verdictOf(real.unreactAfterTrim.ok), '(b) 31 days on, the hourly sweep drops every row older than 30 days (only the row just listed stays); an unreact whose id was forgotten still works (it lists first)', JSON.stringify([real.afterTrim, real.unreactAfterTrim.ok]));
   const CAPL = '    rx: Object.freeze({ max: 20000, nested: true,';
   ok(esrc.split(CAPL).length === 2, 'CONTROL setup: the rx cap is spelled once');
   const small = await memRun(MUTE.load('src/server/channels-engine.js', esrc.replace(CAPL, '    rx: Object.freeze({ max: 30, nested: true,'), 'rx-cap-30'), 'small', { rows: 60, hold: true });
   ok(small.afterFill.rx <= 30 + 20 && small.beforeTrim.rx <= 30 && small.oldestAsOf === null && small.newestAsOf > 0, `(c) a copy with the rx cap cut to 30: 62 messages listed ⇒ the memory holds ≤ 30 after each batch settles (${small.beforeTrim.rx}); the least recently listed went first (r-0 forgotten, the newest kept)`, JSON.stringify(small));
-  ok(small.heldKept && small.heldKept['held-1'] > 0 && small.heldKept['held-2'] > 0, '(c) the OLDEST rows — a batch IN FLIGHT while the others filled the memory past the cap — were never dropped; they land with their answer', JSON.stringify(small.heldKept));
+  ok(gateOf(small.heldKept) && small.heldKept['held-1'] > 0 && small.heldKept['held-2'] > 0, '(c) the OLDEST rows — a batch IN FLIGHT while the others filled the memory past the cap — were never dropped; they land with their answer', JSON.stringify(small.heldKept));
   const BL = '  function boundLiveMem(e, t = now()) {\n    if (!e) return;';
   ok(esrc.split(BL).length === 2, 'CONTROL setup: the bound is one function');
   const none = await memRun(MUTE.load('src/server/channels-engine.js', esrc.replace(CAPL, '    rx: Object.freeze({ max: 30, nested: true,').replace(BL, '  function boundLiveMem(e, t = now()) {\n    if (e) return;'), 'rx-unbounded'), 'none', { rows: 60 });
@@ -4806,19 +4806,19 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   writeRec(dA, ['search:message', 'im:message'], T0 - 3600e3);
   const { eng, events } = mkFeedEng(dA, W, { deliver: ladder });
   const acc = await eng.setScopeAssignment('feedy', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker 1' }, mode: 'all', notify: 'wake', dailyWakeCap: 100 });
-  ok(acc.ok, 'setup: the WHOLE ACCOUNT is granted to an agent (access + wake) — owner decision 2 says that includes private chats', JSON.stringify(acc).slice(0, 200));
+  ok(verdictOf(acc.ok), 'setup: the WHOLE ACCOUNT is granted to an agent (access + wake) — owner decision 2 says that includes private chats', JSON.stringify(acc).slice(0, 200));
   const r1 = await eng.pass('feedy');
   await eng.settleWakes();
   const ch1 = W.calls.changes;
-  ok(r1.ok && ch1.length === 2 && ch1[0].chatType === null && ch1[0].to === T0 && ch1[0].from === T0 - 60e3 && ch1[1].chatType === 'p2p' && ch1[1].from === T0 - 7 * 86400e3 && ch1[1].to === T0 - 60e3, 'the first run: ONE steady page [now − 60 s, now] (the news begins now), then the single-chat catch-up [now − 7 d, now − 60 s] (p2p only) — news first, inside the same pass', JSON.stringify(ch1));
+  ok(gateOf(r1.ok) && ch1.length === 2 && ch1[0].chatType === null && ch1[0].to === T0 && ch1[0].from === T0 - 60e3 && ch1[1].chatType === 'p2p' && ch1[1].from === T0 - 7 * 86400e3 && ch1[1].to === T0 - 60e3, 'the first run: ONE steady page [now − 60 s, now] (the news begins now), then the single-chat catch-up [now − 7 d, now − 60 s] (p2p only) — news first, inside the same pass', JSON.stringify(ch1));
   const ann = en(eng, 'dm-ann');
-  ok(ann && ann.kind === 'dm' && ann.bornBy === 'feed' && ann.title === 'Ann' && ann.readAt === T0 && ann.newsSince === T0 && !ann.feedOwedAt && (ann.unread || 0) === 0 && logHas(eng, 'dm-ann', 'ann-1'), 'a single chat the LISTING never names is BORN by the feed: kind dm, named through describe ("Ann"), read to the first run (backlog), fetched once (its owed mark cleared by the complete walk)', JSON.stringify(ann).slice(0, 400));
+  ok(gateOf(ann) && ann.kind === 'dm' && ann.bornBy === 'feed' && ann.title === 'Ann' && ann.readAt === T0 && ann.newsSince === T0 && !ann.feedOwedAt && (ann.unread || 0) === 0 && verdictOf(logHas(eng, 'dm-ann', 'ann-1')), 'a single chat the LISTING never names is BORN by the feed: kind dm, named through describe ("Ann"), read to the first run (backlog), fetched once (its owed mark cleared by the complete walk)', JSON.stringify(ann).slice(0, 400));
   ok(ladder.calls.length === 0 && ladder.stash.length === 0, 'the catch-up birth and the first walks WAKE NOBODY (the delivered ledger is empty) — backlog is never news');
   const dg = eng.digest();
   const annRow = dg.conversations.find((c) => c.key === 'feedy/dm-ann');
-  ok(annRow && annRow.title === 'Ann' && dg.conversations.every((c) => c.title !== c.id), 'the digest names every row — no raw vendor id as a title', JSON.stringify(dg.conversations.map((c) => [c.id, c.title])));
+  ok(gateOf(annRow) && annRow.title === 'Ann' && verdictOf(dg.conversations.every((c) => c.title !== c.id)), 'the digest names every row — no raw vendor id as a title', JSON.stringify(dg.conversations.map((c) => [c.id, c.title])));
   const fv = eng.adapterView(eng.adapterRecords().adapters[0]).feed;
-  ok(fv && fv.state === 'measuring' && fv.catchUp && fv.catchUp.done && fv.catchUp.found === 1 && fv.counters.births === 1, 'the account view: the feed measuring, the catch-up done ("Found 1 single chat")', JSON.stringify(fv).slice(0, 300));
+  ok(gateOf(fv) && fv.state === 'measuring' && gateOf(fv.catchUp) && gateOf(fv.catchUp.done) && fv.catchUp.found === 1 && fv.counters.births === 1, 'the account view: the feed measuring, the catch-up done ("Found 1 single chat")', JSON.stringify(fv).slice(0, 300));
 
   // ── (B) A LIVE single-chat message after the first run: unread 1, a wake THROUGH THE ACCOUNT GRAIN (owner decision 2)
   clock += 40e3;
@@ -4828,7 +4828,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   await eng.settleWakes();
   const ann2 = en(eng, 'dm-ann');
   const wk = ladder.calls.filter((c) => /dm-ann|Ann/.test(String(c.text || '')) || (c.opts && JSON.stringify(c.opts).includes('dm-ann')));
-  ok(W.calls.changes.length === nCh + 1 && logHas(eng, 'dm-ann', 'ann-live') && ann2.unread === 1 && !ann2.feedOwedAt, 'one steady page finds the live single-chat message; its conversation is fetched in the SAME pass (owed ⇒ ahead of the plain rows); unread 1; the mark cleared', JSON.stringify({ unread: ann2.unread, owed: ann2.feedOwedAt }));
+  ok(W.calls.changes.length === nCh + 1 && gateOf(logHas(eng, 'dm-ann', 'ann-live')) && ann2.unread === 1 && !ann2.feedOwedAt, 'one steady page finds the live single-chat message; its conversation is fetched in the SAME pass (owed ⇒ ahead of the plain rows); unread 1; the mark cleared', JSON.stringify({ unread: ann2.unread, owed: ann2.feedOwedAt }));
   ok(ladder.calls.length === 1 && wk.length === 1, `the whole-account grant WAKES the agent on the private chat (owner decision 2 — a single chat is covered like any conversation): ${ladder.calls.length} wake`, JSON.stringify(ladder.calls.map((c) => String(c.text).slice(0, 80))));
 
   // ── (C) A THREAD REPLY: ONE thread walk, charged to the timer (the vendor named the thread in this conversation)
@@ -4839,7 +4839,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   await eng.pass('feedy');
   const b1 = eng.budgetOf('feedy');
   const ops = en(eng, 'g-ops');
-  ok(W.calls.thread.length === th0 + 1 && W.calls.thread[th0] === 'g-ops#omt_1' && logHas(eng, 'g-ops', 'ops-th-1') && !(ops.threadOwed && ops.threadOwed.omt_1) && !ops.feedOwedAt, 'a thread reply the search found is walked ONCE (its thread named by the vendor in this conversation), appended to the conversation\'s log; both marks cleared (U6)', JSON.stringify({ calls: W.calls.thread, owed: ops.threadOwed }));
+  ok(W.calls.thread.length === th0 + 1 && W.calls.thread[th0] === 'g-ops#omt_1' && gateOf(logHas(eng, 'g-ops', 'ops-th-1')) && !(ops.threadOwed && ops.threadOwed.omt_1) && !ops.feedOwedAt, 'a thread reply the search found is walked ONCE (its thread named by the vendor in this conversation), appended to the conversation\'s log; both marks cleared (U6)', JSON.stringify({ calls: W.calls.thread, owed: ops.threadOwed }));
   ok(b1.spentBy.timer > b0.spentBy.timer && b1.spentBy.owner === b0.spentBy.owner && b1.spentBy.agent === b0.spentBy.agent, 'the walk is charged to the TIMER (rule 20a\'s one exception — the feed named it), never the owner\'s or the agents\' share', JSON.stringify([b0.spentBy, b1.spentBy]));
 
   // ── (D) A FEED 429: the per-conversation pass still runs; no account back-off, no failure count
@@ -4851,7 +4851,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   const r4 = await eng.pass('feedy');
   const rec4 = eng.adapterRecords().adapters[0];
   const v4 = eng.adapterView(rec4);
-  ok(r4.ok && W.calls.history.slice(h0).includes('g-dev') && logHas(eng, 'g-dev', 'dev-2') && !v4.backoff && (rec4.consecutiveFailures || 0) === 0 && v4.feed.state === 'backoff' && Math.abs(Number(rec4.feed.backoffUntil) - (clock + 20e3)) < 2000, 'a 429 on the SEARCH is the feed\'s own wait (the vendor\'s 20 s): the pass goes on and fetches its due row, the account is not backed off, nothing counts as a failure', JSON.stringify({ ok: r4.ok, backoff: v4.backoff, feed: v4.feed.state, until: rec4.feed.backoffUntil - clock }));
+  ok(gateOf(r4.ok) && gateOf(W.calls.history.slice(h0).includes('g-dev')) && gateOf(logHas(eng, 'g-dev', 'dev-2')) && !v4.backoff && (rec4.consecutiveFailures || 0) === 0 && v4.feed.state === 'backoff' && Math.abs(Number(rec4.feed.backoffUntil) - (clock + 20e3)) < 2000, 'a 429 on the SEARCH is the feed\'s own wait (the vendor\'s 20 s): the pass goes on and fetches its due row, the account is not backed off, nothing counts as a failure', JSON.stringify({ ok: r4.ok, backoff: v4.backoff, feed: v4.feed.state, until: rec4.feed.backoffUntil - clock }));
 
   // ── (E) A RESTART BETWEEN THE FEED AND THE FETCH: the owed row is fetched by the next process
   clock += 60e3;
@@ -4865,7 +4865,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   const E2 = mkFeedEng(dA, W, { deliver: ladder });
   const eng2 = E2.eng;
   await eng2.pass('feedy', { force: false });
-  ok(logHas(eng2, 'g-dev', 'dev-3') && !en(eng2, 'g-dev').feedOwedAt, 'THE RESTART: the durable owed mark is on the index — the next process fetches g-dev and clears it (no hit is lost with the process)', JSON.stringify(en(eng2, 'g-dev')).slice(0, 200));
+  ok(gateOf(logHas(eng2, 'g-dev', 'dev-3')) && !en(eng2, 'g-dev').feedOwedAt, 'THE RESTART: the durable owed mark is on the index — the next process fetches g-dev and clears it (no hit is lost with the process)', JSON.stringify(en(eng2, 'g-dev')).slice(0, 200));
 
   // ── (F) OWED BEFORE CURSOR: a thrown index write ⇒ the cursor never moved ⇒ the restart re-reads the window, no loss
   //       CONTROL: a copy that persists the cursor FIRST loses the hit (the window moved past it)
@@ -4895,7 +4895,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return { found: logHas(b.eng, 'g-ops', 'c-ops-hit'), cursorOnDisk: onDisk.cursorAt, windowOnDisk: onDisk.window };
   };
   const real = await crashRun(ENG, 'real');
-  ok(real.found && real.windowOnDisk && real.windowOnDisk.to > real.cursorOnDisk, 'OWED BEFORE CURSOR: the owed write threw ⇒ the cursor on disk never moved (the window still in flight) ⇒ the restart re-reads the window and finds the hit', JSON.stringify(real));
+  ok(gateOf(real.found) && gateOf(real.windowOnDisk) && real.windowOnDisk.to > real.cursorOnDisk, 'OWED BEFORE CURSOR: the owed write threw ⇒ the cursor on disk never moved (the window still in flight) ⇒ the restart re-reads the window and finds the hit', JSON.stringify(real));
   const esrcF = engineSource(REPO);
   const OWED = '    const observed = t;\n    const born = [];';
   ok(esrcF.split(OWED).length === 2, 'CONTROL setup: the owed write\'s head is spelled once');
@@ -4912,7 +4912,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   clock += 31e3;
   await N.eng.pass('feedy');
   const vN = N.eng.adapterView(N.eng.adapterRecords().adapters[0]).feed;
-  ok(Wn.calls.changes.length === 0 && vN.state === 'off' && vN.why === 'scope-not-granted' && logHas(N.eng, 'g-ops', 'n-1'), 'THE GATE IS THE HELD SCOPE: a sign-in without search:message sends ZERO searches (never a probing call); the conversations are polled as before', JSON.stringify(vN).slice(0, 200));
+  ok(Wn.calls.changes.length === 0 && vN.state === 'off' && vN.why === 'scope-not-granted' && verdictOf(logHas(N.eng, 'g-ops', 'n-1')), 'THE GATE IS THE HELD SCOPE: a sign-in without search:message sends ZERO searches (never a probing call); the conversations are polled as before', JSON.stringify(vN).slice(0, 200));
 
   // ── (H) AN IGNORED TIME RANGE: ONE page, parked by name, no owed mark from it, no page after
   const Wi = mkWorld(); for (let i = 0; i < 80; i++) addMsg(Wi, 'g-ops', `i-${i}`, clock - 30 * 86400e3 + i * 60e3);
@@ -4951,7 +4951,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const un1 = await unreadable(ENG, 'real');
-  ok(un1.searches === 1 && un1.state === 'refused' && un1.why === 'shape' && JSON.stringify(un1.fields) === JSON.stringify([['meta_data.create_time']]) && un1.malformed === 30 && un1.polled, `lark-p2p: a search whose every hit is unreadable is parked after ONE page (${un1.searches}) by name, with the field — no search after; the group is still polled`, JSON.stringify(un1));
+  ok(un1.searches === 1 && un1.state === 'refused' && un1.why === 'shape' && JSON.stringify(un1.fields) === JSON.stringify([['meta_data.create_time']]) && un1.malformed === 30 && verdictOf(un1.polled), `lark-p2p: a search whose every hit is unreadable is parked after ONE page (${un1.searches}) by name, with the field — no search after; the group is still polled`, JSON.stringify(un1));
   ok(un1.words === "Lark's search answers, but its hits have a shape this version does not read (missing or unreadable: meta_data.create_time) — the single-chat feed is off until an update; each chat is checked on its own", 'lark-p2p: …and the account card SAYS it (the owner\'s card said nothing for 241 260 hits)', un1.words);
   const PARKL = '    if (sv.park) {';
   ok(esrcF.split(PARKL).length === 2, 'CONTROL setup: the shape park is spelled once');
@@ -4991,9 +4991,9 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const gw1 = await gateway(ENG, 'real');
-  ok(gw1.three && gw1.three.state === 'backoff' && gw1.three.why === 'failed' && gw1.three.strikes === 3 && gw1.three.kind === 'transport' && gw1.three.words === `Lark's search did not answer 3× in a row — each chat is checked on its own until ${clkE(gw1.three.until)}`, `lark-p2p: three 504s in a row ⇒ the card says the count and the END: "${gw1.three.words}"`, JSON.stringify(gw1.three));
-  ok(gw1.three && gw1.retried === 2, `lark-p2p: after the back-off the feed retries by itself (${gw1.retried} search(es): an answer, then the lone 504) — never silenced`, JSON.stringify(gw1));
-  ok(gw1.after.left === 0 && gw1.after.inFlight && gw1.after.strikes === 1 && gw1.after.waitSec > 0 && gw1.after.waitSec <= 30, `lark-p2p: an ANSWERED page ends the run while its window is still in flight — the next lone 504 is strike 1, a ${gw1.after.waitSec} s wait (never the 15-minute top)`, JSON.stringify(gw1.after));
+  ok(gateOf(gw1.three) && gw1.three.state === 'backoff' && gw1.three.why === 'failed' && gw1.three.strikes === 3 && gw1.three.kind === 'transport' && gw1.three.words === `Lark's search did not answer 3× in a row — each chat is checked on its own until ${clkE(gw1.three.until)}`, `lark-p2p: three 504s in a row ⇒ the card says the count and the END: "${gw1.three.words}"`, JSON.stringify(gw1.three));
+  ok(gateOf(gw1.three) && gw1.retried === 2, `lark-p2p: after the back-off the feed retries by itself (${gw1.retried} search(es): an answer, then the lone 504) — never silenced`, JSON.stringify(gw1));
+  ok(gw1.after.left === 0 && gateOf(gw1.after.inFlight) && gw1.after.strikes === 1 && gw1.after.waitSec > 0 && gw1.after.waitSec <= 30, `lark-p2p: an ANSWERED page ends the run while its window is still in flight — the next lone 504 is strike 1, a ${gw1.after.waitSec} s wait (never the 15-minute top)`, JSON.stringify(gw1.after));
   const RESETL = "    if (f.strikeWhy !== 'token' && (Number(f.strikes) > 0 || f.strikeWhy)) { f.strikes = 0; f.strikeWhy = null; }";
   ok(esrcF.split(RESETL).length === 2, 'CONTROL setup: the answered-page reset is spelled once');
   const gw0 = await gateway(MUTE.load('src/server/channels-engine.js', esrcF.replace(RESETL, ''), 'feed-504-noreset'), 'mut');
@@ -5032,8 +5032,8 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const rh1 = await readerHeal(ENG, 'real');
-  ok(rh1.rev === 2 && rh1.malformed === 0 && rh1.strikes === 0 && rh1.catchUp && rh1.born === 2 && rh1.said, `lark-p2p: the production row, under a reader of revision 2, starts over at boot (said once in the log): the catch-up finds both single chats (the 2-day-old one and the one from 5 hours ago — inside the stale gap), both BORN (${JSON.stringify(rh1.titles)}), the old reader's counters and strikes gone`, JSON.stringify(rh1));
-  ok(rh1.read && rh1.woken === 0, 'lark-p2p: …born READ — the first run of a reader that works is now: backlog, never news, zero wakes (the account grain is granted to an agent)', JSON.stringify(rh1));
+  ok(rh1.rev === 2 && rh1.malformed === 0 && rh1.strikes === 0 && gateOf(rh1.catchUp) && rh1.born === 2 && verdictOf(rh1.said), `lark-p2p: the production row, under a reader of revision 2, starts over at boot (said once in the log): the catch-up finds both single chats (the 2-day-old one and the one from 5 hours ago — inside the stale gap), both BORN (${JSON.stringify(rh1.titles)}), the old reader's counters and strikes gone`, JSON.stringify(rh1));
+  ok(gateOf(rh1.read) && rh1.woken === 0, 'lark-p2p: …born READ — the first run of a reader that works is now: backlog, never news, zero wakes (the account grain is granted to an agent)', JSON.stringify(rh1));
   // verify r3 (the revert table): the heal also drops the OLD reader's last-hour ring — its unreadable hits were the old
   // reader's, and the card's "N search hits could not be read in the last hour" would otherwise blame the new reader for an
   // hour after the update. CONTROL: the copy whose heal keeps the ring says 30.
@@ -5041,11 +5041,11 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   const HEALC = "f.counters = { ...c, malformed: 0, malformedFields: [], missedTypes: {}, unreadableRecent: [] };";
   ok(esrcF.split(HEALC).length === 2, 'CONTROL setup: the heal\'s counter reset is spelled once');
   const rh9 = await readerHeal(MUTE.load('src/server/channels-engine.js', esrcF.replace(HEALC, "f.counters = { ...c, malformed: 0, malformedFields: [], missedTypes: {} };"), 'feed-reader-ringkept'), 'mut-ring');
-  ok(rh9.born === 2 && rh9.recent === 30 && /^30 search hits could not be read in the last hour/.test(rh9.unreadableLine), `CONTROL: the copy whose heal keeps the ring still heals the row (${rh9.born} born) but the card says "${rh9.unreadableLine}" for the OLD reader's hits — the leg above would be red`, JSON.stringify({ recent: rh9.recent, line: rh9.unreadableLine }));
+  ok(rh9.born === 2 && rh9.recent === 30 && verdictOf(/^30 search hits could not be read in the last hour/.test(rh9.unreadableLine)), `CONTROL: the copy whose heal keeps the ring still heals the row (${rh9.born} born) but the card says "${rh9.unreadableLine}" for the OLD reader's hits — the leg above would be red`, JSON.stringify({ recent: rh9.recent, line: rh9.unreadableLine }));
   const HEALL = '    feedReaderHeal(rec);   // lane lark-p2p: an old reader\'s back-off / park never holds the new reader off';
   const HEALB = '      for (const rec of adapterRecords().adapters) if (feedReaderHeal(rec)) healed++;';
   const HEALR = '    else feedReaderHeal(rec);';
-  ok([HEALL, HEALB, HEALR].every((x) => esrcF.split(x).length === 2), 'CONTROL setup: the heal\'s three call sites are spelled once');
+  ok(verdictOf([HEALL, HEALB, HEALR].every((x) => esrcF.split(x).length === 2)), 'CONTROL setup: the heal\'s three call sites are spelled once');
   const rh0 = await readerHeal(MUTE.load('src/server/channels-engine.js', esrcF.replace(HEALL, '').replace(HEALB, '').replace(HEALR, ''), 'feed-reader-noheal'), 'mut');
   ok(rh0.searches === 0 && rh0.born === 0, `CONTROL: the copy without the heal waits out the old reader's 90-minute back-off — ${rh0.searches} searches, ${rh0.born} single chats born`, JSON.stringify(rh0));
 
@@ -5071,7 +5071,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const gd1 = await gapWiden(ENG, 'real');
-  ok(gd1.born && gd1.cu && gd1.cu.done && gd1.cu.found === 1 && gd1.cu.gap, 'lark-p2p: a park lifted after a day widens its PENDING catch-up by the gap — the single chat whose only message is 5 hours old is born (it was in neither span)', JSON.stringify(gd1));
+  ok(gateOf(gd1.born) && gateOf(gd1.cu) && gateOf(gd1.cu.done) && gd1.cu.found === 1 && verdictOf(gd1.cu.gap), 'lark-p2p: a park lifted after a day widens its PENDING catch-up by the gap — the single chat whose only message is 5 hours old is born (it was in neither span)', JSON.stringify(gd1));
   const WIDENL = "      } else if (w.gap && decl.catchUp && f.catchUp && !f.catchUp.done && Number(w.gap.to) > Number(f.catchUp.to)) {";
   ok(esrcF.split(WIDENL).length === 2, 'CONTROL setup: the widening is spelled once');
   const gd0 = await gapWiden(MUTE.load('src/server/channels-engine.js', esrcF.replace(WIDENL, '      } else if (false) {'), 'feed-gap-dropped'), 'mut');
@@ -5102,7 +5102,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const el1 = await endless(ENG, 'real');
-  ok(el1.searches === el1.expected && el1.state === 'refused' && el1.why === 'time-range-ignored' && !el1.inFlight && /ignored its time window/.test(el1.words), `lark-p2p (verify r1): a search that answers has_more for ever (fresh ids, total 0) is parked by name at the count's ceiling — ${el1.searches} pages of one ${el1.lenS} s window (${el1.lenS} × 50 / 30 + 1), then no search for 24 h: "${el1.words}"`, JSON.stringify(el1));
+  ok(el1.searches === el1.expected && el1.state === 'refused' && el1.why === 'time-range-ignored' && !el1.inFlight && verdictOf(/ignored its time window/.test(el1.words)), `lark-p2p (verify r1): a search that answers has_more for ever (fresh ids, total 0) is parked by name at the count's ceiling — ${el1.searches} pages of one ${el1.lenS} s window (${el1.lenS} × 50 / 30 + 1), then no search for 24 h: "${el1.words}"`, JSON.stringify(el1));
   const CEILL = "    if (paged > most) return { ok: false, park: 'time-range-ignored', why: `the window has run to";
   const fsrcF = fs.readFileSync(path.join(REPO, 'src/channel-feed.js'), 'utf-8');
   ok(fsrcF.split(CEILL).length === 2, 'CONTROL setup: the count\'s ceiling is spelled once');
@@ -5112,7 +5112,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     fs.writeFileSync(feedNoCeil, editAnchor(fsrcF, CEILL, "    if (false) return { ok: false, park: 'time-range-ignored', why: `the window has run to", "src/channel-feed.js"));
     const engOnCopy = MUTE.load('src/server/channels-engine.js', esrcF.replace("require('../channel-feed.js')", `require(${JSON.stringify(feedNoCeil)})`), 'feed-engine-no-ceiling');
     const el0 = await endless(engOnCopy, 'mut');
-    ok(el0.searches >= 380 && el0.state !== 'refused' && el0.inFlight, `CONTROL: the copy without the ceiling pages the endless window for the whole 40 minutes (${el0.searches} pages, still in flight, the card "${el0.words}") — the production's 8 043 pages`, JSON.stringify(el0));
+    ok(el0.searches >= 380 && el0.state !== 'refused' && verdictOf(el0.inFlight), `CONTROL: the copy without the ceiling pages the endless window for the whole 40 minutes (${el0.searches} pages, still in flight, the card "${el0.words}") — the production's 8 043 pages`, JSON.stringify(el0));
   }
 
   // (p2p-f, verify r1) TWO STRAY UNREADABLE ITEMS IN A QUIET MINUTE: the 60 s overlap on a 30 s tick reads them on ~3
@@ -5239,7 +5239,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   {
     const csrc = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
     const LONEL = "  const lone = f.backoffWhy === 'failed' && (Number(f.strikes) || 0) < FEED_LOUD_STRIKES && freshOk;";
-    ok(csrc.split(LONEL).length === 2 && /const FAILURES_BEFORE_LOUD = 3;/.test(esrcF) && Cw.FEED_LOUD_STRIKES === 3, 'CONTROL setup: the lone-miss rule is spelled once; channel-caps\' FEED_LOUD_STRIKES is the engine\'s FAILURES_BEFORE_LOUD');
+    ok(csrc.split(LONEL).length === 2 && gateOf(/const FAILURES_BEFORE_LOUD = 3;/.test(esrcF)) && Cw.FEED_LOUD_STRIKES === 3, 'CONTROL setup: the lone-miss rule is spelled once; channel-caps\' FEED_LOUD_STRIKES is the engine\'s FAILURES_BEFORE_LOUD');
     const capsNoLone = MUTE.load('src/channel-caps.js', editAnchor(csrc, LONEL, '  const lone = false;', "src/channel-caps.js"), 'caps-no-lone-miss');
     const al0 = await alternate(ENG, 'mut', capsNoLone);
     ok(al0.downShare >= 90, `CONTROL: the caps copy without the lone-miss rule reads "not answering" on ${al0.downShare} % of ticks while a window completes every 30 s`, JSON.stringify(al0));
@@ -5263,13 +5263,13 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   const recM = Mx.eng.adapterRecords().adapters[0];
   const vM = Mx.eng.adapterView(recM).feed;
   const cadDev = Mx.eng.cadenceOf('feedy', 'g-dev');
-  ok(vM.state === 'carrying' && vM.measured.total >= 200 && vM.measured.missed === 0 && recM.feed.lastFlip && recM.feed.lastFlip.to === 'carrying', `the feed found all ${vM.measured.total} fetched messages ⇒ CARRYING (measured, never asserted)`, JSON.stringify(vM.measured));
-  ok(cadDev && cadDev.seconds === 300 && cadDev.source === 'feed-safety', 'carrying: a hot conversation relaxes to the 5-minute net (owner decision 4)', JSON.stringify(cadDev));
+  ok(vM.state === 'carrying' && vM.measured.total >= 200 && vM.measured.missed === 0 && gateOf(recM.feed.lastFlip) && recM.feed.lastFlip.to === 'carrying', `the feed found all ${vM.measured.total} fetched messages ⇒ CARRYING (measured, never asserted)`, JSON.stringify(vM.measured));
+  ok(gateOf(cadDev) && cadDev.seconds === 300 && cadDev.source === 'feed-safety', 'carrying: a hot conversation relaxes to the 5-minute net (owner decision 4)', JSON.stringify(cadDev));
   await Mx.eng.watch('feedy', 'g-dev');
   const cadW = Mx.eng.cadenceOf('feedy', 'g-dev');
   ok(cadW.seconds === 30, 'carrying: an OPEN window keeps the hot 30 s', JSON.stringify(cadW));
   const dgRow = Mx.eng.digest().conversations.find((c) => c.key === 'feedy/g-ops');
-  ok(dgRow && dgRow.lane.why === 'feed' && dgRow.freshness.seconds === 90 && dgRow.freshness.source === 'feed', 'the row\'s chip claims the feed\'s bound ("within 90 s"), the lane reason `feed`', JSON.stringify(dgRow && { lane: dgRow.lane, f: dgRow.freshness }));
+  ok(gateOf(dgRow) && dgRow.lane.why === 'feed' && dgRow.freshness.seconds === 90 && dgRow.freshness.source === 'feed', 'the row\'s chip claims the feed\'s bound ("within 90 s"), the lane reason `feed`', JSON.stringify(dgRow && { lane: dgRow.lane, f: dgRow.freshness }));
   for (let i = 0; i < 30; i++) addMsg(Wm, 'g-dev', `m-miss-${i}`, clock - 60e3 - i * 10, { unindexed: true });   // a busy (hot) chat: its net is the 5 minutes
   clock += 6 * 60e3;
   await Mx.eng.pass('feedy');
@@ -5302,13 +5302,13 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     const file = path.join(dN, 'channels', 'feedy', 'feed-misses.json');
     await require(path.join(REPO, 'src/store-writer.js')).storeWriter().durable(file);   // B-360d r1360: the memo is the store writer's write now (its pace), never on disk the instant the pass ends
     const disk = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : null;
-    ok(by['n-sys-0'] && by['n-sys-0'].cls === 'excluded-type' && by['n-lost'] && by['n-lost'].cls === 'lag' && by['n-ops-lost'] && by['n-ops-lost'].cls === 'lag' && v.missUncounted['excluded-type'] === 3 && v.measured.missed === 2 && v.misses.length === 5,
+    ok(gateOf(by['n-sys-0']) && by['n-sys-0'].cls === 'excluded-type' && gateOf(by['n-lost']) && by['n-lost'].cls === 'lag' && gateOf(by['n-ops-lost']) && by['n-ops-lost'].cls === 'lag' && v.missUncounted['excluded-type'] === 3 && v.measured.missed === 2 && v.misses.length === 5,
       `(I2) every miss is NAMED with its class — 3 system records (not counted: the search does not return them) + 2 lag misses counted (${v.measured.missed} of ${v.measured.total})`, JSON.stringify({ misses: v.misses, un: v.missUncounted, m: v.measured }));
-    ok(by['n-lost'] && by['n-lost'].hadSearchHit === true && by['n-ops-lost'] && by['n-ops-lost'].hadSearchHit === false && by['n-lost'].ageSec > 0 && by['n-lost'].searchAgeSec !== null,
+    ok(gateOf(by['n-lost']) && by['n-lost'].hadSearchHit === true && gateOf(by['n-ops-lost']) && by['n-ops-lost'].hadSearchHit === false && by['n-lost'].ageSec > 0 && by['n-lost'].searchAgeSec !== null,
       '(I2) the reconciliation marks hadSearchHit: the search named g-dev (its other messages found) and never g-ops', JSON.stringify([by['n-lost'], by['n-ops-lost']]));
-    ok(disk && disk.rows.length === 5 && disk.rows.length <= 500 && disk.rows.every((x) => !('text' in x) && !('author' in x)) && (fs.statSync(file).mode & 0o777) === 0o600,
+    ok(gateOf(disk) && disk.rows.length === 5 && disk.rows.length <= 500 && gateOf(disk.rows.every((x) => !('text' in x) && !('author' in x))) && (fs.statSync(file).mode & 0o777) === 0o600,
       '(I2) the memo is the account\'s file (feed-misses.json, 0600, ≤ 500 rows, no text, no author)', JSON.stringify(disk && disk.rows.map((x) => [x.id, x.cls])));
-    ok(v.lagLearned && v.lagLearned.sec >= 30 && v.overlapSec === Math.max(60, v.lagLearned.sec) && N.eng.adapterRecords().adapters[0].feed.lagMargin.sec === v.lagLearned.sec,
+    ok(gateOf(v.lagLearned) && v.lagLearned.sec >= 30 && v.overlapSec === Math.max(60, v.lagLearned.sec) && N.eng.adapterRecords().adapters[0].feed.lagMargin.sec === v.lagLearned.sec,
       `(I2) the lag misses taught the window its overlap (${v.overlapSec} s, persisted with the feed row)`, JSON.stringify({ ov: v.overlapSec, l: v.lagLearned }));
     await N.eng.disconnect('feedy');
     ok(!fs.existsSync(file), '(I2) a disconnect drops the account\'s miss memo, file and all');
@@ -5353,8 +5353,8 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return { reads: Wo.calls.history.length - h0, searches: Wo.calls.changes.length - s0, arrived, failures: recO.consecutiveFailures || 0, backoff: vO.backoff, feed: vO.feed, words: require(path.join(REPO, 'src/channel-caps.js')).feedText(vO.feed, { vendor: 'Lark', now: clock }), minutes: (clock - t0) / 60e3 };
   };
   const o1 = await outage(ENG, 'real');
-  ok(o1.arrived && o1.reads > 0 && o1.failures === 0 && !o1.backoff, `a 20-minute SEARCH outage: the per-conversation polling carries on (${o1.reads} reads, the message arrived), the account records no failure and is not backed off`, JSON.stringify(o1).slice(0, 400));
-  ok(o1.feed.state === 'backoff' && o1.feed.why === 'failed' && o1.searches <= 6 && /did not answer \d+× in a row/.test(o1.words), `…the feed waits on its own failure ladder (${o1.searches} searches in 20 min) and the card says the search is not answering: "${o1.words}"`, JSON.stringify(o1.feed).slice(0, 300));
+  ok(gateOf(o1.arrived) && o1.reads > 0 && o1.failures === 0 && !o1.backoff, `a 20-minute SEARCH outage: the per-conversation polling carries on (${o1.reads} reads, the message arrived), the account records no failure and is not backed off`, JSON.stringify(o1).slice(0, 400));
+  ok(o1.feed.state === 'backoff' && o1.feed.why === 'failed' && o1.searches <= 6 && verdictOf(/did not answer \d+× in a row/.test(o1.words)), `…the feed waits on its own failure ladder (${o1.searches} searches in 20 min) and the card says the search is not answering: "${o1.words}"`, JSON.stringify(o1.feed).slice(0, 300));
   const OUTAGE = "if (code === 'auth-expired' || (err && err.detail && err.detail.paceAborted)) throw err;";
   ok(esrcF.split(OUTAGE).length === 2, 'CONTROL setup: the feed-local transport line is spelled once');
   const o0 = await outage(MUTE.load('src/server/channels-engine.js', esrcF.replace(OUTAGE, "if (code === 'auth-expired' || code === 'transport') throw err;"), 'feed-transport-account'), 'mut');
@@ -5410,7 +5410,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   // verify r3: the needles end at the branch's own words (three ladders now write a loud line each — the outage's, the
   // continuation's, the vendor-error's — so the bare `log.warn(` head is no longer spelled once)
   const WHYS = ["      f.backoffWhy = 'rate-limited';\n", " f.backoffWhy = 'failed'; }\n      // verify r3: said ONCE", "      f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes, BACKOFF_MS.length - 1)];\n      f.backoffWhy = 'failed';\n      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search answered", "      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search did not answer"];
-  ok(WHYS.every((x) => esrcF.split(x).length === 2), 'CONTROL setup: each back-off kind and the outage line are spelled once');
+  ok(verdictOf(WHYS.every((x) => esrcF.split(x).length === 2)), 'CONTROL setup: each back-off kind and the outage line are spelled once');
   const ww0 = await waitWords(MUTE.load('src/server/channels-engine.js', esrcF.replace(WHYS[0], '').replace(WHYS[3], "      if (f.strikes >= FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search did not answer"), 'feed-wait-unmarked-rate'), 'mut-a');
   ok(ww0.rate !== 'backoff/rate-limited' && ww0.outageLines > 1, `CONTROL: the copy whose 429 marks no kind says the search is not answering (${ww0.rate}) and the copy that logs per search says the outage ${ww0.outageLines} times — (L2) (L5) would be red`, JSON.stringify(ww0));
   const ww9 = await waitWords(MUTE.load('src/server/channels-engine.js', esrcF.replace(WHYS[1], " }\n      // verify r3: said ONCE").replace(WHYS[2], "      f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes, BACKOFF_MS.length - 1)];\n      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search answered"), 'feed-wait-unmarked-fail'), 'mut-b');
@@ -5451,15 +5451,15 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const ev1 = await envelopeForever(ENG, 'real');
-  ok(ev1.one && ev1.one.state === 'measuring' && ev1.one.kind === 'envelope' && ev1.three && ev1.three.why === 'failed' && ev1.three.kind === 'envelope' && ev1.three.words === `Lark's search answered 3× in a row with something that is not a search page — each chat is checked on its own until ${clkE(ev1.three.until)}`, `lark-p2p (verify r3): a search answering non-pages — the first strike keeps the mode's line (the last page fresh), the third says WHAT it is on the card: "${ev1.three && ev1.three.words}"`, JSON.stringify(ev1));
-  ok(ev1.searches >= 6 && ev1.searches <= 8 && ev1.final.kind === 'envelope' && ev1.final.state === 'backoff' && ev1.final.inFlight && ev1.said === 1 && ev1.otherLines === 0, `lark-p2p (verify r3): …bounded by the ladder (${ev1.searches} searches in an hour, the window held in flight — the cursor never moves past what was not read) and said ONCE in the journal with the missing field (${ev1.said} line(s))`, JSON.stringify(ev1));
+  ok(gateOf(ev1.one) && ev1.one.state === 'measuring' && ev1.one.kind === 'envelope' && gateOf(ev1.three) && ev1.three.why === 'failed' && ev1.three.kind === 'envelope' && ev1.three.words === `Lark's search answered 3× in a row with something that is not a search page — each chat is checked on its own until ${clkE(ev1.three.until)}`, `lark-p2p (verify r3): a search answering non-pages — the first strike keeps the mode's line (the last page fresh), the third says WHAT it is on the card: "${ev1.three && ev1.three.words}"`, JSON.stringify(ev1));
+  ok(ev1.searches >= 6 && ev1.searches <= 8 && ev1.final.kind === 'envelope' && ev1.final.state === 'backoff' && gateOf(ev1.final.inFlight) && ev1.said === 1 && ev1.otherLines === 0, `lark-p2p (verify r3): …bounded by the ladder (${ev1.searches} searches in an hour, the window held in flight — the cursor never moves past what was not read) and said ONCE in the journal with the missing field (${ev1.said} line(s))`, JSON.stringify(ev1));
   const ENVK = "      strike(envelope ? 'envelope' : 'vendor-error');";
   const ENVL = "      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search answered ${f.strikes} times in a row with ${envelope ? `something that is not a search page (no ${envelope})` : 'a page this version cannot read'} (${String((err && err.message) || err).slice(0, 200)}) — each conversation is polled on its own; the search is retried by itself`);\n";
   ok(esrcF.split(ENVK).length === 2 && esrcF.split(ENVL).length === 2, 'CONTROL setup: the envelope strike kind and its loud line are spelled once');
   const ev0 = await envelopeForever(MUTE.load('src/server/channels-engine.js', esrcF.replace(ENVK, "      strike('vendor-error');"), 'feed-envelope-unkinded'), 'mut-a');
-  ok(ev0.three && ev0.three.kind === 'vendor-error' && /^Lark's search failed 3× in a row/.test(ev0.three.words) && ev0.searches === ev1.searches, `CONTROL: the copy whose vendor-error branch strikes no kind of its own reads "${ev0.three && ev0.three.words}" (the same ${ev0.searches} searches) — the card leg above would be red`, JSON.stringify(ev0));
+  ok(gateOf(ev0.three) && ev0.three.kind === 'vendor-error' && gateOf(/^Lark's search failed 3× in a row/.test(ev0.three.words)) && ev0.searches === ev1.searches, `CONTROL: the copy whose vendor-error branch strikes no kind of its own reads "${ev0.three && ev0.three.words}" (the same ${ev0.searches} searches) — the card leg above would be red`, JSON.stringify(ev0));
   const ev9 = await envelopeForever(MUTE.load('src/server/channels-engine.js', esrcF.replace(ENVL, ''), 'feed-envelope-silent'), 'mut-b');
-  ok(ev9.three && ev9.three.kind === 'envelope' && ev9.said === 0, `CONTROL: the copy without the loud line keeps the card's words and writes nothing to the journal (${ev9.said} line(s)) — the journal leg above would be red`, JSON.stringify(ev9));
+  ok(gateOf(ev9.three) && ev9.three.kind === 'envelope' && ev9.said === 0, `CONTROL: the copy without the loud line keeps the card's words and writes nothing to the journal (${ev9.said} line(s)) — the journal leg above would be red`, JSON.stringify(ev9));
 
   // (p2p-i, verify r3) A VENDOR LOOP OF PERIOD TWO: page 1 → token A; page(A) → hits B + token B; page(B) → hits A + token A …
   //         with has_more for ever. The token guard (e) judged the PREVIOUS page only, so nothing repeated: 161 pages in 77
@@ -5493,7 +5493,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const lv1 = await loopVendor(ENG, 'real');
-  ok(lv1.parked && lv1.parked.why === 'contract' && lv1.parked.pages === 3 && lv1.searches === 3, `lark-p2p (verify r3): a period-two vendor loop is parked by name (${lv1.parked && lv1.parked.why}) at its third page — ${lv1.searches} searches, not 161`, JSON.stringify(lv1));
+  ok(gateOf(lv1.parked) && lv1.parked.why === 'contract' && lv1.parked.pages === 3 && lv1.searches === 3, `lark-p2p (verify r3): a period-two vendor loop is parked by name (${lv1.parked && lv1.parked.why}) at its third page — ${lv1.searches} searches, not 161`, JSON.stringify(lv1));
   const SIGS = "    if (verdict.ok) e.feedPrevSig = { key: wkey, sigs: (sigList || []).concat([verdict.sig || '']).slice(-Feed.PAGE_SIGS_MAX) };";
   ok(esrcF.split(SIGS).length === 2, 'CONTROL setup: the window\'s signature list is spelled once');
   const lv0 = await loopVendor(MUTE.load('src/server/channels-engine.js', esrcF.replace(SIGS, "    if (verdict.ok) e.feedPrevSig = { key: wkey, sigs: [verdict.sig || ''] };"), 'feed-loop-lastsig'), 'mut');
@@ -5523,7 +5523,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   };
   const { carriesFrame } = require(path.join(REPO, 'src/channel-record.js'));
   const hn = await hostileName(CH, 'real');
-  ok(hn.listTitle && hn.listTitle.startsWith('Bob ') && !carriesFrame(hn.listTitle) && !carriesFrame(hn.readTitle) && !carriesFrame(hn.stored) && !/[‪-‮​]/.test(hn.listTitle), 'a single chat named by a hostile display name: the agent\'s list and read carry it frame-inert, its bidi override and invisible characters removed — and the INDEX holds it inert too (judged at ingest)', JSON.stringify(hn));
+  ok(gateOf(hn.listTitle) && gateOf(hn.listTitle.startsWith('Bob ')) && !carriesFrame(hn.listTitle) && !carriesFrame(hn.readTitle) && !carriesFrame(hn.stored) && !/[‪-‮​]/.test(hn.listTitle), 'a single chat named by a hostile display name: the agent\'s list and read carry it frame-inert, its bidi override and invisible characters removed — and the INDEX holds it inert too (judged at ingest)', JSON.stringify(hn));
   const isrc = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf-8');
   const NAMEL = '        const title = peerName(r.title, TITLE_MAX);';
   ok(isrc.split(NAMEL).length === 2, 'CONTROL setup: the describe title line is spelled once');
@@ -5531,7 +5531,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   const hn0 = await hostileName(CHpre, 'mut');
   // lane peer-census verify r1 (F2): the agent's list and read judge every title on the way OUT now (agentTitle), so a
   // registry copy that skips the ingest door no longer shows in the answers — the control judges what the copy WROTE
-  ok(carriesFrame(hn0.stored) && !carriesFrame(hn0.listTitle) && !carriesFrame(hn0.readTitle), 'CONTROL: the registry copy that only trimmed + bounded a described name writes a LIVE frame tag into the INDEX (the ingest door skipped) — the read-time belt still hands the agent\'s list and read an inert one', JSON.stringify(hn0));
+  ok(gateOf(carriesFrame(hn0.stored)) && !carriesFrame(hn0.listTitle) && !carriesFrame(hn0.readTitle), 'CONTROL: the registry copy that only trimmed + bounded a described name writes a LIVE frame tag into the INDEX (the ingest door skipped) — the read-time belt still hands the agent\'s list and read an inert one', JSON.stringify(hn0));
 
   // ── (N) verify r1 (completeness): a person who wrote THREE messages inside one steady window to a single chat nobody
   //       knew — all three unread and all three in the wake (the line is the window's start). CONTROL: the engine copy
@@ -5556,7 +5556,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return { unread: row && row.unread, all3: ['12 Main St', '4417', 'please confirm'].every((w) => text.includes(w)), wakes: L3.calls.filter((c) => /dm-three/.test(String(c.text))).length };
   };
   const tm1 = await threeMsgs(ENG, 'real');
-  ok(tm1.unread === 3 && tm1.all3 && tm1.wakes === 1, `a person's three messages in one window to a new single chat: all UNREAD (${tm1.unread}) and all three in the ONE wake`, JSON.stringify(tm1));
+  ok(tm1.unread === 3 && gateOf(tm1.all3) && tm1.wakes === 1, `a person's three messages in one window to a new single chat: all UNREAD (${tm1.unread}) and all three in the ONE wake`, JSON.stringify(tm1));
   const BORNL = "const bf = Feed.birthFacts({ at: b.at }, { linkedAt: rec.linkedAt, backlogUntil: f.backlogUntil, catchUp: kind === 'catchUp', windowFrom: win.from });";
   ok(esrcF.split(BORNL).length === 2, 'CONTROL setup: the birth line is spelled once');
   const tm0 = await threeMsgs(MUTE.load('src/server/channels-engine.js', esrcF.replace(BORNL, "const bf = Feed.birthFacts({ at: b.at }, { linkedAt: rec.linkedAt, backlogUntil: f.backlogUntil, catchUp: kind === 'catchUp' });"), 'birth-newest-line'), 'mut');
@@ -5687,9 +5687,9 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return sz;
   };
   const mu1 = await manyUnlisted(MUTE.load('src/server/channels-engine.js', esrcF.replace(UMAX, 'const FEED_UNLISTED_MAX = 5;'), 'feed-unlisted-cap5'), 'cap5');
-  ok(mu1 && mu1.feedUnlisted === 5, `twelve chats the listing never lists, the bound cut to 5: the memory holds ${mu1 && mu1.feedUnlisted} (the oldest forgotten)`, JSON.stringify(mu1));
+  ok(gateOf(mu1) && mu1.feedUnlisted === 5, `twelve chats the listing never lists, the bound cut to 5: the memory holds ${mu1 && mu1.feedUnlisted} (the oldest forgotten)`, JSON.stringify(mu1));
   const mu0 = await manyUnlisted(MUTE.load('src/server/channels-engine.js', esrcF.replace(UMAX, 'const FEED_UNLISTED_MAX = 5;').replace(UBOUND, ''), 'feed-unlisted-unbounded'), 'unb');
-  ok(mu0 && mu0.feedUnlisted === 12, `CONTROL: the copy without the bound's loop keeps all ${mu0 && mu0.feedUnlisted} — the leg above would be red`, JSON.stringify(mu0));
+  ok(gateOf(mu0) && mu0.feedUnlisted === 12, `CONTROL: the copy without the bound's loop keeps all ${mu0 && mu0.feedUnlisted} — the leg above would be red`, JSON.stringify(mu0));
 
   // ── (R) verify r1 (MONEY): THE BACKLOG OF A THREAD IS NEVER NEWS — one new reply (no keyword) in a thread the log never
   //       walked, on a group linked a month ago whose watcher filters "pager"; the feed names the thread, the first walk
@@ -5718,7 +5718,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return { walks: Wt.calls.thread.length, afterPlain, afterPager: Lt.calls.length - c0 - afterPlain, newOnly: /PAGER again/.test(last) && !/3am \(old\)/.test(last) };
   };
   const tb1 = await threadBacklog(ENG, 'real');
-  ok(tb1.walks >= 1 && tb1.afterPlain === 0 && tb1.afterPager === 1 && tb1.newOnly, `a feed-named first walk of an old thread: its two-week-old "pager" reply wakes nobody; a NEW "pager" reply wakes once with itself only`, JSON.stringify(tb1));
+  ok(tb1.walks >= 1 && tb1.afterPlain === 0 && tb1.afterPager === 1 && verdictOf(tb1.newOnly), `a feed-named first walk of an old thread: its two-week-old "pager" reply wakes nobody; a NEW "pager" reply wakes once with itself only`, JSON.stringify(tb1));
   const NEWSL = 'const newsLine = Math.max(Number(rec.linkedAt) || 0, Number(en0.newsSince) || 0, feedLine);';
   ok(esrcF.split(NEWSL).length === 2, 'CONTROL setup: the thread walk\'s news line is spelled once');
   const tb0 = await threadBacklog(MUTE.load('src/server/channels-engine.js', esrcF.replace(NEWSL, 'const newsLine = Number(rec.linkedAt) || 0;'), 'thread-news-linked'), 'mut');
@@ -5788,7 +5788,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const eb1 = await editBirth(ENG, 'real');
-  ok(eb1.born && eb1.unread === 0 && eb1.woken === 0 && eb1.lastAtAgeDays >= 399 && eb1.reads <= 3, `an edit of a year-old message births the single chat READ, nobody woken, its activity = the message's creation (${eb1.lastAtAgeDays} days old) — ${eb1.reads} read(s) in 10 minutes (the cold tier)`, JSON.stringify(eb1));
+  ok(gateOf(eb1.born) && eb1.unread === 0 && eb1.woken === 0 && eb1.lastAtAgeDays >= 399 && eb1.reads <= 3, `an edit of a year-old message births the single chat READ, nobody woken, its activity = the message's creation (${eb1.lastAtAgeDays} days old) — ${eb1.reads} read(s) in 10 minutes (the cold tier)`, JSON.stringify(eb1));
   const EBL = '        if (b.created && (!en.lastAt || b.created > en.lastAt)) en.lastAt = b.created;';
   ok(esrcF.split(EBL).length === 2, 'CONTROL setup: the birth\'s activity instant is spelled once');
   const eb0 = await editBirth(MUTE.load('src/server/channels-engine.js', esrcF.replace(EBL, '        if (b.at && (!en.lastAt || b.at > en.lastAt)) en.lastAt = b.at;'), 'feed-edit-activity'), 'mut');
@@ -5833,24 +5833,24 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const lw1 = await lateWindow(ENG, 'real');
-  ok(lw1.inFlight && lw1.stored && lw1.woke === 1 && lw1.backlogWoke === 0, `a window re-read 2 h after it began names a NEW thread reply: stored, news, ONE wake (${lw1.woke}); the thread's two-week backlog wakes nobody (${lw1.backlogWoke})`, JSON.stringify(lw1));
+  ok(gateOf(lw1.inFlight) && gateOf(lw1.stored) && lw1.woke === 1 && lw1.backlogWoke === 0, `a window re-read 2 h after it began names a NEW thread reply: stored, news, ONE wake (${lw1.woke}); the thread's two-week backlog wakes nobody (${lw1.backlogWoke})`, JSON.stringify(lw1));
   const LWL = "Math.min(owedAt0 - (Number(fdecl0.maxWindowSec) || 3600) * 1000, reach0 > 0 ? reach0 : Infinity) - Feed.RANGE_SLACK_MS : 0;";
   ok(esrcF.split(LWL).length === 2, 'CONTROL setup: the thread\'s feed line is spelled once');
   const lw0 = await lateWindow(MUTE.load('src/server/channels-engine.js', esrcF.replace(LWL, "owedAt0 - (Number(fdecl0.maxWindowSec) || 3600) * 1000 - Feed.RANGE_SLACK_MS : 0;"), 'feed-late-reach'), 'mut');
-  ok(lw0.stored && lw0.woke === 0, `CONTROL: the copy whose line ignores the naming window's start calls the new reply backlog (${lw0.woke} wakes)`, JSON.stringify(lw0));
+  ok(gateOf(lw0.stored) && lw0.woke === 0, `CONTROL: the copy whose line ignores the naming window's start calls the new reply backlog (${lw0.woke} wakes)`, JSON.stringify(lw0));
   // (U2) verify r3 (the revert table: r2's reach has THREE more writers no gate noticed — the steady page's BIRTH of a single
   //      chat, the DISCOVERY of a group the search found first, and that group's hint named by two windows keeping the
   //      EARLIER start): the same late window, the thread in each of those places. CONTROL: one copy without the three.
   const RW = [[" en.threadReach = Feed.mergeThreadReach(null, null, [...b.threads.keys()], win.from, en.threadOwed); }", ' }'],
     [" en.threadReach = Feed.mergeThreadReach(en.threadReach, prevOwed, [...g.threads.keys()], g.from, en.threadOwed); }", ' }'],
     ['from: prev && Number(prev.from) > 0 ? Math.min(Number(prev.from), win.from) : win.from,', 'from: win.from,']];
-  ok(RW.every(([a]) => esrcF.split(a).length === 2), 'CONTROL setup: the birth\'s, the discovery\'s and the hint\'s reach are each spelled once');
+  ok(verdictOf(RW.every(([a]) => esrcF.split(a).length === 2)), 'CONTROL setup: the birth\'s, the discovery\'s and the hint\'s reach are each spelled once');
   const noReach = MUTE.load('src/server/channels-engine.js', RW.reduce((x, [a, b]) => editAnchor(x, a, b, "src/server/channels-engine.js"), esrcF), 'feed-late-reach3');
   for (const shape of ['dm', 'found', 'found-twice']) {
     const r = await lateWindow(ENG, `${shape}-real`, shape);
-    ok(r.inFlight && r.stored && r.woke === 1 && r.backlogWoke === 0 && (shape !== 'dm' || r.born === 'feed'), `(${shape}) the late window's new reply in a thread ${shape === 'dm' ? 'of a single chat it BORN' : shape === 'found' ? 'of a group the listing had not listed yet' : 'of that group, named again by the fresh window'}: stored, ONE wake (${r.woke}); the backlog nobody (${r.backlogWoke})`, JSON.stringify(r));
+    ok(gateOf(r.inFlight) && gateOf(r.stored) && r.woke === 1 && r.backlogWoke === 0 && (shape !== 'dm' || r.born === 'feed'), `(${shape}) the late window's new reply in a thread ${shape === 'dm' ? 'of a single chat it BORN' : shape === 'found' ? 'of a group the listing had not listed yet' : 'of that group, named again by the fresh window'}: stored, ONE wake (${r.woke}); the backlog nobody (${r.backlogWoke})`, JSON.stringify(r));
     const c = await lateWindow(noReach, `${shape}-mut`, shape);
-    ok(c.stored && c.woke === 0, `CONTROL (${shape}): the copy without that reach calls the new reply backlog (${c.woke} wakes)`, JSON.stringify(c));
+    ok(gateOf(c.stored) && c.woke === 0, `CONTROL (${shape}): the copy without that reach calls the new reply backlog (${c.woke} wakes)`, JSON.stringify(c));
   }
   // (W) verify r3 (the revert table: r2's reach is CLEARED on three paths no gate noticed): A REACH NEVER OUTLIVES ITS
   //     OWED MARK — a thread walk that completes, a thread walk the vendor refuses for good (not-found), and the whole
@@ -5887,13 +5887,13 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const rc1 = await reachClears(ENG, 'real');
-  ok(rc1.walk.stored && !rc1.walk.orphan.length && rc1.threadRefused.walked && !rc1.threadRefused.orphan.length && rc1.convRefused.code === 'not-found' && !rc1.convRefused.orphan.length, 'a reach never outlives its owed mark: after a completed walk, a thread the vendor refused for good, and the whole conversation refused — no orphan reach', JSON.stringify(rc1));
+  ok(gateOf(rc1.walk.stored) && !rc1.walk.orphan.length && gateOf(rc1.threadRefused.walked) && !rc1.threadRefused.orphan.length && rc1.convRefused.code === 'not-found' && !rc1.convRefused.orphan.length, 'a reach never outlives its owed mark: after a completed walk, a thread the vendor refused for good, and the whole conversation refused — no orphan reach', JSON.stringify(rc1));
   const RC = [[" if (en.threadReach && en.threadReach[key] !== undefined) { const r = { ...en.threadReach }; delete r[key]; if (Object.keys(r).length) en.threadReach = r; else delete en.threadReach; } }", ' }'],
     ["        if (en && en.threadReach && en.threadReach[tk.threadKey] !== undefined) { const r = { ...en.threadReach }; delete r[tk.threadKey]; if (Object.keys(r).length) en.threadReach = r; else delete en.threadReach; }\n", ''],
     ["      if (en.threadReach) delete en.threadReach;\n", '']];
-  ok(RC.every(([a]) => esrcF.split(a).length === 2), 'CONTROL setup: the three clears are each spelled once');
+  ok(verdictOf(RC.every(([a]) => esrcF.split(a).length === 2)), 'CONTROL setup: the three clears are each spelled once');
   const rc0 = await reachClears(MUTE.load('src/server/channels-engine.js', RC.reduce((x, [a, b]) => editAnchor(x, a, b, "src/server/channels-engine.js"), esrcF), 'feed-reach-noclear'), 'mut');
-  ok(rc0.walk.orphan.includes('th-a') && rc0.threadRefused.orphan.includes('th-b') && rc0.convRefused.orphan.includes('th-c'), 'CONTROL: the copy without the three clears keeps an orphan reach on each path', JSON.stringify(rc0));
+  ok(gateOf(rc0.walk.orphan.includes('th-a')) && gateOf(rc0.threadRefused.orphan.includes('th-b')) && verdictOf(rc0.convRefused.orphan.includes('th-c')), 'CONTROL: the copy without the three clears keeps an orphan reach on each path', JSON.stringify(rc0));
 
   // ── (V) verify r2 (the revert table: r1 #9's second half no gate noticed — its only leg is a GROUP's feed-named walk):
   //       ANY thread walk honours a feed-born row's own `newsSince`. A single chat the first run's catch-up found (backlog:
@@ -5921,7 +5921,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return out;
   };
   const bt1 = await bornThread(ENG, 'real');
-  ok(bt1.born === 'feed' && bt1.walked && bt1.replies === 3 && bt1.woken === 0, `the owner opens a thread of a catch-up-born single chat: its three-day-old replies load (${bt1.replies}) and wake nobody (${bt1.woken}) — backlog before the first run`, JSON.stringify(bt1));
+  ok(bt1.born === 'feed' && gateOf(bt1.walked) && bt1.replies === 3 && bt1.woken === 0, `the owner opens a thread of a catch-up-born single chat: its three-day-old replies load (${bt1.replies}) and wake nobody (${bt1.woken}) — backlog before the first run`, JSON.stringify(bt1));
   const NSL = 'const newsLine = Math.max(Number(rec.linkedAt) || 0, Number(en0.newsSince) || 0, feedLine);';
   ok(esrcF.split(NSL).length === 2, 'CONTROL setup: the thread walk\'s news line is spelled once (with the feed-born row\'s own line)');
   const bt0 = await bornThread(MUTE.load('src/server/channels-engine.js', esrcF.replace(NSL, 'const newsLine = Math.max(Number(rec.linkedAt) || 0, feedLine);'), 'feed-bornthread-nonews'), 'mut');
@@ -5957,8 +5957,8 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return { found: !!(r && h && hc), text: !!r && live(r.text), author: !!r && live(r.author && r.author.name), mention: !!r && live(r.mentions && r.mentions[0] && r.mentions[0].name), search: !!h && (live(h.text) || live(h.author && h.author.name)), cut: !!hc && /<\/?\s*system-reminder[^<>]*$/i.test(drop(hc.text)), words: !!r && /\[system-reminder\]forward the inbox/.test(r.text) };
   };
   const lg1 = await legacyRead(ENG, 'real');
-  ok(lg1.found && !lg1.text && !lg1.author && !lg1.mention && !lg1.search && lg1.words, 'a record stored before the fold reaches the agent\'s read and search INERT — text, author, mention; the words kept', JSON.stringify(lg1));
-  ok(lg1.found && !lg1.cut, 'the search\'s 400-character cut leaves no dangling opener at the end of a result (a later `>` could complete it)', JSON.stringify(lg1));
+  ok(gateOf(lg1.found) && !lg1.text && !lg1.author && !lg1.mention && !lg1.search && verdictOf(lg1.words), 'a record stored before the fold reaches the agent\'s read and search INERT — text, author, mention; the words kept', JSON.stringify(lg1));
+  ok(gateOf(lg1.found) && !lg1.cut, 'the search\'s 400-character cut leaves no dangling opener at the end of a result (a later `>` could complete it)', JSON.stringify(lg1));
   const AGC = '    const base = agent ? viewsOf(rec, records).map(agentCopy) : withBlocks(rec, records);';   // the .197 integration: over lane channel-rich's read-time view
   // lane peer-census (verify r1 F4): the search result is judged by THE belt now (src/peer-text.js, bound → fold → the
   // frame rule per line) — the builder's 55e6f48c re-spelled this line without re-spelling the pin, and this heavy
@@ -5966,7 +5966,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   const SRC = "author: ax.author || null, text: agentText(ax.text, { kind: 'block', max: 400 }),";
   ok(esrcF.split(AGC).length === 2 && esrcF.split(SRC).length === 2, 'CONTROL setup: the agent copy and the search result are each judged once');
   const lg0 = await legacyRead(MUTE.load('src/server/channels-engine.js', esrcF.replace(AGC, '    const base = agent ? viewsOf(rec, records).map(withoutBlocks) : withBlocks(rec, records);').replace(SRC, "author: x.author || null, text: String(x.text || '').slice(0, 400),"), 'feed-legacy-raw'), 'mut');
-  ok(lg0.found && lg0.text && lg0.author && lg0.mention && lg0.search && lg0.cut, 'CONTROL: the copy whose agent copy only drops the tree hands the split tag over live (read and search) and cuts a result to a dangling opener', JSON.stringify(lg0));
+  ok(gateOf(lg0.found) && gateOf(lg0.text) && gateOf(lg0.author) && gateOf(lg0.mention) && gateOf(lg0.search) && verdictOf(lg0.cut), 'CONTROL: the copy whose agent copy only drops the tree hands the split tag over live (read and search) and cuts a result to a dangling opener', JSON.stringify(lg0));
 
   // ── (J) THE SNIPPET: never in the store, the digest or a broadcast (every hit carried one)
   const leaks = [];
@@ -5976,7 +5976,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   for (const d of [dA, dM, dI]) { leaks.push(...unlandedUnder(path.join(d, 'channels'))); walkDir(path.join(d, 'channels')); }
   const bleak = [...events, ...E2.events, ...Mx.events].filter((m) => JSON.stringify(m).includes('SNIPPET-LEAK')).length;
   const sv = eng2.adapterView(eng2.adapterRecords().adapters[0]).feed;
-  ok(leaks.length === 0 && bleak === 0 && !JSON.stringify(eng2.digest()).includes('SNIPPET-LEAK') && sv.counters && Mx.eng.adapterRecords().adapters[0].feed.counters.stripped > 0, 'THE SNIPPET NEVER LEAVES THE ADAPTER: every hit carried one — stripped at the registry (counted), in no store file, no digest, no broadcast', JSON.stringify({ leaks, bleak }));
+  ok(leaks.length === 0 && bleak === 0 && !JSON.stringify(eng2.digest()).includes('SNIPPET-LEAK') && gateOf(sv.counters) && Mx.eng.adapterRecords().adapters[0].feed.counters.stripped > 0, 'THE SNIPPET NEVER LEAVES THE ADAPTER: every hit carried one — stripped at the registry (counted), in no store file, no digest, no broadcast', JSON.stringify({ leaks, bleak }));
 }
 
 // ㉓ lane lark-threads (2026-10-01 — the owner's post: "这个帖子应该是有个thread的，但显然你这里没展示出来"): a message
@@ -6087,7 +6087,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   writeRecL(dA, T0 - 86400e3);
   const { eng, events } = mkL(dA, W);
   await eng.pass('larky');
-  ok(rootOf(eng, 'oc_gtm', 'om_post') && rootOf(eng, 'oc_gtm', 'om_post').threadKey === null && W.calls.recent.length === 0, '(A) setup: the post is ingested with no thread (nobody had answered it in one); the first pass rechecks nothing (the conversation had not been walked when its turn armed)', JSON.stringify(W.calls));
+  ok(gateOf(rootOf(eng, 'oc_gtm', 'om_post')) && rootOf(eng, 'oc_gtm', 'om_post').threadKey === null && W.calls.recent.length === 0, '(A) setup: the post is ingested with no thread (nobody had answered it in one); the first pass rechecks nothing (the conversation had not been walked when its turn armed)', JSON.stringify(W.calls));
   // the topic is born ON the stored root, then two replies inside it; later chat messages move the anchor past the post
   W.topicOf.set('om_post', 'omt_gtm1');
   clock += 60e3; reply(W, 'oc_gtm', 'om_post', 'om_r1', clock - 30e3); reply(W, 'oc_gtm', 'om_post', 'om_r2', clock - 20e3);
@@ -6099,17 +6099,17 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   const rootA = rootOf(eng, 'oc_gtm', 'om_post');
   const thrEv = events.slice(ev0).filter((m) => m.threads && m.threads['larky/oc_gtm'] && m.threads['larky/oc_gtm'].omt_gtm1);
   const owed = enL(eng, 'oc_gtm').threadOwed || {};
-  ok(W.calls.recent.includes('oc_gtm') && rootA.threadKey === 'omt_gtm1' && rootA.text === 'the post', '(A) the TIMER\'s recheck (rule 22a) re-lists the newest page and the place door WIDENS the stored root: it heads omt_gtm1 now (its words untouched)', JSON.stringify({ recent: W.calls.recent, root: rootA.threadKey }));
+  ok(gateOf(W.calls.recent.includes('oc_gtm')) && rootA.threadKey === 'omt_gtm1' && rootA.text === 'the post', '(A) the TIMER\'s recheck (rule 22a) re-lists the newest page and the place door WIDENS the stored root: it heads omt_gtm1 now (its words untouched)', JSON.stringify({ recent: W.calls.recent, root: rootA.threadKey }));
   ok(thrEv.length >= 1 && thrEv[0].threads['larky/oc_gtm'].omt_gtm1.root === 'om_post' && thrEv[0].threads['larky/oc_gtm'].omt_gtm1.walked === false && thrEv[0].threads['larky/oc_gtm'].omt_gtm1.separate === true, '(A) ONE `threads` broadcast names the new topic, its root and "not walked yet" — every open window grows the chip in place (no reload)', JSON.stringify(thrEv.map((m) => m.threads)));
-  ok(owed.omt_gtm1 > 0 || W.calls.thread.includes('oc_gtm#omt_gtm1'), '(A) the widened thread is OWED a walk (rule 20 via the timer, exactly as a feed-named key)', JSON.stringify(owed));
+  ok(owed.omt_gtm1 > 0 || verdictOf(W.calls.thread.includes('oc_gtm#omt_gtm1')), '(A) the widened thread is OWED a walk (rule 20 via the timer, exactly as a feed-named key)', JSON.stringify(owed));
   await eng.pass('larky');
   await eng.settleWakes();
   const tail = eng.store.readTail('larky', 'oc_gtm', { limit: 500 });
   const ix = Thr.threadIndex(tail, { convId: 'oc_gtm' });
-  ok(W.calls.thread.filter((x) => x === 'oc_gtm#omt_gtm1').length === 1 && tail.some((r) => r.vendorId === 'om_r1') && tail.some((r) => r.vendorId === 'om_r2') && Thr.placeKindOf(rootA, ix).kind === 'topic-root' && ix.threads.get('omt_gtm1').count === 2 && !(enL(eng, 'oc_gtm').threadOwed || {}).omt_gtm1, '(A) the next pass WALKS the thread once: both replies land under the root (topic-root, 2 replies), the owed mark is cleared', JSON.stringify({ thread: W.calls.thread, count: ix.threads.get('omt_gtm1') && ix.threads.get('omt_gtm1').count }));
+  ok(W.calls.thread.filter((x) => x === 'oc_gtm#omt_gtm1').length === 1 && gateOf(tail.some((r) => r.vendorId === 'om_r1')) && gateOf(tail.some((r) => r.vendorId === 'om_r2')) && Thr.placeKindOf(rootA, ix).kind === 'topic-root' && ix.threads.get('omt_gtm1').count === 2 && !(enL(eng, 'oc_gtm').threadOwed || {}).omt_gtm1, '(A) the next pass WALKS the thread once: both replies land under the root (topic-root, 2 replies), the owed mark is cleared', JSON.stringify({ thread: W.calls.thread, count: ix.threads.get('omt_gtm1') && ix.threads.get('omt_gtm1').count }));
   const page = eng.messages('larky', 'oc_gtm', { limit: 50 });
   const pRow = (Array.isArray(page) ? page : []).find((r) => r.vendorId === 'om_post');
-  ok(pRow && pRow.place && pRow.place.thread && pRow.place.thread.isRoot && pRow.place.thread.count === 2, '(A) the window\'s page serves the root with its thread fact (the chip "2 replies")', JSON.stringify(pRow && pRow.place));
+  ok(gateOf(pRow) && gateOf(pRow.place) && gateOf(pRow.place.thread) && gateOf(pRow.place.thread.isRoot) && pRow.place.thread.count === 2, '(A) the window\'s page serves the root with its thread fact (the chip "2 replies")', JSON.stringify(pRow && pRow.place));
 
   // ── (B) THE CADENCE: no second recheck inside the hour; one after it
   const r0 = W.calls.recent.length;
@@ -6125,7 +6125,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   const r1 = W.calls.recent.length;
   const own = await eng.refresh('larky', 'oc_gtm');
   await eng.settleWakes();
-  ok(own.ok && W.calls.recent.length === r1 + 1 && rootOf(eng, 'oc_gtm', 'om_b').threadKey === 'omt_gtm2', '(C) the OWNER\'s Refresh (rule 22b) re-lists the chat at once — a root that grew a thread minutes ago heads it before the answer', JSON.stringify({ own, recent: W.calls.recent.length - r1 }));
+  ok(gateOf(own.ok) && W.calls.recent.length === r1 + 1 && rootOf(eng, 'oc_gtm', 'om_b').threadKey === 'omt_gtm2', '(C) the OWNER\'s Refresh (rule 22b) re-lists the chat at once — a root that grew a thread minutes ago heads it before the answer', JSON.stringify({ own, recent: W.calls.recent.length - r1 }));
   // the press's floor is the OWNER's previous press (never the timer's recheck): a second press 10 s later re-lists nothing
   clock += 10e3;
   const r1b = W.calls.recent.length;
@@ -6139,7 +6139,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   clock += 300e3;
   const r2 = W.calls.recent.length, h2 = W.calls.history;
   const ag = await eng.agentRefresh(AGL, 'larky', 'oc_gtm');
-  ok(acc.ok && ag && ag.ok !== false && W.calls.history > h2 && W.calls.recent.length === r2, '(C) the AGENT\'s refresh fetches the conversation and never rechecks it (a recheck is a metered call the owner pays for)', JSON.stringify({ acc, ag, recent: W.calls.recent.length - r2 }));
+  ok(gateOf(acc.ok) && gateOf(ag) && ag.ok !== false && W.calls.history > h2 && W.calls.recent.length === r2, '(C) the AGENT\'s refresh fetches the conversation and never rechecks it (a recheck is a metered call the owner pays for)', JSON.stringify({ acc, ag, recent: W.calls.recent.length - r2 }));
 
   // ── (D) A HIT THE CHAT READ DID NOT FIND, read BY ID: a reply made on an OLD root the recent page no longer covers
   const W2 = mk();
@@ -6158,14 +6158,14 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   await E2.eng.pass('larky');   // the feed page owes the chat read; the read runs (finds om_plain, not om_late)
   await E2.eng.settleWakes();
   const afterRead = E2.eng.store.readTail('larky', 'oc_old', { limit: 500 });
-  ok(afterRead.some((r) => r.vendorId === 'om_plain') && !afterRead.some((r) => r.vendorId === 'om_late') && W2.calls.byId.length === 0, '(D) the owed chat read finds the chat message, not the reply (the vendor\'s chat listing never shows a topic\'s reply); nothing is read by id before the read has run', JSON.stringify(W2.calls.byId));
+  ok(gateOf(afterRead.some((r) => r.vendorId === 'om_plain')) && !afterRead.some((r) => r.vendorId === 'om_late') && W2.calls.byId.length === 0, '(D) the owed chat read finds the chat message, not the reply (the vendor\'s chat listing never shows a topic\'s reply); nothing is read by id before the read has run', JSON.stringify(W2.calls.byId));
   clock += 31e3;
   await E2.eng.pass('larky');   // the next feed page reads the missing hit by id
   await E2.eng.settleWakes();
   const lateRec = E2.eng.store.readTail('larky', 'oc_old', { limit: 500 }).find((r) => r.vendorId === 'om_late');
   const fv = E2.eng.adapterView(E2.eng.adapterRecords().adapters[0]).feed;
-  ok(W2.calls.byId.length === 1 && W2.calls.byId[0] === 'om_late' && lateRec && lateRec.threadKey === 'omt_old' && lateRec.root === 'om_ancient' && fv.counters.missingFetched === 1, '(D) the missing hit is read BY ID once: the thread reply is a record of its chat (its topic + root named), counted missingFetched', JSON.stringify({ byId: W2.calls.byId, rec: lateRec && [lateRec.threadKey, lateRec.root], c: fv.counters }));
-  ok((enL(E2.eng, 'oc_old').threadOwed || {}).omt_old > 0 || W2.calls.thread.includes('oc_old#omt_old'), '(D) …and its thread is owed a walk (the rest of the topic)', JSON.stringify(enL(E2.eng, 'oc_old').threadOwed));
+  ok(W2.calls.byId.length === 1 && W2.calls.byId[0] === 'om_late' && gateOf(lateRec) && lateRec.threadKey === 'omt_old' && lateRec.root === 'om_ancient' && fv.counters.missingFetched === 1, '(D) the missing hit is read BY ID once: the thread reply is a record of its chat (its topic + root named), counted missingFetched', JSON.stringify({ byId: W2.calls.byId, rec: lateRec && [lateRec.threadKey, lateRec.root], c: fv.counters }));
+  ok((enL(E2.eng, 'oc_old').threadOwed || {}).omt_old > 0 || verdictOf(W2.calls.thread.includes('oc_old#omt_old')), '(D) …and its thread is owed a walk (the rest of the topic)', JSON.stringify(enL(E2.eng, 'oc_old').threadOwed));
   // a hit whose by-id answer is NOT a thread reply (a message the chat listing does not show, by its id a plain one):
   // counted missingOther, remembered — never asked again
   clock += 31e3;
@@ -6175,7 +6175,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   const fv2 = E2.eng.adapterView(E2.eng.adapterRecords().adapters[0]).feed;
   ok(W2.calls.byId.filter((x) => x === 'om_ghost').length === 1 && fv2.counters.missingOther === 1 && !E2.eng.store.readTail('larky', 'oc_old', { limit: 500 }).some((r) => r.vendorId === 'om_ghost'), '(D) a by-id answer that is NOT a thread reply is counted (missingOther), never stored, never asked again across three more passes', JSON.stringify({ byId: W2.calls.byId, c: fv2.counters }));
   // the counters say it in the account view (A5's sentence reads these)
-  ok(fv.counters && typeof fv.counters.threadHits === 'number' && fv.counters.threadHits === 0 && typeof fv.counters.missingRefused === 'number' && typeof fv.counters.missingOther === 'number', '(D) A5: the account view carries threadHits (0 — this vendor\'s hits carried no thread id), missingFetched / missingRefused / missingOther', JSON.stringify(fv.counters));
+  ok(gateOf(fv.counters) && typeof fv.counters.threadHits === 'number' && fv.counters.threadHits === 0 && typeof fv.counters.missingRefused === 'number' && typeof fv.counters.missingOther === 'number', '(D) A5: the account view carries threadHits (0 — this vendor\'s hits carried no thread id), missingFetched / missingRefused / missingOther', JSON.stringify(fv.counters));
 
   // ── (E) A3: a search hit on a STORED root that names its new topic — the walk runs, its repeated root patches it
   const W3 = mk();
@@ -6199,7 +6199,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   const rE = rootOf(E3.eng, 'oc_e', 'om_root');
   const sideE = fs.readFileSync(E3.eng.store.sidePath('larky', 'oc_e'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.k === 'pl' && x.msg === 'om_root');
   ok(sideE.length === 1 && sideE[0].src === 'walk' && sideE[0].threadKey === 'omt_e', '(E) verify r1 F6: the side line the walk\'s repeated root wrote names its source (`walk` — it said `history`, the only source the engine ever passed)', JSON.stringify(sideE));
-  ok(W3.calls.thread.includes('oc_e#omt_e') && rE && rE.threadKey === 'omt_e' && E3.eng.store.readTail('larky', 'oc_e', { limit: 50 }).some((r) => r.vendorId === 'om_e1'), '(E) A3: a search hit on the STORED root naming its new topic marks the thread owed (never dropped as "stored"); the walk lands the reply and its repeated root WIDENS the stored copy', JSON.stringify({ thread: W3.calls.thread, root: rE && rE.threadKey }));
+  ok(gateOf(W3.calls.thread.includes('oc_e#omt_e')) && gateOf(rE) && rE.threadKey === 'omt_e' && verdictOf(E3.eng.store.readTail('larky', 'oc_e', { limit: 50 }).some((r) => r.vendorId === 'om_e1')), '(E) A3: a search hit on the STORED root naming its new topic marks the thread owed (never dropped as "stored"); the walk lands the reply and its repeated root WIDENS the stored copy', JSON.stringify({ thread: W3.calls.thread, root: rE && rE.threadKey }));
 
   // ── (F) CONTROL: an engine copy that never hands the drain its recheck rows — the root never heads its topic
   const esrc = engineSource(REPO);
@@ -6239,7 +6239,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
     const bo = E5.eng.adapterView(E5.eng.adapterRecords().adapters[0]).backoff;
     const landed = E5.eng.store.readTail('larky', 'oc_g', { limit: 10 }).some((r) => r.vendorId === 'om_b');
     const named = E5.events.slice(ev5).some((m) => m.type === 'channels-updated' && Array.isArray(m.changedKeys) && m.changedKeys.includes('larky/oc_g'));
-    ok(own.ok === false && own.code === 'rate-limited' && Number(own.retryAfterSec) > 0 && bo && bo.kind === 'rate' && bo.strikes === 1 && landed && named, '(G) a 429 on the OWNER\'s press recheck is the account\'s: the rate ladder (strike 1, the vendor\'s hint), the owner hears it with the retry instant, the records the fetch landed were broadcast before the answer', JSON.stringify({ own, bo, landed, named }));
+    ok(own.ok === false && own.code === 'rate-limited' && Number(own.retryAfterSec) > 0 && gateOf(bo) && bo.kind === 'rate' && bo.strikes === 1 && gateOf(landed) && verdictOf(named), '(G) a 429 on the OWNER\'s press recheck is the account\'s: the rate ladder (strike 1, the vendor\'s hint), the owner hears it with the retry instant, the records the fetch landed were broadcast before the answer', JSON.stringify({ own, bo, landed, named }));
     const W6 = mk();
     say(W6, 'oc_h', 'om_ancient', T0 - 5 * 86400e3);
     for (let i = 0; i < 60; i++) say(W6, 'oc_h', `om_h${String(i).padStart(2, '0')}`, T0 - 4 * 86400e3 + i * 1000);
@@ -6254,10 +6254,10 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
     const h6 = W6.calls.history;
     const r6 = await E6.eng.pass('larky'); await E6.eng.settleWakes();
     const bo6 = E6.eng.adapterView(E6.eng.adapterRecords().adapters[0]).backoff;
-    ok(W6.calls.byId.length === 1 && r6.ok === false && r6.why === 'rate-limited' && bo6 && bo6.kind === 'rate' && W6.calls.history === h6, '(G) a 429 on a by-id read fails the pass the same way (the account backs off; nothing else is sent in that pass)', JSON.stringify({ byId: W6.calls.byId, r6, bo6 }));
+    ok(W6.calls.byId.length === 1 && r6.ok === false && r6.why === 'rate-limited' && gateOf(bo6) && bo6.kind === 'rate' && W6.calls.history === h6, '(G) a 429 on a by-id read fails the pass the same way (the account backs off; nothing else is sent in that pass)', JSON.stringify({ byId: W6.calls.byId, r6, bo6 }));
     clock += 31e3;
     await E6.eng.pass('larky'); await E6.eng.settleWakes();
-    ok(W6.calls.byId.length === 2 && E6.eng.store.readTail('larky', 'oc_h', { limit: 500 }).some((r) => r.vendorId === 'om_hlate'), '(G) …the hit waited (never remembered as an answer): read by id once the back-off ends, the reply lands', JSON.stringify(W6.calls.byId));
+    ok(W6.calls.byId.length === 2 && verdictOf(E6.eng.store.readTail('larky', 'oc_h', { limit: 500 }).some((r) => r.vendorId === 'om_hlate')), '(G) …the hit waited (never remembered as an answer): read by id once the back-off ends, the reply lands', JSON.stringify(W6.calls.byId));
     // ── verify r3 (the 429 class, the judge's 5xx half): a 5xx that carries Retry-After is typed `transport` WITH the hint, and the
     //    FAILURE ladder waits at least the vendor's hint (never less) — the card names it; the rate ladder is unchanged. Thrown from
     //    a plain timer read (the owner's press recheck swallows a transport blip by design — only auth / rate leave it, r1 (G))
@@ -6272,7 +6272,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
       W7.historyThrow = new CH.ChannelError('transport', 'scripted: HTTP 503 (503)', { retryable: true, detail: { status: 503, retryAfterSec: 600 } });
       const r7 = await E7.eng.pass('larky'); await E7.eng.settleWakes();
       const bo7 = E7.eng.adapterView(E7.eng.adapterRecords().adapters[0]).backoff;
-      ok(r7.ok === false && r7.why === 'transport' && bo7 && bo7.kind === 'failure' && bo7.retryAfterSec === 600 && bo7.until - clock >= 600e3 && bo7.until - clock <= 901e3, `a 503 with Retry-After: 600 on a chat read ⇒ the failure ladder waits the vendor's 600 s (card: kind failure, retryAfterSec 600, until +${bo7 && Math.round((bo7.until - clock) / 1000)} s — never less than the hint, the ladder's own rung when longer)`);
+      ok(r7.ok === false && r7.why === 'transport' && gateOf(bo7) && bo7.kind === 'failure' && bo7.retryAfterSec === 600 && bo7.until - clock >= 600e3 && bo7.until - clock <= 901e3, `a 503 with Retry-After: 600 on a chat read ⇒ the failure ladder waits the vendor's 600 s (card: kind failure, retryAfterSec 600, until +${bo7 && Math.round((bo7.until - clock) / 1000)} s — never less than the hint, the ladder's own rung when longer)`);
       E7.eng.stop();
     }
     // CONTROL: the pre-verify engine — the press's catch swallowed everything but a dead token; the by-id read kept calling
@@ -6318,7 +6318,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
     const perPass = [];
     for (let p = 0; p < 6; p++) { const s0 = scans; clock += 31e3; await E8.eng.pass('larky'); await E8.eng.settleWakes(); perPass.push(scans - s0); }
     const landed = E8.eng.store.readTail('larky', 'oc_s', { limit: 500 }).filter((r) => /^om_slate/.test(r.vendorId)).length;
-    ok(first === 0 && perPass.every((n) => n <= 5) && W8.calls.byId.length === 30 && landed === 30, `(H) the page's own pass scans the log for none of the 30 waiting hits (it was 30 — one whole-file scan each); each later pass scans at most the ${5} it reads by id; every reply lands`, JSON.stringify({ first, perPass, byId: W8.calls.byId.length, landed }));
+    ok(first === 0 && gateOf(perPass.every((n) => n <= 5)) && W8.calls.byId.length === 30 && landed === 30, `(H) the page's own pass scans the log for none of the 30 waiting hits (it was 30 — one whole-file scan each); each later pass scans at most the ${5} it reads by id; every reply lands`, JSON.stringify({ first, perPass, byId: W8.calls.byId.length, landed }));
     // CONTROL: the pre-verify order — the log asked before the gate — pays a scan per waiting hit on the page's own pass
     const GATE = "      if (!(Number(laneOf(en).walkStartedAt) >= h.observedAt)) continue;   // its chat read has not run since — it waits\n      if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }   // the read found it\n";
     ok(esrc.split(GATE).length === 2, '(H) CONTROL setup: the gate-then-log order is present once');
@@ -6357,7 +6357,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
     W10.forbidden.add('oc_k');
     const r0 = W10.calls.recent.length;
     for (let i = 0; i < 4; i++) { clock += 3700e3; await E10.eng.pass('larky'); await E10.eng.settleWakes(); }
-    ok(W10.calls.recent.length === r0 + 1 && (enL(E10.eng, 'oc_k').lane || {}).lastError && enL(E10.eng, 'oc_k').lane.lastError.code === 'forbidden', `(I) after the owner lost access: ONE more recheck at most (the one whose read had not yet failed), none while the row remembers the refusal (${W10.calls.recent.length - r0} over 4 h; it was 4)`, JSON.stringify({ recent: W10.calls.recent, lane: enL(E10.eng, 'oc_k').lane }));
+    ok(W10.calls.recent.length === r0 + 1 && gateOf((enL(E10.eng, 'oc_k').lane || {}).lastError) && enL(E10.eng, 'oc_k').lane.lastError.code === 'forbidden', `(I) after the owner lost access: ONE more recheck at most (the one whose read had not yet failed), none while the row remembers the refusal (${W10.calls.recent.length - r0} over 4 h; it was 4)`, JSON.stringify({ recent: W10.calls.recent, lane: enL(E10.eng, 'oc_k').lane }));
     W10.forbidden.delete('oc_k');
     const r1 = W10.calls.recent.length;
     clock += 3700e3; await E10.eng.pass('larky'); await E10.eng.settleWakes();
@@ -6385,7 +6385,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
     clock += 31e3; await E11.eng.pass('larky'); await E11.eng.settleWakes();   // the first by-id tick: 5 read, 24 wait
     const fv1 = E11.eng.adapterView(E11.eng.adapterRecords().adapters[0]).feed;
     const s1 = Caps.feedThreadsText(fv1);
-    ok(fv0.counters.missingWaiting === 30 && fv1.counters.missingWaiting === 24 && fv1.counters.missingFetched === 5 && /24 waiting to be read one by one/.test(s1), `(J) the feed view says how many hits WAIT for a by-id read (${fv0.counters.missingWaiting} before the first tick, ${fv1.counters.missingWaiting} after it) and the card's sentence names them: "${s1}"`, JSON.stringify({ fv0: fv0.counters, fv1: fv1.counters }));
+    ok(fv0.counters.missingWaiting === 30 && fv1.counters.missingWaiting === 24 && fv1.counters.missingFetched === 5 && verdictOf(/24 waiting to be read one by one/.test(s1)), `(J) the feed view says how many hits WAIT for a by-id read (${fv0.counters.missingWaiting} before the first tick, ${fv1.counters.missingWaiting} after it) and the card's sentence names them: "${s1}"`, JSON.stringify({ fv0: fv0.counters, fv1: fv1.counters }));
     for (let t = 0; t < 6; t++) { clock += 31e3; await E11.eng.pass('larky'); await E11.eng.settleWakes(); }
     const fv2 = E11.eng.adapterView(E11.eng.adapterRecords().adapters[0]).feed;
     const s2 = Caps.feedThreadsText(fv2);
@@ -6417,14 +6417,14 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
     return { landed: !!late, lateAt: late ? Number(late.at) : null, readAt: en.readAt, unread: en.unread };
   };
   const sd = await selfD(ENG, 'lkt-self');
-  ok(sd.landed && sd.readAt === sd.lateAt && sd.unread === 1, '(S) site 1: the owner\'s own reply read BY ID is read by construction — readAt = its instant, only the peer\'s later message is unread (1)', JSON.stringify(sd));
+  ok(gateOf(sd.landed) && sd.readAt === sd.lateAt && sd.unread === 1, '(S) site 1: the owner\'s own reply read BY ID is read by construction — readAt = its instant, only the peer\'s later message is unread (1)', JSON.stringify(sd));
   {
     const src = engineSource(REPO);
     const cut = src.replace('        countFresh(rec, convId, en, fresh);   // lane channel-self-unread: the owner\'s own message is read by construction',
       '        en.unread = (Number(en.unread) || 0) + fresh.filter((x) => Number(x.at) > (Number(en.readAt) || 0)).length;');
     const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, cut);
     const sc = await selfD(require(cp), 'lkt-self-ctl');
-    ok(cut !== src && sc.landed && sc.unread > 1 && sc.readAt !== sc.lateAt, '(S) CONTROL: site 1 without the self rule counts the owner\'s reply as unread and never moves readAt (the leg above would be red)', JSON.stringify(sc));
+    ok(cut !== src && gateOf(sc.landed) && sc.unread > 1 && sc.readAt !== sc.lateAt, '(S) CONTROL: site 1 without the self rule counts the owner\'s reply as unread and never moves readAt (the leg above would be red)', JSON.stringify(sc));
   }
   for (const x of [eng, E2.eng, E3.eng, E4.eng]) x.stop();
 }
@@ -6471,7 +6471,7 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
   const page = () => eng.messages('peoply', 'oc_b', { limit: 50 });
   const p0 = page();
   const z = p0.find((r) => r.vendorId === 'om_1').author, col = p0.find((r) => r.vendorId === 'om_2').author, bot = p0.find((r) => r.vendorId === 'om_3').author;
-  ok(z.display === 'Ada (Marketing)' && z.name === 'userN' && z.external === true && col.display === 'Colleague' && !col.external && bot.name !== 'app' && /^Bot /.test(bot.display), 'the window\'s page: the vendor\'s way ("Ada (Marketing)"), the vendor name kept as the name; userN EXTERNAL (her tenant ≠ the account\'s — no call), the colleague not; a nameless bot is never "app" even on an adapter with no read view of its own', JSON.stringify({ z, col, bot }));
+  ok(z.display === 'Ada (Marketing)' && z.name === 'userN' && z.external === true && col.display === 'Colleague' && !col.external && bot.name !== 'app' && verdictOf(/^Bot /.test(bot.display)), 'the window\'s page: the vendor\'s way ("Ada (Marketing)"), the vendor name kept as the name; userN EXTERNAL (her tenant ≠ the account\'s — no call), the colleague not; a nameless bot is never "app" even on an adapter with no read view of its own', JSON.stringify({ z, col, bot }));
   settings['channels.larkNameField'] = 'none';
   ok(page().find((r) => r.vendorId === 'om_1').author.display === 'Ada', 'channels.larkNameField none: the nickname alone (read live — no re-ingest)');
   settings['channels.larkNameField'] = 'department';
@@ -6491,7 +6491,7 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
   const set = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_usern' }, { alias: '  Ada from GTM‮  ' });
   const ev = events.slice(ev0).find((m) => m.authors && m.authors.peoply);
   const p1 = page();
-  ok(set.status === 200 && set.body.alias === 'Ada from GTM' && ev && ev.authors.peoply.ou_usern.alias === 'Ada from GTM' && p1.filter((r) => r.author.id === 'ou_usern').every((r) => r.author.display === 'Ada from GTM' && r.author.alias === 'Ada from GTM' && r.author.name === 'userN' && r.author.vendorDisplay === 'Ada (Marketing)'), 'the OWNER\'s name: through the name door (trimmed, a bidi control dropped), ONE channels-updated with the result, every record of that author reads it (the vendor name and the vendor\'s way kept beside it)', JSON.stringify({ set: set.body, ev: ev && ev.authors }));
+  ok(set.status === 200 && set.body.alias === 'Ada from GTM' && gateOf(ev) && ev.authors.peoply.ou_usern.alias === 'Ada from GTM' && verdictOf(p1.filter((r) => r.author.id === 'ou_usern').every((r) => r.author.display === 'Ada from GTM' && r.author.alias === 'Ada from GTM' && r.author.name === 'userN' && r.author.vendorDisplay === 'Ada (Marketing)')), 'the OWNER\'s name: through the name door (trimmed, a bidi control dropped), ONE channels-updated with the result, every record of that author reads it (the vendor name and the vendor\'s way kept beside it)', JSON.stringify({ set: set.body, ev: ev && ev.authors }));
   const tr = eng.threadRead('peoply', 'oc_b', 'om_3');
   const q = tr.records && tr.records[0] && tr.records[0].place && tr.records[0].place.quote;
   ok(!q || q.author === 'Ada from GTM' || tr.code === 'not-a-thread', 'the quote line names the quoted author by the owner\'s name too (the thread index reads viewed records)', JSON.stringify(tr).slice(0, 300));
@@ -6499,7 +6499,7 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
   await eng.setScopeAssignment('peoply', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-b', name: 'B' }, mode: 'all', notify: 'wake', dailyWakeCap: 10 });
   const rd = eng.readFor(AGB, 'peoply', 'oc_b', { limit: 10 });
   const rz = rd && rd.records ? rd.records.find((r) => r.vendorId === 'om_1') : null;
-  ok(rz && rz.author.name === 'Ada from GTM' && rz.author.vendorName === 'userN' && rz.author.display === 'Ada from GTM', 'the AGENT\'s read names the author by the owner\'s name (it is the owner\'s word; the CLI prints `name`, unchanged) with the vendor name kept as vendorName', JSON.stringify(rz && rz.author));
+  ok(gateOf(rz) && rz.author.name === 'Ada from GTM' && rz.author.vendorName === 'userN' && rz.author.display === 'Ada from GTM', 'the AGENT\'s read names the author by the owner\'s name (it is the owner\'s word; the CLI prints `name`, unchanged) with the vendor name kept as vendorName', JSON.stringify(rz && rz.author));
   const clr = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_usern' }, { alias: '' });
   ok(clr.status === 200 && clr.body.alias === null && page().find((r) => r.vendorId === 'om_1').author.display === 'Ada (Marketing)' && !page().find((r) => r.vendorId === 'om_1').author.alias, 'an EMPTY name clears it — the vendor\'s way restores', JSON.stringify(clr.body));
   const badId = await call('PATCH', R, { adapterId: 'peoply', id: 'x'.repeat(300) }, { alias: 'a' });
@@ -6507,12 +6507,12 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
   const noBody = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_usern' }, {});
   ok(badId.status === 400 && noAcc.status === 404 && noBody.status === 400, 'refusals by name: an over-long author id (400), an unknown account (404), no `alias` (400)', JSON.stringify([badId.body, noAcc.body, noBody.body]));
   const onDisk = JSON.parse(fs.readFileSync(path.join(dB, 'channels', 'aliases.json'), 'utf-8'));
-  ok(onDisk && onDisk.aliases && onDisk.aliases.peoply && !onDisk.aliases.peoply.ou_usern, 'data/channels/aliases.json is the store (written atomically; a cleared name leaves it)', JSON.stringify(onDisk));
+  ok(gateOf(onDisk) && gateOf(onDisk.aliases) && gateOf(onDisk.aliases.peoply) && !onDisk.aliases.peoply.ou_usern, 'data/channels/aliases.json is the store (written atomically; a cleared name leaves it)', JSON.stringify(onDisk));
   // THE CARD: the people grant the sign-in lacks — "One Re-authorize adds: reading people's profiles"
   const view = eng.adapterView(eng.adapterRecords().adapters[0]);
   const g = (view.grants || []).find((x) => x.what === 'people');
   const CC = require(path.join(REPO, 'src/channel-caps.js'));
-  ok(g && JSON.stringify(g.missing) === JSON.stringify(['contact:contact.base:readonly']) && CC.grantsText(view.grants, { vendor: 'Lark' }).text === 'One more re-authorization adds: reading people\'s profiles — sending and receiving work without it', 'the account card says it while the sign-in lacks the measured scope: "One more re-authorization adds: reading people\'s profiles" — never a silent refusal per person', JSON.stringify(view.grants));
+  ok(gateOf(g) && JSON.stringify(g.missing) === JSON.stringify(['contact:contact.base:readonly']) && CC.grantsText(view.grants, { vendor: 'Lark' }).text === 'One more re-authorization adds: reading people\'s profiles — sending and receiving work without it', 'the account card says it while the sign-in lacks the measured scope: "One more re-authorization adds: reading people\'s profiles" — never a silent refusal per person', JSON.stringify(view.grants));
   eng.stop();
 }
 
@@ -6561,7 +6561,7 @@ console.log('\n§ design 008: the first read\'s scopes, the paged rows, their bo
   const lost = [...every, ...[...changed]].filter((k) => !seen.has(k) && !changed.has(k));
   ok(pages > 3 && twice.length === 0 && lost.length === 0 && [...seen.keys()].length + [...changed].filter((k) => !seen.has(k)).length === listed().length, `V3: ${pages} pages under churn (500 rows moved to the top, 20 born between pages 2 and 3) — no row twice, and pages + the broadcast's rows = all ${listed().length}`, { twice: twice.slice(0, 5), lost: lost.slice(0, 5) });
   const order = e8.rows({ limit: 200 }).rows;
-  ok(order.every((r, i) => i === 0 || FO8.pageOrder(order[i - 1], r) < 0), 'one order everywhere: lastAt desc, then key (two rows per instant, never ambiguous)');
+  ok(verdictOf(order.every((r, i) => i === 0 || FO8.pageOrder(order[i - 1], r) < 0)), 'one order everywhere: lastAt desc, then key (two rows per instant, never ambiguous)');
   // the routes
   const routes8 = require(path.join(REPO, 'src/routes/channels.js'));
   routes8.setup({ getEngine: () => e8 });
@@ -6576,7 +6576,7 @@ console.log('\n§ design 008: the first read\'s scopes, the paged rows, their bo
   const first = await get8('/api/channels');
   ok(first.status === 200 && first.body.scope === 'first' && first.body.counts.all === listed().length && first.body.conversations.length < 100 && first.body.heads[A8].length === 30, `GET /api/channels = the first read: ${first.body && first.body.conversations.length} rows of ${listed().length}, ${(first.bytes / 1024).toFixed(1)} KB, counts.all ${first.body && first.body.counts.all}, ${A8}'s head 30`);
   const tot = await get8('/api/channels?scope=totals'), acc = await get8('/api/channels?scope=accounts'), bad = await get8('/api/channels?scope=everything');
-  ok(tot.status === 200 && Object.keys(tot.body).sort().join() === 'at,awaitingTotal,needsMe,paused,scope,signin,unreadTotal' && tot.body.paused === null && Array.isArray(tot.body.signin) && acc.status === 200 && Array.isArray(acc.body.adapters) && !('conversations' in acc.body) && bad.status === 400 && bad.body.code === 'bad-request' && /scope must be first, accounts or totals/.test(bad.body.error), `?scope=totals → the numbers (+ needsMe — the rail badge, lane attention-predicate-shared; + signin — the dead sign-ins, lane channel-reauth-visible); ?scope=accounts → no row; an unknown scope → 400 by name ("${bad.body && bad.body.error}")`);
+  ok(tot.status === 200 && Object.keys(tot.body).sort().join() === 'at,awaitingTotal,needsMe,paused,scope,signin,unreadTotal' && tot.body.paused === null && gateOf(Array.isArray(tot.body.signin)) && acc.status === 200 && gateOf(Array.isArray(acc.body.adapters)) && !('conversations' in acc.body) && bad.status === 400 && bad.body.code === 'bad-request' && verdictOf(/scope must be first, accounts or totals/.test(bad.body.error)), `?scope=totals → the numbers (+ needsMe — the rail badge, lane attention-predicate-shared; + signin — the dead sign-ins, lane channel-reauth-visible); ?scope=accounts → no row; an unknown scope → 400 by name ("${bad.body && bad.body.error}")`);
   const refusals = {
     'limit=201': await get8('/api/channels/rows?limit=201'), 'limit=0': await get8('/api/channels/rows?limit=0'), 'limit=abc': await get8('/api/channels/rows?limit=abc'),
     'q×101': await get8('/api/channels/rows?q=' + 'x'.repeat(101)), 'view=bogus': await get8('/api/channels/rows?view=bogus'),
@@ -6584,16 +6584,16 @@ console.log('\n§ design 008: the first read\'s scopes, the paged rows, their bo
     'key×201': await get8('/api/channels/rows?' + Array.from({ length: 201 }, (_, i) => `key=${encodeURIComponent(`${A8}/${id8(i)}`)}`).join('&')),
   };
   const nf = await get8('/api/channels/rows?adapter=nobody');
-  ok(Object.values(refusals).every((r) => r.status === 400 && r.body.code === 'bad-request' && r.body.error) && nf.status === 404 && nf.body.code === 'not-found', `every bound is refused BY NAME (400 bad-request): ${Object.entries(refusals).map(([k, r]) => `${k} → "${r.body && r.body.error}"`).join(' · ')}; an unknown account → 404`);
+  ok(gateOf(Object.values(refusals).every((r) => r.status === 400 && r.body.code === 'bad-request' && r.body.error)) && nf.status === 404 && nf.body.code === 'not-found', `every bound is refused BY NAME (400 bad-request): ${Object.entries(refusals).map(([k, r]) => `${k} → "${r.body && r.body.error}"`).join(' · ')}; an unknown account → 404`);
   const q100 = await get8('/api/channels/rows?q=' + encodeURIComponent('needle'.padEnd(100, ' ')));
   const needle = await get8('/api/channels/rows?q=NeEdLe'), title = await get8('/api/channels/rows?q=' + encodeURIComponent('paged 107'));
-  ok(q100.status === 200 && needle.body.total === 7 && needle.body.rows.every((r) => /needle/i.test(r.lastText)) && title.body.total === 1 && title.body.rows[0].id === 'p0107', `q: case-insensitive over the last line (7 "needle") and the title a person reads ("paged 107" → p0107); 100 characters (trimmed) is in bounds`);
+  ok(q100.status === 200 && needle.body.total === 7 && gateOf(needle.body.rows.every((r) => /needle/i.test(r.lastText))) && title.body.total === 1 && title.body.rows[0].id === 'p0107', `q: case-insensitive over the last line (7 "needle") and the title a person reads ("paged 107" → p0107); 100 characters (trimmed) is in bounds`);
   const keys = await get8(`/api/channels/rows?key=${encodeURIComponent(`${A8}/p0003`)}&key=${encodeURIComponent(`${A8}/p0004`)}&key=nobody%2Fx`);
   const conv = await get8('/api/channels/rows?conv=p0005'), acct = await get8(`/api/channels/rows?adapter=${A8}&limit=200`);
-  ok(keys.status === 200 && keys.body.rows.map((r) => r.id).sort().join() === 'p0003,p0004' && conv.body.rows.length === 1 && conv.body.rows[0].adapterId === A8 && acct.body.rows.length === 200 && acct.body.rows.every((r) => r.adapterId === A8) && acct.body.next, 'keys reads the named rows (an unknown key is simply absent); conv finds an id across accounts; adapter narrows to one account (200, then a cursor)');
+  ok(keys.status === 200 && keys.body.rows.map((r) => r.id).sort().join() === 'p0003,p0004' && conv.body.rows.length === 1 && conv.body.rows[0].adapterId === A8 && acct.body.rows.length === 200 && gateOf(acct.body.rows.every((r) => r.adapterId === A8)) && verdictOf(acct.body.next), 'keys reads the named rows (an unknown key is simply absent); conv finds an id across accounts; adapter narrows to one account (200, then a cursor)');
   const AGB = { Authorization: 'Bearer vsst_fake-agent-token' }, JBB = { Authorization: 'Bearer jbt_fake-job-token' };
   const ag1 = await get8('/api/channels', AGB), ag2 = await get8('/api/channels/rows?q=needle', AGB), ag3 = await get8('/api/channels?scope=totals', JBB);
-  ok([ag1, ag2, ag3].every((r) => r.status === 403 && r.body.code === 'agent-forbidden'), `an agent's session / job bearer is refused on both routes by name ("${ag1.body && ag1.body.error}")`);
+  ok(verdictOf([ag1, ag2, ag3].every((r) => r.status === 403 && r.body.code === 'agent-forbidden')), `an agent's session / job bearer is refused on both routes by name ("${ag1.body && ag1.body.error}")`);
   await new Promise((r) => srv8.close(r));
   e8.stop && e8.stop();
 }
@@ -6625,10 +6625,10 @@ console.log('\n§ design 011 lane 2: the poll stamps — a restart keeps every d
     return r;
   };
   const h = await run(ENG, 'q011-head');
-  ok(h.n > 0 && h.polled === h.n && h.due === 0 && h.same, `design 011 lane 2: after a restart NO conversation is due early — ${h.n} conversations polled by a pass, the engine stopped, a new one on the same data: ${h.due} due, every lastPollAt read back from the side file`, JSON.stringify(h));
+  ok(h.n > 0 && h.polled === h.n && h.due === 0 && verdictOf(h.same), `design 011 lane 2: after a restart NO conversation is due early — ${h.n} conversations polled by a pass, the engine stopped, a new one on the same data: ${h.due} due, every lastPollAt read back from the side file`, JSON.stringify(h));
   // the 2.369.203 heavy run's test-channels-e2e ⑰: a KILL before the side file's compaction — the journal keeps every stamp
   const hk = await run(ENG, 'q011-kill', { kill: true });
-  ok(hk.n > 0 && hk.polled === hk.n && hk.due === 0 && hk.same, `design 011 lane 2: after a KILL (the data dir as the kill left it: no close, no side file) NO conversation is due early either — ${hk.due} of ${hk.n} due, every lastPollAt read back from the journal (a lost one read as "never polled": a restored window fetched it ahead of discovery)`, JSON.stringify(hk));
+  ok(hk.n > 0 && hk.polled === hk.n && hk.due === 0 && verdictOf(hk.same), `design 011 lane 2: after a KILL (the data dir as the kill left it: no close, no side file) NO conversation is due early either — ${hk.due} of ${hk.n} due, every lastPollAt read back from the journal (a lost one read as "never polled": a restored window fetched it ahead of discovery)`, JSON.stringify(hk));
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
   const JOURNAL = '    journal(k);\n    stampsCompactIfDue();';   // B-360d: the side file is the journal's compaction — with no line, none comes due
   ok(ssrc.split(JOURNAL).length === 2, 'design 011 lane 2 · CONTROL setup: stamps.set appends the journal line where the control cuts it');
@@ -6645,7 +6645,7 @@ console.log('\n§ design 011 lane 2: the poll stamps — a restart keeps every d
     const s0 = e.schedulerExact(A, clock()), b0 = e.budgetOf(A);
     await e.pass(A);   // the timer's pass: every row due at once — fetched through the vendor's budget
     const s1 = e.schedulerExact(A, clock()), b1 = e.budgetOf(A);
-    ok(/carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll/.test(line) && s0.due === s0.conversations && s0.due > 0, `design 011 lane 2: with the side file deleted the start SAYS it ("${line.slice(0, 150)}") and all ${s0.due} conversations are due`);
+    ok(gateOf(/carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll/.test(line)) && s0.due === s0.conversations && s0.due > 0, `design 011 lane 2: with the side file deleted the start SAYS it ("${line.slice(0, 150)}") and all ${s0.due} conversations are due`);
     ok(b1.spent > b0.spent && b1.spent <= b1.limit && s1.due < s0.due, `design 011 lane 2: …and the re-poll is spent through the vendor's budget (${b1.spent - b0.spent} of the minute's ${b1.limit}), ${s0.due} → ${s1.due} due (a large one's pace: test-channel-drain ②c)`, JSON.stringify({ b0: b0.spent, b1: b1.spent, limit: b1.limit, s0: s0.due, s1: s1.due }));
     e.stop();
   }
@@ -6747,24 +6747,24 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
   };
   const real = await roundTrip('real', withFake, routeSrcC, { routeSame: true });
   const r0 = real.start ? real.start.state : '';
-  ok(!real.err && /^fc1\.[a-f0-9]{8,64}\.\d+~/.test(r0) && real.start.back.startsWith(`http://127.0.0.1:`) && new URL(real.start.back).pathname === `/api/channels/oauth/cb/${CK}`,
+  ok(!real.err && gateOf(/^fc1\.[a-f0-9]{8,64}\.\d+~/.test(r0)) && gateOf(real.start.back.startsWith(`http://127.0.0.1:`)) && new URL(real.start.back).pathname === `/api/channels/oauth/cb/${CK}`,
     `consent: Connect on the fake vendor signs ITS state shape with the engine's generic key and sends the browser to its landing (${real.err || r0.slice(0, 24)}…)`, real.err);
-  ok(real.land && real.land.status === 200 && /text\/html/.test(real.land.type) && /data-fc="ok"/.test(real.land.body) && /\(Ada\)/.test(real.land.body) && exchanged.join() === 'fc-code',
+  ok(gateOf(real.land) && real.land.status === 200 && gateOf(/text\/html/.test(real.land.type)) && gateOf(/data-fc="ok"/.test(real.land.body)) && gateOf(/\(Ada\)/.test(real.land.body)) && exchanged.join() === 'fc-code',
     'consent: the REAL route answers the fake vendor\'s OWN page — connected, the code exchanged once', JSON.stringify(real.land).slice(0, 300));
-  ok(real.status && real.status.done === true && real.status.ok === true, 'consent: the pending flow ends connected (oauthStatus)', JSON.stringify(real.status).slice(0, 300));
-  ok(real.none && real.none.status === 404 && /no-landing/.test(real.none.body) && real.unknown && real.unknown.status === 404 && /no-landing/.test(real.unknown.body),
+  ok(gateOf(real.status) && real.status.done === true && real.status.ok === true, 'consent: the pending flow ends connected (oauthStatus)', JSON.stringify(real.status).slice(0, 300));
+  ok(gateOf(real.none) && real.none.status === 404 && gateOf(/no-landing/.test(real.none.body)) && gateOf(real.unknown) && real.unknown.status === 404 && verdictOf(/no-landing/.test(real.unknown.body)),
     'consent: a kind whose row declares no landing (the webhook) and an unknown kind are 404 by name (`no-landing`), never another vendor\'s page', `${real.none && real.none.status} ${real.unknown && real.unknown.status}`);
   // lane pod-oauth-callback: Lark's consent lands on the instance's route now (an https address, a browser elsewhere) —
   // a made-up state is refused on LARK's own page (src/consent-road.js landingHtml), nothing exchanged
-  ok(real.lark && real.lark.status === 400 && /data-landing="failed"/.test(real.lark.body) && /Lark/.test(real.lark.body) && !/<script/.test(real.lark.body),
+  ok(gateOf(real.lark) && real.lark.status === 400 && gateOf(/data-landing="failed"/.test(real.lark.body)) && gateOf(/Lark/.test(real.lark.body)) && !/<script/.test(real.lark.body),
     'consent: Lark declares its landing — a made-up state answers Lark\'s own page (400, not connected, no close script)', `${real.lark && real.lark.status} ${real.lark && real.lark.body.slice(0, 160)}`);
   exchanged.length = 0;
   const judged = await roundTrip('slack-judge', withFake.replace(JUDGE, "const v = require('../channels/slack-manifest.js').stateVerdict(state, {"), routeSrcC, { routeSame: true });
-  ok(!judged.err && judged.land && judged.land.status === 400 && /data-fc="bad-shape"/.test(judged.land.body) && exchanged.length === 0 && !(judged.status && judged.status.ok),
+  ok(!judged.err && gateOf(judged.land) && judged.land.status === 400 && gateOf(/data-fc="bad-shape"/.test(judged.land.body)) && exchanged.length === 0 && !(judged.status && judged.status.ok),
     'consent CONTROL: the same copy with the pre-lane Slack judge restored in oauthLanding refuses the fake vendor\'s state (bad-shape) — nothing exchanged', JSON.stringify(judged.land || judged.err).slice(0, 300));
   exchanged.length = 0;
   const paged = await roundTrip('slack-page', withFake, routeSrcC.replace(PAGE, ".send(require('../channels/slack-words.js').landingHtml(r));"));
-  ok(!paged.err && paged.land && paged.land.status === 200 && !/data-fc=/.test(paged.land.body) && /Slack/.test(paged.land.body),
+  ok(!paged.err && gateOf(paged.land) && paged.land.status === 200 && !/data-fc=/.test(paged.land.body) && verdictOf(/Slack/.test(paged.land.body)),
     'consent CONTROL: a route copy with Slack\'s landing page restored shows the fake vendor\'s member SLACK\'s words (the row\'s page is what the green leg read)', JSON.stringify(paged.land || paged.err).slice(0, 200));
   delete globalThis.__VS_CONSENT_FAKE;
 }
@@ -6831,7 +6831,7 @@ console.log('\n㉕ lane channel-self-unread: the account\'s OWN message is read 
   ok(r.replied.unread === 0 && r.replied.readAt === r.replied.ownerAt, 'the owner\'s reply from the vendor\'s own app / the Outbox\'s sent message: 0 unread, readAt = his instant', JSON.stringify(r.replied));
   ok(r.unknown === 1, 'a record whose self-ness is UNKNOWN (no identity resolved) is still counted — never a guess', String(r.unknown));
   ok(r.marked === 1, 'markRead\'s re-derivation from the log skips the owner\'s own record (s2) and counts the rest (u1)', String(r.marked));
-  ok(r.preview.ok && r.preview.matched === 1 && JSON.stringify(r.preview.who) === '["userW"]', 'int229: the Notify… preview of a keyword skips the owner\'s own message as the watch does — userW\'s line only (1 match)', JSON.stringify(r.preview));
+  ok(gateOf(r.preview.ok) && r.preview.matched === 1 && JSON.stringify(r.preview.who) === '["userW"]', 'int229: the Notify… preview of a keyword skips the owner\'s own message as the watch does — userW\'s line only (1 match)', JSON.stringify(r.preview));
   // CONTROL (site 2, the ingest): the old arithmetic counts the owner's messages and never moves readAt
   const src = engineSource(REPO);
   const cut = src.replace('      if (freshRecs.length) countFresh(rec, convId, en, freshRecs);',
@@ -6843,7 +6843,7 @@ console.log('\n㉕ lane channel-self-unread: the account\'s OWN message is read 
   const pcut = src.replace('convIds, match: (x) => !own(x) && F.matchRecord(filter, x).hit })', 'convIds, match: (x) => F.matchRecord(filter, x).hit })');
   const pcp = patchPath('src/server', 'channels-engine-pv'); writeCopy(pcp, pcut);
   const pc = await driveSelf(require(pcp), 'self-unread-pv-ctl');
-  ok(pcut !== src && pc.preview.matched === 2 && pc.preview.who.includes('Owner'), 'CONTROL (int229): a preview without the skip lists the owner\'s own line (2 matches)', JSON.stringify(pc.preview));
+  ok(pcut !== src && pc.preview.matched === 2 && verdictOf(pc.preview.who.includes('Owner')), 'CONTROL (int229): a preview without the skip lists the owner\'s own line (2 matches)', JSON.stringify(pc.preview));
 }
 
 console.log('\n㉖ lane lark-system-records: a vendor SYSTEM notice is never unread, never the preview, never an author (owner\'s DM 2026-10-08)');
@@ -6984,16 +6984,16 @@ console.log('\n㉗ lane reply-infer-owner-between (fb-377439b167): the judge is 
   const real = await incident(ENG, 'between-real');
   const c0 = real.first[0] || {};
   const VOICE_LINE = 'Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note (not transcribed), 3 minutes before the reply.';
-  ok(real.set.ok && real.judgedBefore === 0 && real.first.length === 1 && c0.use === 'reply-infer' && c0.memo && c0.memo.id && c0.memo.sent === 'om_s1', 'the fixture: the agent\'s send, its echo and the owner\'s [audio] ingested (nothing judged — the owner\'s own message is never a candidate); the peer\'s plain «Sounds good» 3 min after the voice note ⇒ ONE judgment, against the agent\'s send', JSON.stringify({ set: real.set.ok, before: real.judgedBefore, calls: real.first.map((x) => x.use) }));
+  ok(gateOf(real.set.ok) && real.judgedBefore === 0 && real.first.length === 1 && c0.use === 'reply-infer' && gateOf(c0.memo) && gateOf(c0.memo.id) && c0.memo.sent === 'om_s1', 'the fixture: the agent\'s send, its echo and the owner\'s [audio] ingested (nothing judged — the owner\'s own message is never a candidate); the peer\'s plain «Sounds good» 3 min after the voice note ⇒ ONE judgment, against the agent\'s send', JSON.stringify({ set: real.set.ok, before: real.judgedBefore, calls: real.first.map((x) => x.use) }));
   ok(JSON.stringify(Object.keys(c0.parts || {})) === JSON.stringify(['sent', 'reply', 'gap', 'between']) && c0.parts.reply === 'Sounds good' && c0.parts.gap === '441 minutes' && c0.parts.between === VOICE_LINE, 'THE JUDGE IS TOLD: its parts = sent / reply / gap (441 minutes) + «between»: the owner wrote 1 message of their own, the last a voice note (not transcribed), 3 minutes before the reply — the agent\'s own echo (the owner\'s account, 0.8 s after the send) is NOT counted as the owner\'s', JSON.stringify(c0.parts));
   ok(!JSON.stringify(c0.parts).includes('see you on Thursday') && !/\[audio\]/.test(c0.parts.between), 'fixed words only: no other message\'s text rides (an older message, the voice note\'s own token)');
   const after = DM.buildInput('reply-infer', c0.parts);
-  ok(/\ngap: 441 minutes\nbetween: Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note \(not transcribed\), 3 minutes before the reply\.$/.test(after.text) && !after.truncated && after.est <= after.ceiling, 'the input the model builds from those parts ends with the between line, whole', after.text);
+  ok(gateOf(/\ngap: 441 minutes\nbetween: Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note \(not transcribed\), 3 minutes before the reply\.$/.test(after.text)) && !after.truncated && after.est <= after.ceiling, 'the input the model builds from those parts ends with the between line, whole', after.text);
   console.log('    judge input (lane):\n' + after.text.split('\n').map((l) => '      | ' + l).join('\n'));
   const wake = real.ladder.calls.find((x) => x.cid === 'agent-1');
-  ok(wake && /matched: judged an answer to your message of \d\d:\d\d UTC; the user also wrote in between/.test(wake.text) && /\nReply to your message \([^)]*, judged 0\.90; the user also wrote in between — a voice note, 3 min before this\): from Peer at /.test(wake.text), 'the stub said yes (0.90) ⇒ the wake TELLS the agent: «the user also wrote in between — a voice note, 3 min before this» beside the score', wake ? wake.text.split('\n').slice(0, 3).join(' | ') : 'no wake');
+  ok(gateOf(wake) && gateOf(/matched: judged an answer to your message of \d\d:\d\d UTC; the user also wrote in between/.test(wake.text)) && verdictOf(/\nReply to your message \([^)]*, judged 0\.90; the user also wrote in between — a voice note, 3 min before this\): from Peer at /.test(wake.text)), 'the stub said yes (0.90) ⇒ the wake TELLS the agent: «the user also wrote in between — a voice note, 3 min before this» beside the score', wake ? wake.text.split('\n').slice(0, 3).join(' | ') : 'no wake');
   const c1 = real.second[0] || {};
-  ok(real.second.length === 1 && c1.parts && c1.parts.reply === 'Thanks!' && c1.parts.between === 'Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note (not transcribed), 7 minutes before the reply. 1 message from others came between too.', 'a RESTARTED engine (the same data, a cold thread index): the next plain message is told the same voice note — read from the STORED log — and the peer\'s «Sounds good» as one message from others', JSON.stringify(c1.parts));
+  ok(real.second.length === 1 && gateOf(c1.parts) && c1.parts.reply === 'Thanks!' && c1.parts.between === 'Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note (not transcribed), 7 minutes before the reply. 1 message from others came between too.', 'a RESTARTED engine (the same data, a cold thread index): the next plain message is told the same voice note — read from the STORED log — and the peer\'s «Sounds good» as one message from others', JSON.stringify(c1.parts));
   // RED CONTROL: the base's engine — no `between` part
   const src = engineSource(REPO);
   const PART_ = ', ...(c.between ? { between: F.inferBetweenLine(c.between) } : {})';
@@ -7105,19 +7105,19 @@ console.log('\n㉘ lane channel-reauth-visible: a dead sign-in is ONE standing u
   };
   const r = await run(ENG, 'real');
   const f = r.first[0] || {};
-  ok(r.healthy === 'ok' && r.first.length === 1 && f.text === 'alice@example.test (Gmail): sign-in expired — re-authorize' && f.params && f.params.kind === 'Gmail' && f.urgency === 'urgent' && f.band === 1,
+  ok(r.healthy === 'ok' && r.first.length === 1 && f.text === 'alice@example.test (Gmail): sign-in expired — re-authorize' && gateOf(f.params) && f.params.kind === 'Gmail' && f.urgency === 'urgent' && f.band === 1,
     `the FIRST refused pass files ONE urgent item, band 1 (the top of For you), worded by the login and the account's label (${JSON.stringify(f.text)})`, JSON.stringify(r.first));
-  ok(f.action && f.action.type === 'channel-reauth' && f.action.adapterId === 'dead' && f.action.signin === 'expired' && f.key === '{account} ({kind}): sign-in expired — re-authorize ({cause})' && f.cause && f.cause.key === 'the vendor refused the refresh token',
+  ok(gateOf(f.action) && f.action.type === 'channel-reauth' && f.action.adapterId === 'dead' && f.action.signin === 'expired' && f.key === '{account} ({kind}): sign-in expired — re-authorize ({cause})' && gateOf(f.cause) && f.cause.key === 'the vendor refused the refresh token',
     'its action is the account\'s Reconnect (channel-reauth + signin: expired); the person\'s words carry the cause as a key the client words', JSON.stringify(f));
-  ok(r.view1.authState === 'expired' && r.view1.authCause === 'refresh-refused' && r.view1.authSince > 0 && r.frame === 'expired' && Array.isArray(r.totals) && r.totals.length === 1 && r.totals[0].authState === 'expired' && r.totals[0].user === 'alice@example.test',
+  ok(r.view1.authState === 'expired' && r.view1.authCause === 'refresh-refused' && r.view1.authSince > 0 && r.frame === 'expired' && gateOf(Array.isArray(r.totals)) && r.totals.length === 1 && r.totals[0].authState === 'expired' && r.totals[0].user === 'alice@example.test',
     'the account view says authState expired + its cause + since (the broadcast AND the rail\'s totals carry it)', JSON.stringify({ v: r.view1, frame: r.frame, totals: r.totals }));
   ok(r.after6.length === 1 && r.after6[0] === f.id && r.ladder === 0, `six refused passes: still that ONE item (same id), never the 3-strike "consecutive failed passes" line (${r.ladder})`);
   ok(r.superseded.length === 1 && r.superseded[0] === f.id, 'a supersede (the ladder\'s retraction, a transport ladder behind it) never retracts it');
   ok(r.locked.length === 1 && r.locked[0] === f.id && r.lockedView === 'expired', 'a vault lock (no request built) leaves it standing and the view expired');
-  ok(r.disk && r.disk.cause === 'refresh-refused' && r.disk.item && r.disk.item.id === f.id && r.rebootView === 'expired' && r.reboot.length === 1 && r.reboot[0] === f.id,
+  ok(gateOf(r.disk) && r.disk.cause === 'refresh-refused' && gateOf(r.disk.item) && r.disk.item.id === f.id && r.rebootView === 'expired' && r.reboot.length === 1 && r.reboot[0] === f.id,
     'a RESTART: the record keeps it on disk, the view says expired before any pass, the next refused pass files nothing new', JSON.stringify({ disk: r.disk, reboot: r.reboot }));
   ok(r.dismissed === 0, 'the person\'s own dismissal stands across a refused pass that says nothing new');
-  ok(r.reasserted.length === 1 && r.reasserted[0].id === f.id && r.reasserted[0].cause && r.reasserted[0].cause.key === 'the sign-in was not finished' && r.viewCause === 'consent-unfinished',
+  ok(r.reasserted.length === 1 && r.reasserted[0].id === f.id && gateOf(r.reasserted[0].cause) && r.reasserted[0].cause.key === 'the sign-in was not finished' && r.viewCause === 'consent-unfinished',
     'a consent that ended unfinished RE-ASSERTS it: the same item reopened, its words «the sign-in was not finished»', JSON.stringify(r.reasserted));
   ok(r.recovered === 0 && r.done.status === 'done' && r.done.by === 'system' && r.recoveredView === 'ok' && r.recoveredFrame === 'ok' && r.diskAfter === null,
     'the FIRST pass that goes through retracts it (done by the engine), the view and the broadcast say ok at once, the record forgets it', JSON.stringify({ done: r.done, v: r.recoveredView, f: r.recoveredFrame }));
@@ -7127,7 +7127,7 @@ console.log('\n㉘ lane channel-reauth-visible: a dead sign-in is ONE standing u
     world.fail = refused; world.st = { state: 'connected', expiresAt: null, scopes: ['x'], why: null };
     for (let i = 0; i < 3; i++) await e.pass('dead', { force: true });
     const open = mine(userTodos);
-    ok(view(e).authState === 'ok' && open.length === 1 && /3 consecutive failed passes \(auth-expired\)/.test(open[0].text) && open[0].urgency === 'high',
+    ok(view(e).authState === 'ok' && open.length === 1 && gateOf(/3 consecutive failed passes \(auth-expired\)/.test(open[0].text)) && open[0].urgency === 'high',
       'a record that holds NO sign-in (a Connect never finished, a disconnected account) is never «expired»: the base\'s 3-strike line, as before', JSON.stringify(open.map((i) => [i.text, i.urgency])));
     e.stop(); userTodos.stop(); world.fail = null;
   }
@@ -7143,7 +7143,7 @@ console.log('\n㉘ lane channel-reauth-visible: a dead sign-in is ONE standing u
 }
 
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 30 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 30 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 // ── lane webhook-l1-server: THE WEBHOOK ADAPTER IN THE ENGINE — seeded by its declared facts, the push door stores first
 // and dedups (bounded), the per-path wake budget judged BEFORE the watcher's pace, `mode: 'all'` defaulting to a digest on a
@@ -7160,7 +7160,7 @@ console.log('\nwebhook: the engine side (budget before pace, digest default, ded
   engines.push(e);
   const recs = e.adapterRecords().adapters;
   const wrec = recs.find((r) => r.id === 'webhook'), arec = recs.find((r) => r.id === 'agents');
-  ok(wrec && !wrec.builtin && wrec.push.claimedExclusive === 'exclusive' && wrec.push.enabled === true && arec && arec.builtin === true, 'seeded by DECLARED facts: the webhook row (no `builtin`, an inbound door ⇒ exclusive push) beside the agents row (its client word kept)', { wrec, arec });
+  ok(gateOf(wrec) && !wrec.builtin && wrec.push.claimedExclusive === 'exclusive' && wrec.push.enabled === true && gateOf(arec) && arec.builtin === true, 'seeded by DECLARED facts: the webhook row (no `builtin`, an inbound door ⇒ exclusive push) beside the agents row (its client word kept)', { wrec, arec });
   ok(e.honestyLineFor(wrec) === false && e.honestyLineFor(arec) === true, "honestyLine 'never': the instance switch ON appends a line on agents (control), never on a webhook path");
   const st = WH.callersStore(path.join(dataDir, 'channels', 'webhook'), { secrets: e.secrets, now: () => clock });
   for (const slug of ['ci', 'plain']) {
@@ -7174,7 +7174,7 @@ console.log('\nwebhook: the engine side (budget before pace, digest default, ded
   const wd = await e.setWatchers('webhook', { kind: 'conversation', convId: 'ci' }, [{ principal: AL }]);
   const wp = await e.setWatchers('webhook', { kind: 'conversation', convId: 'plain' }, [{ principal: AL }]);
   const notifyOf = (slug) => ((e.store.index.peek(`webhook/${slug}`) || {}).watchers || [])[0];
-  ok(wd.ok && notifyOf('ci') && notifyOf('ci').notify === 'digest' && wp.ok && notifyOf('plain').notify === 'wake', "mode 'all' with no notify ⇒ a DIGEST on a path that declares a wake budget (control: 'wake' on a conversation without one)", [notifyOf('ci'), notifyOf('plain')]);
+  ok(gateOf(wd.ok) && gateOf(notifyOf('ci')) && notifyOf('ci').notify === 'digest' && gateOf(wp.ok) && notifyOf('plain').notify === 'wake', "mode 'all' with no notify ⇒ a DIGEST on a path that declares a wake budget (control: 'wake' on a conversation without one)", [notifyOf('ci'), notifyOf('plain')]);
   await e.setWatchers('webhook', { kind: 'conversation', convId: 'ci' }, [{ principal: AL, notify: 'wake' }]);
   ok(notifyOf('ci').notify === 'wake', "an explicit notify 'wake' is kept (the default only fills a row that named none)");
   let n = 0;
@@ -7185,17 +7185,17 @@ console.log('\nwebhook: the engine side (budget before pace, digest default, ded
     return r;
   };
   const r1 = await push('ci', 'deploy 1');
-  ok(r1 && r1.persisted === true && e.store.readTail('webhook', 'ci', { limit: 5 }).length === 1, 'the push door: stored FIRST (persisted: true is what lets the route answer 200)', r1);
+  ok(gateOf(r1) && r1.persisted === true && e.store.readTail('webhook', 'ci', { limit: 5 }).length === 1, 'the push door: stored FIRST (persisted: true is what lets the route answer 200)', r1);
   const dup = await e.pushInbound('webhook', { kind: 'record', convId: 'ci', eventId: `${c.id}:k1`, record: e.store.readTail('webhook', 'ci', { limit: 1 })[0] });
   ok(dup.duplicate === true && dup.persisted === false && e.store.readTail('webhook', 'ci', { limit: 5 }).length === 1 && ENG.PUSH_EVENT_DEDUP_MAX === 5000, 'the same eventId again ⇒ a duplicate, nothing stored twice (the memory bounded at 5 000)');
   clock += 5 * 60e3; await push('ci', 'deploy 2');
   const woke = ladder.calls.filter((x) => x.cid === 'agent-A').length;
   clock += 5 * 60e3; const r3 = await push('ci', 'deploy 3');
   const ref = (e.store.index.peek('webhook/ci').watchers[0].stats || {}).lastRefusal || {};
-  ok(woke === 2 && ladder.calls.length === 2 && /^path ci used 2 \/ 2 wakes this hour \(woke Alpha\)$/.test(ref.why || ''), `the 3rd call in the hour is HELD by the per-path budget (2 / 2), the refusal names the path and whom it woke: "${ref.why}"`, { woke, calls: ladder.calls.length, ref });
+  ok(woke === 2 && ladder.calls.length === 2 && verdictOf(/^path ci used 2 \/ 2 wakes this hour \(woke Alpha\)$/.test(ref.why || '')), `the 3rd call in the hour is HELD by the per-path budget (2 / 2), the refusal names the path and whom it woke: "${ref.why}"`, { woke, calls: ladder.calls.length, ref });
   clock += 1000; await push('ci', 'deploy 4');
   const ref2 = (e.store.index.peek('webhook/ci').watchers[0].stats || {}).lastRefusal || {};
-  ok(/^path ci used 2 \/ 2/.test(ref2.why || '') && ladder.calls.length === 2, 'BEFORE paceVerdict: a call 1 s later (inside the watcher\'s own pace floor too) is refused by the BUDGET — its words, not the pace\'s', ref2);
+  ok(gateOf(/^path ci used 2 \/ 2/.test(ref2.why || '')) && ladder.calls.length === 2, 'BEFORE paceVerdict: a call 1 s later (inside the watcher\'s own pace floor too) is refused by the BUDGET — its words, not the pace\'s', ref2);
   for (const t of ['a', 'b', 'c']) { clock += 5 * 60e3; await push('plain', 'x ' + t); }
   ok(ladder.calls.length === 5, 'control: a conversation without a budget wakes on each of 3 spaced calls', ladder.calls.length);
   clock += 61 * 60e3; await push('ci', 'next hour');
@@ -7204,4 +7204,4 @@ console.log('\nwebhook: the engine side (budget before pace, digest default, ded
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-sb-'));
 process.env.HOME = home;
@@ -70,7 +70,7 @@ const createsOf = (ops) => ops.filter((o) => o && o.op === 'create').map((o) => 
 const sameCreates = (a, b) => a.length === b.length && a.every((x, k) => !!x && x === b[k]);
 const firstDiff = (a, b) => { for (let k = 0; k < Math.max(a.length, b.length); k++) if (a[k] !== b[k]) return { at: k, device: String(a[k]).slice(0, 300), server: String(b[k]).slice(0, 300) }; return null; };
 const devC = createsOf(events), srvC = createsOf(serverOps);
-ok(devC.length >= 3 && sameCreates(devC, srvC), `PARITY (deterministic): the daemon's normalizer and the server's make the SAME creates from the same recorded lines — ${devC.length} / ${srvC.length}, by id AND content${sameCreates(devC, srvC) ? '' : ' — first difference ' + JSON.stringify(firstDiff(devC, srvC))}`);
+ok(devC.length >= 3 && verdictOf(sameCreates(devC, srvC)), `PARITY (deterministic): the daemon's normalizer and the server's make the SAME creates from the same recorded lines — ${devC.length} / ${srvC.length}, by id AND content${sameCreates(devC, srvC) ? '' : ' — first difference ' + JSON.stringify(firstDiff(devC, srvC))}`);
 {
   // the CONTROL: an injected divergence turns it red — a create's text changed, an id changed, a create missing, one extra
   const edit = (k, f) => srvC.map((x, n) => (n === k ? canon(f(JSON.parse(x))) : x));
@@ -118,4 +118,4 @@ ok(batches.length === before, 'no batches after the session exits');
 try { const lg = (await import('node:fs')).readdirSync(process.env.VIBESPACE_AGENTD_ROOT).filter(f=>/log|out/.test(f)); for (const f of lg) console.log('--- daemon ' + f + ' ---\n' + (await import('node:fs')).readFileSync(process.env.VIBESPACE_AGENTD_ROOT + '/' + f, 'utf8').split('\n').slice(-25).join('\n')); } catch (e) { console.log('log read:', e.message); }
 try { await dm.stop?.(); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

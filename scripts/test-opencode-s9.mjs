@@ -55,7 +55,7 @@ const events = require(path.join(REPO, 'src/opencode-events.js'));
 const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
 
 let pass = 0; const fails = [];
-const ok = (name, cond, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fails.push(name); console.log(`  ✗ ${name}${detail ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fails.push(name); console.log(`  ✗ ${name}${detail ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
 const skipNames = [];   // a skip is not a green (主开发 r1083 should): COUNTED apart and named in the closing line
 const skip = (name, why) => { skipNames.push(name); console.log(`  ⊘ SKIP ${name} — ${why}`); };
 // r4151: a negative control whose copy could not be built is a FAILED line — never a skip that leaves the suite green
@@ -90,11 +90,11 @@ console.log('\n— (a) ROLL BACK / RESTORE —');
 
   const conv = await facts.readConversation('ses_a1');
   const notice = conv.records.find((r) => r.kind === 'notice' && r.noticeKind === 'revert');
-  ok('the reader SAYS the conversation is rolled back (a notice at the boundary)', !!notice && /staged for removal/.test(notice.text), notice?.text);
+  ok('the reader SAYS the conversation is rolled back (a notice at the boundary)', !!notice && verdictOf(/staged for removal/.test(notice.text)), notice?.text);
   const idx = conv.records.indexOf(notice);
   const firstUserAfter = conv.records.findIndex((r) => r.kind === 'user' && r.msgId === 'msg_u2');
   ok('…and it sits immediately BEFORE the message it rolled back to', idx >= 0 && firstUserAfter === idx + 1, { idx, firstUserAfter });
-  ok('the notice names the restored files', /1 file/.test(notice?.text || ''), notice?.text);
+  ok('the notice names the restored files', verdictOf(/1 file/.test(notice?.text || '')), notice?.text);
 
   const s2 = await facts.unrevert('ses_a1');
   ok('unrevert clears it', !s2.revert);
@@ -103,10 +103,10 @@ console.log('\n— (a) ROLL BACK / RESTORE —');
 
   let broke = null;
   try { await facts.revertTo('ses_a1', {}); } catch (e) { broke = e; }
-  ok('a roll-back with no target is REFUSED loudly', !!broke && /message/i.test(broke.message), broke?.message);
+  ok('a roll-back with no target is REFUSED loudly', !!broke && verdictOf(/message/i.test(broke.message)), broke?.message);
   broke = null;
   try { await facts.revertTo('ses_missing', { messageID: 'msg_u1' }); } catch (e) { broke = e; }
-  ok('an unknown conversation names itself in the error', !!broke && /ses_missing/.test(broke.message), broke?.message);
+  ok('an unknown conversation names itself in the error', !!broke && verdictOf(/ses_missing/.test(broke.message)), broke?.message);
   await mock.close();
 }
 
@@ -161,7 +161,7 @@ console.log('\n— (b) THE ASK CARD —');
 
   let broke = null;
   try { await facts.answerQuestion('que_gone', [['Blue']]); } catch (e) { broke = e; }
-  ok('answering a question that is gone FAILS loudly (never a silent no-op)', !!broke && /que_gone/.test(broke.message), broke?.message);
+  ok('answering a question that is gone FAILS loudly (never a silent no-op)', !!broke && verdictOf(/que_gone/.test(broke.message)), broke?.message);
   await mock.close();
 }
 
@@ -171,7 +171,7 @@ console.log('\n— (c) THE SERVE TERMINAL —');
   const mock = await startMockServe({ state: createMockState(), pty: true });
   const facts = serve.createFacts(fixedLocator(mock.url), { log: { warn() { } } });
   const opened = await facts.openPty({ cwd: '/work/alpha', title: 'test' });
-  ok('openPty returns the pty AND the SERVER-side stream url', !!opened.pty?.id && /^ws:\/\/127\.0\.0\.1:\d+\/pty\/pty_mock1\/connect/.test(opened.url), opened.url);
+  ok('openPty returns the pty AND the SERVER-side stream url', !!opened.pty?.id && verdictOf(/^ws:\/\/127\.0\.0\.1:\d+\/pty\/pty_mock1\/connect/.test(opened.url)), opened.url);
   ok('an unsecured serve refuses to mint a ticket — we connect without one', opened.ticketed === false && !/ticket=/.test(opened.url), opened.url);
 
   // the ACCESS layer strips the transport secrets from anything a route returns
@@ -193,12 +193,12 @@ console.log('\n— (c) THE SERVE TERMINAL —');
   let exited = null;
   bridge.shim.onExit((e) => { exited = e; });
   await sleep(300);
-  ok('TEXT frames sent BEFORE the consumer attached are held and flushed (never a blank terminal)', chunks.join('').includes('mock-shell$'), chunks);
+  ok('TEXT frames sent BEFORE the consumer attached are held and flushed (never a blank terminal)', verdictOf(chunks.join('').includes('mock-shell$')), chunks);
   ok('BINARY control frames (\\0-json cursor) are NOT rendered into the shell', !chunks.join('').includes('cursor'), chunks);
   bridge.shim.write('echo hi\r');
   await sleep(200);
   const sock = mock.state.ptySockets.find((x) => x.id === bridge.ptyId);
-  ok('input written to the shim reaches the serve socket', (sock?.input || []).join('').includes('echo hi'), sock?.input);
+  ok('input written to the shim reaches the serve socket', verdictOf((sock?.input || []).join('').includes('echo hi')), sock?.input);
   bridge.shim.resize(100, 40);
   await sleep(200);
   ok('resize goes over HTTP (PUT /pty/:id), not the socket', mock.state.ptys.get(bridge.ptyId)?.size?.cols === 100, mock.state.ptys.get(bridge.ptyId));
@@ -211,17 +211,17 @@ console.log('\n— (c) THE SERVE TERMINAL —');
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n— (d) THE LIVE LANE (the 10s list poll is GONE) —');
 {
-  ok('sseFrames reassembles split frames and joins multi-line data', (() => {
+  ok('sseFrames reassembles split frames and joins multi-line data', verdictOf((() => {
     const a = events.sseFrames('', 'data: {"x":1}\n\ndata: one\ndata: two\n\ndata: {"y"');
     const b = events.sseFrames(a.carry, ':2}\n\n');
     return JSON.stringify(a.frames) === '["{\\"x\\":1}","one\\ntwo"]' && JSON.stringify(b.frames) === '["{\\"y\\":2}"]';
-  })());
+  })()));
   const cls = (type, properties, extra = {}) => events.classifyEvent({ directory: '/work/alpha', payload: { id: 'evt', type, properties }, ...extra });
   ok('classifyEvent: session.created dirties the session list', cls('session.created', { sessionID: 'ses_a1' }).dirty.sessions === true);
   ok('classifyEvent: message.part.updated dirties only that conversation', cls('message.part.updated', { sessionID: 'ses_a1' }).dirty.conversation === 'ses_a1');
   ok('classifyEvent: session.status carries the busy verdict', cls('session.status', { sessionID: 'ses_a1', status: { type: 'busy' } }).status.type === 'busy');
   ok('classifyEvent: question.asked carries the whole request', cls('question.asked', { id: 'que_1', sessionID: 'ses_a1', questions: [{ question: 'q', header: 'h', options: [] }] }).question?.id === 'que_1');
-  ok('classifyEvent: an UNKNOWN type is "other" with no dirty flags (an OpenCode upgrade can never drop a lane)', (() => { const r = cls('galaxy.exploded', {}); return r.kind === 'other' && Object.keys(r.dirty).length === 0; })());
+  ok('classifyEvent: an UNKNOWN type is "other" with no dirty flags (an OpenCode upgrade can never drop a lane)', verdictOf((() => { const r = cls('galaxy.exploded', {}); return r.kind === 'other' && Object.keys(r.dirty).length === 0; })()));
   ok('classifyEvent: a heartbeat is not a change', cls('server.heartbeat', {}).kind === 'heartbeat');
 
   const mock = await startMockServe({ state: createMockState() });
@@ -244,7 +244,7 @@ console.log('\n— (d) THE LIVE LANE (the 10s list poll is GONE) —');
 
   emit(mock.state, { directory: '/work/alpha', payload: { id: 'evt_n', type: 'session.created', properties: { sessionID: 'ses_new' } } });
   await sleep(250);
-  ok('an SSE change marks the list dirty (and NOTIFIES — the cache-invalidation law)', facts.state().dirty === true && changes.includes('sessions'), changes);
+  ok('an SSE change marks the list dirty (and NOTIFIES — the cache-invalidation law)', facts.state().dirty === true && verdictOf(changes.includes('sessions')), changes);
   await sleep(1000);                                   // past the serial-burst floor
   await facts.discover({});
   if (watchBroken) skip('…and the very next discover re-reads it', 'the lane cannot be healthy on this machine (fs.watch exhausted)');
@@ -255,7 +255,7 @@ console.log('\n— (d) THE LIVE LANE (the 10s list poll is GONE) —');
   fs.writeFileSync(path.join(storeDir, 'opencode.db-wal'), 'y');
   await sleep(400);
   if (watchBroken) skip('a write by ANOTHER opencode process (the store file) dirties the list too', 'fs.watch exhausted on this machine (the lane degraded LOUDLY, which is the designed behaviour)');
-  else ok('a write by ANOTHER opencode process (the store file) dirties the list too — the only lane that sees a TUI', changes.some((c) => /^store/.test(c)), changes);
+  else ok('a write by ANOTHER opencode process (the store file) dirties the list too — the only lane that sees a TUI', verdictOf(changes.some((c) => /^store/.test(c))), changes);
 
   // an UNHEALTHY lane falls back to the timer, STRUCTURALLY
   const facts2 = serve.createFacts(fixedLocator(mock.url), { log: { warn() { } }, listCacheMs: 50 });
@@ -279,7 +279,7 @@ console.log('\n— (f) HONEST LIVENESS —');
   const mine = new Map([['w1', { backend: 'opencode', backendSessionId: 'ses_a1', name: 'mine' }]]);
   let rows = await facts.discover({ activeSessions: mine });
   ok('our own live session reads live', rows.find((r) => r.backendSessionId === 'ses_a1')?.status === 'live');
-  ok('everything else reads stopped — never a fake "running"', rows.filter((r) => r.backendSessionId !== 'ses_a1').every((r) => r.status === 'stopped'));
+  ok('everything else reads stopped — never a fake "running"', verdictOf(rows.filter((r) => r.backendSessionId !== 'ses_a1').every((r) => r.status === 'stopped')));
 
   mock.state.statuses = { ses_a2: { type: 'busy' } };
   await facts.statusMap();
@@ -314,10 +314,10 @@ console.log('\n— (f) HONEST LIVENESS —');
   await sleep(20);
   ok('…and a later tick decays back to stopped (stale evidence is not a running agent)', (await factsC.discover({})).find((r) => r.backendSessionId === 'ses_g1')?.status === 'stopped');
 
-  ok('the entry carries the roll-back state and the pending-ask count for the sidebar/chat', (() => {
+  ok('the entry carries the roll-back state and the pending-ask count for the sidebar/chat', verdictOf((() => {
     const r = rows.find((x) => x.backendSessionId === 'ses_a1');
     return r && 'revert' in r.opencode && 'questions' in r.opencode && 'busy' in r.opencode;
-  })(), rows[0]?.opencode);
+  })()), rows[0]?.opencode);
   await mock.close();
 }
 
@@ -326,20 +326,20 @@ console.log('\n— WIRING PINS (a fix that is not wired is not a fix) —');
 {
   const routes = read('src/routes/opencode.js');
   // (the roll-back routes + the dead routes gone — MOVED to the fast scripts/test-opencode-s9-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-  ok('…and every op in the SHARED table is reachable (a route, the ws ask lane or the pty bridge) — no dead rows', (() => {
+  ok('…and every op in the SHARED table is reachable (a route, the ws ask lane or the pty bridge) — no dead rows', verdictOf((() => {
     const table = require(path.join(REPO, 'src/opencode-remote.js')).OPENCODE_OP_NAMES;
     const surfaces = routes + read('src/ws-handler.js') + read('src/server/opencode-pty-bridge.js') + read('src/server/opencode-access.js') + read('src/ws-create.js');
     return table.every((op) => surfaces.includes(`'${op}'`));
-  })());
+  })()));
   // (the routes' one helper, publicView, broadcast, the ask card, the window, the session card, ws-create, the schema — MOVED to the fast scripts/test-opencode-s9-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-  ok('the daemon bundle carries the shared serve + op table (the device rung is the SAME code)', (() => {
+  ok('the daemon bundle carries the shared serve + op table (the device rung is the SAME code)', verdictOf((() => {
     const b = path.join(REPO, 'data/bin/vibespace-agentd.js');
     if (!fs.existsSync(b)) return false;
     const t = fs.readFileSync(b, 'utf-8');
     return t.includes('opencode-serve') && t.includes('runOpencodeOp');
-  })());
+  })()));
   // (the docs + the reader-site census — MOVED to the fast scripts/test-opencode-s9-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-  ok('ci.mjs runs this suite', /'test-opencode-s9'/.test(read('scripts/ci.mjs')));
+  ok('ci.mjs runs this suite', verdictOf(/'test-opencode-s9'/.test(read('scripts/ci.mjs'))));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -389,7 +389,7 @@ console.log('\n— ROUND 2 (findings from the review of this branch) —');
   facts.armLive((deps) => { onEvent = deps.onEvent; return { start() { }, kick() { }, stop() { }, state: () => ({ sse: { connected: true }, watch: { active: true } }) }; }).start();
   onEvent({ kind: 'connected', sessionId: '', dirty: { sessions: true } });
   for (let i = 0; i < 40 && !mock.state.requests.includes('GET /session/status'); i++) await sleep(50);
-  ok('a (re)connect re-reads /session/status (the turn that was already running is not "stopped")', mock.state.requests.includes('GET /session/status'), mock.state.requests.slice(-4));
+  ok('a (re)connect re-reads /session/status (the turn that was already running is not "stopped")', verdictOf(mock.state.requests.includes('GET /session/status')), mock.state.requests.slice(-4));
   const rows = await facts.discover({});
   ok('…and that conversation reads external on the FIRST list after the reconnect', rows.find((r) => r.backendSessionId === 'ses_a2')?.status === 'external', rows.map((r) => `${r.backendSessionId}:${r.status}`));
   facts.stopLive();
@@ -500,11 +500,11 @@ console.log('\n— ROUND 3 (findings from the second review of this branch) —'
   //    admitted the shell was gone. Measured on the real serve: after `exit`,
   //    `GET /pty/<id>` is PtyNotFoundError and the upgrade is a plain 404.
   const bridgeMod = require(path.join(REPO, 'src/server/opencode-pty-bridge.js'));
-  ok('ptyGone(): a 404/410 upgrade is terminal, a transport failure is not', (() => {
+  ok('ptyGone(): a 404/410 upgrade is terminal, a transport failure is not', verdictOf((() => {
     const t = ['Unexpected server response: 404', 'Unexpected server response: 410'].every((m) => bridgeMod.ptyGone(m));
     const f = ['Unexpected server response: 502', 'Unexpected server response: 503', 'connect ECONNREFUSED 127.0.0.1:1', 'socket hang up', 'read ECONNRESET', '', null].every((m) => !bridgeMod.ptyGone(m));
     return t && f;
-  })());
+  })()));
 
   const mock = await startMockServe({ state: createMockState(), pty: true });
   const facts = serve.createFacts(fixedLocator(mock.url), { log: { warn() { } } });
@@ -565,11 +565,11 @@ console.log('\n— ROUND 4 (findings from the third review of this branch) —')
   oldUrl.searchParams.set('directory', USER_DIR);
   const oldPty = await (await fetch(oldUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cwd: USER_DIR }) })).json();
   ok('negative control: the OLD `?directory=` shape DOES boot it (and DELETE frees nothing — the mock models the measurement)',
-    mock.state.instances.has(USER_DIR), [...mock.state.instances]);
+    verdictOf(mock.state.instances.has(USER_DIR)), [...mock.state.instances]);
   const delUrl = new URL(mock.url + `/pty/${oldPty.id}`);
   delUrl.searchParams.set('directory', USER_DIR);
   await fetch(delUrl, { method: 'DELETE' });
-  ok('…and closing it does NOT release the instance it booted (only POST /instance/dispose does — measured)', mock.state.instances.has(USER_DIR));
+  ok('…and closing it does NOT release the instance it booted (only POST /instance/dispose does — measured)', verdictOf(mock.state.instances.has(USER_DIR)));
   ok('precondition: none of this was already booted before the leg', before.size === 0 || !before.has(USER_DIR));
 
   // CHANGE THEM TOGETHER OR NOT AT ALL: the pty registry is PER INSTANCE
@@ -618,7 +618,7 @@ console.log('\n— ROUND 4 (findings from the third review of this branch) —')
   const markBefore = facts._live.reapedFor;
   const busy = await facts.reapPtys({ force: true, attempts: 2, settleMs: 10 });
   ok('a sweep REFUSES while an open is in flight, and does not advance the swept marker (it retries later instead of racing)',
-    busy.ok === false && /being opened/.test(busy.reason || '') && facts._live.reapedFor === markBefore, { busy, markBefore, now: facts._live.reapedFor });
+    busy.ok === false && gateOf(/being opened/.test(busy.reason || '')) && facts._live.reapedFor === markBefore, { busy, markBefore, now: facts._live.reapedFor });
   ok('…and it did not DELETE anything while refusing', mock.state.ptys.size === 2, [...mock.state.ptys.keys()]);
   facts._live.ptyOpening--;
   // NEGATIVE CONTROL: with the flag cleared the very same call sweeps normally
@@ -627,10 +627,10 @@ console.log('\n— ROUND 4 (findings from the third review of this branch) —')
   ok('negative control: with nothing in flight the same call sweeps normally (the guard is a gate, not an off switch)', unbusy.ok === true, unbusy);
   facts._live.ptys.clear();                     // ← the restart: in-memory knowledge is gone, only the session field survives
   const reaped = await facts.reapPtys({ force: true });
-  ok('after a restart the orphan nobody holds is reaped', reaped.removed.includes(orphan.pty.id), reaped);
-  ok('…and the one a live session still holds (session._opencodePtyId, via heldPtyIds) is NOT', mock.state.ptys.has(keeper.pty.id) && !reaped.removed.includes(keeper.pty.id), [...mock.state.ptys.keys()]);
+  ok('after a restart the orphan nobody holds is reaped', verdictOf(reaped.removed.includes(orphan.pty.id)), reaped);
+  ok('…and the one a live session still holds (session._opencodePtyId, via heldPtyIds) is NOT', gateOf(mock.state.ptys.has(keeper.pty.id)) && !reaped.removed.includes(keeper.pty.id), [...mock.state.ptys.keys()]);
   ok('…and the sweep asked the DIRECTORY-LESS list (it must not boot an instance to clean up)',
-    mock.state.requests.includes('GET /pty') && !mock.state.requests.some((r) => /^GET \/pty\?.*directory=/.test(r)), mock.state.requests.filter((r) => r.startsWith('GET /pty')));
+    gateOf(mock.state.requests.includes('GET /pty')) && !mock.state.requests.some((r) => /^GET \/pty\?.*directory=/.test(r)), mock.state.requests.filter((r) => r.startsWith('GET /pty')));
   await mock.close();
 }
 {
@@ -653,7 +653,7 @@ console.log('\n— ROUND 4 (findings from the third review of this branch) —')
   });
   for (let i = 0; i < 200 && mock.state.ptys.has(stale.id); i++) await sleep(50);
   ok('boot: adopting a serve that outlived us reaps the terminals nobody can reach any more — no caller, on the ready edge', !mock.state.ptys.has(stale.id), [...mock.state.ptys.keys()]);
-  ok('…and it did it through the reaper, not by accident (the DELETE is the only way a pty leaves the serve)', mock.state.requests.some((r) => r === `DELETE /pty/${stale.id}`), mock.state.requests.filter((r) => r.startsWith('DELETE /pty')));
+  ok('…and it did it through the reaper, not by accident (the DELETE is the only way a pty leaves the serve)', verdictOf(mock.state.requests.some((r) => r === `DELETE /pty/${stale.id}`)), mock.state.requests.filter((r) => r.startsWith('DELETE /pty')));
   const again = await facts.reapPtys();
   ok('…and it is idempotent per serve PROCESS (a routine notify must not re-sweep and race a terminal being opened)', again.skipped === 'already-reaped', again);
   serve.uninstall();
@@ -674,7 +674,7 @@ console.log('\n— ROUND 4 (findings from the third review of this branch) —')
   const existsButEmpty = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-notastore-'));
   const w1 = events.createStoreWatch({ dirs: [existsButEmpty], log: { warn() { } } });
   ok('a directory that EXISTS but holds no opencode.db is not a store watch — `active` stays false and says why',
-    w1.state().active === false && /opencode\.db/.test(JSON.stringify(w1.state().failed)), w1.state());
+    w1.state().active === false && verdictOf(/opencode\.db/.test(JSON.stringify(w1.state().failed))), w1.state());
   w1.stop();
   const realStore = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-isastore-'));
   fs.writeFileSync(path.join(realStore, 'opencode.db'), 'x');
@@ -728,8 +728,8 @@ console.log('\n— ROUND 4 (findings from the third review of this branch) —')
     // and the surviving watch is still the real one (a non-existent dir is
     // reported, never watched)
     ok('a `connected` RE-RESOLVES against the serve\'s own GET /path home and re-arms (the latch is gone)',
-      lane.state().rearms === 1 && JSON.stringify(lane.state().watch.failed).includes('/home/mock'), lane.state());
-    ok('…and the real store is still watched afterwards (re-arming is not losing the watch)', afterDirs.includes(path.join(serverHome, '.local/share/opencode')), afterDirs);
+      lane.state().rearms === 1 && verdictOf(JSON.stringify(lane.state().watch.failed).includes('/home/mock')), lane.state());
+    ok('…and the real store is still watched afterwards (re-arming is not losing the watch)', verdictOf(afterDirs.includes(path.join(serverHome, '.local/share/opencode'))), afterDirs);
     const rearmsBefore = lane.state().rearms;
     await lane._armWatch('connected');
     await lane._armWatch('connected');
@@ -805,7 +805,7 @@ function inotifyWdsOn(dir, pid = 'self') {
   ok('(setup) the locator followed the serve to the replacement process', facts.state().ready === true && facts.state().port === B.port, facts.state());
   const afterRestart = await askCard();
   ok('a serve RESTART makes the warm map UNKNOWN: the same open ask renders STALE, never joined to the dead que_live1', afterRestart?.stale === true && afterRestart?.requestId !== 'que_live1', afterRestart && { requestId: afterRestart.requestId, stale: afterRestart.stale });
-  ok('…because it re-read the authoritative list from the NEW process instead of trusting the map', B.state.requests.includes('GET /question'), B.state.requests);
+  ok('…because it re-read the authoritative list from the NEW process instead of trusting the map', verdictOf(B.state.requests.includes('GET /question')), B.state.requests);
   const mm = new AcpMessageManager('ses_a2');
   const card = mm.convertHistory((await facts.readConversation('ses_a2')).records).find((m) => m.permission?.kind === 'user_input');
   ok('…and the flag reaches the rendered card, which is where the dead Submit would have been', card?.permission?.stale === true, card?.permission);
@@ -890,7 +890,7 @@ function inotifyWdsOn(dir, pid = 'self') {
   const laneSt = facts.state().liveLane;
   const watchBroken = !laneSt?.watch?.active && envExhausted(JSON.stringify(laneSt?.watch?.failed || []));
   ok('turning the service ON starts the lane, with no restart (the same predicate the keeper spawns on)', facts.state().liveLane !== null, laneSt);
-  ok('…and the SSE lane subscribed to the serve it adopted', mock.state.requests.some((r) => r.startsWith('GET /global/event')), mock.state.requests.slice(0, 6));
+  ok('…and the SSE lane subscribed to the serve it adopted', verdictOf(mock.state.requests.some((r) => r.startsWith('GET /global/event'))), mock.state.requests.slice(0, 6));
   if (base < 0 || watchBroken) skip('…and NOW the store is watched (positive control: the measurement can see a watch)', watchBroken ? `this machine cannot fs.watch right now: ${JSON.stringify(laneSt.watch.failed).slice(0, 160)}` : 'no /proc/self/fdinfo on this platform');
   else ok('…and NOW the store IS watched — the positive control that proves the OFF measurement could have failed', inotifyWdsOn(storeDir) > base, { base, now: inotifyWdsOn(storeDir) });
 
@@ -1015,16 +1015,16 @@ const stalledChild = () => { const c = new EventEmitter(); c.pid = null; c.unref
   const delays = [0, 1200];
   const fixedRuns = [];
   for (const d of delays) fixedRuns.push([d, await toggle(events, d)]);
-  ok('(setup) enabling the service arms the lane through the real install()/locator wiring, and disabling takes it down', fixedRuns.every(([, r]) => r.armed && r.laneGone), fixedRuns);
+  ok('(setup) enabling the service arms the lane through the real install()/locator wiring, and disabling takes it down', verdictOf(fixedRuns.every(([, r]) => r.armed && r.laneGone)), fixedRuns);
   if (fixedRuns[0][1].base < 0) skip('disabling the service DURING the arm leaves no watch behind', 'no /proc/self/fdinfo on this platform');
   else {
-    ok('disabling the service while the arm is still in flight (0 ms and mid-await, a serve that cannot boot) leaves ZERO watches on the store', fixedRuns.every(([, r]) => r.leaked === 0), fixedRuns);
-    ok('…and nothing of ours answers a store write afterwards', fixedRuns.every(([, r]) => r.externals === 0), fixedRuns);
+    ok('disabling the service while the arm is still in flight (0 ms and mid-await, a serve that cannot boot) leaves ZERO watches on the store', verdictOf(fixedRuns.every(([, r]) => r.leaked === 0)), fixedRuns);
+    ok('…and nothing of ours answers a store write afterwards', verdictOf(fixedRuns.every(([, r]) => r.externals === 0)), fixedRuns);
     if (!unfixedEvents) unbuilt('NEGATIVE CONTROL: the unfixed lane leaks at every one of those delays', unfixedWhy || 'no control module');
     else {
       const ctlRuns = [];
       for (const d of delays) ctlRuns.push([d, await toggle(unfixedEvents, d)]);
-      ok('NEGATIVE CONTROL: the UNFIXED lane leaks one watch at EVERY delay and still broadcasts — the leak is in the arm, not in the toggle', ctlRuns.every(([, r]) => r.leaked >= 1 && r.externals >= 1), ctlRuns);
+      ok('NEGATIVE CONTROL: the UNFIXED lane leaks one watch at EVERY delay and still broadcasts — the leak is in the arm, not in the toggle', verdictOf(ctlRuns.every(([, r]) => r.leaked >= 1 && r.externals >= 1)), ctlRuns);
     }
   }
 }
@@ -1265,7 +1265,7 @@ for (const [win, label] of [['reuse', 'the reuse health probe on a BUSY recorded
   const n7 = R7_NEUTER.length;
   const stated = [['docs/kb-bugfix-invariants.md', new RegExp(`exactly these ${n7} checks`)], ['docs/kb-file-structure.md', new RegExp(`its ${n7} replacements`)], ['the kb-bugfix-invariants INDEX head', new RegExp(`把这 ${n7} 个检查删掉`)]];
   ok(`docs: the ROUND 7 negative control's size is stated as the number R7_NEUTER owns (${n7}) in all three places`,
-    stated.every(([f, re]) => re.test(f.endsWith(' INDEX head') ? bugIndex() : read(f))), stated.filter(([f, re]) => !re.test(f.endsWith(' INDEX head') ? bugIndex() : read(f))).map(([f]) => f));
+    verdictOf(stated.every(([f, re]) => re.test(f.endsWith(' INDEX head') ? bugIndex() : read(f)))), stated.filter(([f, re]) => !re.test(f.endsWith(' INDEX head') ? bugIndex() : read(f))).map(([f]) => f));
   if (unfixedServeFile) { try { fs.rmSync(unfixedServeFile, { force: true }); } catch { } }
 }
 
@@ -1370,7 +1370,7 @@ async function r8Run(mod, { disable = true, enable = true } = {}) {
   ok('(round 7, still) a Disable with no Enable publishes nothing at all', off.ready === false && off.source === null && off.spawns === 0, off);
 
   const fixed = await r8Run(serve);
-  ok('a Disable→Enable pair NEVER republishes the serve the Disable SIGTERMed', fixed.adoptedTheKilledServe === false && fixed.kills.some(([p, s]) => p === fixed.recordedPid && s === 'SIGTERM'), fixed);
+  ok('a Disable→Enable pair NEVER republishes the serve the Disable SIGTERMed', fixed.adoptedTheKilledServe === false && verdictOf(fixed.kills.some(([p, s]) => p === fixed.recordedPid && s === 'SIGTERM')), fixed);
   ok('…and the Enable runs its OWN ladder: exactly one spawn, adopted as `spawned` on a live port', fixed.spawns === 1 && fixed.source === 'spawned' && fixed.port !== fixed.recordedPort, fixed);
   ok('…exactly ONE client is ever published, and ONE lane follows it', fixed.adoptions.length === 1 && fixed.lane === true, fixed);
   ok('…and the Enable\'s own start() resolves that client, so the route reports the truth', fixed.startResult === 'client', fixed);
@@ -1421,7 +1421,7 @@ async function r8Run(mod, { disable = true, enable = true } = {}) {
   ok('(the setup) the boot wait really did have a child in flight', r.spawnedPid === 4242, r);
   ok('stop() nulls `state.child`/`state.pid` FIRST — abandon() finds the slot already empty, which is why its conditional null is a no-op (and must never be unconditional: a newer ladder owns that slot)', r.afterStopPid === null, r);
   ok('…and abandon() STILL SIGTERMs the child it holds in its closure — the second kill arrives after stop() returned', JSON.stringify(r.kills) === JSON.stringify(['stop:SIGTERM', 'after-stop:SIGTERM']), r.kills);
-  ok('…and it says so honestly (the boot was OURS to stop) and leaves no record for the next boot to ADOPT', /was starting when the background service was turned off/.test(r.lastError || '') && r.record === false, r);
+  ok('…and it says so honestly (the boot was OURS to stop) and leaves no record for the next boot to ADOPT', gateOf(/was starting when the background service was turned off/.test(r.lastError || '')) && r.record === false, r);
   if (!r8AbandonCtl.mod) unbuilt("NEGATIVE CONTROL: without abandon()'s kill the child survives the bail", r8AbandonCtl.why);
   else {
     const ctl = await runAbandon(r8AbandonCtl.mod);
@@ -1434,7 +1434,7 @@ async function r8Run(mod, { disable = true, enable = true } = {}) {
   const n8 = R8_NEUTER.length;
   // (ROUND 8 written down — MOVED to the fast scripts/test-opencode-s9-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok(`docs: the ROUND 8 negative control's size is stated as the number R8_NEUTER owns (${n8})`,
-    new RegExp(`one per mechanism, ${n8} of them`).test(read('docs/kb-bugfix-invariants.md')) && new RegExp(`${n8} single-mechanism controls`).test(kfs),
+    gateOf(new RegExp(`one per mechanism, ${n8} of them`).test(read('docs/kb-bugfix-invariants.md'))) && verdictOf(new RegExp(`${n8} single-mechanism controls`).test(kfs)),
     [n8]);
   for (const f of [r8EpochCtl.file, r8DetachCtl.file, r8AbandonCtl.file]) if (f) { try { fs.rmSync(f, { force: true }); } catch { } }
 }
@@ -1679,7 +1679,7 @@ for (const [win, label] of [['bad', "the reuse VERDICT probe on a '/'-worktree l
   const n9 = R9_NEUTER.length;
   // (ROUND 9 written down — MOVED to the fast scripts/test-opencode-s9-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok(`docs: the ROUND 9 pre-fix control's size is stated as the number R9_NEUTER owns (${n9})`,
-    new RegExp(`removing all ${n9}`).test(read('docs/kb-bugfix-invariants.md')) && new RegExp(`its ${n9} replacements`).test(kfs), [n9]);
+    gateOf(new RegExp(`removing all ${n9}`).test(read('docs/kb-bugfix-invariants.md'))) && verdictOf(new RegExp(`its ${n9} replacements`).test(kfs)), [n9]);
   for (const f of [r9PreFix.file, r9VerdictCtl.file, r9DeadPidCtl.file, r9OwnedCtl.file]) if (f) { try { fs.rmSync(f, { force: true }); } catch { } }
 }
 
@@ -1742,7 +1742,7 @@ const readRec = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir
   const realArgv = readProcCmdline(kid.pid);
   const realVerdict = classifyRecordedPid(rec, { pid: kid.pid, argv: realArgv, uid: readProcUid(kid.pid), selfUid: process.getuid(), selfPid: process.pid });
   ok('the REAL reader over a REAL /proc feeds the same verdict (the table is not a fiction about procfs)',
-    Array.isArray(realArgv) && realArgv.includes('serve') && realVerdict.verdict === 'ours', { realArgv, realVerdict });
+    gateOf(Array.isArray(realArgv)) && gateOf(realArgv.includes('serve')) && realVerdict.verdict === 'ours', { realArgv, realVerdict });
   try { process.kill(kid.pid, 'SIGKILL'); } catch { }
 }
 
@@ -1833,7 +1833,7 @@ async function r10Run(mod, { socket = 'hung', recorded = 'ours', autostart = tru
   ok('…signalled once, BY PID, after proving from /proc that the pid really is that serve — and never this process',
     fixed.kills.length === 1 && fixed.kills[0][0] === fixed.recordedPid && fixed.kills[0][1] === 'SIGTERM' && fixed.recordedPid !== process.pid, fixed.kills);
   ok('…and it SPOKE: one warn naming the pid, the port and the budget it missed (the fall-through logged nothing at all)',
-    fixed.warns.some((w) => w.includes(String(fixed.recordedPid)) && w.includes(String(fixed.recordedPort)) && /ALIVE but answered no \/global\/health/.test(w)), fixed.warns);
+    verdictOf(fixed.warns.some((w) => w.includes(String(fixed.recordedPid)) && w.includes(String(fixed.recordedPort)) && /ALIVE but answered no \/global\/health/.test(w))), fixed.warns);
   if (!r10Ctl.mod) unbuilt('NEGATIVE CONTROL: the fall-through leaves two live serves', r10Ctl.why);
   else {
     const ctl = await r10Run(r10Ctl.mod, { socket: 'hung', recorded: 'ours' });
@@ -1849,8 +1849,8 @@ async function r10Run(mod, { socket = 'hung', recorded = 'ours', autostart = tru
   ok('a live recorded pid we CANNOT prove is ours is neither signalled nor spawned over',
     unknown.spawns === 0 && unknown.kills.length === 0 && unknown.recordedAlive === true && unknown.recordPort === unknown.recordedPort, unknown);
   ok('…the locator publishes a BLOCKED park whose lastError names the pid, the port, the record file and both ways out',
-    unknown.parked === true && unknown.parkedKind === 'blocked' && /pid \d+/.test(unknown.lastError || '') && /port \d+/.test(unknown.lastError || '')
-    && (unknown.lastError || '').includes('opencode-serve.json') && /stop that process/.test(unknown.lastError || ''), unknown.lastError);
+    unknown.parked === true && unknown.parkedKind === 'blocked' && gateOf(/pid \d+/.test(unknown.lastError || '')) && gateOf(/port \d+/.test(unknown.lastError || ''))
+    && gateOf((unknown.lastError || '').includes('opencode-serve.json')) && verdictOf(/stop that process/.test(unknown.lastError || '')), unknown.lastError);
   ok('…/api/home REPORTS it through the SAME predicate the red toast reads — a blocked record IS a broken store, unlike a service that is merely off',
     storeFailureReason({ id: 'opencode', store: { serveState: () => unknown.snap, unavailableReason: () => unknown.reason } }) === unknown.lastError
     && storeFailureReason({ id: 'opencode', store: { serveState: () => ({ ...unknown.snap, parked: false, parkedKind: null }), unavailableReason: () => unknown.reason } }) === null,
@@ -1860,7 +1860,7 @@ async function r10Run(mod, { socket = 'hung', recorded = 'ours', autostart = tru
   const stubborn = await r10Run(serve, { socket: 'hung', recorded: 'stubborn' });
   ok('a recorded serve that IGNORES SIGTERM is not spawned over either — we waited for the exit, it never came, and the state says exactly that',
     stubborn.spawns === 0 && stubborn.kills.length === 1 && stubborn.recordedAlive === true && stubborn.parkedKind === 'blocked'
-    && /did not exit within/.test(stubborn.lastError || '') && stubborn.recordPort === stubborn.recordedPort, stubborn);
+    && gateOf(/did not exit within/.test(stubborn.lastError || '')) && stubborn.recordPort === stubborn.recordedPort, stubborn);
   // ④ the recycled pid: clear the stale record, NEVER signal the stranger
   const other = await r10Run(serve, { socket: 'hung', recorded: 'other' });
   ok('a recorded pid that is alive but is NOT that serve (a recycled pid) is never signalled — the stale record is cleared and a fresh serve starts',
@@ -1959,7 +1959,7 @@ async function r10Run(mod, { socket = 'hung', recorded = 'ours', autostart = tru
   const n10 = R10_NEUTER.length;
   // (ROUND 10 written down — MOVED to the fast scripts/test-opencode-s9-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok(`docs: the ROUND 10 pre-fix control's size is stated as the number R10_NEUTER owns (${n10})`,
-    new RegExp(`its ${n10} replacements`).test(kfs), [n10]);
+    verdictOf(new RegExp(`its ${n10} replacements`).test(kfs)), [n10]);
   // (ROUND 11 written down + the shipped script's own entry — MOVED to the fast scripts/test-opencode-s9-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   if (r10Ctl.file) { try { fs.rmSync(r10Ctl.file, { force: true }); } catch { } }
 }
@@ -2024,7 +2024,7 @@ ok('(the controls themselves) a PRE-FIX copy can be built for each of the two ro
   ok('…and THIS server process is still never "ours", blind host or not (the one pid a SIGTERM must never reach)',
     classifyRecordedPid(rec, { pid: 999, selfPid: 999, hostReadable: false }).verdict === 'other');
   ok("the blind verdict's sentence names the machine, not the pid — the user is not told to go stop something",
-    /this host cannot identify ANY process/.test(classifyRecordedPid(rec, { pid: 321, selfPid: 999, hostReadable: false }).why));
+    verdictOf(/this host cannot identify ANY process/.test(classifyRecordedPid(rec, { pid: 321, selfPid: 999, hostReadable: false }).why)));
 }
 
 /** ② THE PORTABLE READER, on REAL processes. The `ps` rung cannot be reached on
@@ -2062,9 +2062,9 @@ ok('(the controls themselves) a PRE-FIX copy can be built for each of the two ro
       rows.push({ label, want, viaProc, viaPs, psUid: ps && ps.uid, psArgv: ps && ps.argv && ps.argv.slice(0, 6) });
     }
     ok('THE PS RUNG AGREES WITH PROCFS on every real fixture — same verdicts, so a macOS host decides the same thing about the same serve',
-      rows.every((r) => r.viaProc === r.want && r.viaPs === r.want), rows);
+      verdictOf(rows.every((r) => r.viaProc === r.want && r.viaPs === r.want)), rows);
     ok('…and it really read that process: the uid it reports is ours, and the argv carries `serve` for the serve fixture',
-      rows[0].psUid === process.getuid() && (rows[0].psArgv || []).includes('serve'), rows[0]);
+      rows[0].psUid === process.getuid() && verdictOf((rows[0].psArgv || []).includes('serve')), rows[0]);
     ok('…including the one place the two spellings genuinely differ: `ps` flattens a spaced argv word into several, and the verdict is STILL the same (the reader answers two word-level questions, never reconstructs a command)',
       rows[2].viaProc === 'ours' && rows[2].viaPs === 'ours'
       && (procArgv(kSpacey.pid) || []).length !== (serve.readPsIdentity(kSpacey.pid) || { argv: [] }).argv.length,
@@ -2087,12 +2087,12 @@ ok('(the controls themselves) a PRE-FIX copy can be built for each of the two ro
   ok('…and NOTHING is signalled — the one thing round 10 really bought survives (we never SIGTERM a pid we cannot name)',
     blind.kills.length === 0 && blind.recordedAlive === true, blind.kills);
   ok('…and it SAID SO once, naming the machine rather than the process',
-    blind.warns.some((w) => /cannot identify ANY process|cannot read its own process command line/.test(w)), blind.warns);
+    verdictOf(blind.warns.some((w) => /cannot identify ANY process|cannot read its own process command line/.test(w))), blind.warns);
   if (!r11Ctl.mod) unbuilt('NEGATIVE CONTROL: without the blind verdict the same host parks forever', r11Ctl.why);
   else {
     const ctl = await r10Run(r11Ctl.mod, { socket: 'hung', recorded: 'ours', ...blindHost });
     ok('NEGATIVE CONTROL: with the blind verdict removed, that machine parks BLOCKED with no spawn and tells the user to go stop an unrelated process — the regression this leg exists for',
-      ctl.parked === true && ctl.parkedKind === 'blocked' && ctl.spawns === 0 && /stop that process/.test(ctl.lastError || ''), ctl);
+      ctl.parked === true && ctl.parkedKind === 'blocked' && ctl.spawns === 0 && verdictOf(/stop that process/.test(ctl.lastError || '')), ctl);
   }
   // …and the two verdicts stay distinguishable: blinding ONLY the recorded pid
   // still blocks (that host answers about other processes, so silence is data)
@@ -2111,8 +2111,8 @@ const { storeFailureReason: storeFailureReasonS9 } = require(path.join(REPO, 'sr
   ok('DISABLE in a blocked park signals NOTHING: the pid the settlement refused to identify is refused by stop() too',
     blocked.killsAfterStop.length === 0 && blocked.kills.length === 0 && blocked.recordedAlive === true, blocked);
   ok('…the record is still cleared (the user turned it off — that outranks the file) and the state SAYS what was left alone',
-    blocked.recordAfterStop === null && /could not be identified/.test(blocked.lastError || '') && /LEFT ALONE/.test(blocked.lastError || '')
-    && (blocked.lastError || '').includes(String(blocked.recordedPid)), blocked.lastError);
+    blocked.recordAfterStop === null && gateOf(/could not be identified/.test(blocked.lastError || '')) && gateOf(/LEFT ALONE/.test(blocked.lastError || ''))
+    && verdictOf((blocked.lastError || '').includes(String(blocked.recordedPid))), blocked.lastError);
   if (!r11StopCtl.mod) unbuilt("NEGATIVE CONTROL: stop() signals the pid the park refused", r11StopCtl.why);
   else {
     const ctl = await r10Run(r11StopCtl.mod, { socket: 'hung', recorded: 'ours', readCmdline: (pid) => (pid === process.pid ? serve.readProcCmdline(pid) : null), stopAfter: true });
@@ -2129,7 +2129,7 @@ const { storeFailureReason: storeFailureReasonS9 } = require(path.join(REPO, 'sr
     blocked.parked === false && blocked.parkedKind === null && blocked.snap.stopped === true, blocked.snap);
   ok('…and /api/home agrees through the SAME predicate: no storeReason, no red toast — while lastError SURVIVES as history for the ⚙ card',
     storeFailureReasonS9({ id: 'opencode', store: { serveState: () => blocked.snap, unavailableReason: () => blocked.reason } }) === null
-    && /could not be identified/.test(blocked.lastError || ''), [blocked.lastError, blocked.reason]);
+    && verdictOf(/could not be identified/.test(blocked.lastError || '')), [blocked.lastError, blocked.reason]);
   if (!resACtl.mod) unbuilt('NEGATIVE CONTROL: the park outlives the Disable and the store still calls itself broken', resACtl.why);
   else {
     const kept = await r10Run(resACtl.mod, { socket: 'hung', recorded: 'ours', readCmdline: (pid) => (pid === process.pid ? serve.readProcCmdline(pid) : null), stopAfter: true });
@@ -2209,7 +2209,7 @@ console.log('\n— A REAL BOOT WITH THE SERVICE OFF (nothing of ours runs or wat
       ok('…and started no serve at all: no record, and not even the throwaway cwd a spawn would need', !fs.existsSync(path.join(wt, 'data', 'opencode-serve.json')) && !fs.existsSync(path.join(wt, 'data', 'opencode-serve')), fs.readdirSync(path.join(wt, 'data')).filter((x) => /opencode/.test(x)));
       const home = await fetch(`http://127.0.0.1:${PORT}/api/home`).then((r) => r.json()).catch(() => null);
       const ocRow = (home?.harnesses || []).find((h) => h.id === 'opencode') || null;
-      ok('…and /api/home calls it OFF, not BROKEN (a deliberately-off service is no error toast)', !!ocRow && !ocRow.storeReason && ocRow.service && ocRow.service.enabled === false, ocRow);
+      ok('…and /api/home calls it OFF, not BROKEN (a deliberately-off service is no error toast)', !!ocRow && !ocRow.storeReason && gateOf(ocRow.service) && ocRow.service.enabled === false, ocRow);
 
       // POSITIVE CONTROL, same process, same measurement: turn it on the way a
       // user does. Without this, "0 watches" could just be a measurement that
@@ -2280,10 +2280,10 @@ console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —
       skip(`a REAL \`opencode serve\` (${version}) boots`, facts.reasonUnavailable());
     } else {
       ok(`a REAL opencode serve (${version}) boots and answers /session/status without a directory`, (await client.sessionStatus({ timeoutMs: 8000 })) !== null);
-      ok('…and /question (the ask lane) answers with a list', Array.isArray(await client.questions({ timeoutMs: 8000 })));
+      ok('…and /question (the ask lane) answers with a list', verdictOf(Array.isArray(await client.questions({ timeoutMs: 8000 }))));
       ok('…and /path reports the store home the fs.watch lane needs', typeof (await client.paths({ timeoutMs: 8000 }))?.home === 'string');
       const dirs = events.storeDirsFor({ env, serveHome: (await client.paths({ timeoutMs: 8000 })).home });
-      ok('…and that home resolves to the sqlite store directory we watch', dirs.some((d) => fs.existsSync(path.join(d, 'opencode.db'))), dirs);
+      ok('…and that home resolves to the sqlite store directory we watch', verdictOf(dirs.some((d) => fs.existsSync(path.join(d, 'opencode.db')))), dirs);
       // the live lane against the real serve
       const lane = events.createLiveLane({ locator: facts.locator, storeDirs: dirs, onEvent: () => { }, log: { warn() { } } });
       lane.start();
@@ -2303,7 +2303,7 @@ console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —
       const reverted = await facts.revertTo(sess.id, { messageID: msg.info.id, cwd });
       ok('…a REAL roll-back stages the message and comes back on the Session', reverted?.revert?.messageID === msg.info.id, reverted?.revert);
       const rConv = await facts.readConversation(sess.id);
-      ok('…and the REAL conversation renders the roll-back notice at the boundary', rConv.records.some((r) => r.noticeKind === 'revert'), rConv.records.map((r) => r.kind));
+      ok('…and the REAL conversation renders the roll-back notice at the boundary', verdictOf(rConv.records.some((r) => r.noticeKind === 'revert')), rConv.records.map((r) => r.kind));
       facts.invalidate();
       const rRows = await facts.discover({});
       const rRow = rRows.find((r) => r.backendSessionId === sess.id);
@@ -2370,7 +2370,7 @@ console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —
         };
         const wBase = wds();
         const pty = await facts.openPty({ cwd: wdTree, title: 's9 gate' });
-        ok('…and a REAL serve pty opens with a loopback ws url (no ticket on an unsecured serve)', /^ws:\/\/127\.0\.0\.1:\d+\/pty\/pty_/.test(pty.url) && pty.ticketed === false, pty.url);
+        ok('…and a REAL serve pty opens with a loopback ws url (no ticket on an unsecured serve)', gateOf(/^ws:\/\/127\.0\.0\.1:\d+\/pty\/pty_/.test(pty.url)) && pty.ticketed === false, pty.url);
         let shellCwd = null;
         try { shellCwd = fs.readlinkSync(`/proc/${pty.pty.pid}/cwd`); } catch { shellCwd = null; }
         if (shellCwd === null) skip('…in the directory the user asked for', 'the shell pid is not readable in /proc here');
@@ -2398,7 +2398,7 @@ console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —
         facts._live.ptys.clear();
         const swept = await facts.reapPtys({ force: true });
         const stillThere = (await client.ptyList({ timeoutMs: 8000 })).some((x) => x.id === orphan.pty.id);
-        ok('…and reapPtys() removes a REAL serve-owned terminal no session can reach (the shell the restart stranded)', swept.removed?.includes(orphan.pty.id) && !stillThere, { swept, stillThere });
+        ok('…and reapPtys() removes a REAL serve-owned terminal no session can reach (the shell the restart stranded)', gateOf(swept.removed?.includes(orphan.pty.id)) && !stillThere, { swept, stillThere });
       } catch (e) {
         // opening a pty BOOTS the OpenCode instance for that directory, which
         // needs inotify watches this box may be out of
@@ -2461,7 +2461,7 @@ console.log('\n— REAL BINARY: THE PENDING-ASK LIST IS PER SERVE PROCESS —');
         ok('…and pendingQuestions() answers [] instead of inventing one (⇒ readConversation marks the card STALE)', (await facts.pendingQuestions({ sessionId: 'ses_real' })).length === 0);
         let broke = null;
         try { await facts.answerQuestion('que_real1', [['Blue']]); } catch (e) { broke = e; }
-        ok('…and answering the dead id fails LOUDLY against the real serve — the Submit a stale card must never offer', !!broke && /que_real1/.test(broke.message), broke?.message);
+        ok('…and answering the dead id fails LOUDLY against the real serve — the Submit a stale card must never offer', !!broke && verdictOf(/que_real1/.test(broke.message)), broke?.message);
       }
     }
     try { facts.locator.stop({ killRecorded: true }); } catch { }
@@ -2554,7 +2554,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
         for (let i = 0; i < 80 && !ready; i++) { await sleep(500); ready = await ev('(async()=>{ try { await window.app?.ready; return !!window.app; } catch { return false; } })()').catch(() => false); }
         ok('the app booted in headless chrome', !!ready);
 
-        ok('App carries the serve-terminal action (the session-card command calls it)', await ev('typeof window.app.openOpencodeTerminal === "function"'));
+        ok('App carries the serve-terminal action (the session-card command calls it)', verdictOf(await ev('typeof window.app.openOpencodeTerminal === "function"')));
 
         // THE SESSION-CARD MENU, rendered for real
         const menu = await ev(`(async () => {
@@ -2588,7 +2588,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
           document.body.click();
           return { items };
         })()`);
-        ok('the session card of an OpenCode conversation OFFERS the serve terminal (rendered menu, not a code grep)', Array.isArray(menu?.items) && menu.items.some((x) => /Open terminal in this session/i.test(x)), menu);
+        ok('the session card of an OpenCode conversation OFFERS the serve terminal (rendered menu, not a code grep)', gateOf(Array.isArray(menu?.items)) && verdictOf(menu.items.some((x) => /Open terminal in this session/i.test(x))), menu);
 
         // THE CHAT WINDOW: the reader, the roll-back row, and the confirm dialog
         const opened = await ev(`(async () => {
@@ -2607,7 +2607,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
           window.__ocCv = cv;
           return { ok: true, msgs: list.querySelectorAll('.chat-msg').length, hasCv: !!cv, cvMsgs: cv?._messages?.length ?? null, text: list.textContent.slice(0, 300), cls: [...list.querySelectorAll('.chat-msg')].map((e) => e.className) };
         })()`);
-        ok('the serve-backed conversation opens read-only in a real chat window', opened?.ok && opened.msgs > 0 && opened.hasCv && opened.cvMsgs >= 1, opened);
+        ok('the serve-backed conversation opens read-only in a real chat window', gateOf(opened?.ok) && opened.msgs > 0 && gateOf(opened.hasCv) && opened.cvMsgs >= 1, opened);
 
         const popup = await ev(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2624,7 +2624,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
           window.__ocMsgEl = el;
           return { btns, cls: el.className, rows: pop ? pop.textContent.slice(0, 120) : null };
         })()`);
-        ok('right-clicking a USER message offers "Roll back to before this message" (and no Restore — nothing is staged)', Array.isArray(popup?.btns) && popup.btns.some((b) => /Roll back to before this message/i.test(b)) && !popup.btns.some((b) => /Restore rolled-back/i.test(b)), popup);
+        ok('right-clicking a USER message offers "Roll back to before this message" (and no Restore — nothing is staged)', gateOf(Array.isArray(popup?.btns)) && gateOf(popup.btns.some((b) => /Roll back to before this message/i.test(b))) && !popup.btns.some((b) => /Restore rolled-back/i.test(b)), popup);
 
         const confirmed = await ev(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2649,8 +2649,8 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
           const errs = [...document.querySelectorAll('#global-toasts .global-toast-error')].map((e) => e.textContent.trim());
           return { asked: true, text: text.slice(0, 200), toasts, errs };
         })()`);
-        ok('…it ASKS first (never a native confirm) and the dialog says what it does', confirmed?.asked === true && /restore the files/i.test(confirmed.text || ''), confirmed);
-        ok('…confirming performs a REAL roll-back and reports it (no error toast, and no misleading "Copied")', Array.isArray(confirmed?.toasts) && confirmed.toasts.some((x) => /Rolled back/i.test(x)) && !confirmed.toasts.some((x) => /^Copied/.test(x)) && (confirmed.errs || []).length === 0, confirmed);
+        ok('…it ASKS first (never a native confirm) and the dialog says what it does', confirmed?.asked === true && verdictOf(/restore the files/i.test(confirmed.text || '')), confirmed);
+        ok('…confirming performs a REAL roll-back and reports it (no error toast, and no misleading "Copied")', gateOf(Array.isArray(confirmed?.toasts)) && gateOf(confirmed.toasts.some((x) => /Rolled back/i.test(x))) && !confirmed.toasts.some((x) => /^Copied/.test(x)) && (confirmed.errs || []).length === 0, confirmed);
 
         let server = null;
         for (let i = 0; i < 20; i++) { server = await fetch(`${base}/session/${sess.id}`).then((r) => r.json()).catch(() => null); if (server?.revert) break; await sleep(500); }
@@ -2673,7 +2673,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
         })()`);
         ok('…the sidebar row learns the staged roll-back through the broadcast (multi-client law)', after?.staged === true, after);
         ok('…the open window SAYS what happened in-line', after?.said === true, after?.said);
-        ok('…and NOW the popup offers Restore instead of another roll-back', (after?.btns || []).some((b) => /Restore rolled-back/i.test(b)) && !(after?.btns || []).some((b) => /Roll back to before/i.test(b)), after?.btns);
+        ok('…and NOW the popup offers Restore instead of another roll-back', gateOf((after?.btns || []).some((b) => /Restore rolled-back/i.test(b))) && !(after?.btns || []).some((b) => /Roll back to before/i.test(b)), after?.btns);
 
         // THE SERVE TERMINAL, opened for real from the App action
         const term = await ev(`(async () => {
@@ -2717,8 +2717,8 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
           skip('"Open terminal in this session" opens a SERVE-owned shell', `not reproducible here: ${why}`);
           skip('…and the pty exists ON THE SERVE', 'same');
         } else {
-          ok('"Open terminal in this session" really opens a SERVE-owned shell and its output reaches xterm', termOk, { ...term, server: srvTail.split('\n').filter((l) => /opencode|pty|error|Error/i.test(l)).slice(-6) });
-          ok('…and the pty exists ON THE SERVE (not a local dtach spawn)', servePty, ptys);
+          ok('"Open terminal in this session" really opens a SERVE-owned shell and its output reaches xterm', verdictOf(termOk), { ...term, server: srvTail.split('\n').filter((l) => /opencode|pty|error|Error/i.test(l)).slice(-6) });
+          ok('…and the pty exists ON THE SERVE (not a local dtach spawn)', verdictOf(servePty), ptys);
         }
 
         // THE ASK CARD — rendered by the REAL renderer, both branches
@@ -2750,4 +2750,4 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
 }
 
 console.log(`\n${fails.length ? fails.length + ' FAILED' : 'ALL PASS'} (${pass} passed${skipNames.length ? `, ${skipNames.length} skipped — ${skipNames.join('; ')}` : ''})`);
-if (fails.length) { for (const f of fails) console.log('  - ' + f); process.exit(1); }
+if (fails.length) { for (const f of fails) console.log('  - ' + f); process.exit(1); };import { verdictOf, gateOf } from './lib/check.mjs';

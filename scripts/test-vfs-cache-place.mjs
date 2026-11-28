@@ -20,7 +20,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -56,7 +56,7 @@ function judgePlace(P) {
 try {
   const P = require(path.join(REPO, 'src/vfs-cache-place.js'));
   // ── ① the witness fixture — parsed, never grepped ──
-  ok(/\n\t"Dirty": true\n\}\n?$/.test(META_DIRTY) && !META_DIRTY.includes('"Dirty":true'), '① the fixture is the real shape: Go\'s indented encoder writes "Dirty": true WITH a space (a grep for "Dirty":true matches nothing)');
+  ok(gateOf(/\n\t"Dirty": true\n\}\n?$/.test(META_DIRTY)) && !META_DIRTY.includes('"Dirty":true'), '① the fixture is the real shape: Go\'s indented encoder writes "Dirty": true WITH a space (a grep for "Dirty":true matches nothing)');
   ok(P.metaVerdict(META_DIRTY) === 'dirty', '① the real dirty vfsMeta reads dirty');
   ok(P.metaVerdict(META_CLEAN) === 'clean', '① the real clean vfsMeta (uploaded: a fingerprint, "Dirty": false) reads clean');
   ok(P.metaVerdict(META_NOSPACE) === 'dirty', '① the no-space spelling "Dirty":true reads dirty too — parse, not grep');
@@ -65,36 +65,36 @@ try {
 
   // ── ② the two witnesses ──
   const W = P.dirtyWitness;
-  ok(W(null, null).dirty && W(null, null).why === 'unread', '② the walk failed ⇒ dirty (fail closed)');
-  ok(W({ timedOut: true }, null).dirty, '② the walk timed out ⇒ dirty');
+  ok(gateOf(W(null, null).dirty) && W(null, null).why === 'unread', '② the walk failed ⇒ dirty (fail closed)');
+  ok(verdictOf(W({ timedOut: true }, null).dirty), '② the walk timed out ⇒ dirty');
   ok(!W({ exists: false }, null).dirty && W({ exists: false }, null).why === 'empty', '② nothing cached and no daemon to ask ⇒ clean (empty)');
   ok(!W({ exists: true, files: 3, dirty: 0, unread: 0 }, null).dirty, '② every vfsMeta clean, no live daemon ⇒ clean');
   ok(W({ exists: true, files: 3, dirty: 2, unread: 0 }, null).items === 2, '② vfsMeta items dirty ⇒ dirty, counted');
   ok(W({ exists: true, files: 3, dirty: 0, unread: 1 }, null).why === 'unread', '② one unreadable vfsMeta ⇒ dirty (unread)');
   ok(W({ exists: true, files: 3, dirty: 0, unread: 0 }, { queue: [{ name: 'a.txt', uploading: true }] }).items === 1, '② the live witness: the outgoing daemon still queues an upload ⇒ dirty');
-  ok(W({ exists: true, files: 3, dirty: 0, unread: 0 }, { error: 'vfs/queue: no answer in 2000 ms' }).dirty, '② the outgoing daemon alive but its rc queue unreadable ⇒ dirty');
-  ok(W({ exists: false }, { queue: [{ name: 'a' }] }).dirty, '② no vfsMeta but the daemon queues ⇒ dirty');
+  ok(verdictOf(W({ exists: true, files: 3, dirty: 0, unread: 0 }, { error: 'vfs/queue: no answer in 2000 ms' }).dirty), '② the outgoing daemon alive but its rc queue unreadable ⇒ dirty');
+  ok(verdictOf(W({ exists: false }, { queue: [{ name: 'a' }] }).dirty), '② no vfsMeta but the daemon queues ⇒ dirty');
 
   // ── ③ the placement rule ──
   const C = P.cachePlacement;
   const net = { recordDir: '/net/data/vfs-cache/A', recordNetwork: true, dataDirNetwork: true, candidates: [{ dir: '/home/u/.cache/vibespace/vfs-cache/A', network: false, writable: true }] };
   const clean = W({ exists: true, files: 2, dirty: 0, unread: 0 }, null);
-  ok(C(net).needWitness && !C(net).move && C(net).dir === net.recordDir, '③ a move is wanted ⇒ the witness is read first (nothing moves without it)');
+  ok(gateOf(C(net).needWitness) && !C(net).move && C(net).dir === net.recordDir, '③ a move is wanted ⇒ the witness is read first (nothing moves without it)');
   const mv = C({ ...net, witness: clean });
-  ok(mv.move && mv.dir === net.candidates[0].dir && mv.from === net.recordDir && mv.reason === 'moved', '③ network dataDir + a local writable candidate + clean ⇒ move (from = the old dir, removed after the mount)');
-  ok(judgePlace(P), '③ dirty ⇒ stay on the old dir, pendingMove + the item count (moves at the next reconnect once clean)');
+  ok(gateOf(mv.move) && mv.dir === net.candidates[0].dir && mv.from === net.recordDir && mv.reason === 'moved', '③ network dataDir + a local writable candidate + clean ⇒ move (from = the old dir, removed after the mount)');
+  ok(verdictOf(judgePlace(P)), '③ dirty ⇒ stay on the old dir, pendingMove + the item count (moves at the next reconnect once clean)');
   const ur = C({ ...net, witness: W(null, null) });
-  ok(!ur.move && ur.pendingMove && ur.reason === 'unread', '③ an unreadable witness ⇒ stay (fail closed)');
-  ok(['local-data'].includes(C({ ...net, dataDirNetwork: false, witness: clean }).reason) && !C({ ...net, dataDirNetwork: false, witness: clean }).move, '③ a LOCAL dataDir (the fleet PVC) never moves');
+  ok(!ur.move && gateOf(ur.pendingMove) && ur.reason === 'unread', '③ an unreadable witness ⇒ stay (fail closed)');
+  ok(gateOf(['local-data'].includes(C({ ...net, dataDirNetwork: false, witness: clean }).reason)) && !C({ ...net, dataDirNetwork: false, witness: clean }).move, '③ a LOCAL dataDir (the fleet PVC) never moves');
   for (const cand of [[{ dir: '/x/A', network: true, writable: true }], [{ dir: '/x/A', network: false, writable: false }], []]) {
     const p = C({ ...net, candidates: cand, witness: clean });
     ok(!p.move && p.reason === 'no-local' && p.network === true, `③ no local writable candidate (${JSON.stringify(cand)}) ⇒ stay + the door on the row`);
   }
   const fr = C({ ...net, exists: false });
-  ok(fr.move && fr.from === null && fr.dir === net.candidates[0].dir, '③ nothing cached yet ⇒ a switch with nothing to remove');
+  ok(gateOf(fr.move) && fr.from === null && fr.dir === net.candidates[0].dir, '③ nothing cached yet ⇒ a switch with nothing to remove');
   ok(C({ ...net, recordDir: '/home/u/.cache/vibespace/vfs-cache/A', recordNetwork: false }).reason === 'local', '③ a cache already on local disk stays');
   const ov = { ...net, dataDirNetwork: false, recordNetwork: false, candidates: [{ dir: '/fast/A', network: false, writable: true, override: true }] };
-  ok(C({ ...ov, witness: clean }).move && C({ ...ov, witness: clean }).dir === '/fast/A' && !C({ ...ov, witness: W({ exists: true, files: 1, dirty: 1, unread: 0 }, null) }).move, '③ the owner\'s override (env / mounts.vfsCacheRoot) wins — and still moves only when clean');
+  ok(gateOf(C({ ...ov, witness: clean }).move) && C({ ...ov, witness: clean }).dir === '/fast/A' && !C({ ...ov, witness: W({ exists: true, files: 1, dirty: 1, unread: 0 }, null) }).move, '③ the owner\'s override (env / mounts.vfsCacheRoot) wins — and still moves only when clean');
   ok(P.deviceCacheVerdict({}).dir === null && P.deviceCacheVerdict({ dir: '/n/c', network: true }).why === 'network' && P.deviceCacheVerdict({ dir: '/n/c', network: true }).dir === '/n/c', '③ the device twin: no dir ⇒ rclone\'s own local default; a network dir is said, never moved');
 
   // ── ④ the real manager's remount step ──
@@ -116,7 +116,7 @@ try {
   const A = seed(g, 'A', [META_CLEAN, META_CLEAN]);
   const toA = await g._placeCache(A.m);
   ok(toA === path.join(LOCAL_ROOT, 'A') && A.m.cacheDir === toA && A.m.cacheOld === A.dir, '④ a clean cache on the network dataDir MOVES at the remount: the new daemon gets ~/.cache/vibespace/vfs-cache/<id>, the record remembers both dirs', JSON.stringify({ toA, A: A.m }));
-  ok(fs.readdirSync(toA).length === 0 && fs.existsSync(path.join(A.dir, 'vfs', 'od', 'f0.txt')), '④ a SWITCH, never a copy: the new dir starts empty; the old one stays until the new daemon mounted');
+  ok(fs.readdirSync(toA).length === 0 && verdictOf(fs.existsSync(path.join(A.dir, 'vfs', 'od', 'f0.txt'))), '④ a SWITCH, never a copy: the new dir starts empty; the old one stays until the new daemon mounted');
   ok((fs.statSync(LOCAL_ROOT).mode & 0o777) === 0o700, '④ the local root is 0700');
   try { require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync([g._file]); } catch { }   // B-574d (r4796): mounts.json is the store writer's — the cache's place (no person pressed it) rides it off the loop; landed before the file is read
   ok(JSON.parse(fs.readFileSync(g._file, 'utf8')).mounts.find((x) => x.id === 'A').cacheDir === toA, '④ m.cacheDir is persisted through the mounts store');
@@ -124,7 +124,7 @@ try {
     const S = seed(g, id, metas);
     const to = await g._placeCache(S.m, rc);
     const cell = g.list().find((x) => x.id === id).cache;
-    ok(to === S.dir && S.m.cacheDir === S.dir && !S.m.cacheOld && cell.why === why && cell.pendingMove && cell.network, `④ ${id}: ${why === 'dirty' ? 'a dirty item' : 'an unreadable witness'} (${rc ? 'rc ' + JSON.stringify(rc) : metas.length + ' vfsMeta'}) ⇒ the daemon restarts on the OLD dir, the row says ${why}`, JSON.stringify({ to, m: S.m, cell }));
+    ok(to === S.dir && S.m.cacheDir === S.dir && !S.m.cacheOld && cell.why === why && gateOf(cell.pendingMove) && verdictOf(cell.network), `④ ${id}: ${why === 'dirty' ? 'a dirty item' : 'an unreadable witness'} (${rc ? 'rc ' + JSON.stringify(rc) : metas.length + ' vfsMeta'}) ⇒ the daemon restarts on the OLD dir, the row says ${why}`, JSON.stringify({ to, m: S.m, cell }));
   }
   ok(g.list().find((x) => x.id === 'B').cache.items === 1, '④ the row counts the items still uploading');
   const T0 = seed(g, 'T', [META_CLEAN]); (g._cacheWalkFailed = new Map()).set('T', Date.now() - 60e3);
@@ -139,8 +139,8 @@ try {
   const other = path.join(D, 'not-A'); fs.mkdirSync(other);
   g._dropCacheDir(A.m, other); g._dropCacheDir(A.m, toA);
   g._dropCacheDir(A.m, A.m.cacheOld);
-  ok(await until(() => !fs.existsSync(A.dir) && !A.m.cacheOld, 5000), '④ the old dir is removed by a CHILD rm and m.cacheOld cleared');
-  ok(fs.existsSync(other) && fs.existsSync(toA), '④ never a dir not named after the record, never the live dir');
+  ok(verdictOf(await until(() => !fs.existsSync(A.dir) && !A.m.cacheOld, 5000)), '④ the old dir is removed by a CHILD rm and m.cacheOld cleared');
+  ok(gateOf(fs.existsSync(other)) && verdictOf(fs.existsSync(toA)), '④ never a dir not named after the record, never the live dir');
   void G;
 
   // ── ⑥ verify r1 → r2 (the data-loss verify on 82a834ada) ──
@@ -149,7 +149,7 @@ try {
   for (const code of ['ESTALE', 'EIO', 'EACCES']) {
     const w = W({ exists: null, error: code, files: 0, dirty: 0, unread: 1 }, null);
     const pl = C({ ...net, exists: true, witness: w });
-    ok(w.dirty && w.code === code && !pl.move && pl.reason === 'unread' && pl.code === code, `⑥#0 PURE: a ${code} on the record's dir ⇒ unknown ⇒ stay + said (${code})`);
+    ok(gateOf(w.dirty) && w.code === code && !pl.move && pl.reason === 'unread' && pl.code === code, `⑥#0 PURE: a ${code} on the record's dir ⇒ unknown ⇒ stay + said (${code})`);
   }
   const errnoRun = async (MM, how, tag) => {
     const g = mk(MM, true, 'e-' + tag + '-' + how), id = 'X' + how.replace(/\W/g, '');
@@ -176,7 +176,7 @@ try {
   const g7 = mk(MountManager, true, 'ov'); g7._getSetting = (k) => (k === 'mounts.vfsCacheRoot' ? path.join(RO, 'vc') : undefined);
   const O7 = seed(g7, 'O', [META_CLEAN]);
   const toO = await g7._placeCache(O7.m), cO = g7.list().find((x) => x.id === 'O').cache;
-  ok(toO === O7.dir && !O7.m.cacheOld && fs.existsSync(path.join(O7.dir, 'vfs', 'od', 'f0.txt')) && cO.why === 'override-refused' && cO.override === path.join(RO, 'vc') && cO.code === 'EACCES',
+  ok(toO === O7.dir && !O7.m.cacheOld && gateOf(fs.existsSync(path.join(O7.dir, 'vfs', 'od', 'f0.txt'))) && cO.why === 'override-refused' && cO.override === path.join(RO, 'vc') && cO.code === 'EACCES',
     '⑥#1 real: mounts.vfsCacheRoot under a 0500 dir ⇒ refused: the daemon keeps its dir, nothing dropped, the row names the override + EACCES', JSON.stringify({ toO, cO }));
   const formerDir = path.join(D, 'former', 'P'); fs.mkdirSync(path.join(formerDir, 'vfsMeta', 'od'), { recursive: true }); fs.writeFileSync(path.join(formerDir, 'vfsMeta', 'od', 'a.txt'), META_CLEAN);
   const P7 = { id: 'P', name: 'P', type: 'rclone', rcloneType: 'local', desired: 'unmounted', cacheDir: formerDir }; g7._state.mounts.push(P7);
@@ -188,7 +188,7 @@ try {
   ok(P.fsClassOf(0x794c7630) === 'ephemeral' && P.fsClassOf(0x01021994) === 'ephemeral' && P.fsClassOf(0x858458f6) === 'ephemeral' && P.fsClassOf(0x01021997) === 'ephemeral'
     && P.fsClassOf(0xEF53) === 'local' && P.fsClassOf(0x6969) === 'network' && P.fsClassOf(0x65735546) === 'network', '⑥#3 fsClassOf: overlayfs / tmpfs / ramfs / 9p ⇒ ephemeral; ext4 ⇒ local; NFS / FUSE ⇒ network');
   const judgeDurable = (PP) => !PP.cachePlacement({ recordDir: '/net/d/vfs-cache/A', recordFs: 'network', dataDirNetwork: true, dataDirDefault: '/net/d/vfs-cache/A', candidates: [{ dir: '/home/v/.cache/vibespace/vfs-cache/A', fs: PP.fsClassOf(0x01021994), writable: true }], witness: clean6 }).move;
-  ok(judgeDurable(P), '⑥#3 PURE: a tmpfs home ⇒ the cache stays on the data dir (ephemeral-home)');
+  ok(verdictOf(judgeDurable(P)), '⑥#3 PURE: a tmpfs home ⇒ the cache stays on the data dir (ephemeral-home)');
   const tmpT = MountManager._statfsType(os.tmpdir());
   ok(tmpT !== 0x01021994 || P.fsClassOf(tmpT) === 'ephemeral', `⑥#3 real statfs: ${os.tmpdir()} = 0x${(tmpT >>> 0).toString(16)} ⇒ ${P.fsClassOf(tmpT)}${tmpT === 0x01021994 ? ' (tmpfs here — never a candidate)' : ''}`);
   const g9 = mk(MountManager, true, 'eph', 'ephemeral');
@@ -213,21 +213,21 @@ try {
     return { w1, w2, rearmed, moved: to === path.join(LOCAL_ROOT, 'M'), cleared: !g._cacheWalkFailed.has('M'), downWalked: walks !== w3, downStay: toD === D2.dir, downCell: g.list().find((x) => x.id === 'Nd').cache };
   };
   const mr = await memoRun(MountManager, 'real');
-  ok(mr.w1 === 1 && mr.w2 === 2 && mr.rearmed, '⑥#2 a timed-out walk is not repeated inside the window; after it, the next timeout RE-ARMS the memo (2 walks, not 3)', JSON.stringify(mr));
-  ok(mr.moved && mr.cleared, '⑥#2 a walk that finished clears the memo (and a clean cache moves)', JSON.stringify(mr));
-  ok(!mr.downWalked && mr.downStay && mr.downCell.why === 'unread' && mr.downCell.code === 'mount-dead', '⑥#2 the mount is down (liveness dead) ⇒ no walk at all: the cache stays, the row says mount-dead', JSON.stringify(mr));
+  ok(mr.w1 === 1 && mr.w2 === 2 && verdictOf(mr.rearmed), '⑥#2 a timed-out walk is not repeated inside the window; after it, the next timeout RE-ARMS the memo (2 walks, not 3)', JSON.stringify(mr));
+  ok(gateOf(mr.moved) && verdictOf(mr.cleared), '⑥#2 a walk that finished clears the memo (and a clean cache moves)', JSON.stringify(mr));
+  ok(!mr.downWalked && gateOf(mr.downStay) && mr.downCell.why === 'unread' && mr.downCell.code === 'mount-dead', '⑥#2 the mount is down (liveness dead) ⇒ no walk at all: the cache stays, the row says mount-dead', JSON.stringify(mr));
   // #4 (refuted): covered by the STARTING suite — a joined start never reaches _placeCache while the old daemon lives
 
   // ── ⑤ patched-copy controls ──
   const MC = mutantCopies('vfs-cache-place', REPO);
   const psrc = fs.readFileSync(path.join(REPO, 'src/vfs-cache-place.js'), 'utf8');
   const grepFrom = 'function metaVerdict(text) {\n', grepTo = 'function metaVerdict(text) { return /"Dirty":true/.test(text) ? \'dirty\' : \'clean\';\n';
-  ok(psrc.includes(grepFrom) && !judgeMeta(MC.load('src/vfs-cache-place.js', editAnchor(psrc, grepFrom, grepTo, "src/vfs-cache-place.js"), 'grep')), '⑤ NEGATIVE CONTROL: a grep-for-a-spelling witness reads the real dirty file CLEAN (red)');
+  ok(gateOf(psrc.includes(grepFrom)) && !judgeMeta(MC.load('src/vfs-cache-place.js', editAnchor(psrc, grepFrom, grepTo, "src/vfs-cache-place.js"), 'grep')), '⑤ NEGATIVE CONTROL: a grep-for-a-spelling witness reads the real dirty file CLEAN (red)');
   const dirtyFrom = '  if (witness.dirty) return stay(';
-  ok(psrc.includes(dirtyFrom) && !judgePlace(MC.load('src/vfs-cache-place.js', editAnchor(psrc, dirtyFrom, '  if (false) return stay(', "src/vfs-cache-place.js"), 'movedirty')), '⑤ NEGATIVE CONTROL: a move while dirty (red)');
+  ok(gateOf(psrc.includes(dirtyFrom)) && !judgePlace(MC.load('src/vfs-cache-place.js', editAnchor(psrc, dirtyFrom, '  if (false) return stay(', "src/vfs-cache-place.js"), 'movedirty')), '⑤ NEGATIVE CONTROL: a move while dirty (red)');
   const msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8');
   const cpFrom = '      m.cacheDir = p.dir;\n      if (p.from) m.cacheOld = p.from;\n';
-  ok(msrc.includes(cpFrom), '⑤ the copy control anchors on the real switch');
+  ok(verdictOf(msrc.includes(cpFrom)), '⑤ the copy control anchors on the real switch');
   const gm = mk(MC.load('src/mounts.js', editAnchor(msrc, cpFrom, '      if (p.from) fs.cpSync(p.from, p.dir, { recursive: true });\n' + cpFrom, "src/mounts.js"), 'copy').MountManager, true, 'mut');
   const AM = seed(gm, 'AM', [META_CLEAN]);
   const toM = await gm._placeCache(AM.m);
@@ -239,15 +239,15 @@ try {
   const e0 = await errnoRun(MM0, 'EACCES', 'mut');
   ok(e0.to === e0.local, '⑤ NEGATIVE CONTROL #0: the old catch{} shape ⇒ an EACCES dirty cache moves "fresh" and is orphaned (red)', JSON.stringify(e0));
   const ovFrom = "    if (!ov.writable) return stay('override-refused',";
-  ok(psrc.includes(ovFrom) && MC.load('src/vfs-cache-place.js', editAnchor(psrc, ovFrom, "    if (false) return stay('override-refused',", "src/vfs-cache-place.js"), 'ovw').cachePlacement({ ...net, candidates: [{ dir: '/ro/A', fs: 'local', writable: false, override: true }], witness: clean6 }).move, '⑤ NEGATIVE CONTROL #1: an override obeyed without its writable check ⇒ moves onto the dead dir (red)');
+  ok(gateOf(psrc.includes(ovFrom)) && verdictOf(MC.load('src/vfs-cache-place.js', editAnchor(psrc, ovFrom, "    if (false) return stay('override-refused',", "src/vfs-cache-place.js"), 'ovw').cachePlacement({ ...net, candidates: [{ dir: '/ro/A', fs: 'local', writable: false, override: true }], witness: clean6 }).move), '⑤ NEGATIVE CONTROL #1: an override obeyed without its writable check ⇒ moves onto the dead dir (red)');
   const durFrom = " : NON_DURABLE_FS_MAGIC.includes(t) ? 'ephemeral'";
-  ok(psrc.includes(durFrom) && !judgeDurable(MC.load('src/vfs-cache-place.js', editAnchor(psrc, durFrom, '', "src/vfs-cache-place.js"), 'netonly')), '⑤ NEGATIVE CONTROL #3: the old NETWORK_FS_MAGIC alone ⇒ a tmpfs home is "local" ⇒ the cache moves onto it (red)');
+  ok(gateOf(psrc.includes(durFrom)) && !judgeDurable(MC.load('src/vfs-cache-place.js', editAnchor(psrc, durFrom, '', "src/vfs-cache-place.js"), 'netonly')), '⑤ NEGATIVE CONTROL #3: the old NETWORK_FS_MAGIC alone ⇒ a tmpfs home is "local" ⇒ the cache moves onto it (red)');
   const memoFrom = 'if (meta && meta.timedOut) memo.set(m.id, Date.now());';
   const mm2 = msrc.includes(memoFrom) && await memoRun(MC.load('src/mounts.js', editAnchor(msrc, memoFrom, 'if (meta && meta.timedOut && !memo.get(m.id)) memo.set(m.id, Date.now());', "src/mounts.js"), 'memo1').MountManager, 'mut');
-  ok(mm2 && mm2.w2 === 3, '⑤ NEGATIVE CONTROL #2: the memo armed only once ⇒ every reconnect after the window walks again (red)', JSON.stringify(mm2));
+  ok(gateOf(mm2) && mm2.w2 === 3, '⑤ NEGATIVE CONTROL #2: the memo armed only once ⇒ every reconnect after the window walks again (red)', JSON.stringify(mm2));
 } finally {
   await sleep(200);
   fs.rmSync(D, { recursive: true, force: true });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

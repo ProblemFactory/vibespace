@@ -37,7 +37,7 @@ const socksClient = (port, { user, pass, offer = [0x02], payload = 'ping', want 
 const credsOf = (url) => { const m = /^socks5h:\/\/([^:]+):([^@]+)@127\.0\.0\.1:(\d+)$/.exec(url); return m && { user: m[1], pass: m[2], port: Number(m[3]) }; };
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -93,27 +93,27 @@ try {
   const list = ex.listFor(S, 'w1');
   check('listFor returns only the machines open to this conversation', list.length === 3 && !list.some((m) => m.id === 'host-no'), JSON.stringify(list.map((m) => m.id)));
   check('list carries online flag (dial offline shows false)', list.find((m) => m.id === 'host-off').online === false);
-  check('…and the grants (network yes, commands no)', list.every((m) => m.grants.use === true && m.grants.run === false));
+  check('…and the grants (network yes, commands no)', verdictOf(list.every((m) => m.grants.use === true && m.grants.run === false)));
 
   // ── resolution: id / exact name / unique substring, then the grant ──
   const rm = await tryUse('Mac');
-  check('resolve by exact name ("Mac" exact beats "Off Mac" substring)', rm.r && rm.r.hostId === 'host-mac', JSON.stringify(rm.e && rm.e.message));
+  check('resolve by exact name ("Mac" exact beats "Off Mac" substring)', gateOf(rm.r) && rm.r.hostId === 'host-mac', JSON.stringify(rm.e && rm.e.message));
   check('resolve by unique substring', (await tryUse('build')).r?.hostId === 'host-box');
   const amb = await tryUse('ma'); // 'ma' ⊂ Mac AND Off Mac, exact of neither
-  check('ambiguous substring is rejected with names', amb.e && amb.e.code === 'ambiguous' && /more specific/.test(amb.e.message), amb.e && amb.e.message);
+  check('ambiguous substring is rejected with names', gateOf(amb.e) && amb.e.code === 'ambiguous' && verdictOf(/more specific/.test(amb.e.message)), amb.e && amb.e.message);
   const notExit = await tryUse('NotAnExit');
-  check('a real machine not open to this conversation is refused BY GRANT (never "no such machine")', notExit.e && notExit.e.code === 'not_granted' && /"Who can use it"/.test(notExit.e.message), notExit.e && notExit.e.message);
+  check('a real machine not open to this conversation is refused BY GRANT (never "no such machine")', gateOf(notExit.e) && notExit.e.code === 'not_granted' && verdictOf(/"Who can use it"/.test(notExit.e.message)), notExit.e && notExit.e.message);
   const none = await tryUse('nope');
-  check('no match is rejected', none.e && none.e.code === 'no_machine', none.e && none.e.message);
+  check('no match is rejected', gateOf(none.e) && none.e.code === 'no_machine', none.e && none.e.message);
   await ex.stop('host-mac'); await ex.stop('host-box'); served = 0; unserved = 0;
 
   // ── use: binds a local port, bytes round-trip through the (mock) device SOCKS ──
   const r = (await tryUse('host-mac')).r;
   const cr = credsOf(r.url);
-  check('use returns a socks5h url on the server loopback WITH this conversation\'s own credentials (A3)', cr && cr.port === r.localPort && /^s[0-9a-f]{12}$/.test(cr.user) && /^[0-9a-f]{36}$/.test(cr.pass), r.url);
+  check('use returns a socks5h url on the server loopback WITH this conversation\'s own credentials (A3)', gateOf(cr) && cr.port === r.localPort && gateOf(/^s[0-9a-f]{12}$/.test(cr.user)) && verdictOf(/^[0-9a-f]{36}$/.test(cr.pass)), r.url);
   check('serveSocks was called on the device', served === 1);
   const reply = await socksClient(r.localPort, cr);
-  check('bytes round-trip through the exit forward once the credentials are given (the device SOCKS greeted on the client\'s behalf)', reply.text.includes('EX:ping'), JSON.stringify(reply));
+  check('bytes round-trip through the exit forward once the credentials are given (the device SOCKS greeted on the client\'s behalf)', verdictOf(reply.text.includes('EX:ping')), JSON.stringify(reply));
   const bare = await new Promise((resolve) => { const c = net.connect(r.localPort, '127.0.0.1', () => c.write('ping')); let b = ''; c.on('data', (d) => { b += d; }); c.on('close', () => resolve(b)); c.on('error', () => resolve(b)); setTimeout(() => { try { c.destroy(); } catch {} resolve(b); }, 2000); });
   check('a bare connection (any local process, no SOCKS auth) gets NOTHING through — not a byte reaches the machine', !bare.includes('EX:'), JSON.stringify(bare));
   const noAuth = await socksClient(r.localPort, { ...cr, offer: [0x00] });
@@ -127,10 +127,10 @@ try {
   ex.sessionsMap = () => new Map([['w1', S], ['w2', S2]]);
   const r2u = await ex.use(S2, 'w2', 'host-mac');
   const cr2 = credsOf(r2u.url);
-  check('a second granted conversation gets its OWN credentials on the same port', cr2 && cr2.port === r.localPort && cr2.user !== cr.user && cr2.pass !== cr.pass);
-  check('…which work', (await socksClient(r.localPort, cr2)).text.includes('EX:ping'));
+  check('a second granted conversation gets its OWN credentials on the same port', gateOf(cr2) && cr2.port === r.localPort && cr2.user !== cr.user && cr2.pass !== cr.pass);
+  check('…which work', verdictOf((await socksClient(r.localPort, cr2)).text.includes('EX:ping')));
   await ex.setAccess('host-mac', { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:c-1' }] } });
-  check('after the revoke of the second conversation its pair is dead and the first still works', (await socksClient(r.localPort, cr2)).log[1] === 'auth:1' && (await socksClient(r.localPort, cr)).text.includes('EX:ping'));
+  check('after the revoke of the second conversation its pair is dead and the first still works', (await socksClient(r.localPort, cr2)).log[1] === 'auth:1' && verdictOf((await socksClient(r.localPort, cr)).text.includes('EX:ping')));
   check('…and `use` again by the first conversation hands back the SAME pair (eval twice is fine)', (await ex.use(S, 'w1', 'host-mac')).url === r.url);
   ex.sessionsMap = () => new Map([['w1', S]]);
   await ex.setAccess('host-mac', { use: { mode: 'everyone' } });
@@ -143,7 +143,7 @@ try {
 
   // ── offline device fails loud ──
   const off = await tryUse('host-off');
-  check('use on an offline device fails loud', off.e && off.e.code === 'offline' && /offline/i.test(off.e.message), off.e && off.e.message);
+  check('use on an offline device fails loud', gateOf(off.e) && off.e.code === 'offline' && verdictOf(/offline/i.test(off.e.message)), off.e && off.e.message);
 
   // ── stop tears down + unserves the device SOCKS ──
   await ex.stop('host-mac');
@@ -170,18 +170,18 @@ try {
     const cr = credsOf((await ex.use(S, 'w1', 'host-mac')).url); // the other holder, listed by session
     const r3 = await ex.use(S3, 'w3', 'host-mac');
     const cr3 = credsOf(r3.url);
-    check('A3-r2: a conversation granted through a Task Group gets its pair and connects', (await socksClient(r3.localPort, cr3)).text.includes('EX:ping'));
+    check('A3-r2: a conversation granted through a Task Group gets its pair and connects', verdictOf((await socksClient(r3.localPort, cr3)).text.includes('EX:ping')));
     member = []; // left the group — the only re-judge r1 had was the machine's PATCH
     const left = await socksClient(r3.localPort, cr3);
     check('A3-r2: after the conversation LEFT the group its pair is refused (01 01) — the connection asks the verdict, not just the pair (r1: bytes through)', left.log[1] === 'auth:1' && !left.text.includes('EX:'), JSON.stringify(left));
     const use3 = await ex.use(S3, 'w3', 'host-mac').then(() => null, (e) => e);
-    check('…and `use` says not_granted', use3 && use3.code === 'not_granted');
-    check('…the other holder\'s pair still works', (await socksClient(r3.localPort, cr)).text.includes('EX:ping'));
+    check('…and `use` says not_granted', gateOf(use3) && use3.code === 'not_granted');
+    check('…the other holder\'s pair still works', verdictOf((await socksClient(r3.localPort, cr)).text.includes('EX:ping')));
     // a conversation that DIED (killed / exited) — nobody PATCHed anything
     member = ['G'];
     const r3b = await ex.use(S3, 'w3', 'host-mac');
     const cr3b = credsOf(r3b.url);
-    check('(a re-granted conversation gets a fresh pair)', cr3b.user !== cr3.user && (await socksClient(r3.localPort, cr3b)).text.includes('EX:ping'));
+    check('(a re-granted conversation gets a fresh pair)', cr3b.user !== cr3.user && verdictOf((await socksClient(r3.localPort, cr3b)).text.includes('EX:ping')));
     ex.sessionsMap = () => new Map([['w1', S]]); // w3 is gone from the live map
     const dead = await socksClient(r3.localPort, cr3b);
     check('A3-r2: a DEAD conversation\'s pair is refused (01 01) — r1 honoured it until the forward stopped', dead.log[1] === 'auth:1' && !dead.text.includes('EX:'), JSON.stringify(dead));
@@ -194,16 +194,16 @@ try {
     const cut = await new Promise((resolve) => { held.once('close', () => resolve(true)); setTimeout(() => resolve(false), 1500); });
     check('A3-r2: onSessionEnd (the kill / exit path) cuts the conversation\'s open connection at once', cut === true);
     check('…and its pair is gone', (await socksClient(r3.localPort, cr3c)).log[1] === 'auth:1');
-    check('…the forward stays up for its other holder', ex.list().find((m) => m.id === 'host-mac').active === true && (await socksClient(r3.localPort, cr)).text.includes('EX:ping'));
+    check('…the forward stays up for its other holder', ex.list().find((m) => m.id === 'host-mac').active === true && verdictOf((await socksClient(r3.localPort, cr)).text.includes('EX:ping')));
     const u0 = unserved;
     ex.onSessionEnd(S, 'w1'); await sleep(200);
     check('A3-r2: the last holder gone ⇒ the forward stops (the device SOCKS unserved)', !ex.list().find((m) => m.id === 'host-mac').active && unserved === u0 + 1, `unserved=${unserved}`);
     // constant-time compare (r1's LOW): the pair is judged by crypto.timingSafeEqual, never ===
     const src = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
-    check('A3-r2: the password compare is constant-time (timingSafeEqual) — no `c.pass === p` left', /crypto\.timingSafeEqual\(A, B\)/.test(src) && !/c\.pass === p/.test(src));
+    check('A3-r2: the password compare is constant-time (timingSafeEqual) — no `c.pass === p` left', gateOf(/crypto\.timingSafeEqual\(A, B\)/.test(src)) && !/c\.pass === p/.test(src));
     // WIRING: both session-end sites (the ws kill path, the stdout exit path) tell the manager, beside helper-asks.forget
     const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), sso = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8'), srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-    check('WIRING (A3-r2): the kill path and the exit path both call exitProxy.onSessionEnd(session, id) right before activeSessions.delete', /getExitProxy\(\)\?\.onSessionEnd\?\.\(session, data\.sessionId\); \} catch \{ \}[^\n]*\n\s*activeSessions\.delete\(data\.sessionId\);/.test(wsh) && /exitProxyRef\.onSessionEnd\?\.\(session, id\); \} catch \{ \}[^\n]*\n\s*activeSessions\.delete\(id\);/.test(sso) && (srv.match(/getExitProxy: \(\) => \{ try \{ return exitProxy; \} catch \{ return null; \} \}/g) || []).length >= 4);
+    check('WIRING (A3-r2): the kill path and the exit path both call exitProxy.onSessionEnd(session, id) right before activeSessions.delete', gateOf(/getExitProxy\(\)\?\.onSessionEnd\?\.\(session, data\.sessionId\); \} catch \{ \}[^\n]*\n\s*activeSessions\.delete\(data\.sessionId\);/.test(wsh)) && gateOf(/exitProxyRef\.onSessionEnd\?\.\(session, id\); \} catch \{ \}[^\n]*\n\s*activeSessions\.delete\(id\);/.test(sso)) && (srv.match(/getExitProxy: \(\) => \{ try \{ return exitProxy; \} catch \{ return null; \} \}/g) || []).length >= 4);
     ex.groupsOf = null; ex.sessionsMap = () => new Map([['w1', S]]);
     await ex.setAccess('host-mac', { use: { mode: 'everyone' } });
   }
@@ -223,23 +223,23 @@ try {
     const r4 = await ex.use(S4, 'w4', 'host-mac');
     const cr4 = credsOf(r4.url);
     const o4 = await openConn(r4.localPort, cr4), oS = await openConn(r4.localPort, crS);
-    check('(open): a group-granted conversation holds an open connection carrying bytes', (await talk(o4, 'one')).includes('EX:one'));
+    check('(open): a group-granted conversation holds an open connection carrying bytes', verdictOf((await talk(o4, 'one')).includes('EX:one')));
     member = []; // the conversation leaves G — nothing PATCHed on the machine
     const noHook = await talk(o4, 'two');
-    check('(open): without a re-judge the open connection still carries bytes after the group was left (the shape reproduced)', noHook.includes('EX:two'));
+    check('(open): without a re-judge the open connection still carries bytes after the group was left (the shape reproduced)', verdictOf(noHook.includes('EX:two')));
     const rj = ex.rejudgeAll('task-groups');
     const cut = await new Promise((resolve) => { if (o4.s.destroyed) return resolve(true); o4.s.once('close', () => resolve(true)); setTimeout(() => resolve(false), 1500); });
-    check('verify-r2: rejudgeAll (the Task Group store\'s change hook) cuts the OPEN connection of a conversation that lost `use` — as a PATCH does', cut === true && rj.stopped.some((x) => x.sessionId === 'w4'), JSON.stringify(rj));
+    check('verify-r2: rejudgeAll (the Task Group store\'s change hook) cuts the OPEN connection of a conversation that lost `use` — as a PATCH does', cut === true && verdictOf(rj.stopped.some((x) => x.sessionId === 'w4')), JSON.stringify(rj));
     check('…its pair is dropped (a new connection hears 01 01)', (await socksClient(r4.localPort, cr4)).log[1] === 'auth:1');
-    check('…the other holder\'s open connection is untouched', (await talk(oS, 'three')).includes('EX:three') && !oS.s.destroyed);
+    check('…the other holder\'s open connection is untouched', gateOf((await talk(oS, 'three')).includes('EX:three')) && !oS.s.destroyed);
     check('…a re-judge with nothing changed drops nobody', ex.rejudgeAll('task-groups').stopped.length === 0);
     const u0 = unserved;
     ex.sessionsMap = () => new Map([['w4', S4]]); // the listed conversation is gone too (its end hook never ran)
     ex.rejudgeAll('task-groups'); await sleep(200);
-    check('…the last holder judged out ⇒ the forward stops (the device SOCKS unserved)', !ex.list().find((m) => m.id === 'host-mac').active && unserved === u0 + 1 && oS.s.destroyed);
+    check('…the last holder judged out ⇒ the forward stops (the device SOCKS unserved)', !ex.list().find((m) => m.id === 'host-mac').active && unserved === u0 + 1 && verdictOf(oS.s.destroyed));
     // WIRING: the Task Group store's onChange (server.js) calls it on every change
     const srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), tgwSrc = fs.readFileSync(path.join(REPO, 'src/server/task-groups-wiring.js'), 'utf8'); // tgwSrc: the store, «make room» 2026-11-17: moved whole out of server.js
-    check('WIRING (open): server.js\'s TaskGroupManager onChange calls exitProxy.rejudgeAll(\'task-groups\') — the store is built in src/server/task-groups-wiring.js, server.js hands it the exitProxy getter', /onChange: \(ch\) => \{\n[^\n]*taskFanout\.note\(ch && ch\.ids\);[^\n]*\n\s*try \{ exitProxy\(\)\.rejudgeAll\('task-groups'\); \} catch \{ \}/.test(tgwSrc) && /task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bexitProxy: \(\) => exitProxy\b/.test(srvSrc));   // lane task-group-fanout: after the fan-out's note (the broadcast coalesces, the re-judge does not)
+    check('WIRING (open): server.js\'s TaskGroupManager onChange calls exitProxy.rejudgeAll(\'task-groups\') — the store is built in src/server/task-groups-wiring.js, server.js hands it the exitProxy getter', gateOf(/onChange: \(ch\) => \{\n[^\n]*taskFanout\.note\(ch && ch\.ids\);[^\n]*\n\s*try \{ exitProxy\(\)\.rejudgeAll\('task-groups'\); \} catch \{ \}/.test(tgwSrc)) && verdictOf(/task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bexitProxy: \(\) => exitProxy\b/.test(srvSrc)));   // lane task-group-fanout: after the fan-out's note (the broadcast coalesces, the re-judge does not)
     ex.groupsOf = null; ex.sessionsMap = () => new Map([['w1', S]]);
     await ex.setAccess('host-mac', { use: { mode: 'everyone' } });
   }
@@ -292,16 +292,16 @@ try {
   {
     const { HostManager } = require('../src/hosts.js');
     const a = await hostsLeg(HostManager, 'real');
-    check('(A-r3a): the borrowed connection carries bytes and the ask waits before the import', a.before && a.asked === 1, JSON.stringify(a));
+    check('(A-r3a): the borrowed connection carries bytes and the ask waits before the import', gateOf(a.before) && a.asked === 1, JSON.stringify(a));
     check('verify-r3 A-r3a: Import config NARROWING the machine\'s lists cuts the conversation\'s OPEN connection at once (r2: bytes through)', a.narrowCut === true, JSON.stringify(a));
-    check('…its waiting "ask me" request is answered not_granted (nothing runs), the forward stops and the row lists nobody', a.narrowAsk && a.narrowAsk.code === 'not_granted' && a.narrowStopped && a.narrowUsedBy === 0, JSON.stringify(a));
-    check('verify-r3 A-r3a: Import config WITHOUT the machine cuts its open connection', a.before2 && a.dropCut === true && !a.dropAfter.includes('EX:'), JSON.stringify(a));
+    check('…its waiting "ask me" request is answered not_granted (nothing runs), the forward stops and the row lists nobody', gateOf(a.narrowAsk) && a.narrowAsk.code === 'not_granted' && gateOf(a.narrowStopped) && a.narrowUsedBy === 0, JSON.stringify(a));
+    check('verify-r3 A-r3a: Import config WITHOUT the machine cuts its open connection', gateOf(a.before2) && a.dropCut === true && !a.dropAfter.includes('EX:'), JSON.stringify(a));
     check('verify-r3 A-r3a: a removal that skipped the route\'s onMachineUnpaired still cuts (hosts.remove itself tells the re-judge)', a.removeCut === true, JSON.stringify(a));
     check('lane grants-unify: a removed machine\'s two rows leave the grants store (a machine re-added under its id starts at nobody)', a.pruned === 0, JSON.stringify(a));
     const hsrc = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
     const bodyOf = (name) => { const i = hsrc.indexOf(`\n  ${name}(`); const j = hsrc.indexOf('\n  }\n', i); return i < 0 ? '' : hsrc.slice(i, j); };
-    check('WIRING (A-r3a): hosts.js importBundle / remove / reshapeStore / setExitAccess each call this._reachChanged(…) after the save', ['importBundle', 'remove', 'reshapeStore', 'setExitAccess'].every((n) => /this\._save\(\);\s*\n\s*this\._reachChanged\('/.test(bodyOf(n))), ['importBundle', 'remove', 'reshapeStore', 'setExitAccess'].filter((n) => !/this\._reachChanged\('/.test(bodyOf(n))).join(','));
-    check('WIRING (A-r3a): server.js points hosts.onReachChange at exitProxy.rejudgeAll', /\nhosts\.onReachChange = \(why\) => exitProxy\.rejudgeAll\(`hosts-\$\{why\}`\);/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8')));
+    check('WIRING (A-r3a): hosts.js importBundle / remove / reshapeStore / setExitAccess each call this._reachChanged(…) after the save', verdictOf(['importBundle', 'remove', 'reshapeStore', 'setExitAccess'].every((n) => /this\._save\(\);\s*\n\s*this\._reachChanged\('/.test(bodyOf(n)))), ['importBundle', 'remove', 'reshapeStore', 'setExitAccess'].filter((n) => !/this\._reachChanged\('/.test(bodyOf(n))).join(','));
+    check('WIRING (A-r3a): server.js points hosts.onReachChange at exitProxy.rejudgeAll', verdictOf(/\nhosts\.onReachChange = \(why\) => exitProxy\.rejudgeAll\(`hosts-\$\{why\}`\);/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'))));
     // CONTROL (A-r3a): a HostManager whose import does not tell the re-judge — the pre-fix shape: the open connection lives on
     const M = mutantCopies('exitproxy-hosts', REPO);
     const patchedH = editAnchor(hsrc, "    this._reachChanged('import');", '    ;', "src/hosts.js");
@@ -323,7 +323,7 @@ try {
     const ex2 = new EPM({ hosts, grants, log: () => {}, sessionsMap: () => new Map([['w1', S]]) });
     const r3 = await ex2.use(S, 'w1', 'host-mac');
     const bare2 = await new Promise((resolve) => { const c = net.connect(r3.localPort, '127.0.0.1', () => c.write('ping')); let b = ''; c.on('data', (d) => { b += d; if (/EX:[\s\S]*ping/.test(b)) { c.end(); resolve(b); } }); c.on('error', () => resolve(b)); setTimeout(() => { try { c.destroy(); } catch {} resolve(b); }, 2000); });
-    check('CONTROL: without the gate a bare local connection reaches the machine — the pre-verify shape', /EX:[\s\S]*ping/.test(bare2), JSON.stringify(bare2));
+    check('CONTROL: without the gate a bare local connection reaches the machine — the pre-verify shape', verdictOf(/EX:[\s\S]*ping/.test(bare2)), JSON.stringify(bare2));
     await ex2.stop('host-mac');
     // CONTROL (A3-r2): a copy whose connection judge stops at the pair (r1's check) lets a dead conversation's pair through
     const pairOnly = editAnchor(src, "    const s = this.sessionsMap().get(c.sessionId);\n    if (!s || (() => { const x = this.ctxFor(s, c.sessionId); return this._endsOn(E.exitVerdict(this.access(hostId), 'use', x), x); })()) {", "    const s = null;\n    if (false) {", "src/exit-proxy.js");
@@ -335,7 +335,7 @@ try {
     const cr9 = credsOf(r9.url);
     ex3.sessionsMap = () => new Map(); // died
     const through = await socksClient(r9.localPort, cr9);
-    check('CONTROL (A3-r2): with the pair-only judge a DEAD conversation\'s pair still opens the machine — the leg above goes red', through.text.includes('EX:ping'), JSON.stringify(through.log));
+    check('CONTROL (A3-r2): with the pair-only judge a DEAD conversation\'s pair still opens the machine — the leg above goes red', verdictOf(through.text.includes('EX:ping')), JSON.stringify(through.log));
     await ex3.stop('host-mac');
     // CONTROL (open): a copy whose re-judge judges nobody (the pre-fix manager: no hook) keeps the open connection
     const noRejudge = editAnchor(src, "        for (const sid of new Set([...live.users, ...(live.bySession ? live.bySession.keys() : [])])) {", "        for (const sid of []) {", "src/exit-proxy.js");
@@ -349,7 +349,7 @@ try {
     const o8 = await openConn(r8.localPort, credsOf(r8.url));
     m8 = [];
     ex4.rejudgeAll('task-groups');
-    check('CONTROL (open): with a re-judge that judges nobody the open connection still carries bytes after the group was left — the leg above goes red', (await talk(o8, 'ctl')).includes('EX:ctl') && !o8.s.destroyed);
+    check('CONTROL (open): with a re-judge that judges nobody the open connection still carries bytes after the group was left — the leg above goes red', gateOf((await talk(o8, 'ctl')).includes('EX:ctl')) && !o8.s.destroyed);
     o8.s.destroy();
     await ex4.stop('host-mac');
     await ex4.setAccess('host-mac', { use: { mode: 'everyone' } });
@@ -360,4 +360,4 @@ try {
   try { for (const m of ['host-mac', 'host-box']) await ex.stop(m); } catch {}
 }
 console.log(failed ? `\n${failed} FAILED` : '\nexit-proxy test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

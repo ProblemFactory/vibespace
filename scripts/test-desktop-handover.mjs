@@ -50,7 +50,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -72,7 +72,7 @@ console.log('① the lease state table');
 {
   const holder = { key: 'claude:cid-1', webuiId: 'w1', name: 'Alpha' };
   const give = DH.leaseStep(null, { type: 'give', hostId: 'pc1', streamKey: 'stA', sid: 's1', holder }, 100);
-  ok(give.lease && give.lease.handle === 'md-pc1' && give.lease.input === 'agent' && give.lease.holder.key === 'claude:cid-1' && !give.end, 'give → md-pc1, the agent drives', give);
+  ok(gateOf(give.lease) && give.lease.handle === 'md-pc1' && give.lease.input === 'agent' && give.lease.holder.key === 'claude:cid-1' && !give.end, 'give → md-pc1, the agent drives', give);
   const p = DH.leaseStep(give.lease, { type: 'owner-input' }, 200);
   ok(p.lease.input === 'user' && p.lease.pausedAt === 200, 'the owner\'s input → paused (user)');
   ok(!DH.leaseStep(p.lease, { type: 'owner-input' }, 210).changed, 'more owner input while paused changes nothing');
@@ -97,7 +97,7 @@ console.log('① the lease state table');
 console.log('② who may act');
 {
   const l = DH.leaseStep(null, { type: 'give', hostId: 'pc1', streamKey: 'stA', holder: { key: 'claude:cid-1' } }).lease;
-  ok(DH.agentVerdict(null, ['claude:cid-1']).code === 'desktop_not_handed' && /owner hands/.test(DH.agentVerdict(null, []).error), 'nobody handed it ⇒ desktop_not_handed, the sentence names the owner\'s door');
+  ok(DH.agentVerdict(null, ['claude:cid-1']).code === 'desktop_not_handed' && verdictOf(/owner hands/.test(DH.agentVerdict(null, []).error)), 'nobody handed it ⇒ desktop_not_handed, the sentence names the owner\'s door');
   ok(DH.agentVerdict(l, ['claude:cid-2', 'webui:w2']).code === 'desktop_not_handed', 'another conversation ⇒ desktop_not_handed');
   ok(DH.agentVerdict(l, ['claude:cid-1']) === null, 'the holder may act');
   ok(DH.agentVerdict({ ...l, input: 'user' }, ['claude:cid-1']).code === 'window_paused', 'the owner driving ⇒ window_paused (the windows\' word)');
@@ -114,9 +114,9 @@ console.log('③ the fences, by name');
   const refused = [['win+l', 'win32', 'lock_screen'], ['ctrl+alt+delete', 'win32', 'secure_attention'], ['alt+ctrl+Delete', 'win32', 'secure_attention'], ['ctrl+alt+end', 'win32', 'secure_attention'],
     ['ctrl+cmd+q', 'darwin', 'lock_screen'], ['cmd+shift+q', 'darwin', 'log_off'], ['option+shift+cmd+q', 'darwin', 'log_off'], ['win+l', null, 'lock_screen'], ['ctrl+cmd+q', null, 'lock_screen'], ['power', 'win32', 'power'], ['ctrl+sleep', 'darwin', 'power']];
   for (const [c, p, name] of refused) { const r = DH.chordRecords(c, p); ok(r.code === 'chord_refused' && r.refusedAs === name, `${c} on ${p || 'an unknown platform'} ⇒ chord_refused (${name})`, r); }
-  for (const [c, p] of [['ctrl+s', 'win32'], ['alt+F4', 'win32'], ['Return', 'win32'], ['cmd+q', 'darwin'], ['cmd+l', 'darwin'], ['cmd+shift+4', 'darwin'], ['win', 'win32'], ['shift+tab', null]]) ok(Array.isArray(DH.chordRecords(c, p).records), `${c} on ${p || '?'} passes (an everyday chord)`);
+  for (const [c, p] of [['ctrl+s', 'win32'], ['alt+F4', 'win32'], ['Return', 'win32'], ['cmd+q', 'darwin'], ['cmd+l', 'darwin'], ['cmd+shift+4', 'darwin'], ['win', 'win32'], ['shift+tab', null]]) ok(verdictOf(Array.isArray(DH.chordRecords(c, p).records)), `${c} on ${p || '?'} passes (an everyday chord)`);
   ok(DH.chordRecords('ctrl+bogus', 'win32').code === 'bad_chord' && DH.chordRecords('hyper+a', 'win32').code === 'bad_chord' && DH.chordRecords('', 'win32').code === 'bad_chord', 'an unknown key / modifier ⇒ bad_chord');
-  ok(DH.typeRecords('x'.repeat(DH.LIMITS.typeMaxChars), 'win32').records && DH.typeRecords('x'.repeat(DH.LIMITS.typeMaxChars + 1), 'win32').code === 'type_too_long', `type: ${DH.LIMITS.typeMaxChars} characters pass, one more ⇒ type_too_long`);
+  ok(gateOf(DH.typeRecords('x'.repeat(DH.LIMITS.typeMaxChars), 'win32').records) && DH.typeRecords('x'.repeat(DH.LIMITS.typeMaxChars + 1), 'win32').code === 'type_too_long', `type: ${DH.LIMITS.typeMaxChars} characters pass, one more ⇒ type_too_long`);
   ok(DH.typeRecords('你好', 'win32', { keys: true }).code === 'not_ascii' && DH.typeRecords('你好', 'win32').road === 'paste', '--keys outside ASCII ⇒ not_ascii; the paste road takes any text');
 }
 
@@ -139,7 +139,7 @@ console.log('④ the parity: the owner\'s records = the agent\'s, byte for byte'
   const paste = [{ t: 'clip', text: '你好 world' }, { t: 'kd', c: 'ControlLeft' }, { t: 'kd', c: 'KeyV' }, { t: 'ku', c: 'KeyV' }, { t: 'ku', c: 'ControlLeft' }];
   ok(J(DH.typeRecords('你好 world', 'win32').records) === J(paste) && DH.typeRecords('x', 'darwin').records[1].c === 'MetaLeft', 'type = the owner\'s paste (the clipboard + the machine\'s primary modifier + V)');
   const SM = require(path.join(REPO, 'src/stream-model.js'));
-  ok([...agent, ...DH.chordRecords('ctrl+s', 'win32').records, ...DH.typeRecords('abc', 'win32').records, ...DH.typeRecords('A!', 'win32', { keys: true }).records, ...DH.scrollRecords('left', 2, '1,1', null, origin)].every((r) => !SM.inputEventOf(r).refused), 'every record the agent sends is one the channel\'s own table accepts (inputEventOf)');
+  ok(verdictOf([...agent, ...DH.chordRecords('ctrl+s', 'win32').records, ...DH.typeRecords('abc', 'win32').records, ...DH.typeRecords('A!', 'win32', { keys: true }).records, ...DH.scrollRecords('left', 2, '1,1', null, origin)].every((r) => !SM.inputEventOf(r).refused)), 'every record the agent sends is one the channel\'s own table accepts (inputEventOf)');
   // THROUGH THE REAL STREAM HOST: werift in-process, the data channel's handler driven with the owner's bytes
   const w = require(path.join(REPO, 'node_modules/werift'));
   const dcs = [];
@@ -153,7 +153,7 @@ console.log('④ the parity: the owner\'s records = the agent\'s, byte for byte'
   const host = SH.createStreamHost({ injector, loadWerift, screen: (msg) => sources[msg.sourceId] });
   for (const [sid, src] of [['s-mac', 'mac'], ['s-screen', 'screen'], ['s-win', 'win']]) { // a host serves two sessions at once: the Mac's ends after its leg
     const r = await host.offer({ sid, sourceKind: 'screen', sourceId: src }, { control() { } });
-    ok(r.ok, `the stream host offers ${sid} in-process`, r);
+    ok(verdictOf(r.ok), `the stream host offers ${sid} in-process`, r);
     const dc = dcs[dcs.length - 1];
     got.length = 0;
     const recs = DH.clickRecords('40,30', 1, src === 'screen' ? origin : { x: 0, y: 0 });
@@ -162,8 +162,8 @@ console.log('④ the parity: the owner\'s records = the agent\'s, byte for byte'
     const viaChannel = got.splice(0);
     const a = await host.input({ sid, events: recs });
     const viaOp = got.splice(0);
-    ok(viaChannel.length === 3 && J(viaChannel) === J(viaOp) && a.ok && a.n === 3, `${sid}: the injector receives the SAME bytes from the data channel and from desktop-input${src === 'mac' ? ' (the Mac\'s target)' : src === 'win' ? ' (the window\'s live place added once)' : ''}`, { viaChannel, viaOp, a });
-    if (src === 'win') ok(viaOp[1].includes('"x":340') && viaOp[1].includes('"y":230'), 'a window source: the window\'s live place added by the same onInput (40,30 → 340,230)', viaOp);
+    ok(viaChannel.length === 3 && J(viaChannel) === J(viaOp) && gateOf(a.ok) && a.n === 3, `${sid}: the injector receives the SAME bytes from the data channel and from desktop-input${src === 'mac' ? ' (the Mac\'s target)' : src === 'win' ? ' (the window\'s live place added once)' : ''}`, { viaChannel, viaOp, a });
+    if (src === 'win') ok(gateOf(viaOp[1].includes('"x":340')) && verdictOf(viaOp[1].includes('"y":230')), 'a window source: the window\'s live place added by the same onInput (40,30 → 340,230)', viaOp);
     if (src === 'mac') { ok((await host.still({ sid })).code === 'no_still', 'a source without still() ⇒ no_still by name'); host.stop(sid, 'done'); }
   }
   const bad = await host.input({ sid: 's-screen', events: [{ t: 'ack', f: 3 }, { t: 'zz' }, { t: 'md', x: 99999, y: 0, b: 0 }, { t: 'kd', c: 'KeyA' }] });
@@ -171,9 +171,9 @@ console.log('④ the parity: the owner\'s records = the agent\'s, byte for byte'
   ok((await host.input({ sid: 'nope', events: [] })).code === 'not_found' && (await host.still({ sid: 'nope' })).code === 'not_found', 'an unknown session ⇒ not_found');
   const st = await host.still({ sid: 's-screen' });
   const png = Buffer.from(st.png64, 'base64');
-  ok(st.ok && st.w === 1280 && st.h === 720 && png.readUInt32BE(16) === 1280 && J(st.origin) === J({ x: 0, y: 0 }) && st.display === 'fake', 'desktop-grab: the source\'s still as a PNG (its IHDR says the size)', { w: st.w, h: st.h });
+  ok(gateOf(st.ok) && st.w === 1280 && st.h === 720 && png.readUInt32BE(16) === 1280 && J(st.origin) === J({ x: 0, y: 0 }) && st.display === 'fake', 'desktop-grab: the source\'s still as a PNG (its IHDR says the size)', { w: st.w, h: st.h });
   const MAC = require(path.join(REPO, 'src/agentd/stream-mac.js'));
-  ok(/still: \(\) => Promise\.resolve\(\{ ok: false, code: 'mac_still_pending'/.test(fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8')) && typeof MAC.createMacScreen === 'function', 'the Mac\'s source answers mac_still_pending (the still rides the helper\'s next version)');
+  ok(gateOf(/still: \(\) => Promise\.resolve\(\{ ok: false, code: 'mac_still_pending'/.test(fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8'))) && typeof MAC.createMacScreen === 'function', 'the Mac\'s source answers mac_still_pending (the still rides the helper\'s next version)');
   host.stopAll('done');
 }
 
@@ -182,10 +182,10 @@ console.log('⑤ the op census — THREE-TOUCH');
   const agentd = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
   const client = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
   const caps = (/capabilities: \[([^\]]*)\]/.exec(agentd) || [])[1] || '';
-  ok(caps.includes("'desktop-grab'") && caps.includes("'desktop-input'"), 'touch 1: the hello-ack names desktop-grab and desktop-input');
-  ok(/msg\.op === 'desktop-grab'[\s\S]{0,400}op: 'desktop-grab-result', id: msg\.id/.test(agentd) && /msg\.op === 'desktop-input'[\s\S]{0,400}op: 'desktop-input-result', id: msg\.id/.test(agentd), 'touch 2: each handler answers by id with `op` on the reply (mux.control)');
+  ok(gateOf(caps.includes("'desktop-grab'")) && verdictOf(caps.includes("'desktop-input'")), 'touch 1: the hello-ack names desktop-grab and desktop-input');
+  ok(gateOf(/msg\.op === 'desktop-grab'[\s\S]{0,400}op: 'desktop-grab-result', id: msg\.id/.test(agentd)) && verdictOf(/msg\.op === 'desktop-input'[\s\S]{0,400}op: 'desktop-input-result', id: msg\.id/.test(agentd)), 'touch 2: each handler answers by id with `op` on the reply (mux.control)');
   const routing = (/if \(m\.op === 'fs-result'[^\n]*/.exec(client) || [''])[0];
-  ok(routing.includes("m.op === 'desktop-grab-result'") && routing.includes("m.op === 'desktop-input-result'"), 'touch 3: the client\'s id-keyed routing set holds both result ops');
+  ok(gateOf(routing.includes("m.op === 'desktop-grab-result'")) && verdictOf(routing.includes("m.op === 'desktop-input-result'")), 'touch 3: the client\'s id-keyed routing set holds both result ops');
   const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
   for (const [m, args] of [['desktopGrab', ['s1', { by: 'system:test' }]], ['desktopInput', ['s1', [{ t: 'kd', c: 'KeyA' }], { by: 'system:test' }]]]) {
     const asked = [];
@@ -194,7 +194,7 @@ console.log('⑤ the op census — THREE-TOUCH');
     ok(e === 'host_needs_daemon' && asked.length === 0, `${m}: an agent without the capability is NEVER asked (host_needs_daemon, 0 requests)`, { e, asked });
     const nu = { ...old, connect: async () => ({ info: { capabilities: ['desktop-grab', 'desktop-input'] } }) };
     const r = await DeviceManager.prototype[m].apply(nu, args);
-    ok(r.ok && asked.length === 1 && asked[0].op === (m === 'desktopGrab' ? 'desktop-grab' : 'desktop-input') && asked[0].sid === 's1' && asked[0].by === 'system:test', `${m}: with the capability it asks its op once, naming the session and who asked (\`by\`, int315: an act at lane device-act-audit's ONE send point)`, asked);
+    ok(gateOf(r.ok) && asked.length === 1 && asked[0].op === (m === 'desktopGrab' ? 'desktop-grab' : 'desktop-input') && asked[0].sid === 's1' && asked[0].by === 'system:test', `${m}: with the capability it asks its op once, naming the session and who asked (\`by\`, int315: an act at lane device-act-audit's ONE send point)`, asked);
   }
 }
 
@@ -237,21 +237,21 @@ console.log('⑥ the engine');
   streams.delete('stW');
   ok(await codeOfAsync(() => eng.screenshot('md-pc1', A)) === 'desktop_not_handed', 'before any hand-over every verb ⇒ desktop_not_handed');
   const g = await eng.give({ hostId: 'pc1', streamKey: 'stA', principal: 'agent:cid-1' });
-  ok(g.ok && g.lease.holder.name === 'Alpha' && g.lease.input === 'agent', 'the owner gives it to Alpha', g);
+  ok(gateOf(g.ok) && g.lease.holder.name === 'Alpha' && g.lease.input === 'agent', 'the owner gives it to Alpha', g);
   ok(J(eng.rowsFor(A).map((r) => r.handle)) === J(['md-pc1']) && eng.rowsFor(B).length === 0, 'list: md-pc1 for Alpha only');
   for (const [verb, fn] of [['screenshot', () => eng.screenshot('md-pc1', B)], ['click', () => eng.act('md-pc1', B, { verb: 'click', at: '1,1' })], ['key', () => eng.act('md-pc1', B, { verb: 'key', chord: 'ctrl+s' })]]) ok(await codeOfAsync(fn) === 'desktop_not_handed', `Beta (another conversation) ${verb} ⇒ desktop_not_handed`);
   ok(await codeOfAsync(() => eng.act('md-pc1', A, { verb: 'click', at: '5,5' })) === 'outside_display' || true, '(no still yet, no picture size: see next)');
   const c1 = calls.length;
   ok(await codeOfAsync(() => eng.act('md-pc1', A, { verb: 'click', at: '5,5' })) === 'screenshot_first' && calls.length === c1, 'a click before any still and without the picture\'s size ⇒ screenshot_first (no device call)');
   const shot = await eng.screenshot('md-pc1', A);
-  ok(shot.w === 1280 && shot.h === 720 && shot.originX === 1920 && shot.png.equals(STILL.png) && J(calls[calls.length - 1]) === J(['grab', 'sid-A']), 'screenshot: desktop-grab on the window\'s session, the PNG + its size + the display\'s origin');
+  ok(shot.w === 1280 && shot.h === 720 && shot.originX === 1920 && gateOf(shot.png.equals(STILL.png)) && J(calls[calls.length - 1]) === J(['grab', 'sid-A']), 'screenshot: desktop-grab on the window\'s session, the PNG + its size + the display\'s origin');
   ok(await codeOfAsync(() => eng.act('md-pc1', A, { verb: 'click', at: '1280,5' })) === 'outside_display', '--at outside the still ⇒ outside_display');
   const r1 = await eng.act('md-pc1', A, { verb: 'click', at: '100,50', button: 3 });
   const sent = calls[calls.length - 1];
-  ok(r1.ok && sent[0] === 'input' && sent[1] === 'sid-A' && J(sent[2]) === J(DH.clickRecords('100,50', 3, { x: 1920, y: 0 })), 'click --at 100,50 --button 3 = the records + the display\'s origin, into the window\'s session', sent);
-  ok(bys.length >= 2 && bys.slice(-2).every((b) => b === 'agent:claude:cid-1'), 'int315: the still and the click each name the agent the desktop was handed to (`by` agent:claude:cid-1 — the act at the ONE send point)', bys.slice(-2));
+  ok(gateOf(r1.ok) && sent[0] === 'input' && sent[1] === 'sid-A' && J(sent[2]) === J(DH.clickRecords('100,50', 3, { x: 1920, y: 0 })), 'click --at 100,50 --button 3 = the records + the display\'s origin, into the window\'s session', sent);
+  ok(bys.length >= 2 && verdictOf(bys.slice(-2).every((b) => b === 'agent:claude:cid-1')), 'int315: the still and the click each name the agent the desktop was handed to (`by` agent:claude:cid-1 — the act at the ONE send point)', bys.slice(-2));
   const f1 = eng.hooks.factsOf('stA');
-  ok(f1 && f1.state === 'agent' && f1.holder.name === 'Alpha' && f1.dot && f1.dot.x === 100 && f1.dot.y === 50 && nudges.includes('stA'), 'the strip\'s facts: Alpha drives, its pointer at the still\'s 100,50 (the page\'s poll nudged)', f1);
+  ok(gateOf(f1) && f1.state === 'agent' && f1.holder.name === 'Alpha' && gateOf(f1.dot) && f1.dot.x === 100 && f1.dot.y === 50 && verdictOf(nudges.includes('stA')), 'the strip\'s facts: Alpha drives, its pointer at the still\'s 100,50 (the page\'s poll nudged)', f1);
   addStream('stP', 'sid-P'); // verify r1 (B): a SECOND window of the same machine (the phone) hears the lease by host — not its own (no pointer there), its owner input pauses; another machine's stream hears nothing
   ok(f1.own === true && eng.hooks.factsOf('stP', 'pc1').state === 'agent' && eng.hooks.factsOf('stP', 'pc1').own === false && eng.hooks.factsOf('stP', 'pc2') === null && eng.hooks.factsOf('stP') === null, 'the facts by host: every stream of the machine hears its lease, `own` only on the one that carries it', eng.hooks.factsOf('stP', 'pc1'));
   streams.delete('stP');
@@ -314,12 +314,12 @@ console.log('⑥ the engine');
   // the audit
   const lines = auditLines();
   const verbs = lines.filter((l) => l.origin === 'machine').map((l) => l.verb);
-  ok(lines.every((l) => l.origin === 'machine') && ['lease-give', 'screenshot', 'click', 'key', 'type', 'scroll', 'lease-pause', 'lease-resume', 'lease-rebind', 'lease-end'].every((v) => verbs.includes(v)), 'the audit: a line per verb and per lease change, origin machine', verbs);
+  ok(gateOf(lines.every((l) => l.origin === 'machine')) && verdictOf(['lease-give', 'screenshot', 'click', 'key', 'type', 'scroll', 'lease-pause', 'lease-resume', 'lease-rebind', 'lease-end'].every((v) => verbs.includes(v))), 'the audit: a line per verb and per lease change, origin machine', verbs);
   const click = lines.find((l) => l.verb === 'click' && l.ok);
-  ok(click && click.x === 100 && click.y === 50 && click.button === 3 && click.sessionKey === 'claude:cid-1' && click.by === 'pixels', 'a click\'s line: who, the point, the button', click);
+  ok(gateOf(click) && click.x === 100 && click.y === 50 && click.button === 3 && click.sessionKey === 'claude:cid-1' && click.by === 'pixels', 'a click\'s line: who, the point, the button', click);
   const typeLine = lines.find((l) => l.verb === 'type' && l.ok);
-  ok(typeLine && typeLine.chars === 9 && !JSON.stringify(lines).includes('secret'), 'a type\'s line has its LENGTH, never its text');
-  ok(lines.some((l) => l.verb === 'key' && l.ok === false && l.code === 'chord_refused' && l.refusedAs === 'lock_screen'), 'a refused chord is audited by name');
+  ok(gateOf(typeLine) && typeLine.chars === 9 && !JSON.stringify(lines).includes('secret'), 'a type\'s line has its LENGTH, never its text');
+  ok(verdictOf(lines.some((l) => l.verb === 'key' && l.ok === false && l.code === 'chord_refused' && l.refusedAs === 'lock_screen')), 'a refused chord is audited by name');
   ok(J(lines.filter((l) => l.verb === 'lease-end').map((l) => l.cause)) === J(['window_closed', 'conversation_ended', 'revoked', 'agent_done']), 'the lease ends, each by name', lines.filter((l) => l.verb === 'lease-end'));
 }
 
@@ -350,12 +350,12 @@ console.log('⑦ the routes');
   ok(eng.stateOf('pc1') === null, '…and nothing was handed');
   ok((await req('POST', '/api/agent/window/act', { handle: 'md-pc1', verb: 'click', at: '1,1' }, asA)).body.code === 'desktop_not_handed', 'the agent\'s verb before a hand-over ⇒ 403 desktop_not_handed');
   const g = await req('POST', '/api/desktop/machine-desktop/handover', { host: 'pc1', key: 'stR', principal: 'agent:cid-1' });
-  ok(g.status === 200 && g.body.ok && g.body.lease.holder.name === 'Alpha', 'the owner (no token) hands pc1 to Alpha', g.body);
+  ok(g.status === 200 && gateOf(g.body.ok) && g.body.lease.holder.name === 'Alpha', 'the owner (no token) hands pc1 to Alpha', g.body);
   const t = await req('GET', '/api/agent/window/targets', undefined, asA);
   ok(t.status === 200 && J((t.body.machines || []).map((m) => m.handle)) === J(['md-pc1']) && (await req('GET', '/api/agent/window/targets', undefined, asB)).body.machines.length === 0, 'targets: `machines` = md-pc1 for Alpha, none for Beta');
   const s = await req('GET', '/api/agent/window/screenshot?handle=md-pc1', undefined, asA);
   const meta = JSON.parse(s.headers.get('x-window-shot') || 'null');
-  ok(s.status === 200 && s.headers.get('content-type') === 'image/png' && s.body.equals(STILL.png) && meta.w === 1280 && meta.machine === 'pc1' && meta.coords === 'display', 'screenshot ⇒ image/png + X-Window-Shot {w, h, machine, coords: display}', meta);
+  ok(s.status === 200 && s.headers.get('content-type') === 'image/png' && gateOf(s.body.equals(STILL.png)) && meta.w === 1280 && meta.machine === 'pc1' && meta.coords === 'display', 'screenshot ⇒ image/png + X-Window-Shot {w, h, machine, coords: display}', meta);
   const codes = [];
   for (const [body, want, status] of [[{ verb: 'click', at: '99999,1' }, 'outside_display', 400], [{ verb: 'key', chord: 'ctrl+alt+delete' }, 'chord_refused', 403], [{ verb: 'type', text: 'z'.repeat(1501) }, 'type_too_long', 400]]) {
     const r = await req('POST', '/api/agent/window/act', { handle: 'md-pc1', ...body }, asA);
@@ -385,7 +385,7 @@ console.log('⑦ the routes');
   windowEngine.acts.length = 0;
   const rm = await fetch(`http://127.0.0.1:${srvM.address().port}/api/agent/window/act`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...asA }, body: J({ handle: 'dw-4242', verb: 'click', at: '5,5' }) }).then((r) => r.json());
   const mutantRed = !(rm.code === 'desktop_injection_refused' && windowEngine.acts.length === 1);
-  ok(mutantRed, 'MUTANT (dw- routed to the hand-over): the dw act no longer reaches the window engine — the leg above goes RED', rm);
+  ok(verdictOf(mutantRed), 'MUTANT (dw- routed to the hand-over): the dw act no longer reaches the window engine — the leg above goes RED', rm);
   srvM.close();
 }
 
@@ -399,28 +399,28 @@ console.log('⑨ the CLI end to end');
     c.on('close', (code) => res({ code, out, err }));
   });
   const l = await cli(['list']);
-  ok(l.code === 0 && /\* md-pc1 {2}pc1 — its desktop {2}A MACHINE'S DESKTOP — handed to you by its owner/.test(l.out) && /mode: pixels — screenshot, then click --at/.test(l.out) && !/no window is shared with you/.test(l.out), 'list prints the md- row (and not "no window is shared")', l.out);
+  ok(l.code === 0 && gateOf(/\* md-pc1 {2}pc1 — its desktop {2}A MACHINE'S DESKTOP — handed to you by its owner/.test(l.out)) && gateOf(/mode: pixels — screenshot, then click --at/.test(l.out)) && !/no window is shared with you/.test(l.out), 'list prints the md- row (and not "no window is shared")', l.out);
   const lb = await cli(['list'], 'vsst_beta');
-  ok(lb.code === 0 && !/md-pc1/.test(lb.out) && /no window is shared with you/.test(lb.out), 'Beta\'s list has no md- row');
+  ok(lb.code === 0 && !/md-pc1/.test(lb.out) && verdictOf(/no window is shared with you/.test(lb.out)), 'Beta\'s list has no md- row');
   const sh = await cli(['screenshot', 'md-pc1']);
   const file = (sh.out.split(' (')[0] || '').trim();
-  ok(sh.code === 0 && /1280x720 — pc1's display D1, its own pixels; `click md-pc1 --at x,y` takes a pixel of THIS image/.test(sh.out) && fs.existsSync(file) && fs.readFileSync(file).equals(STILL.png), 'screenshot writes the PNG and prints its size + the click hint', sh.out);
+  ok(sh.code === 0 && gateOf(/1280x720 — pc1's display D1, its own pixels; `click md-pc1 --at x,y` takes a pixel of THIS image/.test(sh.out)) && gateOf(fs.existsSync(file)) && verdictOf(fs.readFileSync(file).equals(STILL.png)), 'screenshot writes the PNG and prints its size + the click hint', sh.out);
   const ck = await cli(['click', 'md-pc1', '--at', '640,360']);
-  ok(ck.code === 0 && /clicked point 640,360 of the display \(button 1\) via stream — audited by:point/.test(ck.out), 'click --at prints the point', ck);
+  ok(ck.code === 0 && verdictOf(/clicked point 640,360 of the display \(button 1\) via stream — audited by:point/.test(ck.out)), 'click --at prints the point', ck);
   const ty = await cli(['type', 'md-pc1', 'hello 世界']);
-  ok(ty.code === 0 && /typed 8 character\(s\) through the machine's clipboard/.test(ty.out), 'type prints the clipboard road', ty);
+  ok(ty.code === 0 && verdictOf(/typed 8 character\(s\) through the machine's clipboard/.test(ty.out)), 'type prints the clipboard road', ty);
   const ke = await cli(['key', 'md-pc1', 'win+l']);
-  ok(ke.code === 1 && /\[chord_refused\]/.test(ke.err) && /locks, logs off or powers the machine/.test(ke.err), 'key win+l ⇒ exit 1, chord_refused + its hint', ke.err);
+  ok(ke.code === 1 && gateOf(/\[chord_refused\]/.test(ke.err)) && verdictOf(/locks, logs off or powers the machine/.test(ke.err)), 'key win+l ⇒ exit 1, chord_refused + its hint', ke.err);
   const nb = await cli(['screenshot', 'md-pc1'], 'vsst_beta');
-  ok(nb.code === 1 && /\[desktop_not_handed\]/.test(nb.err) && /Hand to an agent/.test(nb.err), 'Beta ⇒ desktop_not_handed + the owner\'s door', nb.err);
+  ok(nb.code === 1 && gateOf(/\[desktop_not_handed\]/.test(nb.err)) && verdictOf(/Hand to an agent/.test(nb.err)), 'Beta ⇒ desktop_not_handed + the owner\'s door', nb.err);
   await req('POST', '/api/desktop/machine-desktop/handover/pause', { host: 'pc1' });
   const pz = await cli(['click', 'md-pc1', '--at', '1,1']);
-  ok(pz.code === 1 && /\[window_paused\]/.test(pz.err) && /do NOT retry in a loop/.test(pz.err), 'paused ⇒ window_paused + never-loop hint', pz.err);
+  ok(pz.code === 1 && gateOf(/\[window_paused\]/.test(pz.err)) && verdictOf(/do NOT retry in a loop/.test(pz.err)), 'paused ⇒ window_paused + never-loop hint', pz.err);
   await req('POST', '/api/desktop/machine-desktop/handover/resume', { host: 'pc1' });
   const dt = await cli(['detach', 'md-pc1']);
-  ok(dt.code === 0 && /handed md-pc1 back to its owner/.test(dt.out) && eng.stateOf('pc1') === null, 'detach hands it back');
+  ok(dt.code === 0 && gateOf(/handed md-pc1 back to its owner/.test(dt.out)) && eng.stateOf('pc1') === null, 'detach hands it back');
   const help = await cli(['help']);
-  ok(/A MACHINE'S DESKTOP \(md-<host> rows\)/.test(help.out) && /no verb can ask for one/.test(help.out), 'the usage names the md- rows and the owner\'s door');
+  ok(gateOf(/A MACHINE'S DESKTOP \(md-<host> rows\)/.test(help.out)) && verdictOf(/no verb can ask for one/.test(help.out)), 'the usage names the md- rows and the owner\'s door');
 }
 console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 (A)); the chunks; the lows');
 {
@@ -433,7 +433,7 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   const long = DH.typeRecords('Ab'.repeat(750), 'win32', { keys: true }).records; // 1500 characters, half shifted
   const chunks = DH.chunkRecords(long, CAP);
   const heldAfter = (c) => { const h = new Set(); for (const x of c) { if (x.t === 'kd') h.add(x.c); else if (x.t === 'ku') h.delete(x.c); } return h.size; };
-  ok(CAP === 200 && chunks.length > 1 && chunks.every((c) => c.length <= CAP && heldAfter(c) === 0) && J(chunks.flat()) === J(long), `a 1500-char --keys type (${long.length} records) = ${chunks.length} chunks of ≤ ${CAP} (the sibling input-events' cap), each cut where nothing is held, nothing lost or reordered`, chunks.map((c) => c.length));
+  ok(CAP === 200 && chunks.length > 1 && gateOf(chunks.every((c) => c.length <= CAP && heldAfter(c) === 0)) && J(chunks.flat()) === J(long), `a 1500-char --keys type (${long.length} records) = ${chunks.length} chunks of ≤ ${CAP} (the sibling input-events' cap), each cut where nothing is held, nothing lost or reordered`, chunks.map((c) => c.length));
   const mini = [{ t: 'kd', c: 'ShiftLeft' }, { t: 'kd', c: 'KeyA' }, { t: 'ku', c: 'KeyA' }, { t: 'ku', c: 'ShiftLeft' }, { t: 'kd', c: 'KeyB' }, { t: 'ku', c: 'KeyB' }];
   ok(J(DH.chunkRecords(mini, 5).map((c) => c.length)) === J([4, 2]) && DH.charsTyped(long, 8) === 2 && DH.charsTyped(long, 0) === 0, 'a chunk never ends with Shift held (the cut moves back to the last let-go); charsTyped counts the characters in the first N records');
 
@@ -477,13 +477,13 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   const m = await measure(SH, 'fix');
   const before = m.log.slice(0, m.md).filter((l) => !l.mark);
   const held = new Set(); for (const l of before) { if (l.t === 'kd') held.add(l.c); else if (l.t === 'ku') held.delete(l.c); }
-  ok(ordered(m), `ORDERED: the owner's click sent 10 ms into a 1500-char type went in after at most the ONE agent record in flight and its let-gos (${afterSent(m)?.length ?? '?'} record(s) between the send and its md, ${presses(m)} new press) — never behind the chunk (verify r1 measured 6395 ms behind 6000 records); measured, not judged: ${m.ownerMs} ms`, { ownerMs: m.ownerMs, sent: m.sent, md: m.md, after: afterSent(m) });
+  ok(verdictOf(ordered(m)), `ORDERED: the owner's click sent 10 ms into a 1500-char type went in after at most the ONE agent record in flight and its let-gos (${afterSent(m)?.length ?? '?'} record(s) between the send and its md, ${presses(m)} new press) — never behind the chunk (verify r1 measured 6395 ms behind 6000 records); measured, not judged: ${m.ownerMs} ms`, { ownerMs: m.ownerMs, sent: m.sent, md: m.md, after: afterSent(m) });
   // THE PLACED HOLD (the find made wrong at will): the same fixed host with the event loop held 80 ms right after the click — the old
   // clock verdict (≤ 50 ms) goes red for the wrong reason, the order holds
   const mh = await measure(SH, 'held', { holdMs: 80 });
-  ok(mh.ownerMs != null && mh.ownerMs > 50 && ordered(mh), `PLACED: the loop held 80 ms after the click — the fixed host's click lands ${mh.ownerMs} ms after its send (the old «≤ 50» verdict RED though nothing went before it) while the ORDER holds (${presses(mh)} new press)`, { ownerMs: mh.ownerMs, after: afterSent(mh) });
+  ok(mh.ownerMs != null && mh.ownerMs > 50 && verdictOf(ordered(mh)), `PLACED: the loop held 80 ms after the click — the fixed host's click lands ${mh.ownerMs} ms after its send (the old «≤ 50» verdict RED though nothing went before it) while the ORDER holds (${presses(mh)} new press)`, { ownerMs: mh.ownerMs, after: afterSent(mh) });
   ok(held.size === 0 && J(m.log.slice(-3).map((l) => l.t)) === J(['mv', 'md', 'mu']), 'no stuck modifier: every key the agent pressed was up before the owner\'s click, and nothing of the agent\'s came after it', { held: [...held], tail: m.log.slice(-4) });
-  ok(m.act.code === 'window_paused' && m.act.did && m.act.did.partial === true && m.act.did.of === 6000 && m.act.did.sent < 6000 && m.act.did.charsTyped >= 0 && m.act.did.charsTyped < 1500 && /records went in \(\d+ of 1500 characters typed\)/.test(m.act.message) && m.input === 'user', `the act answers window_paused, partial: ${m.act.did && m.act.did.sent} of 6000 records, ${m.act.did && m.act.did.charsTyped} of 1500 characters said; the lease paused`, m.act);
+  ok(m.act.code === 'window_paused' && gateOf(m.act.did) && m.act.did.partial === true && m.act.did.of === 6000 && m.act.did.sent < 6000 && m.act.did.charsTyped >= 0 && m.act.did.charsTyped < 1500 && gateOf(/records went in \(\d+ of 1500 characters typed\)/.test(m.act.message)) && m.input === 'user', `the act answers window_paused, partial: ${m.act.did && m.act.did.sent} of 6000 records, ${m.act.did && m.act.did.charsTyped} of 1500 characters said; the lease paused`, m.act);
   // CONTROL: the same leg over a copy of the stream host with ONE ordered chain (the owner's records queue behind the agent's, no drop)
   const shSrc = fs.readFileSync(path.join(REPO, 'src/agentd/stream-host.js'), 'utf8');
   const chainSrc = editAnchor(editAnchor(shSrc, '(lane === \'owner\' ? s.ownerQ : s.agentQ).push(', 's.agentQ.push(', "src/agentd/stream-host.js"), 'if (s.agentQ.length || s.agentHeld.size || s.inFlight === \'agent\') dropAgent(s, \'owner_input\');', '', "src/agentd/stream-host.js");
@@ -535,15 +535,15 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   ok(clips[0] === 'SAVE' && !clips.some((x) => x.startsWith('RESTORE')), 'the owner\'s own clip cancels the put-back (their new clipboard wins)', clips);
   hostC.stopAll('done');
   const pz = await (async () => { const h2 = SH.createStreamHost({ injector: { kind: 'fake', inject: async () => ({ ok: true, n: 1, refused: [] }) }, loadWerift, screen: () => srcOf() }); await h2.offer({ sid: 'n', sourceKind: 'screen', sourceId: 'x' }, { control() { } }); const r = await h2.input({ sid: 'n', events: DH.typeRecords('x', 'darwin').records }); h2.stopAll('done'); return r; })();
-  ok(pz.ok && !('clipboard' in pz), 'an injector without a clipboard read (the Mac\'s helper, the Linux stub) ⇒ no put-back, said by its absence', pz);
+  ok(gateOf(pz.ok) && !('clipboard' in pz), 'an injector without a clipboard read (the Mac\'s helper, the Linux stub) ⇒ no put-back, said by its absence', pz);
   const { EventEmitter } = await import('node:events');
   const psLines = [];
   const psSpawn = () => { const c = new EventEmitter(); c.stdout = new EventEmitter(); c.stdout.setEncoding = () => { }; c.stdin = new EventEmitter(); c.stdin.write = (l) => { psLines.push(l.trim()); setImmediate(() => c.stdout.emit('data', (l.startsWith('R') ? 'kept' : 'ok') + '\n')); return true; }; c.kill = () => { }; setImmediate(() => c.stdout.emit('data', 'ready\n')); return c; };
   const win = I.createInjector({ platform: 'win32', spawn: psSpawn });
   const s1 = await win.clip('save'), r1 = await win.clip('restore', 'hé');
   win.close();
-  ok(s1 === 'ok' && r1 === 'kept' && psLines[0] === 'S' && /^R /.test(psLines[1]) && Buffer.from(psLines[1].slice(2), 'base64').toString('utf16le') === 'hé' && I.createInjector({ platform: 'linux' }).clip === null && I.createInjector({ platform: 'darwin' }).clip === null, 'Windows: clip = the resident script\'s `S` / `R <base64 utf-16le>` lines; the stub and the Mac have none', psLines);
-  ok(/'S' \{ \$vsHad = \[VsInput\]::ClipKind\(\); \$vsSaved = if \(\$vsHad -eq 'text'\) \{ Get-Clipboard -Raw \}/.test(I.INPUT_PS) && /'R' \{ .*\$r = 'kept'; if \(\$vsHad -and \(Get-Clipboard -Raw\) -ceq \$want\)/.test(I.INPUT_PS) && /IsClipboardFormatAvailable\(13\) \? "text" : CountClipboardFormats\(\) == 0 \? "empty" : "other"/.test(I.INPUT_PS), 'the resident script: S keeps text / empty / other INSIDE the script; R puts it back only while the clipboard still holds the agent\'s text (a picture or files: kept, said)');
+  ok(s1 === 'ok' && r1 === 'kept' && psLines[0] === 'S' && gateOf(/^R /.test(psLines[1])) && Buffer.from(psLines[1].slice(2), 'base64').toString('utf16le') === 'hé' && I.createInjector({ platform: 'linux' }).clip === null && I.createInjector({ platform: 'darwin' }).clip === null, 'Windows: clip = the resident script\'s `S` / `R <base64 utf-16le>` lines; the stub and the Mac have none', psLines);
+  ok(gateOf(/'S' \{ \$vsHad = \[VsInput\]::ClipKind\(\); \$vsSaved = if \(\$vsHad -eq 'text'\) \{ Get-Clipboard -Raw \}/.test(I.INPUT_PS)) && gateOf(/'R' \{ .*\$r = 'kept'; if \(\$vsHad -and \(Get-Clipboard -Raw\) -ceq \$want\)/.test(I.INPUT_PS)) && verdictOf(/IsClipboardFormatAvailable\(13\) \? "text" : CountClipboardFormats\(\) == 0 \? "empty" : "other"/.test(I.INPUT_PS)), 'the resident script: S keeps text / empty / other INSIDE the script; R puts it back only while the clipboard still holds the agent\'s text (a picture or files: kept, said)');
 
   // ── THE ENGINE: chunks with the lease re-asked; the machine's cut; the daemon's not_found ──
   const xcalls = []; let xanswer = null, xgrab = null;
@@ -557,13 +557,13 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   xanswer = (sid, evs, k) => { if (k === 2) eng.pause('pcX', 'owner_input'); return { ok: true, n: evs.length, refused: [] }; };
   const c1 = await caught(() => eng.act('md-pcX', A, { verb: 'type', text: 'Ab'.repeat(200), keys: true }));
   const sent2 = ch400[0].length + ch400[1].length;
-  ok(ch400.length >= 3 && xcalls.length === 2 && c1.code === 'window_paused' && c1.did.partial && c1.did.sent === sent2 && c1.did.of === recs400.length && c1.did.charsTyped === DH.charsTyped(recs400, sent2) && /records went in/.test(c1.message), `a pause landing during chunk 2 ⇒ chunk 3 is never sent (the lease re-asked between chunks); window_paused says ${c1.did && c1.did.sent} of ${recs400.length} records / ${c1.did && c1.did.charsTyped} characters`, { calls: xcalls, c1 });
-  ok(auditLines().some((l) => l.verb === 'type' && l.handle === 'md-pcX' && l.ok === false && l.code === 'window_paused' && l.sent === sent2 && l.events === recs400.length), 'its audit line: ok false, window_paused, sent of events');
+  ok(ch400.length >= 3 && xcalls.length === 2 && c1.code === 'window_paused' && gateOf(c1.did.partial) && c1.did.sent === sent2 && c1.did.of === recs400.length && c1.did.charsTyped === DH.charsTyped(recs400, sent2) && verdictOf(/records went in/.test(c1.message)), `a pause landing during chunk 2 ⇒ chunk 3 is never sent (the lease re-asked between chunks); window_paused says ${c1.did && c1.did.sent} of ${recs400.length} records / ${c1.did && c1.did.charsTyped} characters`, { calls: xcalls, c1 });
+  ok(verdictOf(auditLines().some((l) => l.verb === 'type' && l.handle === 'md-pcX' && l.ok === false && l.code === 'window_paused' && l.sent === sent2 && l.events === recs400.length)), 'its audit line: ok false, window_paused, sent of events');
   eng.resume('pcX');
   xcalls.length = 0;
   xanswer = (sid, evs) => ({ ok: false, n: 3, refused: [], display: 'D1', partial: true, cancelled: 'owner_input', sent: 3, of: evs.length });
   const c2 = await caught(() => eng.act('md-pcX', A, { verb: 'type', text: 'hello', keys: true }));
-  ok(c2.code === 'window_paused' && c2.did.cancelled === 'owner_input' && c2.did.sent === 3 && c2.did.of === 10 && c2.did.released && c2.did.released.ok === true && eng.stateOf('pcX').input === 'user' && auditLines().some((l) => l.verb === 'lease-pause' && l.handle === 'md-pcX' && l.by === 'machine' && l.cause === 'owner_input'), 'the machine\'s `cancelled: owner_input` ⇒ the lease pauses here too (audited by: machine — the page\'s /pause may still be on its way), window_paused with sent / of / released', c2);
+  ok(c2.code === 'window_paused' && c2.did.cancelled === 'owner_input' && c2.did.sent === 3 && c2.did.of === 10 && gateOf(c2.did.released) && c2.did.released.ok === true && eng.stateOf('pcX').input === 'user' && verdictOf(auditLines().some((l) => l.verb === 'lease-pause' && l.handle === 'md-pcX' && l.by === 'machine' && l.cause === 'owner_input')), 'the machine\'s `cancelled: owner_input` ⇒ the lease pauses here too (audited by: machine — the page\'s /pause may still be on its way), window_paused with sent / of / released', c2);
   eng.resume('pcX');
   xanswer = null;
   ok((await caught(() => eng.act('md-pcX', A, { verb: 'type', text: 'hi' }))).ok.did.clipboard === undefined, 'no put-back from the machine ⇒ no clipboard word in did');
@@ -571,7 +571,7 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   ok((await caught(() => eng.act('md-pcX', A, { verb: 'type', text: 'hi' }))).ok.did.clipboard === 'restoring', 'the machine\'s put-back ⇒ did.clipboard restoring (the CLI says the clipboard comes back)');
   xanswer = () => ({ ok: false, code: 'not_found', error: 'that stream session ended' });
   const nf = await req('POST', '/api/agent/window/act', { handle: 'md-pcX', verb: 'key', chord: 'a' }, asA);
-  ok(nf.status === 404 && nf.body.code === 'not_found' && eng.stateOf('pcX') === null && auditLines().some((l) => l.verb === 'lease-end' && l.handle === 'md-pcX' && l.cause === 'daemon_gone' && l.by === 'machine'), 'the daemon\'s not_found (its session gone — it restarted) ⇒ HTTP 404 by name, and the lease ENDS daemon_gone (audited)', nf);
+  ok(nf.status === 404 && nf.body.code === 'not_found' && eng.stateOf('pcX') === null && verdictOf(auditLines().some((l) => l.verb === 'lease-end' && l.handle === 'md-pcX' && l.cause === 'daemon_gone' && l.by === 'machine')), 'the daemon\'s not_found (its session gone — it restarted) ⇒ HTTP 404 by name, and the lease ENDS daemon_gone (audited)', nf);
   xanswer = null;
   await eng.give({ hostId: 'pcX', streamKey: 'stX', principal: 'agent:cid-1' });
   xgrab = () => ({ ok: false, code: 'not_found', error: 'that stream session ended' });
@@ -583,10 +583,10 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   const sw = { handle: 'md-q', hostId: 'q', holder: { key: 'k', name: 'n' }, input: 'rebinding', resumeTo: 'agent', streamKey: 'a', since: 0, pausedAt: null, rebindSince: 0 };
   const sw1 = DH.leaseStep(sw, { type: 'owner-input' }, 5);
   const sw2 = DH.leaseStep(sw1.lease, { type: 'rebind', streamKey: 'b', sid: 's' }, 6);
-  ok(sw1.changed && sw1.lease.input === 'rebinding' && sw1.lease.resumeTo === 'user' && sw2.lease.input === 'user' && sw2.lease.pausedAt === 5 && !DH.leaseStep(sw1.lease, { type: 'owner-input' }, 7).changed, 'owner input while rebinding ⇒ the next stream comes back PAUSED (once; the agent does not drive on after the switch)');
+  ok(gateOf(sw1.changed) && sw1.lease.input === 'rebinding' && sw1.lease.resumeTo === 'user' && sw2.lease.input === 'user' && sw2.lease.pausedAt === 5 && !DH.leaseStep(sw1.lease, { type: 'owner-input' }, 7).changed, 'owner input while rebinding ⇒ the next stream comes back PAUSED (once; the agent does not drive on after the switch)');
   ok(DH.leaseStep({ ...sw, input: 'agent' }, { type: 'daemon-gone', streamKey: 'a' }, 1).end === 'daemon_gone' && !DH.leaseStep({ ...sw, input: 'agent' }, { type: 'daemon-gone', streamKey: 'other' }, 1).changed && typeof DH.END_WHY.daemon_gone === 'string', 'daemon-gone ends the lease of THAT stream only, by name');
   const sv = fs.readFileSync(path.join(REPO, 'src/lib/stream-view.js'), 'utf8'), mdk = fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop.js'), 'utf8'), hov = fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop-handover.js'), 'utf8');
-  ok(/if \(msg && !open && msg\.t !== 'ack' && msg\.t !== 'mv' && opts\.after && st\.state !== 'playing'/.test(sv) && /code === 'switching' \? t\('Switching display — that input did not reach the machine'\)/.test(mdk) && /st\.state === 'rebinding' && !switchPaused && !pausing/.test(hov) && /cause === 'stream_ended' \|\| cause === 'daemon_gone'/.test(hov), 'the view SAYS a press / key / wheel / paste mid-switch reached nothing (「切换中」, never queued: a click would land on the other display), and the strip pauses once mid-switch');
+  ok(gateOf(/if \(msg && !open && msg\.t !== 'ack' && msg\.t !== 'mv' && opts\.after && st\.state !== 'playing'/.test(sv)) && gateOf(/code === 'switching' \? t\('Switching display — that input did not reach the machine'\)/.test(mdk)) && gateOf(/st\.state === 'rebinding' && !switchPaused && !pausing/.test(hov)) && verdictOf(/cause === 'stream_ended' \|\| cause === 'daemon_gone'/.test(hov)), 'the view SAYS a press / key / wheel / paste mid-switch reached nothing (「切换中」, never queued: a click would land on the other display), and the strip pauses once mid-switch');
 
   // ── THE HUB'S SHUTDOWN audits every live hand-over's end (the streams first, then the timers — before the exit) ──
   const DW = require(path.join(REPO, 'src/server/desktop-webrtc.js'));
@@ -601,12 +601,12 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   DA.setup({ handover: engS, webrtc: wrS });
   DA.shutdownStreams();
   const shutLines = fs.readFileSync(path.join(dataS, 'window-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  ok(stS.take && engS.stateOf('pcS') === null && shutLines.some((l) => l.verb === 'lease-end' && l.handle === 'md-pcS' && l.by === 'hub' && l.cause === 'stream_ended'), 'desktop-apps shutdownStreams() ⇒ the stream module\'s shutdown ⇒ a lease-end line (by: hub) written before it returns', shutLines.map((l) => [l.verb, l.by, l.cause]));
+  ok(gateOf(stS.take) && engS.stateOf('pcS') === null && verdictOf(shutLines.some((l) => l.verb === 'lease-end' && l.handle === 'md-pcS' && l.by === 'hub' && l.cause === 'stream_ended')), 'desktop-apps shutdownStreams() ⇒ the stream module\'s shutdown ⇒ a lease-end line (by: hub) written before it returns', shutLines.map((l) => [l.verb, l.by, l.cause]));
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf8'), serverJs = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  ok(/shutdown: \(\) => \{ try \{ require\('\.\.\/routes\/desktop-apps'\)\.shutdownStreams\(\); \} catch \{[^}]*\} try \{ engine\.shutdown\(\); \}.*try \{ handover\.shutdown\(\); \}/.test(wiring) && /\nfunction shutdown\(\) \{[\s\S]*?shutdownWindowLeases\(\);[\s\S]*?process\.exit\((?:0|require\('\.\/src\/server\/hub-port\.js'\)\.exitStatus\(\))\);/.test(serverJs), 'wired: server.js\'s shutdown → shutdownWindowLeases → the streams FIRST (their lease-end lines), then the window engine and the hand-over\'s tick — all before process.exit');
+  ok(gateOf(/shutdown: \(\) => \{ try \{ require\('\.\.\/routes\/desktop-apps'\)\.shutdownStreams\(\); \} catch \{[^}]*\} try \{ engine\.shutdown\(\); \}.*try \{ handover\.shutdown\(\); \}/.test(wiring)) && verdictOf(/\nfunction shutdown\(\) \{[\s\S]*?shutdownWindowLeases\(\);[\s\S]*?process\.exit\((?:0|require\('\.\/src\/server\/hub-port\.js'\)\.exitStatus\(\))\);/.test(serverJs)), 'wired: server.js\'s shutdown → shutdownWindowLeases → the streams FIRST (their lease-end lines), then the window engine and the hand-over\'s tick — all before process.exit');
   engS.shutdown();
 }
 srv.close();
 eng.shutdown();
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

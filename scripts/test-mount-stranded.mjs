@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
 const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
 const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
@@ -35,12 +35,12 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stranded-'));
   const notices = [];
   const fake = { broadcast: (m) => notices.push(m) };
   const dest = await P._ensureMountpointDir.call(fake, mp, { quarantine: true });
-  ok(typeof dest === 'string' && dest.startsWith(mp + '.stranded-'), 'leftovers moved to a SIBLING <mp>.stranded-<ts>/ (never inside the mount point)', dest);
-  ok(fs.existsSync(mp) && fs.readdirSync(mp).length === 0, 'the mount point is recreated EMPTY (rclone can now mount)');
-  ok(fs.readFileSync(path.join(dest, 'Courses', 'AIContext', '.vibespace', 'TASK.md'), 'utf8') === 'generated' && fs.existsSync(path.join(dest, '.hidden')), 'every byte survives, dotfiles included — nothing deleted');
+  ok(typeof dest === 'string' && verdictOf(dest.startsWith(mp + '.stranded-')), 'leftovers moved to a SIBLING <mp>.stranded-<ts>/ (never inside the mount point)', dest);
+  ok(gateOf(fs.existsSync(mp)) && fs.readdirSync(mp).length === 0, 'the mount point is recreated EMPTY (rclone can now mount)');
+  ok(fs.readFileSync(path.join(dest, 'Courses', 'AIContext', '.vibespace', 'TASK.md'), 'utf8') === 'generated' && verdictOf(fs.existsSync(path.join(dest, '.hidden'))), 'every byte survives, dotfiles included — nothing deleted');
   const n = notices.find((m) => m.type === 'server-notice');
-  ok(n && n.level === 2 && n.text.includes(dest) && /Nothing was deleted/.test(n.text), 'a level-2 server-notice names the quarantine path (silent-failure rule)', JSON.stringify(n));
-  ok(/Courses, \.hidden|\.hidden, Courses/.test(n?.text || ''), 'the notice lists what was moved');
+  ok(gateOf(n) && n.level === 2 && gateOf(n.text.includes(dest)) && verdictOf(/Nothing was deleted/.test(n.text)), 'a level-2 server-notice names the quarantine path (silent-failure rule)', JSON.stringify(n));
+  ok(verdictOf(/Courses, \.hidden|\.hidden, Courses/.test(n?.text || '')), 'the notice lists what was moved');
   // idempotent: an empty mount point is a no-op with no notice
   notices.length = 0;
   const again = await P._ensureMountpointDir.call(fake, mp, { quarantine: true });
@@ -48,7 +48,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stranded-'));
   // default (edit-time caller) never quarantines — the user may point a record at a populated dir
   fs.writeFileSync(path.join(mp, 'keep.txt'), 'x');
   const edit = await P._ensureMountpointDir.call(fake, mp);
-  ok(edit === null && fs.existsSync(path.join(mp, 'keep.txt')) && notices.length === 0, 'without {quarantine:true} (mount-point EDIT path) nothing is moved — only connect quarantines');
+  ok(edit === null && gateOf(fs.existsSync(path.join(mp, 'keep.txt'))) && notices.length === 0, 'without {quarantine:true} (mount-point EDIT path) nothing is moved — only connect quarantines');
   const src = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8');
   ok((src.match(/_ensureMountpointDir\(mp, \{ quarantine: true \}\)/g) || []).length === 2, 'BOTH connect paths (rclone _mountInner + cephfs) quarantine — a kernel mount would silently SHADOW leftovers');
   ok(!/rm -rf|rmSync\([^)]*recursive: true[^)]*\)[^\n]*stranded/.test(src), 'no recursive delete anywhere near the quarantine (never-delete stance)');
@@ -88,12 +88,12 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stranded-'));
   const b = tg.create({ title: 'local', contextDir: okRoot });
   await tg.mirrorIdle();   // lane cli-call-timeouts: TASK.md is mirrored OFF the store write (queued, bounded) — wait for the copy to land
   ok(!fs.existsSync(shadowRoot), 'a context folder on a DISCONNECTED storage gets NO TASK.md (the tree is not recreated on the bare mount point)');
-  ok(fs.existsSync(path.join(okRoot, '.vibespace', 'TASK.md')), 'an ordinary context folder still gets its TASK.md');
+  ok(verdictOf(fs.existsSync(path.join(okRoot, '.vibespace', 'TASK.md'))), 'an ordinary context folder still gets its TASK.md');
   shadowOn = false; // storage came back
   fs.mkdirSync(path.join(shadowRoot, 'Courses', 'AIContext'), { recursive: true });
   tg.syncAllContextMd();
   await tg.mirrorIdle();
-  ok(fs.existsSync(path.join(shadowRoot, 'Courses', 'AIContext', '.vibespace', 'TASK.md')), 'syncAllContextMd() after the mount returns writes the skipped file (retry-on-mounts-updated)');
+  ok(verdictOf(fs.existsSync(path.join(shadowRoot, 'Courses', 'AIContext', '.vibespace', 'TASK.md'))), 'syncAllContextMd() after the mount returns writes the skipped file (retry-on-mounts-updated)');
   ok(typeof a.id === 'string' && typeof b.id === 'string', 'task ops never break over a shadowed folder');
   fs.mkdirSync(path.join(tmp, 'data2'), { recursive: true });
   const tgNoDep = new TaskGroupManager({ dataDir: path.join(tmp, 'data2'), onChange: () => {}, readUserState: () => ({}), getSetting: () => undefined });
@@ -104,15 +104,15 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stranded-'));
 {
   const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const tgw = fs.readFileSync(path.join(REPO, 'src/server/task-groups-wiring.js'), 'utf8'); // the store's construction, «make room» 2026-11-17: moved whole out of server.js
-  ok(/isPathShadowed: \(p\) => \{ let s = null; try \{ s = mounts\(\)\.shadowedBy\(p\); \} catch \{ s = null; \} if \(s\) return s; try \{ return require\('\.\.\/machine-mounts\.js'\)\.pullShadowOf\(p, \{ writer: true \}\); \} catch \{ return null; \} \}/.test(tgw) && /task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bmounts: \(\) => mounts\b/.test(sv), 'server.js hands the task store a LAZY shadow getter (mounts wire up later — TDZ-safe like getPortForwards; the store is built in src/server/task-groups-wiring.js, handed `mounts: () => mounts`)');
-  ok(/onMountsUpdated: \(\) => tasks\.syncAllContextMd\(\)/.test(sv), 'server.js wires mounts-updated → syncAllContextMd');
+  ok(gateOf(/isPathShadowed: \(p\) => \{ let s = null; try \{ s = mounts\(\)\.shadowedBy\(p\); \} catch \{ s = null; \} if \(s\) return s; try \{ return require\('\.\.\/machine-mounts\.js'\)\.pullShadowOf\(p, \{ writer: true \}\); \} catch \{ return null; \} \}/.test(tgw)) && verdictOf(/task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bmounts: \(\) => mounts\b/.test(sv)), 'server.js hands the task store a LAZY shadow getter (mounts wire up later — TDZ-safe like getPortForwards; the store is built in src/server/task-groups-wiring.js, handed `mounts: () => mounts`)');
+  ok(verdictOf(/onMountsUpdated: \(\) => tasks\.syncAllContextMd\(\)/.test(sv)), 'server.js wires mounts-updated → syncAllContextMd');
   const w = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/msg\?\.type === 'mounts-updated'\) \{ try \{ onMountsUpdated\?\.\(\);/.test(w), 'the wiring tees every mounts-updated broadcast into the resync');
-  ok(/^try \{ onMountsUpdated\?\.\(\); \}/m.test(w), 'and resyncs ONCE right after mounts exist (the boot regen ran unguarded before them)');
+  ok(verdictOf(/msg\?\.type === 'mounts-updated'\) \{ try \{ onMountsUpdated\?\.\(\);/.test(w)), 'the wiring tees every mounts-updated broadcast into the resync');
+  ok(verdictOf(/^try \{ onMountsUpdated\?\.\(\); \}/m.test(w)), 'and resyncs ONCE right after mounts exist (the boot regen ran unguarded before them)');
   const fj = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
-  ok(/const shadow = mounts\.shadowedBy\?\.\(p\);[\s\S]{0,200}status\(503\)/.test(fj), 'files.js refuses every op under a disconnected storage\'s mount point with 503 (no more writing into the bare dir from the explorer/editor)');
+  ok(verdictOf(/const shadow = mounts\.shadowedBy\?\.\(p\);[\s\S]{0,200}status\(503\)/.test(fj)), 'files.js refuses every op under a disconnected storage\'s mount point with 503 (no more writing into the bare dir from the explorer/editor)');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

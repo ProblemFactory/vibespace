@@ -19,7 +19,7 @@ const require = createRequire(import.meta.url);
 const { syncGroupCtx, syncGroupCtxOverDevice, FILE_CAP, MAX_FILES } = require('../src/ctx-sync.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 // In-memory fake device: rdir → Map(rel → {data, mt})
@@ -66,7 +66,7 @@ store.set('../evil.txt', { data: Buffer.from('escape'), mt: now + 100 }); // tra
 
 const skips = [];
 const r = await syncGroupCtxOverDevice({ hosts: mkHosts(fakeDevice(store)), hostId: 'h1', group, remoteDir: rdir, onSkip: (rel, why, size) => skips.push({ rel, why, size }) });
-ok(store.has('new-local.md') && store.get('new-local.md').data.toString() === 'local fresh', 'push: fresh local file lands on the machine');
+ok(gateOf(store.has('new-local.md')) && store.get('new-local.md').data.toString() === 'local fresh', 'push: fresh local file lands on the machine');
 ok(store.get('same.md').mt === now - 9999, 'sha-equal file untouched despite mtime gap (no echo ping-pong)');
 ok(fs.readFileSync(path.join(dir, 'stale.md'), 'utf8') === 'remote newer body', 'pull: strictly-newer remote wins locally');
 ok(fs.readFileSync(path.join(dir, 'remote-only/art.txt'), 'utf8') === 'artifact', 'pull: remote-only artifact materializes (nested dir)');
@@ -80,20 +80,20 @@ fs.writeFileSync(big, Buffer.alloc(FILE_CAP + 1024));
 skips.length = 0;
 await syncGroupCtxOverDevice({ hosts: mkHosts(fakeDevice(store)), hostId: 'h1', group, remoteDir: rdir, onSkip: (rel, why, size) => skips.push({ rel, why, size }) });
 ok(!store.has('big.bin'), `an over-cap file (${Math.round(FILE_CAP / 1024 / 1024)}MB+) is not synced`);
-ok(skips.some((s) => s.rel === 'big.bin' && s.why === 'size'), 'THE POINT: the skip is REPORTED, never silent (the old dial cap ate files invisibly)');
+ok(verdictOf(skips.some((s) => s.rel === 'big.bin' && s.why === 'size')), 'THE POINT: the skip is REPORTED, never silent (the old dial cap ate files invisibly)');
 fs.rmSync(big);
 
 // ── the old 2MB cap must be GONE: a 3MB file (the audit example) syncs ──
 fs.writeFileSync(path.join(dir, 'audit-3mb.json'), Buffer.alloc(3 * 1024 * 1024, 0x61));
 await syncGroupCtxOverDevice({ hosts: mkHosts(fakeDevice(store)), hostId: 'h1', group, remoteDir: rdir, onSkip: () => { } });
-ok(store.has('audit-3mb.json') && store.get('audit-3mb.json').data.length === 3 * 1024 * 1024, 'a 3MB context file now reaches the machine (the file the old cap silently ate)');
+ok(gateOf(store.has('audit-3mb.json')) && store.get('audit-3mb.json').data.length === 3 * 1024 * 1024, 'a 3MB context file now reaches the machine (the file the old cap silently ate)');
 ok(MAX_FILES >= 1000, 'file-count bound raised to ≥1000');
 
 // ── transport policy: ssh falls back to rsync, dial surfaces the error ──
 let threw = null;
 try { await syncGroupCtx({ hosts: mkHosts(null), host: { id: 'd', transport: 'dial' }, group, remoteDir: rdir }); }
 catch (e) { threw = e; }
-ok(threw && /device offline/.test(threw.message), 'dial with a dead link surfaces the device error (no bogus rsync)');
+ok(gateOf(threw) && verdictOf(/device offline/.test(threw.message)), 'dial with a dead link surfaces the device error (no bogus rsync)');
 let rsyncTried = false;
 const hostsSsh = {
   async deviceBounded() { throw new Error('device offline'); },
@@ -101,7 +101,7 @@ const hostsSsh = {
   sshCmd() { return 'ssh'; }, dest() { return 'u@h'; },
 };
 try { await syncGroupCtx({ hosts: hostsSsh, host: { id: 's', transport: 'ssh' }, group, remoteDir: rdir }); } catch { }
-ok(rsyncTried, 'ssh with a dead link degrades to the legacy rsync pair');
+ok(verdictOf(rsyncTried), 'ssh with a dead link degrades to the legacy rsync pair');
 
 // B-5278 (a): a file over LINE_FILE_MAX rides the agent's byte STREAM (fs-write-stream), never ONE control line (a 16 MiB file
 // was ≈21 MiB of base64 in one line); an older agent — the client refuses the stream BEFORE anything is sent — keeps the one line
@@ -124,18 +124,18 @@ ok(rsyncTried, 'ssh with a dead link degrades to the legacy rsync pair');
   const oldDev = (st2, log) => { const dev = streamDev(st2, log); dev.fsWriteStream = async () => { throw Object.assign(new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'), { code: 'host_needs_daemon' }); }; return dev; };
   const run2 = async (Lib, mk) => { const st2 = new Map(), log = []; await Lib.syncGroupCtxOverDevice({ hosts: mkHosts(mk(st2, log)), hostId: 'h2', group: g2, remoteDir: rdir, onSkip: () => { } }); return { st2, log }; };
   const s = await run2(CS, streamDev), sb = s.log.find((x) => x.rel === 'big.md');
-  ok(sb && sb.road === 'stream' && sb.bytes === LINE_FILE_MAX + 4096 && sb.overwrite && sb.by === 'system:ctx-sync' && s.st2.get('big.md').data.length === LINE_FILE_MAX + 4096 && s.log.some((x) => x.rel === 'small.md' && x.road === 'line'),
+  ok(gateOf(sb) && sb.road === 'stream' && sb.bytes === LINE_FILE_MAX + 4096 && gateOf(sb.overwrite) && sb.by === 'system:ctx-sync' && s.st2.get('big.md').data.length === LINE_FILE_MAX + 4096 && verdictOf(s.log.some((x) => x.rel === 'small.md' && x.road === 'line')),
     `B-5278 (a): a file over ${LINE_FILE_MAX} bytes goes through the agent's byte stream (its size announced, overwrite, by system:ctx-sync) — never one control line; a small one keeps the line`);
   const o2 = await run2(CS, oldDev), ob = o2.log.find((x) => x.rel === 'big.md');
-  ok(ob && ob.road === 'line' && o2.st2.has('big.md'), 'an OLDER agent (no fs-write-stream: refused before anything is sent) — the file goes as one line, as before; the sync never hangs on an op the agent lacks');
+  ok(gateOf(ob) && ob.road === 'line' && verdictOf(o2.st2.has('big.md')), 'an OLDER agent (no fs-write-stream: refused before anything is sent) — the file goes as one line, as before; the sync never hangs on an op the agent lacks');
   const M = mutantCopies('ctx-sync', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
   const CSRC = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'ctx-sync.js'), 'utf8');
   const noStream = M.load('src/ctx-sync.js', anchored(CSRC, "      if (buf.length > LINE_FILE_MAX && typeof dm.fsWriteStream === 'function') {", "      if (false) {   /* MUTANT: the release's one line */", 'ctx-no-stream'), 'ctx-no-stream');
   const x = await run2(noStream, streamDev), xb = x.log.find((y) => y.rel === 'big.md');
-  ok(xb && xb.road === 'line', 'CONTROL (the stream road cut, in a copy): the big file rides ONE control line again (red)');
+  ok(gateOf(xb) && xb.road === 'line', 'CONTROL (the stream road cut, in a copy): the big file rides ONE control line again (red)');
   fs.rmSync(d2, { recursive: true, force: true });
 }
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

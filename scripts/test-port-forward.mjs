@@ -13,7 +13,7 @@ const { PortForwardManager } = require('../src/port-forward.js');
 import { mutantCopies } from './mutant-copy.mjs';
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -73,9 +73,9 @@ try {
   // ── machine #0 (this instance): detect + record-only forward ──
   {
     const lp = await pf.detect('__local__');
-    check('detectLocal sees the real test listener', lp.some((p) => p.port === SERVICE_PORT), JSON.stringify(lp.slice(0, 6)));
+    check('detectLocal sees the real test listener', verdictOf(lp.some((p) => p.port === SERVICE_PORT)), JSON.stringify(lp.slice(0, 6)));
     const lf = await pf.forward('__local__', SERVICE_PORT, { label: 'local test' });
-    check('local forward is active with a direct URL (no tunnel)', lf.active && lf.localPort === SERVICE_PORT && lf.url === `http://127.0.0.1:${SERVICE_PORT}/`, JSON.stringify(lf));
+    check('local forward is active with a direct URL (no tunnel)', gateOf(lf.active) && lf.localPort === SERVICE_PORT && lf.url === `http://127.0.0.1:${SERVICE_PORT}/`, JSON.stringify(lf));
     await pf.unforward(lf.id);
     check('local forward removed', !pf.list().some((r) => r.hostId === '__local__'), '');
   }
@@ -95,7 +95,7 @@ try {
     + 'LISTEN 0 511 127.0.0.1:49999 0.0.0.0:* users:(("chrome",pid=88,fd=9))\n', stderr: '' });
   await pf._watchSweep();
   const evNew = events.find((e) => e.type === 'machine-ports-new');
-  check('watch notifies the NEW port with host name + proc', !!evNew && evNew.hostName === 'mock-mac' && evNew.ports.some((p) => p.port === 3000 && p.proc === 'node'), JSON.stringify(evNew));
+  check('watch notifies the NEW port with host name + proc', !!evNew && evNew.hostName === 'mock-mac' && verdictOf(evNew.ports.some((p) => p.port === 3000 && p.proc === 'node')), JSON.stringify(evNew));
   check('watch ignores ephemeral ports (>32767)', !evNew.ports.some((p) => p.port === 49999), JSON.stringify(evNew));
   check('watch does not re-announce baseline ports', !evNew.ports.some((p) => p.port === 5173 || p.port === 22 || p.port === 8080), JSON.stringify(evNew));
   events.length = 0;
@@ -119,15 +119,15 @@ try {
   // ── detect() parses both ss and lsof ──
   ssMode = 'ss';
   let ports = await pf.detect('h1');
-  check('detect (ss) finds all listening ports', ports.some((p) => p.port === 5173 && p.proc === 'node') && ports.some((p) => p.port === 22) && ports.some((p) => p.port === 8080), JSON.stringify(ports));
+  check('detect (ss) finds all listening ports', gateOf(ports.some((p) => p.port === 5173 && p.proc === 'node')) && gateOf(ports.some((p) => p.port === 22)) && verdictOf(ports.some((p) => p.port === 8080)), JSON.stringify(ports));
   ssMode = 'lsof';
   ports = await pf.detect('h1');
-  check('detect (lsof) parses BSD/macOS output', ports.some((p) => p.port === 5173 && p.proc === 'node') && ports.some((p) => p.port === 8080), JSON.stringify(ports));
+  check('detect (lsof) parses BSD/macOS output', gateOf(ports.some((p) => p.port === 5173 && p.proc === 'node')) && verdictOf(ports.some((p) => p.port === 8080)), JSON.stringify(ports));
 
   // ── forward() binds a local port that reaches the device service ──
   const f = await pf.forward('h1', SERVICE_PORT, { label: 'dev server' });
-  check('forward returns an active record with a local URL', f.active && f.localPort > 0 && f.url.includes(String(f.localPort)), JSON.stringify(f));
-  check('forward broadcasts port-forwards-updated', events.some((e) => e.type === 'port-forwards-updated'), JSON.stringify(events.slice(-1)));
+  check('forward returns an active record with a local URL', gateOf(f.active) && f.localPort > 0 && verdictOf(f.url.includes(String(f.localPort))), JSON.stringify(f));
+  check('forward broadcasts port-forwards-updated', verdictOf(events.some((e) => e.type === 'port-forwards-updated')), JSON.stringify(events.slice(-1)));
 
   // pipe a request through the forwarded port → device echo service
   const reply = await new Promise((res, rej) => {
@@ -144,7 +144,7 @@ try {
 
   // ── persistence: a fresh manager restores the forward ──
   const pf2 = new PortForwardManager({ hosts, dataDir, broadcast: () => {}, log: () => {} });
-  check('persisted forward reloads from disk (inactive until restore)', pf2.list().some((r) => r.id === f.id && !r.active));
+  check('persisted forward reloads from disk (inactive until restore)', verdictOf(pf2.list().some((r) => r.id === f.id && !r.active)));
   await pf2.restore();
   check('restore() re-establishes the forward on a fresh port', pf2.list().find((r) => r.id === f.id)?.active === true);
   // both managers now bind — tear the second down so ports free
@@ -154,8 +154,8 @@ try {
   deviceThrows = true;
   let offErr = null;
   try { await pf.forward('h2', 9999); } catch (e) { offErr = e.message; }
-  check('forward to an offline device fails loud', /offline/i.test(offErr || ''), offErr);
-  check('the offline forward is still recorded (retries on relink)', pf._state.forwards.some((r) => r.hostId === 'h2'));
+  check('forward to an offline device fails loud', verdictOf(/offline/i.test(offErr || '')), offErr);
+  check('the offline forward is still recorded (retries on relink)', verdictOf(pf._state.forwards.some((r) => r.hostId === 'h2')));
   deviceThrows = false;
   await pf.onMachineLinked('h2'); // still offline service (port 9999) → error recorded, no throw
   check('onMachineLinked retries without throwing', true);
@@ -171,19 +171,19 @@ try {
   // ── manual LAN-target forward (jump host into the device's network) ──
   {
     const lf = await pf.forward('h1', 8080, { targetHost: '10.0.0.5' });
-    check('LAN forward records targetHost', lf.targetHost === '10.0.0.5' && lf.active, JSON.stringify(lf));
-    check('LAN forward id encodes host:port', /10\.0\.0\.5.*8080/.test(lf.id), lf.id);
+    check('LAN forward records targetHost', lf.targetHost === '10.0.0.5' && verdictOf(lf.active), JSON.stringify(lf));
+    check('LAN forward id encodes host:port', verdictOf(/10\.0\.0\.5.*8080/.test(lf.id)), lf.id);
     // tcpForward is per-connection — open one to trigger it, then assert one
     // call reached the device with the LAN target (background probes also call
     // tcpForward, so check the full list, not a single-slot capture)
     mockDm._calls = [];
     await new Promise((res) => { const c = net.connect(lf.localPort, '127.0.0.1', () => { setTimeout(() => { c.destroy(); res(); }, 200); }); c.on('error', res); });
-    check('_start pipes to the LAN target host:port on the device', mockDm._calls.some((c) => c.port === 8080 && c.host === '10.0.0.5'), JSON.stringify(mockDm._calls));
+    check('_start pipes to the LAN target host:port on the device', verdictOf(mockDm._calls.some((c) => c.port === 8080 && c.host === '10.0.0.5')), JSON.stringify(mockDm._calls));
     // a plain port forward and a LAN forward for the SAME remotePort coexist
     const plain = await pf.forward('h1', 8080);
     check('bare-port and LAN forward to the same port are DISTINCT records', plain.id !== lf.id && !plain.targetHost, JSON.stringify(plain));
     let bad = ''; try { await pf.forward('h1', 22, { targetHost: 'bad host!' }); } catch (e) { bad = e.message; }
-    check('invalid target host rejected', /invalid target host/.test(bad), bad);
+    check('invalid target host rejected', verdictOf(/invalid target host/.test(bad)), bad);
     await pf.unforward(lf.id); await pf.unforward(plain.id);
   }
 
@@ -193,7 +193,7 @@ try {
   {
     const LAN_PORT = await new Promise((res) => { const s = net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('LAN:'), d])))); s.listen(0, '0.0.0.0', () => res(s.address().port)); }); // all-ifaces so 127.0.0.2 reaches it
     const lf = await pf.forward('__local__', LAN_PORT, { targetHost: '127.0.0.2' }); // 127.0.0.2 = a non-loopback-127.0.0.1 target
-    check('local LAN forward binds a REAL proxy port (not the remotePort short-circuit)', lf.localPort && lf.localPort !== LAN_PORT, JSON.stringify({ localPort: lf.localPort, remotePort: LAN_PORT }));
+    check('local LAN forward binds a REAL proxy port (not the remotePort short-circuit)', gateOf(lf.localPort) && lf.localPort !== LAN_PORT, JSON.stringify({ localPort: lf.localPort, remotePort: LAN_PORT }));
     // NOTE: 127.0.0.2 reaches the same loopback echo on Linux — proves the
     // proxy dials targetHost:port rather than assuming the service is local.
     const reply = await new Promise((resolve) => {
@@ -201,7 +201,7 @@ try {
       let b = ''; c.on('data', (d) => { b += d; if (b.includes('LAN:hey')) { c.end(); resolve(b); } });
       c.on('error', () => resolve('')); setTimeout(() => { try { c.destroy(); } catch {} resolve(b); }, 3000);
     });
-    check('local LAN forward proxies bytes to targetHost:port', reply.includes('LAN:hey'), JSON.stringify(reply));
+    check('local LAN forward proxies bytes to targetHost:port', verdictOf(reply.includes('LAN:hey')), JSON.stringify(reply));
     await pf.unforward(lf.id);
   }
 
@@ -230,7 +230,7 @@ try {
     rec = pf.list().find((r) => r.id === f.id);
     check('Auto clears the override (back to detected)', rec.protoOverride === null && rec.proto === 'http', JSON.stringify(rec));
     let bad = ''; try { await pf.setProtoOverride(f.id, 'ftp'); } catch (e) { bad = e.message; }
-    check('invalid proto rejected with guidance', /http, https, tcp/.test(bad), bad);
+    check('invalid proto rejected with guidance', verdictOf(/http, https, tcp/.test(bad)), bad);
     await pf.unforward(f.id);
     httpSrv.close();
   }
@@ -255,11 +255,11 @@ try {
     // guard: killOrphan refuses a HEALTHY process (our own test runner)
     let refused = '';
     try { pf.killOrphan(process.pid); } catch (e) { refused = e.message; }
-    check('killOrphan refuses a healthy process', /refusing/.test(refused), refused);
+    check('killOrphan refuses a healthy process', verdictOf(/refusing/.test(refused)), refused);
     // and kills the real orphan
     const kr = pf.killOrphan(proc.pid);
     const gone = await new Promise((r) => { proc.on('exit', () => r(true)); setTimeout(() => r(false), 5000); });
-    check('killOrphan terminates the orphan', !!kr.ok && gone);
+    check('killOrphan terminates the orphan', !!kr.ok && verdictOf(gone));
   } else {
     console.log('  · SKIP orphan e2e: /proc is linux-only');
   }
@@ -296,7 +296,7 @@ try {
 
     // the probe: a port nobody listens on is UNDECIDED (throws), not 'tcp'
     let thrown = null; try { await probeProto(P, { timeoutMs: 800 }); } catch (e) { thrown = e; }
-    check('probeProto: a refused port is undecided (throws EUNREACHABLE), never "tcp"', thrown && thrown.code === 'EUNREACHABLE', String(thrown));
+    check('probeProto: a refused port is undecided (throws EUNREACHABLE), never "tcp"', gateOf(thrown) && thrown.code === 'EUNREACHABLE', String(thrown));
     await up('tcp');
     check('probeProto: a raw-TCP listener still reads "tcp"', (await probeProto(P, { timeoutMs: 800 })) === 'tcp');
     await down();
@@ -307,7 +307,7 @@ try {
     await pa.forward('__local__', P, { label: 'service: demo' });
     const r1 = await pa.publish(id);
     const S = pa.list().find((f) => f.id === id).publicSub;
-    check('publish of a live web service → https://<sub>', /^https:\/\/vs[0-9a-f]+\.relay\.test\/$/.test(r1.publicUrl) && !r1.pending, JSON.stringify(r1));
+    check('publish of a live web service → https://<sub>', gateOf(/^https:\/\/vs[0-9a-f]+\.relay\.test\/$/.test(r1.publicUrl)) && !r1.pending, JSON.stringify(r1));
     // 2. server restart (a new manager over the same data/) keeps the subdomain
     const pb = mk();
     await pb.restore();
@@ -316,8 +316,8 @@ try {
     await down();
     const r3 = await pb.publish(id);
     check('nothing answers yet: publish keeps the last protocol (http) and the same name — no TCP fallback', r3.publicUrl === r1.publicUrl && r3.proto === 'http' && r3.pending === true, JSON.stringify(r3));
-    check('…the forward is marked protoPending (re-probed by the heal sweep / reprobe)', pb.list().find((f) => f.id === id) && disk().forwards.find((f) => f.id === id).protoPending === true);
-    check('…one log line names the decision', logs.some((l) => l.includes(`publish ${id}: http (nothing answers yet, kept the last protocol)`)), logs.slice(-3).join(' | '));
+    check('…the forward is marked protoPending (re-probed by the heal sweep / reprobe)', gateOf(pb.list().find((f) => f.id === id)) && disk().forwards.find((f) => f.id === id).protoPending === true);
+    check('…one log line names the decision', verdictOf(logs.some((l) => l.includes(`publish ${id}: http (nothing answers yet, kept the last protocol)`))), logs.slice(-3).join(' | '));
     // 4. the late listener answers → reprobe confirms http, same URL, pending cleared
     await up('http');
     const r4 = await pb.reprobe(id);
@@ -326,11 +326,11 @@ try {
     await down(); await up('tcp');
     const r5 = await pb.reprobe(id);
     const rec5 = disk().forwards.find((f) => f.id === id);
-    check('a TCP decision publishes tcp:// and KEEPS publicSub on the record', r5.changed && /^tcp:\/\//.test(r5.publicUrl) && rec5.publicSub === S, JSON.stringify(rec5));
+    check('a TCP decision publishes tcp:// and KEEPS publicSub on the record', gateOf(r5.changed) && gateOf(/^tcp:\/\//.test(r5.publicUrl)) && rec5.publicSub === S, JSON.stringify(rec5));
     // …and a web answer repairs the TCP publish to http with the SAME subdomain
     await down(); await up('http');
     const r6 = await pb.reprobe(id);
-    check('repair: a wrong TCP publish goes back to http with the same subdomain', r6.changed && r6.publicUrl === r1.publicUrl, JSON.stringify(r6));
+    check('repair: a wrong TCP publish goes back to http with the same subdomain', gateOf(r6.changed) && r6.publicUrl === r1.publicUrl, JSON.stringify(r6));
     // 6. a stopping service (unpublish + unforward keepName) gets its name back at its next start
     await pb.unpublish(id, { keepName: true }); await pb.unforward(id, { keepName: true });
     check('stop: the forward is gone, its public name waits in the store', !pb.list().some((f) => f.id === id) && disk().names[id].sub === S, JSON.stringify(disk().names));
@@ -342,7 +342,7 @@ try {
     const rec8 = disk().forwards.find((f) => f.id === id);
     check('explicit unpublish clears publicSub / publicPort', rec8.publicSub === null && rec8.publicPort === null && !rec8.publicUrl, JSON.stringify(rec8));
     const r8 = await pb.publish(id);
-    check('…and the next publish has a NEW subdomain', /^https:\/\/vs/.test(r8.publicUrl) && r8.publicUrl !== r1.publicUrl, r8.publicUrl);
+    check('…and the next publish has a NEW subdomain', gateOf(/^https:\/\/vs/.test(r8.publicUrl)) && r8.publicUrl !== r1.publicUrl, r8.publicUrl);
     await pb.unpublish(id);
 
     // PATCHED-COPY CONTROLS (outside the tree): each fix reverted on its own reproduces the incident
@@ -388,7 +388,7 @@ try {
     };
     const real2 = await drive2(PortForwardManager), mut2 = await drive2(PF2);
     check('CONTROL item 2: a publish before the service listens keeps http + the URL', real2.a === real2.b && real2.proto === 'http', JSON.stringify(real2));
-    check('NEGATIVE CONTROL item 2: the pre-fix probe reads the refused port as TCP and publishes tcp://', mut2.proto === 'tcp' && /^tcp:\/\//.test(mut2.b), JSON.stringify(mut2));
+    check('NEGATIVE CONTROL item 2: the pre-fix probe reads the refused port as TCP and publishes tcp://', mut2.proto === 'tcp' && verdictOf(/^tcp:\/\//.test(mut2.b)), JSON.stringify(mut2));
     await down();
     fs.rmSync(pdir, { recursive: true, force: true });
   }
@@ -411,12 +411,12 @@ try {
     const after = fs.readFileSync(sfile, 'utf8');
     const listed = typeof ph.heldWords === 'function' ? ph.heldWords() : null;
     check('r3009: port-forwards.json read FAILED (a placed EIO) — the person\'s next Forward and the boot replay write NOTHING over it: the file\'s content survives', after === before && !owedAfter, after.slice(0, 240));
-    check('r3009: …the new Forward is refused BY NAME (503 ports_unread), and the store says why (the Ports panel\'s words), never an empty list', !!fwdErr && fwdErr.status === 503 && fwdErr.code === 'ports_unread' && /could not be read/.test(String(listed || '')), JSON.stringify({ err: fwdErr && fwdErr.message, code: fwdErr && fwdErr.code, listed }));
+    check('r3009: …the new Forward is refused BY NAME (503 ports_unread), and the store says why (the Ports panel\'s words), never an empty list', !!fwdErr && fwdErr.status === 503 && fwdErr.code === 'ports_unread' && verdictOf(/could not be read/.test(String(listed || ''))), JSON.stringify({ err: fwdErr && fwdErr.message, code: fwdErr && fwdErr.code, listed }));
     // r3104 (a): a SECOND ROAD that looks a forward up through the list — /svc/<name> (src/server/path-mounts.js) — answers the hold's
     // words while held (503 ports_unread), never «no service mounted»
     const PM = require('../src/server/path-mounts.js').create({ getPortForwards: () => ph, requestAuthed: () => true });
     const svc = await new Promise((resolve) => { const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ c: this.c, b }); }, redirect(c, u) { resolve({ c, u }); } }; PM.handler({ originalUrl: '/svc/kept-sub/', url: '/svc/kept-sub/', headers: {} }, res); });
-    check('r3104 (a): while held, /svc/<name> answers the hold\'s words (503 ports_unread), never «no service mounted»', svc.c === 503 && svc.b && svc.b.code === 'ports_unread' && /could not be read/.test(String(svc.b.error)), JSON.stringify(svc));
+    check('r3104 (a): while held, /svc/<name> answers the hold\'s words (503 ports_unread), never «no service mounted»', svc.c === 503 && gateOf(svc.b) && svc.b.code === 'ports_unread' && verdictOf(/could not be read/.test(String(svc.b.error))), JSON.stringify(svc));
     clearInterval(ph._watch);
     fs.rmSync(sdir, { recursive: true, force: true });
   }
@@ -455,18 +455,18 @@ try {
     };
     const PM0 = require('../src/server/path-mounts.js');
     const u0 = await unpairScene(PortForwardManager, PM0, 'now');
-    check('r3174: a machine unpaired WHILE HELD writes nothing then (the file as it was) and loses its forwards at the LIFT (listed and on disk: only the other machine\'s)', u0.heldFile && !u0.owedHeld && u0.landed === true && u0.afterIds === 'pf-__local__-7002' && u0.onDisk === 'pf-__local__-7002', JSON.stringify(u0));
-    check('r3174: /svc to a caller NOT signed in while held — a plain 503 (no hold words, no file name)', u0.anon.c === 503 && u0.anon.b && !/port-forwards|could not be read/.test(JSON.stringify(u0.anon.b)), JSON.stringify(u0.anon));
+    check('r3174: a machine unpaired WHILE HELD writes nothing then (the file as it was) and loses its forwards at the LIFT (listed and on disk: only the other machine\'s)', gateOf(u0.heldFile) && !u0.owedHeld && u0.landed === true && u0.afterIds === 'pf-__local__-7002' && u0.onDisk === 'pf-__local__-7002', JSON.stringify(u0));
+    check('r3174: /svc to a caller NOT signed in while held — a plain 503 (no hold words, no file name)', u0.anon.c === 503 && gateOf(u0.anon.b) && !/port-forwards|could not be read/.test(JSON.stringify(u0.anon.b)), JSON.stringify(u0.anon));
     const PFS = fs.readFileSync(path.join(ROOTu, 'src/port-forward.js'), 'utf8'), PMS = fs.readFileSync(path.join(ROOTu, 'src/server/path-mounts.js'), 'utf8');
     const UNPAIR_HELD = "    if (this._hold.held()) { (this._unpairedHeld = this._unpairedHeld || new Set()).add(hostId); return; }   // r3174: held — its forwards go at the lift\n";
     const PLAIN = "res.status(503).json(requestAuthed(req) ? { error: heldW, code: 'ports_unread' } : { error: 'unavailable' })";
     const u1 = await unpairScene(MU.load('src/port-forward.js', anchU(PFS, UNPAIR_HELD, '', 'unpair-held-cut'), 'unpair-held-cut').PortForwardManager, PM0, 'unpair-held-cut');
-    check('RED CONTROL r3228: the unpair\'s held line cut (in a copy) — the unpaired machine\'s forward comes back at the lift', u1.afterIds.includes('pf-h1-7001'), JSON.stringify(u1));
+    check('RED CONTROL r3228: the unpair\'s held line cut (in a copy) — the unpaired machine\'s forward comes back at the lift', verdictOf(u1.afterIds.includes('pf-h1-7001')), JSON.stringify(u1));
     // r5029: RED CONTROL — the lift's write never asked (the unpair road's _persist cut, in a copy): the list drops the machine, the landing
     // answers at once (nothing owed) and the file still names its forward — the on-disk clause, read after the landing, can see a lost write
     const UNPAIR_WRITE = "    this._persist({ now });   // r5036: a machine's REMOVAL by a person lands at once (its callers pass now); the unpair at a lift rides the writer\n";
     const u3 = await unpairScene(MU.load('src/port-forward.js', anchU(PFS, UNPAIR_WRITE, '', 'unpair-write-cut'), 'unpair-write-cut').PortForwardManager, PM0, 'unpair-write-cut');
-    check('RED CONTROL r5029: the unpair\'s write cut (in a copy) — listed without the machine, but read after the landing the file still holds its forward', u3.landed === true && u3.afterIds === 'pf-__local__-7002' && u3.onDisk.includes('pf-h1-7001'), JSON.stringify(u3));
+    check('RED CONTROL r5029: the unpair\'s write cut (in a copy) — listed without the machine, but read after the landing the file still holds its forward', u3.landed === true && u3.afterIds === 'pf-__local__-7002' && verdictOf(u3.onDisk.includes('pf-h1-7001')), JSON.stringify(u3));
     // r5116 (N3): A PERSON's ACT ON THE PORTS `now` ROAD (server.js passes it: a protocol change, a forward's removal, …) IS ON DISK WHEN
     // ITS CALL RETURNS — the file read at once after the call (its save runs before the call's first await), no flush, no wait. RED
     // CONTROL (a copy): the `now` road's flushSync cut — the write is only owed then (the writer lands it on a later turn of the loop)
@@ -487,7 +487,7 @@ try {
     check('r5116: a person\'s act on the Ports now road (a protocol change) is ON DISK when its call returns — read at once, no flush, no wait', n0.atReturn === 'https' && n0.landed === true && n0.later === 'https', JSON.stringify(n0));
     check('RED CONTROL r5116: the now road\'s flushSync cut (in a copy) — the change is NOT on disk at the return (only owed), it lands later', n1.atReturn === null && n1.landed === true && n1.later === 'https', JSON.stringify(n1));
     const u2 = await unpairScene(PortForwardManager, MU.load('src/server/path-mounts.js', anchU(PMS, PLAIN, "res.status(503).json({ error: heldW, code: 'ports_unread' })", 'plain-503-cut'), 'plain-503-cut'), 'plain-503-cut');
-    check('RED CONTROL r3228: the plain 503 cut (in a copy) — the hold\'s words (the file\'s name) reach a caller who is not signed in', u2.anon.c === 503 && /port-forwards|could not be read/.test(JSON.stringify(u2.anon.b || {})), JSON.stringify(u2.anon));
+    check('RED CONTROL r3228: the plain 503 cut (in a copy) — the hold\'s words (the file\'s name) reach a caller who is not signed in', u2.anon.c === 503 && verdictOf(/port-forwards|could not be read/.test(JSON.stringify(u2.anon.b || {}))), JSON.stringify(u2.anon));
   }
   // r3104: TORN BYTES — kept aside once (the helper), the list then starts EMPTY, and the store NAMES the copy for the Ports panel
   // («the list was damaged; its damaged bytes are kept beside it as <name>» — never «restore it»: they are the damaged bytes)
@@ -499,7 +499,7 @@ try {
     const copy = typeof pt.tornCopy === 'function' ? pt.tornCopy() : null;
     const copyOk = !!copy && fs.existsSync(path.join(tdir, copy)) && fs.readFileSync(path.join(tdir, copy), 'utf8') === '{"forwards": [{"id": "pf-torn-1", "hostId": "__local__", "remotePo';
     const zh = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/lib/i18n-zh.js'), 'utf8');
-    check('r3104: torn port-forwards.json — its bytes kept aside once, the list starts empty, and the store names the copy for the Ports panel (its sentence in zh too)', copyOk && /^port-forwards\.json\.corrupt-/.test(copy) && pt.list().length === 0 && zh.includes('"The list of port forwards was damaged; its damaged bytes are kept beside it as {name}.'), JSON.stringify({ copy, n: pt.list().length }));
+    check('r3104: torn port-forwards.json — its bytes kept aside once, the list starts empty, and the store names the copy for the Ports panel (its sentence in zh too)', gateOf(copyOk) && gateOf(/^port-forwards\.json\.corrupt-/.test(copy)) && pt.list().length === 0 && verdictOf(zh.includes('"The list of port forwards was damaged; its damaged bytes are kept beside it as {name}.')), JSON.stringify({ copy, n: pt.list().length }));
     if (pt._hold && pt._hold.stop) pt._hold.stop(); clearInterval(pt._watch);
     fs.rmSync(tdir, { recursive: true, force: true });
   }
@@ -509,4 +509,4 @@ try {
   fs.rmSync(dataDir, { recursive: true, force: true });
 }
 console.log(failed ? `\n${failed} FAILED` : '\nport-forward test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

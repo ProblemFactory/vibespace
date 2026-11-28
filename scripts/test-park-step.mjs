@@ -22,7 +22,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -56,15 +56,15 @@ const table = P.parkTable(NOW);
   ok(cell('inflight', 'post-ok') === 'landed +say' && cell('inflight', 'post-refused-transient') === 'waiting +say' && cell('inflight', 'post-refused-final') === 'stashed +say' && cell('inflight', 'poster-never-answers') === 'inflight', '(c) on the wire: ok lands, a transient miss waits again, a final miss stashes, a poster that never answers leaves it on the wire (the primitive\'s own bound ends that)');
   ok(cell('inflight', 'boot-inflight') === 'maybeDelivered +say' && cell('claimed', 'boot-ho') === 'maybeDelivered +say' && cell('maybeDelivered', 'timer') === 'stashed +say' && cell('maybeDelivered', 'turn-end') === 'stashed +say', '(d) a boot turns a stamp (inflight or ho) into may-have-landed, said; the first sweep hands it to the stash, said, never posted');
   ok(cell('maybeDelivered', 'bound-60min') === 'stashed +say' && cell('maybeDelivered', 'target-gone') === 'stashed +say' && cell('maybeDelivered', 'spend-refused') === 'stashed +say', '(d) …and it falls as may-have-landed before any other judge (never "expired", never a spend verdict)');
-  ok(['turn-end', 'timer', 'bound-60min', 'max-attempts', 'target-gone', 'spend-refused'].every((e) => /skipped/.test(cell('inflight', e)) && /skipped/.test(cell('claimed', e))), '(e) an attempt leaves an in-flight or claimed entry alone (it is spoken for)');
+  ok(verdictOf(['turn-end', 'timer', 'bound-60min', 'max-attempts', 'target-gone', 'spend-refused'].every((e) => /skipped/.test(cell('inflight', e)) && /skipped/.test(cell('claimed', e)))), '(e) an attempt leaves an in-flight or claimed entry alone (it is spoken for)');
   ok(cell('waiting', 'cap') === 'evicted +say' && cell('cleared', 'cap') === 'evicted +say' && cell('claimed', 'cap') === 'claimed' && cell('inflight', 'cap') === 'inflight' && cell('maybeDelivered', 'cap') === 'maybeDelivered', '(f) the cap evicts the oldest WAITING (said); the wire, a claim and a leaving copy are not counted (r2 ⑤ + r3 ④)');
   ok(cell('waiting', 'clear-single') === 'cleared' && cell('inflight', 'clear-batch') === 'inflight +say' && cell('claimed', 'clear-single') === 'claimed' && cell('maybeDelivered', 'clear-single') === 'maybeDelivered', '(g) a clear replaces the words wherever the entry is; on the wire it is said (r2 ④)');
   ok(cell('waiting', 'clock-forward') === 'waiting' && cell('waiting', 'clock-backward') === 'waiting +say' && cell('inflight', 'clock-backward') === 'inflight +say', '(h) a forward step changes nothing until the next attempt; a backward step re-bases the stamps, said once (r2 ③)');
-  ok(STATES.filter((s) => TERMINAL.has(s)).every((s) => EVENTS.every((e) => cell(s, e) === '—')), '(i) the four terminal states answer nothing to any event (' + [...TERMINAL].join(', ') + ')');
+  ok(verdictOf(STATES.filter((s) => TERMINAL.has(s)).every((s) => EVENTS.every((e) => cell(s, e) === '—'))), '(i) the four terminal states answer nothing to any event (' + [...TERMINAL].join(', ') + ')');
   ok(cell('claimed', 'post-ok') === 'landed' && cell('claimed', 'post-refused-transient') === 'waiting' && cell('claimed', 'post-refused-final') === 'waiting', '(j) a hand-over\'s landing takes a claimed entry (its own card, no park charge); its miss releases the claim');
   // verify r4 (the owner-outcome table: S10 / S12 / S13 — "table lacks handover-claim / prompt-take"): the two doors
-  ok(cell('waiting', 'handover-claim') === 'claimed' && cell('cleared', 'handover-claim') === 'claimed' && ['claimed', 'inflight', 'maybeDelivered'].every((s) => cell(s, 'handover-claim') === '—'), '(k) a hand-over claims a WAITING / cleared entry; one claimed, on the wire or leaving is listed to nobody (r4)');
-  ok(cell('waiting', 'prompt-take') === 'landed' && cell('cleared', 'prompt-take') === 'landed' && ['claimed', 'inflight', 'maybeDelivered'].every((s) => cell(s, 'prompt-take') === '—'), '(k) a fitting prompt takes a WAITING / cleared entry inline — landed, no post, no charge (r4)');
+  ok(cell('waiting', 'handover-claim') === 'claimed' && cell('cleared', 'handover-claim') === 'claimed' && verdictOf(['claimed', 'inflight', 'maybeDelivered'].every((s) => cell(s, 'handover-claim') === '—')), '(k) a hand-over claims a WAITING / cleared entry; one claimed, on the wire or leaving is listed to nobody (r4)');
+  ok(cell('waiting', 'prompt-take') === 'landed' && cell('cleared', 'prompt-take') === 'landed' && verdictOf(['claimed', 'inflight', 'maybeDelivered'].every((s) => cell(s, 'prompt-take') === '—')), '(k) a fitting prompt takes a WAITING / cleared entry inline — landed, no post, no charge (r4)');
   { const r = parkStep(canonical('waiting', NOW), 'prompt-take', { now: NOW }); ok(r.leave === 'landed' && !r.post && !r.charge && !r.authorize && r.entry.holds === false, '(k) …the take gives the hold back and bills nothing'); }
 }
 
@@ -157,7 +157,7 @@ function walk(P, start, seq, rnd, startNow = NOW) {
   ok(e.s === 'expired' && e.attempts <= P.MAX_ATTEMPTS && now - NOW <= P.MAX_MS + 600_000, '(d) a target that never accepts: the entry expires within the hour by the schedule alone (' + e.attempts + ' attempts, ' + Math.round((now - NOW) / 60000) + ' min)');
   let e2 = freshEntry(NOW); let now2 = NOW; let posts = 0;
   for (let i = 0; i < 100 && !TERMINAL.has(e2.s); i++) { let r = parkStep(e2, 'turn-end', { now: now2 }); e2 = r.entry; if (r.post) posts++; if (e2.s === 'inflight') { r = parkStep(e2, 'post-refused-transient', { now: now2 }); e2 = r.entry; } }
-  ok(e2.s === 'expired' && posts === P.MAX_ATTEMPTS - 1 && /attempt bound/.test('x attempt bound'), '(d) …and a turn end every second cannot post it for ever: the attempts bound ends it after ' + posts + ' posts');
+  ok(e2.s === 'expired' && posts === P.MAX_ATTEMPTS - 1 && verdictOf(/attempt bound/.test('x attempt bound')), '(d) …and a turn end every second cannot post it for ever: the attempts bound ends it after ' + posts + ' posts');
 }
 
 // ── §3 THE ENGINE AGREES ────────────────────────────────────────────────────
@@ -297,11 +297,11 @@ console.log('\n§4 controls');
   // (i) the table without the may-have-landed-first rule: an attempt on a may-have-landed entry posts it — the walk is red
   const m1 = editAnchor(PS, "    if (e.s === 'maybeDelivered') return out({ leave: 'stash'", "    if (false) return out({ leave: 'stash'", "src/park-step.js");
   if (m1 === PS) ok(false, '(i) CONTROL anchor moved');
-  else { const Pm = M.load('src/park-step.js', m1, 'no-maybe-first'); const rnd = prng(3); let v = []; for (const ev of EVENTS) for (const ev2 of EVENTS) v.push(...walk(Pm, 'maybeDelivered', [ev, ev2], rnd)); ok(v.some((x) => /a post from maybeDelivered|posts .* > attempts/.test(x)), '(i) CONTROL: a table that lets an attempt post a may-have-landed entry breaks the walk (' + v.length + ' violations)', v.slice(0, 2).join(' | ')); }
+  else { const Pm = M.load('src/park-step.js', m1, 'no-maybe-first'); const rnd = prng(3); let v = []; for (const ev of EVENTS) for (const ev2 of EVENTS) v.push(...walk(Pm, 'maybeDelivered', [ev, ev2], rnd)); ok(verdictOf(v.some((x) => /a post from maybeDelivered|posts .* > attempts/.test(x))), '(i) CONTROL: a table that lets an attempt post a may-have-landed entry breaks the walk (' + v.length + ' violations)', v.slice(0, 2).join(' | ')); }
   // (ii) the table with a silent eviction: the walk is red on "a drop not said by id"
   const m2 = editAnchor(PS, "say: `the retry park holds 30 waiting per conversation — ${id} (the oldest waiting) falls to the stash, evicted`", "say: null", "src/park-step.js");
   if (m2 === PS) ok(false, '(ii) CONTROL anchor moved');
-  else { const Pm = M.load('src/park-step.js', m2, 'silent-evict'); const v = walk(Pm, 'waiting', ['cap'], prng(5)); ok(v.some((x) => /not said by id/.test(x)), '(ii) CONTROL: a silent eviction breaks "every drop is said by id"', v.join(' | ')); }
+  else { const Pm = M.load('src/park-step.js', m2, 'silent-evict'); const v = walk(Pm, 'waiting', ['cap'], prng(5)); ok(verdictOf(v.some((x) => /not said by id/.test(x))), '(ii) CONTROL: a silent eviction breaks "every drop is said by id"', v.join(' | ')); }
   // (iii) the ENGINE without r3 ④ (the cap counts a may-have-landed entry): the cell maybeDelivered × cap disagrees
   const CDS = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   const m3 = editAnchor(CDS, "filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);", "filter((x) => x && !x.inflight && !x.ho);", "src/server/conversation-deliver.js", 'first');
@@ -327,11 +327,11 @@ console.log('\n§4b cell-level controls');
   const anchor2 = "    return out({ now, post: true, authorize: 'hold', entry: { s: 'inflight', attempts, posts: e.posts + 1 }, persist: true });\n";
   const m2 = editAnchor(PS, "    const holdValid = hold && now - e.holdAt <= HOLD_TTL_MS;\n", "    const holdValid = hold && now - e.holdAt <= HOLD_TTL_MS;\n    if (e.s === 'waiting' && event === 'timer' && !holdValid) return out({ now, post: true, authorize: 'hold', entry: { s: 'inflight', attempts, posts: e.posts + 1 }, persist: true });\n", "src/park-step.js");
   if (m2 === PS || !PS.includes(anchor2)) ok(false, '(vi) CONTROL anchor moved');
-  else { const Pm = M.load('src/park-step.js', m2, 'cell-stale-hold'); const booted = Pm.parkStep(Pm.canonical('waiting', NOW), 'boot-inflight', { now: NOW }).entry; const cellM = Pm.parkStep(booted, 'timer', { now: NOW }); const cellP = P.parkStep(P.parkStep(canonical('waiting', NOW), 'boot-inflight', { now: NOW }).entry, 'timer', { now: NOW }); let v = []; for (let seed = 1; seed <= 20; seed++) v.push(...walk(Pm, 'waiting', ['boot-inflight', 'timer'], prng(seed))); ok(cellM.authorize === 'hold' && cellP.authorize === 'fresh' && v.some((x) => /a hold converted past its TTL or without one/.test(x)), '(vi) CONTROL: a cell mutant that converts a forgotten hold (waiting × timer after a boot: hold where the table says fresh) is red under I5b', JSON.stringify({ mutant: cellM.authorize, table: cellP.authorize, v: v.slice(0, 2) })); }
+  else { const Pm = M.load('src/park-step.js', m2, 'cell-stale-hold'); const booted = Pm.parkStep(Pm.canonical('waiting', NOW), 'boot-inflight', { now: NOW }).entry; const cellM = Pm.parkStep(booted, 'timer', { now: NOW }); const cellP = P.parkStep(P.parkStep(canonical('waiting', NOW), 'boot-inflight', { now: NOW }).entry, 'timer', { now: NOW }); let v = []; for (let seed = 1; seed <= 20; seed++) v.push(...walk(Pm, 'waiting', ['boot-inflight', 'timer'], prng(seed))); ok(cellM.authorize === 'hold' && cellP.authorize === 'fresh' && verdictOf(v.some((x) => /a hold converted past its TTL or without one/.test(x))), '(vi) CONTROL: a cell mutant that converts a forgotten hold (waiting × timer after a boot: hold where the table says fresh) is red under I5b', JSON.stringify({ mutant: cellM.authorize, table: cellP.authorize, v: v.slice(0, 2) })); }
   // (vii) claimed × post-ok charges the park for a hand-over's landing (one cell): red under I5
   const m3 = editAnchor(PS, "    if (event === 'post-ok') return e.s === 'inflight' ? landedByPark() : landedByHandover();", "    if (event === 'post-ok' && e.s === 'claimed') return out({ leave: 'landed', charge: true, entry: { holds: false } });\n    if (event === 'post-ok') return e.s === 'inflight' ? landedByPark() : landedByHandover();", "src/park-step.js");
   if (m3 === PS) ok(false, '(vii) CONTROL anchor moved');
-  else { const Pm = M.load('src/park-step.js', m3, 'cell-charge-handover'); const v = walk(Pm, 'claimed', ['post-ok'], prng(17)); ok(v.some((x) => /a charge outside the park's own landing/.test(x)), '(vii) CONTROL: a cell mutant that charges a hand-over\'s landing is red under I5', v.join(' | ')); }
+  else { const Pm = M.load('src/park-step.js', m3, 'cell-charge-handover'); const v = walk(Pm, 'claimed', ['post-ok'], prng(17)); ok(verdictOf(v.some((x) => /a charge outside the park's own landing/.test(x))), '(vii) CONTROL: a cell mutant that charges a hand-over\'s landing is red under I5', v.join(' | ')); }
 }
 // ── §5 THE DOOR CENSUS (verify r4 T2⑤) ───────────────────────────────────────────────────────────────────────────
 console.log('\n§5 the door census: every engine door is a table event, every event has a door, every via is an event');
@@ -378,7 +378,7 @@ console.log('\n§5 the door census: every engine door is a table event, every ev
   // the `via` a take can carry — grep-derived over the engine and its two callers — each must be an event
   const VIA_EVENT = { message: 'post-ok', 'hand-over': 'post-ok', prompt: 'prompt-take' };
   const vias = new Set([...(CDS + ARS + SHS).matchAll(/via: '([a-z-]+)'/g)].map((m) => m[1]));
-  ok(vias.size >= 3 && [...vias].every((v) => VIA_EVENT[v] && EVENTS.includes(VIA_EVENT[v])), '(d) every via a take carries (' + [...vias].join(', ') + ') is a table event', [...vias].filter((v) => !VIA_EVENT[v]).join(', '));
+  ok(vias.size >= 3 && verdictOf([...vias].every((v) => VIA_EVENT[v] && EVENTS.includes(VIA_EVENT[v]))), '(d) every via a take carries (' + [...vias].join(', ') + ') is a table event', [...vias].filter((v) => !VIA_EVENT[v]).join(', '));
   // a TERMINAL record is never written again: a landed and a stashed entry, snapshotted, then every door run over the park
   for (const end of ['landed', 'stashed']) {
     const ctx = await enter(CD, 'waiting');
@@ -396,4 +396,4 @@ console.log('\n§5 the door census: every engine door is a table event, every ev
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

@@ -48,7 +48,7 @@ const cliIdentity = require('../src/cli-identity.js');
 const { isCliProcess } = cliIdentity;
 
 let pass = 0, fail = 0;
-const ok = (c, n, diag) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); if (diag) console.error('      ' + JSON.stringify(diag)); } };
+const ok = (c, n, diag) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); if (diag) console.error('      ' + JSON.stringify(diag)); } };
 const shq = (s) => `'${String(s).replace(/'/g, `'"'"'`)}'`;
 
 // A fake machine: records what it was asked to run and answers with SWEPT lines.
@@ -71,15 +71,15 @@ const mkHosts = (dev, { hostRec = null } = {}) => ({
 
 // ── 1. The script itself is machine-agnostic ──
 const script = writerSweepScript('rid-abc', shq);
-ok(script.includes("RID='rid-abc'"), 'script quotes the conversation id');
-ok(script.includes('/proc') && script.includes('lsof'), 'script covers Linux (/proc) AND macOS/BSD (lsof)');
-ok(script.includes('.claude/sessions') && script.includes('.vibespace'), 'script sweeps lock files and pipe-session metas');
+ok(verdictOf(script.includes("RID='rid-abc'")), 'script quotes the conversation id');
+ok(gateOf(script.includes('/proc')) && verdictOf(script.includes('lsof')), 'script covers Linux (/proc) AND macOS/BSD (lsof)');
+ok(gateOf(script.includes('.claude/sessions')) && verdictOf(script.includes('.vibespace')), 'script sweeps lock files and pipe-session metas');
 // Intent, not a count: a sweep is destructive, so NO kill may be silent. (The
 // count form broke the moment B-3185 collapsed three copy-pasted kill lines
 // into one function — the same assertion, expressed as a fact about the text.)
 for (const [name, s] of [['claude', script], ['codex', writerSweepScript('rid-abc', shq, { backend: 'codex' })]]) {
   const kills = s.split('\n').filter((l) => /kill -TERM/.test(l));
-  ok(kills.length >= 2 && kills.every((l) => l.includes('SWEPT:')), `${name}: every kill leg reports what it terminated (${kills.length} legs)`);
+  ok(kills.length >= 2 && verdictOf(kills.every((l) => l.includes('SWEPT:'))), `${name}: every kill leg reports what it terminated (${kills.length} legs)`);
 }
 // B-3185: the fd scan is BATCHED — one `ls -l` per 400 fd directories, never a
 // fork PER PROCESS. `/proc/[0-9]*` may therefore appear exactly once (inside
@@ -98,22 +98,22 @@ const PREFIX_SHAPES = {
 };
 const wholeArgvIdentity = /case\s+"\$\(\s*ps\s+-p\s+"?\$\w+"?\s+-o\s+args=[^)]*\)"\s+in\s+\*/;
 const perProcessLs = /ls -l "\$\w+\/fd"/;
-ok(wholeArgvIdentity.test(PREFIX_SHAPES['claude identity'])
-  && wholeArgvIdentity.test(PREFIX_SHAPES['codex identity'])
-  && perProcessLs.test(PREFIX_SHAPES['per-process ls']),
+ok(gateOf(wholeArgvIdentity.test(PREFIX_SHAPES['claude identity']))
+  && gateOf(wholeArgvIdentity.test(PREFIX_SHAPES['codex identity']))
+  && verdictOf(perProcessLs.test(PREFIX_SHAPES['per-process ls'])),
   'drift pin is SATISFIABLE: both regexes match the exact pre-B-3185 lines they exist to catch');
 // …and the pin is proven ON THE SHIPPED SCRIPT by REINTRODUCING the drift: a
 // guard that has never once been seen to go red is a claim, not a guard. The
 // splice anchors are asserted too, so a rename cannot quietly make these two
 // negative controls vacuous.
 const reIdentity = script.replace('vs_claude_kill() {\n', 'vs_claude_kill() {\n  ' + PREFIX_SHAPES['claude identity'] + '\n');
-ok(reIdentity !== script && wholeArgvIdentity.test(reIdentity),
+ok(reIdentity !== script && verdictOf(wholeArgvIdentity.test(reIdentity)),
   'NEGATIVE CONTROL: splicing the pre-B-3185 whole-argv identity line back into the shipped claude script turns the pin RED');
 const reLs = script.replace('vs_fd_scan() {\n', 'vs_fd_scan() {\n' + PREFIX_SHAPES['per-process ls'] + '\n');
-ok(reLs !== script && perProcessLs.test(reLs),
+ok(reLs !== script && verdictOf(perProcessLs.test(reLs)),
   'NEGATIVE CONTROL: splicing the pre-B-3185 per-process `ls` fork back in turns the batching pin RED');
 for (const [name, s] of [['claude', script], ['codex', writerSweepScript('rid-abc', shq, { backend: 'codex' })]]) {
-  ok((s.match(/\/proc\/\[0-9\]\*/g) || []).length === 1 && s.includes('vs_fd_scan'), `${name}: exactly ONE /proc walk, through the shared batched scan`);
+  ok((s.match(/\/proc\/\[0-9\]\*/g) || []).length === 1 && verdictOf(s.includes('vs_fd_scan')), `${name}: exactly ONE /proc walk, through the shared batched scan`);
   ok(!perProcessLs.test(s) && !wholeArgvIdentity.test(s), `${name}: no per-process ls fork and no whole-argv substring identity test`);
 }
 
@@ -186,10 +186,10 @@ if (fs.existsSync('/proc/self')) {
     '$0 ~ "^/proc/[0-9]+/fd:$" { p = substr($0, 7, length($0) - 10); next }');
   ok(stickyFns !== fdScanShellFns(), 'the sticky-`p` negative control really is the shipped awk with only that line reverted');
   const buggy = probe(narrowProc(stickyFns, ['$$', '$H']));
-  ok(fixed.pids.has(fixed.shellPid), 'awk attribution: the shell that really holds the fd IS found (the control is not vacuous — the scan reached it)');
+  ok(verdictOf(fixed.pids.has(fixed.shellPid)), 'awk attribution: the shell that really holds the fd IS found (the control is not vacuous — the scan reached it)');
   ok(fixed.pids.size === 1, 'awk attribution: NOBODY ELSE is named — an fd inherited by `ls` under /proc/self/fd is attributed to no pid at all',
     { named: [...fixed.pids], shell: fixed.shellPid });
-  ok(buggy.pids.size > fixed.pids.size && [...buggy.pids].some((x) => x !== buggy.shellPid),
+  ok(buggy.pids.size > fixed.pids.size && verdictOf([...buggy.pids].some((x) => x !== buggy.shellPid)),
     'NEGATIVE CONTROL: with the pre-fix sticky `p`, the SAME inherited fd is attributed to processes that never had it (one per chunk) — these are the pids the sweep would have SIGTERMed',
     { buggy: [...buggy.pids].slice(0, 8), shell: buggy.shellPid });
   fs.rmSync(adir, { recursive: true, force: true });
@@ -201,7 +201,7 @@ if (fs.existsSync('/proc/self')) {
   // script whose stderr the callers read. The whole compound is silenced now.
   const { spawnSync } = await import('node:child_process');
   const idFns = cliIdentityShellFns();
-  ok(/\{ tr [^{}]*< "\/proc\/\$1\/cmdline"[^{}]*\| sed[^{}]*; \} 2>\/dev\/null/.test(idFns),
+  ok(verdictOf(/\{ tr [^{}]*< "\/proc\/\$1\/cmdline"[^{}]*\| sed[^{}]*; \} 2>\/dev\/null/.test(idFns)),
     'vs_argv silences the WHOLE cmdline compound, not just `tr` (a failed redirect is a shell-level error)');
   const gone = Number(fs.readFileSync('/proc/sys/kernel/pid_max', 'utf8').trim()) + 1;
   const r = spawnSync('sh', ['-c', `${idFns}\nvs_argv ${gone} 0; vs_is_cli ${gone} claude`], { encoding: 'utf8', timeout: 20000 });
@@ -246,15 +246,15 @@ if (fs.existsSync('/proc/self')) {
   // WHERE the redirection sits, not how many stages follow it.)
   const preFixCompound = `tr '\\n' '\\001' < "${argvDir}/$1/cmdline" 2>/dev/null | tr '\\0' '\\n' | sed -n "$(($2 + 1))p" | tr '\\001' '\\n'`;
   const preFixed = rerooted.replace(shippedCompound, preFixCompound);
-  ok(rerooted !== idFns && !rerooted.includes('/proc/$1/cmdline') && rerooted.includes(shippedCompound),
+  ok(rerooted !== idFns && !rerooted.includes('/proc/$1/cmdline') && verdictOf(rerooted.includes(shippedCompound)),
     'the re-rooted copy changed ONLY the /proc path — the silencing structure under test is the shipped text');
-  ok(preFixed !== rerooted && preFixed.includes(preFixCompound),
+  ok(preFixed !== rerooted && verdictOf(preFixed.includes(preFixCompound)),
     'the negative control is that same line in its VERBATIM pre-fix spelling (redirect first, `2>/dev/null` on `tr` alone)');
   const runArgv = (fns) => spawnSync('sh', ['-c', `${fns}\nvs_argv 7 0`], { encoding: 'utf8', timeout: 20000 });
   const argvFixed = runArgv(rerooted), argvBuggy = runArgv(preFixed);
   ok((argvFixed.stderr || '') === '',
     'vs_argv is SILENT when the cmdline OPEN fails after `[ -r ]` passed (the pid-exits-mid-scan shape) — the whole compound is redirected', { stderr: argvFixed.stderr });
-  ok(/cannot open/.test(argvBuggy.stderr || ''),
+  ok(verdictOf(/cannot open/.test(argvBuggy.stderr || '')),
     'NEGATIVE CONTROL: the pre-fix spelling leaks the SHELL\'s `cannot open …` for that exact input — the noise this fix removed from every machine-wide scan', { stderr: argvBuggy.stderr });
   await new Promise((res) => srv.close(res));
   fs.rmSync(argvDir, { recursive: true, force: true });
@@ -275,19 +275,19 @@ try {
   await sweepWriters(mkHosts(fakeDevice('dial', { fail: true }), { hostRec: { transport: 'dial' } }), 'd1', 'rid-abc',
     { shq, execFileAsync: async () => { throw new Error('ssh must never be attempted for dial'); } });
 } catch (e) { threw = e; }
-ok(threw && /device link lost/.test(threw.message), 'dial failure surfaces the DEVICE error (no bogus ssh fallback)');
+ok(gateOf(threw) && verdictOf(/device link lost/.test(threw.message)), 'dial failure surfaces the DEVICE error (no bogus ssh fallback)');
 
 // ── 4. An ssh machine keeps its legacy per-op channel as the fallback ──
 let sshUsed = false;
 const rFallback = await sweepWriters(mkHosts(fakeDevice('ssh', { fail: true }), { hostRec: { transport: 'ssh' } }), 'h2', 'rid-abc',
   { shq, execFileAsync: async () => { sshUsed = true; return 'SWEPT:333\n'; } });
-ok(sshUsed && rFallback.via === 'ssh' && rFallback.swept[0] === '333', 'ssh host falls back to the per-op channel when the device is down');
+ok(gateOf(sshUsed) && rFallback.via === 'ssh' && rFallback.swept[0] === '333', 'ssh host falls back to the per-op channel when the device is down');
 
 // ── 5. LOCAL has no second channel — a down daemon must throw, not pretend ──
 threw = null;
 try { await sweepWriters(mkHosts(fakeDevice('local', { fail: true })), null, 'rid-abc', { shq, execFileAsync: async () => 'SWEPT:999' }); }
 catch (e) { threw = e; }
-ok(threw, 'local failure throws (caller decides to warn) instead of silently claiming a sweep');
+ok(verdictOf(threw), 'local failure throws (caller decides to warn) instead of silently claiming a sweep');
 
 // ── 6. Real script execution against real holder processes on this machine ──
 // Proves the fd-scan leg finds a holder AND that "is this the CLI?" is decided
@@ -498,14 +498,14 @@ if (fs.existsSync('/proc/self')) {
   const t0 = Date.now();
   const allHolding = () => !holders.some((h) => !fs.existsSync(h.ready)) && holdsIt(rTail.pid) && [...versFixtures, ...delFixtures].every(([, p]) => holdsIt(p.pid));
   while (!allHolding() && Date.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 20));
-  ok(holdsIt(rTail.pid), '`tail -f` fixture really has the transcript open (the negative control is not vacuous)');
+  ok(verdictOf(holdsIt(rTail.pid)), '`tail -f` fixture really has the transcript open (the negative control is not vacuous)');
   // Rung 3's three fixtures must be REACHABLE before the verdicts mean anything:
   // if the helper never had the fd, "it survived" says nothing at all.
   const versHold = versFixtures.filter(([, p]) => holdsIt(p.pid)).map(([n]) => n);
   ok(versHold.length === 3, 'all three rung-3 fixtures really hold the transcript open (one binary, three argv[0]s — the verdicts below are about the presentation, nothing else)', { holding: versHold });
   // …and they really are ONE image: /proc/<pid>/exe is byte-identical for all three.
   const exeOf = (pid) => { try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return ''; } };
-  ok(versFixtures.every(([, p]) => exeOf(p.pid) === versImg),
+  ok(verdictOf(versFixtures.every(([, p]) => exeOf(p.pid) === versImg)),
     'all three rung-3 fixtures report the SAME /proc/<pid>/exe (the exe test alone cannot tell them apart — only argv[0] can)',
     { exes: versFixtures.map(([n, p]) => [n, exeOf(p.pid)]) });
   // RUNG 3's NEGATIVE CONTROL, on the predicate itself and BEFORE the sweep
@@ -525,33 +525,33 @@ if (fs.existsSync('/proc/self')) {
   // A REVERT THAT DOES NOT PARSE ANSWERS "NO" FOR EVERYTHING — and a negative
   // control that silently answers NO looks exactly like a narrowing that works.
   const shParses = (t) => { try { execFileSync('sh', ['-n', '-c', t], { timeout: 20000 }); return true; } catch { return false; } };
-  ok(r1Ident !== shippedIdent && /versions\/\*\) return 0/.test(r1Ident) && !/vs_c_a0##/.test(r1Ident.slice(rungStart)) && shParses(r1Ident),
+  ok(r1Ident !== shippedIdent && gateOf(/versions\/\*\) return 0/.test(r1Ident)) && !/vs_c_a0##/.test(r1Ident.slice(rungStart)) && verdictOf(shParses(r1Ident)),
     'the rung-3 negative control is the shipped identity with ONLY rung 3 reverted to r1 — and it PARSES (a broken revert would answer NO for everything and fake a pass)');
-  ok(isCliWith(r1Ident, rHelperReexec.pid, 'claude'),
+  ok(verdictOf(isCliWith(r1Ident, rHelperReexec.pid, 'claude')),
     'NEGATIVE CONTROL: r1\'s rung 3 answers YES for the re-exec\'d helper — the widening, reproduced on a live process');
   ok(!isCliWith(shippedIdent, rHelperReexec.pid, 'claude'), 'the shipped rung answers NO for that same live helper');
-  ok(isCliWith(shippedIdent, wImageDirect.pid, 'claude') && isCliWith(shippedIdent, wPresentsAsCli.pid, 'claude'),
+  ok(gateOf(isCliWith(shippedIdent, wImageDirect.pid, 'claude')) && verdictOf(isCliWith(shippedIdent, wPresentsAsCli.pid, 'claude')),
     '…and still YES for both CLI presentations of the SAME image (the narrowing did not make rung 3 unreachable)');
   // ── THE `(deleted)` IMAGE (r3, defect 2), with its own negative control ──
   const exeRaw = (pid) => { try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return ''; } };
-  ok(delFixtures.every(([, p]) => / \(deleted\)$/.test(exeRaw(p.pid))) && delFixtures.every(([, p]) => holdsIt(p.pid)),
+  ok(gateOf(delFixtures.every(([, p]) => / \(deleted\)$/.test(exeRaw(p.pid)))) && verdictOf(delFixtures.every(([, p]) => holdsIt(p.pid))),
     'the auto-update fixtures really are in the state under test: /proc/<pid>/exe ends in ` (deleted)` AND they hold the transcript open',
     { exes: delFixtures.map(([n, p]) => [n, exeRaw(p.pid)]) });
-  ok(delFixtures.every(([, p]) => isCliWith(shippedIdent, p.pid, 'claude')),
+  ok(verdictOf(delFixtures.every(([, p]) => isCliWith(shippedIdent, p.pid, 'claude'))),
     'a LIVE claude whose image was replaced on disk is still the CLI to the shell rung (` (deleted)` stripped)',
     { verdicts: delFixtures.map(([n, p]) => [n, isCliWith(shippedIdent, p.pid, 'claude')]) });
-  ok(delFixtures.every(([, p]) => isCliProcess(p.pid, 'claude') === true),
+  ok(verdictOf(delFixtures.every(([, p]) => isCliProcess(p.pid, 'claude') === true)),
     '…and to the JS twin, which strips the same suffix');
   // The control strips the strip — same text, the comment + assignment removed.
   // Anchored on the ASSIGNMENT rather than its exact quoting, so re-quoting the
   // pattern (as the zsh fix below does) cannot silently turn this control into a
   // no-op that compares the shipped text against itself.
   const noStripIdent = shippedIdent.replace(/\n *# the kernel appends[\s\S]*?\n  vs_c_e=\$\{vs_c_e%[^\n]*\}/, '');
-  ok(noStripIdent !== shippedIdent && !/deleted/.test(noStripIdent) && shParses(noStripIdent),
+  ok(noStripIdent !== shippedIdent && !/deleted/.test(noStripIdent) && verdictOf(shParses(noStripIdent)),
     'the `(deleted)` negative control is the shipped identity with ONLY the strip removed — and it PARSES (a broken revert answers NO for everything and fakes a pass)');
-  ok(isCliWith(noStripIdent, wNative.pid, 'claude'),
+  ok(verdictOf(isCliWith(noStripIdent, wNative.pid, 'claude')),
     '…and it is NOT simply dead: without the strip, a normal claude (rung 1) still answers YES');
-  ok(delFixtures.every(([, p]) => !isCliWith(noStripIdent, p.pid, 'claude')),
+  ok(verdictOf(delFixtures.every(([, p]) => !isCliWith(noStripIdent, p.pid, 'claude'))),
     'NEGATIVE CONTROL: without the strip BOTH exe rungs miss the very process the sweep exists to stop — the CLI that was auto-updated mid-session',
     { verdicts: delFixtures.map(([n, p]) => [n, isCliWith(noStripIdent, p.pid, 'claude')]) });
 
@@ -561,7 +561,7 @@ if (fs.existsSync('/proc/self')) {
   const argv0Of = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0] || ''; } catch { return ''; } };
   const tNl = Date.now();
   while (nlFixtures.some(([, p]) => !argv0Of(p.pid).includes('\n')) && Date.now() - tNl < 10000) await new Promise((r) => setTimeout(r, 20));
-  ok(nlFixtures.every(([, p]) => argv0Of(p.pid).includes('\n')),
+  ok(verdictOf(nlFixtures.every(([, p]) => argv0Of(p.pid).includes('\n'))),
     'the newline fixtures really carry a newline INSIDE argv[0] (read back out of /proc — the state under test, not a description of it)',
     { argv0s: nlFixtures.map(([n, p]) => [n, JSON.stringify(argv0Of(p.pid))]) });
   // The control is the shipped text with ONLY the /proc reader reverted to the
@@ -569,17 +569,17 @@ if (fs.existsSync('/proc/self')) {
   const R4_ARGV_NEW = `tr '\\n' '\\001' < "/proc/$1/cmdline" | tr '\\0' '\\n' | sed -n "$(($2 + 1))p" | tr '\\001' '\\n'`;
   const R4_ARGV_OLD = `tr '\\0' '\\n' < "/proc/$1/cmdline" | sed -n "$(($2 + 1))p"`;
   const preR4Ident = shippedIdent.replace(R4_ARGV_NEW, () => R4_ARGV_OLD);
-  ok(preR4Ident !== shippedIdent && !preR4Ident.includes(R4_ARGV_NEW) && shParses(preR4Ident),
+  ok(preR4Ident !== shippedIdent && !preR4Ident.includes(R4_ARGV_NEW) && verdictOf(shParses(preR4Ident)),
     'the newline negative control is the shipped identity with ONLY the pre-r4 `vs_argv` /proc reader put back — and it PARSES (a broken revert answers NO for everything and fakes a pass)');
-  ok(isCliWith(preR4Ident, wNative.pid, 'claude') && !isCliWith(preR4Ident, rTail.pid, 'claude'),
+  ok(gateOf(isCliWith(preR4Ident, wNative.pid, 'claude')) && !isCliWith(preR4Ident, rTail.pid, 'claude'),
     '…and it is NOT simply dead: the pre-r4 reader still answers YES for a normal claude and NO for `tail`');
-  ok(nlFixtures.every(([, p, want]) => isCliProcess(p.pid, 'claude') === want),
+  ok(verdictOf(nlFixtures.every(([, p, want]) => isCliProcess(p.pid, 'claude') === want)),
     'the JS twin reads the NUL-separated record: `…/claude<LF>…/tail` is NOT the CLI, `…/dir<LF>name/claude` IS',
     { js: nlFixtures.map(([n, p]) => [n, isCliProcess(p.pid, 'claude')]) });
-  ok(nlFixtures.every(([, p, want]) => isCliWith(preR4Ident, p.pid, 'claude') !== want),
+  ok(verdictOf(nlFixtures.every(([, p, want]) => isCliWith(preR4Ident, p.pid, 'claude') !== want)),
     'NEGATIVE CONTROL: the pre-r4 shell answers the OPPOSITE of the JS twin on BOTH fixtures — it would have SIGTERMed a `tail` reader and spared a real writer, on the same live pids',
     { preR4: nlFixtures.map(([n, p]) => [n, isCliWith(preR4Ident, p.pid, 'claude')]) });
-  ok(nlFixtures.every(([, p, want]) => isCliWith(shippedIdent, p.pid, 'claude') === want),
+  ok(verdictOf(nlFixtures.every(([, p, want]) => isCliWith(shippedIdent, p.pid, 'claude') === want)),
     'the SHIPPED shell now agrees with the JS twin on both — "the Nth line" is "the Nth NUL-record" in either spelling');
 
   // …and the TRAILING half of the same defect (`$(…)` eats trailing newlines).
@@ -589,27 +589,27 @@ if (fs.existsSync('/proc/self')) {
     ['vs_cap vs_argv "$1" "$vs_c_i"\n        vs_c_a=$vs_c_v', 'vs_c_a=$(vs_argv "$1" "$vs_c_i")'],
     ['vs_cap readlink "/proc/$1/exe"\n  vs_c_e=$vs_c_v', 'vs_c_e=$(readlink "/proc/$1/exe" 2>/dev/null)'],
   ];
-  ok(CAPS.every(([now]) => shippedIdent.includes(now)),
+  ok(verdictOf(CAPS.every(([now]) => shippedIdent.includes(now))),
     'every capture the trailing-bytes fix protects is present in the SHIPPED text under the exact spelling the control reverts (the substitution cannot silently miss one)');
   const preCapIdent = CAPS.reduce((t, [now, was]) => t.replace(now, () => was), shippedIdent);
-  ok(preCapIdent !== shippedIdent && !/vs_cap (vs_argv|readlink)/.test(preCapIdent) && shParses(preCapIdent),
+  ok(preCapIdent !== shippedIdent && !/vs_cap (vs_argv|readlink)/.test(preCapIdent) && verdictOf(shParses(preCapIdent)),
     'the trailing-bytes negative control is the shipped identity with ONLY those three captures put back — no `vs_cap` call survives, and it PARSES');
-  ok(isCliWith(preCapIdent, wNative.pid, 'claude') && !isCliWith(preCapIdent, rTail.pid, 'claude'),
+  ok(gateOf(isCliWith(preCapIdent, wNative.pid, 'claude')) && !isCliWith(preCapIdent, rTail.pid, 'claude'),
     '…and it is NOT simply dead: the pre-vs_cap captures still answer YES for a normal claude and NO for `tail`');
   const tCap = Date.now();
   const capReady = () => argv0Of(rArgvTrailNl.pid).endsWith('\n')
     && argv0Of(rArgvTrailCtl.pid).endsWith(String.fromCharCode(1))
     && exeOf(rExeTrailNl.pid).endsWith('\n');
   while (!capReady() && Date.now() - tCap < 10000) await new Promise((r) => setTimeout(r, 20));
-  ok(capReady(),
+  ok(verdictOf(capReady()),
     'the trailing-byte fixtures really END in the byte under test — argv[0] in LF / in \\001, and an exe PATH in LF (all read back out of /proc)',
     { argv0s: capFixtures.map(([n, p]) => [n, JSON.stringify(argv0Of(p.pid))]), exe: JSON.stringify(exeOf(rExeTrailNl.pid)) });
-  ok(capFixtures.every(([, p]) => isCliProcess(p.pid, 'claude') === false),
+  ok(verdictOf(capFixtures.every(([, p]) => isCliProcess(p.pid, 'claude') === false)),
     'THE identity says NO to all three: a name that ends in a byte the CLI\'s name does not carry is a different name');
-  ok(capFixtures.every(([, p]) => isCliWith(preCapIdent, p.pid, 'claude') === true),
+  ok(verdictOf(capFixtures.every(([, p]) => isCliWith(preCapIdent, p.pid, 'claude') === true)),
     'NEGATIVE CONTROL: without vs_cap the shell says YES to all three — `$(…)` ate the trailing byte, so the sweep and the remote Terminate would SIGTERM a process THE identity refuses (and the \\001 residue the code comment called harmless was not)',
     { preCap: capFixtures.map(([n, p]) => [n, isCliWith(preCapIdent, p.pid, 'claude')]) });
-  ok(capFixtures.every(([, p]) => isCliWith(shippedIdent, p.pid, 'claude') === false),
+  ok(verdictOf(capFixtures.every(([, p]) => isCliWith(shippedIdent, p.pid, 'claude') === false)),
     'the SHIPPED shell agrees with the JS twin on all three — the capture preserves the word, including its last byte');
 
   // ── THE SHELL THAT RUNS THIS TEXT IS NOT `sh` (r3 round 2) ────────────────
@@ -635,7 +635,7 @@ if (fs.existsSync('/proc/self')) {
   const shellProbe = [...delFixtures, ...nlFixtures.map(([n, p]) => [n, p]), ...capFixtures, ['w-native', wNative], ['r-helper-reexec', rHelperReexec]];
   const verdictsUnder = (argv, fns) => shellProbe.map(([n, p]) => `${n}=${isCliUnder(argv, fns, p.pid, 'claude')}`).join(',');
   const shBaseline = verdictsUnder(['/bin/sh'], shippedIdent);
-  ok(/vs_c_e=\$\{vs_c_e%'[^']* \(deleted\)[^']*'\}|vs_c_e=\$\{vs_c_e%"[^"]* \(deleted\)[^"]*"\}|\\\(deleted\\\)/.test(shippedIdent),
+  ok(verdictOf(/vs_c_e=\$\{vs_c_e%'[^']* \(deleted\)[^']*'\}|vs_c_e=\$\{vs_c_e%"[^"]* \(deleted\)[^"]*"\}|\\\(deleted\\\)/.test(shippedIdent)),
     'the ` (deleted)` pattern is QUOTED in the shipped text — unquoted, `(…)` is a glob GROUP in zsh and the strip silently does nothing');
   const shellDiff = shells.filter(([, argv]) => verdictsUnder(argv, shippedIdent) !== shBaseline);
   ok(shellDiff.length === 0,
@@ -645,7 +645,7 @@ if (fs.existsSync('/proc/self')) {
   // or the parity above is agreement among shells that all behave like `sh`.
   const zsh = shells.find(([n]) => n === 'zsh');
   const unquotedIdent = shippedIdent.replace(/vs_c_e=\$\{vs_c_e%'( \(deleted\))'\}/, 'vs_c_e=${vs_c_e%$1}');
-  ok(unquotedIdent !== shippedIdent && shParses(unquotedIdent) && verdictsUnder(['/bin/sh'], unquotedIdent) === shBaseline,
+  ok(unquotedIdent !== shippedIdent && gateOf(shParses(unquotedIdent)) && verdictsUnder(['/bin/sh'], unquotedIdent) === shBaseline,
     'the zsh negative control is the shipped text with ONLY the quotes removed — it PARSES and is INDISTINGUISHABLE under `sh` (which is why every sh-only test stayed green)');
   if (!zsh) console.log('  · zsh absent — the cross-shell negative control below is vacuous here (it is the shell that discriminates)');
   ok(!zsh || verdictsUnder(zsh[1], unquotedIdent) !== shBaseline,
@@ -709,28 +709,28 @@ if (fs.existsSync('/proc/self')) {
   // not by a ready file — they are `sh`, not node
   const wasSweptPid = (p) => swept.includes(p.pid) && !alive(p.pid);
   const survivedPid = (p) => !swept.includes(p.pid) && alive(p.pid);
-  ok(wasSwept('w-native', wNative), 'WRITER swept: a native `…/bin/claude` holder (argv[0] basename) — positive control that the scan reached the holder at all', { swept });
-  ok(wasSwept('w-npm', wNpm), 'WRITER swept: `node …/@anthropic-ai/claude-code/cli.js` (the npm entry point)', { swept });
-  ok(wasSwept('w-shim', wShim), 'WRITER swept: `node <prefix>/bin/claude` (the shebang bin shim)', { swept });
-  ok(!swept.includes(rTail.pid) && alive(rTail.pid), 'READER survives: `tail -f <HOME>/.claude/projects/…/<id>.jsonl` is NOT a transcript writer (B-3185)', { swept, pid: rTail.pid });
-  ok(survived('r-worktree', rWorktree), 'READER survives: a process running from a path under .claude/worktrees/ (the suite\'s own self-kill shape)', { swept });
-  ok(survived('r-othercli', rOtherCli), 'READER survives: a `cli.js` that is not under a claude package', { swept });
-  ok(survived('r-neutral', rNeutral), 'READER survives: a neutral `node -e` holder', { swept });
+  ok(verdictOf(wasSwept('w-native', wNative)), 'WRITER swept: a native `…/bin/claude` holder (argv[0] basename) — positive control that the scan reached the holder at all', { swept });
+  ok(verdictOf(wasSwept('w-npm', wNpm)), 'WRITER swept: `node …/@anthropic-ai/claude-code/cli.js` (the npm entry point)', { swept });
+  ok(verdictOf(wasSwept('w-shim', wShim)), 'WRITER swept: `node <prefix>/bin/claude` (the shebang bin shim)', { swept });
+  ok(!swept.includes(rTail.pid) && verdictOf(alive(rTail.pid)), 'READER survives: `tail -f <HOME>/.claude/projects/…/<id>.jsonl` is NOT a transcript writer (B-3185)', { swept, pid: rTail.pid });
+  ok(verdictOf(survived('r-worktree', rWorktree)), 'READER survives: a process running from a path under .claude/worktrees/ (the suite\'s own self-kill shape)', { swept });
+  ok(verdictOf(survived('r-othercli', rOtherCli)), 'READER survives: a `cli.js` that is not under a claude package', { swept });
+  ok(verdictOf(survived('r-neutral', rNeutral)), 'READER survives: a neutral `node -e` holder', { swept });
   ok(!selfTermed && !swept.includes(process.pid), 'the SUITE ITSELF holds the transcript open and is never swept', { swept, pid: process.pid });
   // RUNG 3, both directions — same image, different presentation.
-  ok(wasSweptPid(wImageDirect), 'RUNG 3 WRITER swept: exe under `<name>/versions/`, argv[0] IS that image (a wrapper\'s `exec "$IMG"` — nothing renamed)', { swept });
-  ok(wasSweptPid(wPresentsAsCli), 'RUNG 3 WRITER swept: the same image behind a launcher argv[0] that PRESENTS as the CLI (`…/claude-native`)', { swept });
-  ok(survivedPid(rHelperReexec), 'RUNG 3 READER survives: the same image re-exec\'d as a HELPER (argv[0] `ugrep`) — the measured shape r1 would have SIGTERMed as a transcript writer', { swept });
-  ok(wasSweptPid(wDelVersions) && wasSweptPid(wDelBasename),
+  ok(verdictOf(wasSweptPid(wImageDirect)), 'RUNG 3 WRITER swept: exe under `<name>/versions/`, argv[0] IS that image (a wrapper\'s `exec "$IMG"` — nothing renamed)', { swept });
+  ok(verdictOf(wasSweptPid(wPresentsAsCli)), 'RUNG 3 WRITER swept: the same image behind a launcher argv[0] that PRESENTS as the CLI (`…/claude-native`)', { swept });
+  ok(verdictOf(survivedPid(rHelperReexec)), 'RUNG 3 READER survives: the same image re-exec\'d as a HELPER (argv[0] `ugrep`) — the measured shape r1 would have SIGTERMed as a transcript writer', { swept });
+  ok(gateOf(wasSweptPid(wDelVersions)) && verdictOf(wasSweptPid(wDelBasename)),
     'AUTO-UPDATE WRITERS swept: both `(deleted)`-image holders (exe under `<name>/versions/`, and exe basename `claude`) — the CLI whose binary was replaced mid-session is still a writer', { swept });
   // THE SUITE'S OWN SHAPE, run rather than described (r2, defect 5).
-  ok(absArgv.includes('.claude') && !relArgv.includes('.claude'),
+  ok(gateOf(absArgv.includes('.claude')) && !relArgv.includes('.claude'),
     'the two suite-copy legs really are the two argv shapes: absolute carries `.claude`, relative (what `npm run ci` types) carries none',
     { absArgv, relArgv });
-  ok(survived('self-abs', selfAbs), 'READER survives: a COPY of this suite run BY ABSOLUTE PATH out of a `.claude/worktrees/` checkout — the exact argv that SIGTERMed the suite pre-B-3185', { swept });
-  ok(survived('self-rel', selfRel), 'READER survives: the same copy run RELATIVELY from that checkout (`node scripts/test-writer-sweep.mjs`, the shape the gate types)', { swept });
-  ok(swept.includes(lockWriter.pid) && !alive(lockWriter.pid), 'LOCK-FILE leg: a claude named by its own ~/.claude/sessions/<pid>.json is swept even though it holds no fd (the leg that reaches a REAL live claude)', { swept });
-  ok(!swept.includes(lockStale.pid) && alive(lockStale.pid), 'LOCK-FILE leg: a STALE lock file whose pid was reused by something that is not claude kills nothing', { swept });
+  ok(verdictOf(survived('self-abs', selfAbs)), 'READER survives: a COPY of this suite run BY ABSOLUTE PATH out of a `.claude/worktrees/` checkout — the exact argv that SIGTERMed the suite pre-B-3185', { swept });
+  ok(verdictOf(survived('self-rel', selfRel)), 'READER survives: the same copy run RELATIVELY from that checkout (`node scripts/test-writer-sweep.mjs`, the shape the gate types)', { swept });
+  ok(gateOf(swept.includes(lockWriter.pid)) && !alive(lockWriter.pid), 'LOCK-FILE leg: a claude named by its own ~/.claude/sessions/<pid>.json is swept even though it holds no fd (the leg that reaches a REAL live claude)', { swept });
+  ok(!swept.includes(lockStale.pid) && verdictOf(alive(lockStale.pid)), 'LOCK-FILE leg: a STALE lock file whose pid was reused by something that is not claude kills nothing', { swept });
   console.log(`  · fd scan + sweep wall time: ${scanMs}ms over ${execFileSync('sh', ['-c', 'ls -d /proc/[0-9]* 2>/dev/null | wc -l'], { encoding: 'utf8' }).trim()} processes`);
   fs.closeSync(selfFd);
   process.off('SIGTERM', onTerm);
@@ -768,18 +768,18 @@ if (fs.existsSync('/proc/self')) {
 // script must stay byte-identical (every existing caller passes no backend).
 {
   const codexScript = writerSweepScript('01a0338c-b464-7ed3-8c11-bfa028cb0e2d', shq, { backend: 'codex', protectSids: ['sess-3-1787571254232'] });
-  ok(codexScript.includes('/rollout-.*-$RID.jsonl') && codexScript.includes('.codex/sessions') && codexScript.includes('lsof'), 'codex script scans open rollout files (/proc fd leg + lsof leg)');
-  ok(codexScript.includes('*codex*resume*"$RID"*') && codexScript.includes('CODEX_WEBUI_RESUME_ID=$RID'), 'codex script has the argv leg (external `codex resume <id>` TUI + orphaned wrapper)');
-  ok(codexScript.includes("PROTECT='sess-3-1787571254232'") && codexScript.includes('CLAUDE_WEBUI_SESSION_ID='), 'protect list reaches the script and is matched on the holder\'s CLAUDE_WEBUI_SESSION_ID');
-  ok(codexScript.includes('VS_WRITER_SWEEP'), 'the sweep shell self-skip sentinel is present (its own argv carries RID)');
+  ok(gateOf(codexScript.includes('/rollout-.*-$RID.jsonl')) && gateOf(codexScript.includes('.codex/sessions')) && verdictOf(codexScript.includes('lsof')), 'codex script scans open rollout files (/proc fd leg + lsof leg)');
+  ok(gateOf(codexScript.includes('*codex*resume*"$RID"*')) && verdictOf(codexScript.includes('CODEX_WEBUI_RESUME_ID=$RID')), 'codex script has the argv leg (external `codex resume <id>` TUI + orphaned wrapper)');
+  ok(gateOf(codexScript.includes("PROTECT='sess-3-1787571254232'")) && verdictOf(codexScript.includes('CLAUDE_WEBUI_SESSION_ID=')), 'protect list reaches the script and is matched on the holder\'s CLAUDE_WEBUI_SESSION_ID');
+  ok(verdictOf(codexScript.includes('VS_WRITER_SWEEP')), 'the sweep shell self-skip sentinel is present (its own argv carries RID)');
   ok(!codexScript.includes('*claude*'), 'codex script never kills claude processes');
-  ok(codexScript.includes('.vibespace') && codexScript.includes('vibespace-remote-keeper'), 'shared pipe-session + keeper legs stay in the codex script');
-  ok(writerSweepScript('x', shq, { backend: 'codex', protectSids: ['ok-1', 'bad sid; rm -rf /'] }).includes("PROTECT='ok-1'"), 'malformed protect ids are dropped before they reach the shell');
+  ok(gateOf(codexScript.includes('.vibespace')) && verdictOf(codexScript.includes('vibespace-remote-keeper')), 'shared pipe-session + keeper legs stay in the codex script');
+  ok(verdictOf(writerSweepScript('x', shq, { backend: 'codex', protectSids: ['ok-1', 'bad sid; rm -rf /'] }).includes("PROTECT='ok-1'")), 'malformed protect ids are dropped before they reach the shell');
   ok(writerSweepScript('rid-abc', shq, { backend: 'claude' }) === writerSweepScript('rid-abc', shq), 'backend defaults to claude — the claude script is unchanged for every existing caller');
   const l = fakeDevice('local'), r = fakeDevice('remote');
   await sweepWriters(mkHosts(l), null, 'tid-1', { shq, backend: 'codex', protectSids: ['s1'] });
   await sweepWriters(mkHosts(r, { hostRec: { transport: 'ssh' } }), 'h1', 'tid-1', { shq, backend: 'codex', protectSids: ['s1'] });
-  ok(l.calls[0].script === r.calls[0].script && l.calls[0].script.includes("PROTECT='s1'"), 'codex: local and remote receive a BYTE-IDENTICAL script (one implementation)');
+  ok(l.calls[0].script === r.calls[0].script && verdictOf(l.calls[0].script.includes("PROTECT='s1'")), 'codex: local and remote receive a BYTE-IDENTICAL script (one implementation)');
 }
 
 // ── 9. Real codex holders on this machine (Linux /proc). Fixture shapes are
@@ -824,26 +824,26 @@ if (fs.existsSync('/proc/self')) {
 
   const h1 = holder(rollout);
   await sleep(300);
-  ok(runSweep().includes(String(h1.pid)), `an external codex app-server holding rollout-*-<threadId>.jsonl open is swept (SWEPT:${h1.pid})`);
+  ok(verdictOf(runSweep().includes(String(h1.pid))), `an external codex app-server holding rollout-*-<threadId>.jsonl open is swept (SWEPT:${h1.pid})`);
   ok((await exited(h1)) === 'SIGTERM', 'the holder actually received SIGTERM');
   ok(runSweep().length === 0, 'released → the sweep finds nothing (clean)');
 
   const h2 = holder(rollout, { CLAUDE_WEBUI_SESSION_ID: 'sess-live-1' });
   await sleep(300);
-  ok(!runSweep({ protectSids: ['sess-live-1'] }).includes(String(h2.pid)) && alive(h2.pid), 'a holder under a LIVE VibeSpace codex session (protect list) is NEVER swept');
-  ok(runSweep({ protectSids: ['sess-other'] }).includes(String(h2.pid)), 'the same holder IS swept once its session is not live (protect mismatch)');
+  ok(!runSweep({ protectSids: ['sess-live-1'] }).includes(String(h2.pid)) && verdictOf(alive(h2.pid)), 'a holder under a LIVE VibeSpace codex session (protect list) is NEVER swept');
+  ok(verdictOf(runSweep({ protectSids: ['sess-other'] }).includes(String(h2.pid))), 'the same holder IS swept once its session is not live (protect mismatch)');
   await exited(h2);
 
   const h3 = note(spawn(process.execPath, ['-e', idle, 'codex', 'resume', tid], { stdio: 'ignore' }));
   await sleep(300);
-  ok(runSweep().includes(String(h3.pid)), 'a `codex resume <threadId>` argv (external TUI) is swept by the argv leg');
+  ok(verdictOf(runSweep().includes(String(h3.pid))), 'a `codex resume <threadId>` argv (external TUI) is swept by the argv leg');
   await exited(h3);
 
   const zst = rollout + '.zst';
   fs.writeFileSync(zst, 'zst');
   const h4 = holder(zst);
   await sleep(300);
-  ok(runSweep().includes(String(h4.pid)), 'an open rollout-*-<threadId>.jsonl.zst (codex ≥0.153 compression) holder is swept');
+  ok(verdictOf(runSweep().includes(String(h4.pid))), 'an open rollout-*-<threadId>.jsonl.zst (codex ≥0.153 compression) holder is swept');
   await exited(h4);
 
   const h5 = holder(rollout, {}, process.execPath);
@@ -852,13 +852,13 @@ if (fs.existsSync('/proc/self')) {
   const h5b = note(spawn('tail', ['-f', rollout], { stdio: 'ignore' }));
   await sleep(300);
   const sweptRun = runSweep();
-  ok(!sweptRun.includes(String(h5.pid)) && alive(h5.pid), 'a NON-codex holder of the rollout is never killed (executable guard)');
-  ok(!sweptRun.includes(String(h5b.pid)) && alive(h5b.pid), '`tail -f <HOME>/.codex/sessions/…/rollout-….jsonl` is never killed (B-3185)');
+  ok(!sweptRun.includes(String(h5.pid)) && verdictOf(alive(h5.pid)), 'a NON-codex holder of the rollout is never killed (executable guard)');
+  ok(!sweptRun.includes(String(h5b.pid)) && verdictOf(alive(h5b.pid)), '`tail -f <HOME>/.codex/sessions/…/rollout-….jsonl` is never killed (B-3185)');
   h5.kill('SIGKILL'); h5b.kill('SIGKILL');
 
   const h6 = holder(rollout);
   await sleep(300);
-  ok(!runScript(writerSweepScript(tid, shq)).includes(String(h6.pid)) && alive(h6.pid), 'the CLAUDE script never sweeps a codex holder (backend legs are disjoint)');
+  ok(!runScript(writerSweepScript(tid, shq)).includes(String(h6.pid)) && verdictOf(alive(h6.pid)), 'the CLAUDE script never sweeps a codex holder (backend legs are disjoint)');
   h6.kill('SIGKILL');
   await exited(h6);
 
@@ -903,13 +903,13 @@ if (fs.existsSync('/proc/self')) {
       return true;
     } catch { return false; }
   };
-  ok(retiredArgvIdentity(coMaster.pid),
+  ok(verdictOf(retiredArgvIdentity(coMaster.pid)),
     'NEGATIVE CONTROL: the RETIRED argv-regex identity answers YES for that very process — the false RUNNING the discovery twin used to produce');
   const coReal = holder(rollout);
   await sleep(300);
-  ok(runCo().includes(rollout),
+  ok(verdictOf(runCo().includes(rollout)),
     'discovery CO leg: a real codex holder of the rollout IS reported (positive control — the ported leg is not simply dead)');
-  ok(coStatuses.every((st) => st === 0),
+  ok(verdictOf(coStatuses.every((st) => st === 0)),
     'discovery CO leg EXITS 0 in every state — nothing found, a non-CLI holder found, a real holder found (it is the ssh script\'s LAST command and _ssh rejects non-zero)',
     { statuses: coStatuses });
   // NEGATIVE CONTROL for that, made DETERMINISTIC: which fd the live scan
@@ -928,7 +928,7 @@ if (fs.existsSync('/proc/self')) {
     'NEGATIVE CONTROL: strip the terminator and that same row makes the leg exit non-zero — which _ssh turns into "host unreachable, serving stale sessions" for the whole host',
     { status: noTerm.status });
   const rowReal = runCoRaw(oneRow(coReal.pid));
-  ok(rowReal.status === 0 && rowReal.out.includes('CO ' + rollout),
+  ok(rowReal.status === 0 && verdictOf(rowReal.out.includes('CO ' + rollout)),
     'one row naming the real codex holder: reported AND exits 0 (the substitution is not simply muting the loop)');
 
   // ── THE CO LEG'S OTHER BRANCH (r3): macOS/BSD has no /proc, so the leg has a
@@ -940,7 +940,7 @@ if (fs.existsSync('/proc/self')) {
   // /proc probe — leaving the loop, the identity test and the terminator as
   // shipped (the same technique as the vs_argv control in §1).
   const noProcCo = coLeg.replace('if [ -d /proc/self ]; then', 'if [ -d /proc/self/definitely-not-here ]; then');
-  ok(noProcCo !== coLeg && noProcCo.includes('lsof -Fpn') && !/\[ -d \/proc\/self \]/.test(noProcCo),
+  ok(noProcCo !== coLeg && gateOf(noProcCo.includes('lsof -Fpn')) && !/\[ -d \/proc\/self \]/.test(noProcCo),
     'the no-/proc control changed ONLY the /proc probe — the lsof body under test is the shipped text');
   const haveLsof = (() => { try { execFileSync('sh', ['-c', 'command -v lsof'], { stdio: 'ignore' }); return true; } catch { return false; } })();
   if (!haveLsof) console.log('  · lsof absent — the CO leg\'s no-/proc branch legs below are vacuous here');
@@ -954,7 +954,7 @@ if (fs.existsSync('/proc/self')) {
   const coKeeper = note(spawn(keeperBin, ['-c', 'read x'], { stdio: ['pipe', 'ignore', 'ignore', keeperFd] }));
   fs.closeSync(keeperFd);
   await sleep(300);
-  ok(!haveLsof || runCoNoProc(noProcCo).includes(rollout),
+  ok(!haveLsof || verdictOf(runCoNoProc(noProcCo).includes(rollout)),
     'the no-/proc branch REACHES the real codex holder — `vs_is_cli` is DEFINED there now (r1/r2 emitted it inside the `then` block, so this branch called an undefined function)',
     { reported: haveLsof ? runCoNoProc(noProcCo) : null });
   // …and the verbatim pre-r3 body, so the control is the old code itself.
@@ -962,12 +962,12 @@ if (fs.existsSync('/proc/self')) {
   // a REPLACER FUNCTION, not a replacement string: `$0`/`$&` in the pre-r3 awk
   // are String.replace substitution patterns and would be rewritten.
   const preR3Co = noProcCo.replace(/lsof -Fpn[\s\S]*?\n {10}done\n/, () => preR3Lsof + '\n');
-  ok(preR3Co !== noProcCo && preR3Co.includes("c ~ /codex/"),
+  ok(preR3Co !== noProcCo && verdictOf(preR3Co.includes("c ~ /codex/")),
     'the negative control is that branch in its VERBATIM pre-r3 spelling (lsof COMMAND field, substring-matched)');
   coReal.kill('SIGKILL');
   await exited(coReal);
   await sleep(300);
-  ok(!haveLsof || runCoNoProc(preR3Co).includes(rollout),
+  ok(!haveLsof || verdictOf(runCoNoProc(preR3Co).includes(rollout)),
     'NEGATIVE CONTROL: with only `codex-keeper` holding it, the pre-r3 branch calls the rollout RUNNING — a stopped thread that never stops showing as live on every mac host',
     { reported: haveLsof ? runCoNoProc(preR3Co) : null });
   ok(!haveLsof || runCoNoProc(noProcCo).length === 0,
@@ -1010,7 +1010,7 @@ if (fs.existsSync('/proc/self')) {
   ok(!(await drive(live, { backend: 'opencode', resume: true, resumeId: 'oc-other' })), 'opencode resume of a session nobody holds passes');
   ok(!(await drive(live, { backend: 'shell', resume: true, resumeId: 'oc-live' })), 'shell (no stream protocol) never enters the guard');
   const hit = await drive(live, { backend: 'codex', resume: true, resumeId: 'tid-live' });
-  ok(hit && hit.existingId === 'sess-1' && hit.existingName === 'codex live', 'codex resume of a LIVE thread is refused with the live session handed back');
+  ok(gateOf(hit) && hit.existingId === 'sess-1' && hit.existingName === 'codex live', 'codex resume of a LIVE thread is refused with the live session handed back');
   ok(!(await drive(live, { backend: 'codex', resume: true, resumeId: 'tid-live', fork: true })), 'codex FORK of a live thread passes (thread/fork mints a new id)');
   ok(!(await drive(live, { backend: 'codex', resume: true, resumeId: 'tid-other' })), 'codex resume of a thread nobody holds passes');
   ok(!(await drive(live, { backend: 'codex', resume: true, resumeId: 'tid-remote' })), 'host semantics: a thread live on h1 is not "live" for a local resume');
@@ -1020,15 +1020,15 @@ if (fs.existsSync('/proc/self')) {
 
   const src = ['src/ws-create.js', 'src/spawn/local.js', 'src/spawn/ssh.js', 'src/spawn/dial.js'].map((f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')).join('\n'); // the create path (lane dc-seams-server)
   ok(!/codex resume forks a new thread id by design \(not affected\)/.test(src), 'the FALSE "codex resume forks a new thread id" exemption is gone');
-  ok(/if \(capsOf\(backend\)\.streamProtocol && data\.resume && data\.resumeId && !data\.fork\)/.test(src), 'resume-already-live guard is gated on the harness caps row (no backend id list)');
+  ok(verdictOf(/if \(capsOf\(backend\)\.streamProtocol && data\.resume && data\.resumeId && !data\.fork\)/.test(src)), 'resume-already-live guard is gated on the harness caps row (no backend id list)');
   const sites = src.split('\n').filter((l) => /await sweepWriters\(/.test(l));
-  ok(sites.length >= 3 && sites.every((l) => /\.\.\.sweepOpts\(/.test(l)), `every sweep call site passes the backend + protect list via sweepOpts (${sites.length})`);
+  ok(sites.length >= 3 && verdictOf(sites.every((l) => /\.\.\.sweepOpts\(/.test(l))), `every sweep call site passes the backend + protect list via sweepOpts (${sites.length})`);
   const rstore = fs.readFileSync(new URL('../src/resume-store.js', import.meta.url), 'utf8');
-  ok(/const sweepOpts = \(hostId\) => writerSweepOpts\(backend, activeSessions, hostId\)/.test(src) && /\(es\.backend \|\| 'claude'\) === backend && \(es\.host \|\| null\) === \(hostId \|\| null\)/.test(rstore), 'protect list = live sessions of the SAME harness on the TARGET machine (resume-store.writerSweepOpts)');
+  ok(gateOf(/const sweepOpts = \(hostId\) => writerSweepOpts\(backend, activeSessions, hostId\)/.test(src)) && verdictOf(/\(es\.backend \|\| 'claude'\) === backend && \(es\.host \|\| null\) === \(hostId \|\| null\)/.test(rstore)), 'protect list = live sessions of the SAME harness on the TARGET machine (resume-store.writerSweepOpts)');
   ok(!/backend === '(claude|codex)'/.test(fs.readFileSync(new URL('../src/writer-sweep.js', import.meta.url), 'utf8')) && !/=== '(claude|codex)'/.test(rstore), 'writer-sweep.js / resume-store.js carry no harness id branch (dc-harness-store)');
-  ok(/&& hasWriterSweep\(backend\) && \/\^\[\\w-\]\+\$\/\.test\(data\.resumeId\) && hosts\)/.test(src), 'the LOCAL sweep gate admits every harness that declares store.writerSweep (codex included)');
+  ok(verdictOf(/&& hasWriterSweep\(backend\) && \/\^\[\\w-\]\+\$\/\.test\(data\.resumeId\) && hosts\)/.test(src)), 'the LOCAL sweep gate admits every harness that declares store.writerSweep (codex included)');
   const client = fs.readFileSync(new URL('../src/lib/session-lifecycle.js', import.meta.url), 'utf8');
-  ok(/resend: uiRow\(backend\)\.resumeResend && !!resumeId && !fork/.test(client), 'client re-sends codex resumes on reconnect (safe only because the guard now covers codex)');
+  ok(verdictOf(/resend: uiRow\(backend\)\.resumeResend && !!resumeId && !fork/.test(client)), 'client re-sends codex resumes on reconnect (safe only because the guard now covers codex)');
 }
 
 // ── 11. THE fd scan is ONE implementation (B-3185 wiring pin). boot-restore's
@@ -1057,17 +1057,17 @@ if (fs.existsSync('/proc/self')) {
   const wrongArgMax = /glob (also )?(already )?overflows ARG_MAX|glob .{0,40}ALREADY overflows ARG_MAX/;
   ok(![wsrc, boot, kbFile, kbBug].some((t) => wrongArgMax.test(t)),
     'the WRONG ARG_MAX rationale (a shell for-loop overflowing ARG_MAX) is gone from the code AND from both kb twins');
-  ok(/never reach(ed|es) execve/.test(wsrc),
+  ok(verdictOf(/never reach(ed|es) execve/.test(wsrc)),
     'the scan states the real reason instead: the for-loop glob never reached execve (its problem was the per-FD forks) — the restore holds no copy of it since B-b2d3 step 2');
-  ok(/EXECS `ls`/.test(wsrc) && /ARG_MAX/.test(wsrc),
+  ok(gateOf(/EXECS `ls`/.test(wsrc)) && verdictOf(/ARG_MAX/.test(wsrc)),
     'and the chunking is justified where it actually applies — `vs_fd_chunk` execs `ls`, so ITS argv is the one ARG_MAX bounds');
   ok(!/Both codex legs kill only `\*codex\*` cmdlines/.test(kbFile),
     'kb: the retired "both codex legs kill only *codex* cmdlines" claim is gone (identity is the EXECUTABLE since B-3185)');
   ok(!/live-conversation fd scan failed/.test(boot), 'the restore\'s «fd scan failed» line left with its scan (B-b2d3 step 2: no pair waits on it)');   // stale-pins: kept (the line's absence, on purpose)
   const fns = fdScanShellFns();
-  ok(fns.includes('vs_fd_scan') && fns.includes('vs_fd_pids') && fns.includes('/proc/self/fd'),
+  ok(gateOf(fns.includes('vs_fd_scan')) && gateOf(fns.includes('vs_fd_pids')) && verdictOf(fns.includes('/proc/self/fd')),
     'the shared scan exports both entry points and keeps the >1-operand guarantee `ls -l` needs for its headers');
-  ok(writerSweepScript('r', shq).includes(fns) && writerSweepScript('r', shq, { backend: 'codex' }).includes(fns),
+  ok(gateOf(writerSweepScript('r', shq).includes(fns)) && verdictOf(writerSweepScript('r', shq, { backend: 'codex' }).includes(fns)),
     'both backends embed the scan VERBATIM (no per-backend copy to drift)');
 }
 
@@ -1080,15 +1080,15 @@ if (fs.existsSync('/proc/self')) {
 {
   const { codexOpenRolloutsShell } = require('../src/hosts.js');
   const co = codexOpenRolloutsShell();
-  ok(co.includes(fdScanShellFns()) && co.includes(cliIdentityShellFns()),
+  ok(gateOf(co.includes(fdScanShellFns())) && verdictOf(co.includes(cliIdentityShellFns())),
     'discovery CO leg embeds THE shared batched scan AND THE shared identity test VERBATIM (one implementation, two call sites)');
-  ok(co.includes('vs_fd_scan "/rollout-') && co.includes('vs_is_cli "$copid" codex'),
+  ok(gateOf(co.includes('vs_fd_scan "/rollout-')) && verdictOf(co.includes('vs_is_cli "$copid" codex')),
     'the CO leg decides RUNNING by (shared scan → fd evidence) + (shared identity → is it the codex CLI)');
   // r3: the macOS/BSD branch survives the port AND is the SAME rule. `-Fpn`
   // (pid + name) feeding `vs_is_cli`, never `-Fcn` + `c ~ /codex/`; and the
   // shared function definitions are emitted ABOVE the `if`, or `vs_is_cli`
   // simply does not exist in the branch that needs it. Driven for real above.
-  ok(co.includes('lsof -Fpn') && !co.includes('lsof -Fcn') && !co.includes('c ~ /codex/'),
+  ok(gateOf(co.includes('lsof -Fpn')) && !co.includes('lsof -Fcn') && !co.includes('c ~ /codex/'),
     'the macOS/BSD lsof branch (no /proc) survives the port AND asks the shared identity — not lsof\'s COMMAND field');
   ok(co.indexOf(cliIdentityShellFns()) < co.indexOf('if [ -d /proc/self ]'),
     'the shared shell functions are defined BEFORE the /proc branch, so the lsof branch can call vs_is_cli at all');
@@ -1102,14 +1102,14 @@ if (fs.existsSync('/proc/self')) {
             for l in "$p"/fd/*; do t=$(readlink "$l" 2>/dev/null) || continue; case "$t" in "$HOME"/.codex/sessions/*rollout-*.jsonl|"$HOME"/.codex/sessions/*rollout-*.jsonl.zst) echo "CO $t";; esac; done
           done
         else`;
-  ok(perProcCmdlineFork.test(PRE_B3185_CO_LEG) && perFdReadlink.test(PRE_B3185_CO_LEG) && argvRegexIdentity.test(PRE_B3185_CO_LEG),
+  ok(gateOf(perProcCmdlineFork.test(PRE_B3185_CO_LEG)) && gateOf(perFdReadlink.test(PRE_B3185_CO_LEG)) && verdictOf(argvRegexIdentity.test(PRE_B3185_CO_LEG)),
     'NEGATIVE CONTROL: all three pins FIRE on the exact pre-B-3185 CO leg (git 3b928ca4^ src/hosts.js) — the pins can match the drift they name');
   ok(!perProcCmdlineFork.test(co) && !perFdReadlink.test(co) && !argvRegexIdentity.test(co),
     'and NONE of them fire on the shipped leg: no per-process fork pair, no per-FD readlink, no whole-argv identity');
   const hostsSrc = fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8');
-  ok(/\$\{codexOpenRolloutsShell\(\)\}/.test(hostsSrc) && !perFdReadlink.test(hostsSrc) && !argvRegexIdentity.test(hostsSrc),
+  ok(gateOf(/\$\{codexOpenRolloutsShell\(\)\}/.test(hostsSrc)) && !perFdReadlink.test(hostsSrc) && !argvRegexIdentity.test(hostsSrc),
     'WIRING PIN: the discovery script builds its CO leg from that one function, and no copy of the retired shapes is left anywhere in hosts.js');
-  ok(/require\('\.\/writer-sweep'\)/.test(hostsSrc) || /require\('\.\/writer-sweep\.js'\)/.test(hostsSrc),
+  ok(verdictOf(/require\('\.\/writer-sweep'\)/.test(hostsSrc)) || verdictOf(/require\('\.\/writer-sweep\.js'\)/.test(hostsSrc)),
     'hosts.js takes the scan + identity from the SHARED module (not a local re-implementation)');
 
   // THE TWIN IS GONE, AND STAYS GONE (r3, defect 1 — the standing sweep's whole
@@ -1133,13 +1133,13 @@ if (fs.existsSync('/proc/self')) {
   // can turn red is a pin the next author deletes.
   const codeOnly = (t) => t.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
   const factsCode = codeOnly(facts), identCode = codeOnly(identSrc);
-  ok(/function isCliProcess/.test(identSrc) && /function cliIdentityShellFns/.test(identSrc),
+  ok(gateOf(/function isCliProcess/.test(identSrc)) && verdictOf(/function cliIdentityShellFns/.test(identSrc)),
     'THE identity rule has ONE home: src/cli-identity.js carries the JS predicate AND the shell text');
   ok(cliIdentity.cliIdentityShellFns === cliIdentityShellFns,
     'writer-sweep RE-EXPORTS that shell text rather than keeping a copy (same function object)');
-  ok(/require\('\.\/cli-identity'\)/.test(sweepSrc) && /require\('\.\/cli-identity'\)/.test(facts),
+  ok(gateOf(/require\('\.\/cli-identity'\)/.test(sweepSrc)) && verdictOf(/require\('\.\/cli-identity'\)/.test(facts)),
     'WIRING PIN: both the sweep and discovery-facts take the identity from the shared module');
-  ok(/isCliProcess\(pid, 'claude'\)/.test(facts) && /isCliProcess\(pid, 'codex'\)/.test(facts),
+  ok(gateOf(/isCliProcess\(pid, 'claude'\)/.test(facts)) && verdictOf(/isCliProcess\(pid, 'codex'\)/.test(facts)),
     'discovery-facts asks the shared predicate for BOTH CLI names (the lock scan and the open-rollout scan)');
   // the three retired JS shapes, proven on the verbatim pre-r3 source
   const retiredCommIncludes = /comm\.includes\('claude'\)/;
@@ -1157,12 +1157,12 @@ function cmdlineLooksClaude(pid) {
 function isCodexCommandLine(cmdline = '') {
   return /(^|\\0|[\\/\\s])codex(\\0|\\s|$)/.test(String(cmdline || ''));
 }`;
-  ok(retiredCommIncludes.test(PRE_R3_FACTS) && retiredCmdlineIncludes.test(PRE_R3_FACTS) && retiredCodexArgvRegex.test(PRE_R3_FACTS),
+  ok(gateOf(retiredCommIncludes.test(PRE_R3_FACTS)) && gateOf(retiredCmdlineIncludes.test(PRE_R3_FACTS)) && verdictOf(retiredCodexArgvRegex.test(PRE_R3_FACTS)),
     'NEGATIVE CONTROL: all three JS pins FIRE on the exact pre-r3 discovery-facts text (git baa66775 src/discovery-facts.js) — pins that can match the drift they name');
   ok(!retiredCommIncludes.test(factsCode) && !retiredCmdlineIncludes.test(factsCode) && !retiredCodexArgvRegex.test(factsCode),
     'and NONE of them fire on the shipped discovery-facts CODE: no comm substring, no cmdline substring, no whole-argv codex regex');
   const identRequires = [...identSrc.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
-  ok(identRequires.length > 0 && identRequires.every((r) => !r.startsWith('.')),
+  ok(identRequires.length > 0 && verdictOf(identRequires.every((r) => !r.startsWith('.'))),
     `cli-identity stays dependency-free — node builtins only (${identRequires.join(', ')}) — because the daemon bundles discovery-facts, which now pulls it in`);
   // ONE assert either way — §13 checks the total against the number the kb
   // advertises, so a conditionally-present assert would make that number depend
@@ -1170,7 +1170,7 @@ function isCodexCommandLine(cmdline = '') {
   const agentdBundle = new URL('../data/bin/vibespace-agentd.js', import.meta.url);
   const bundleBuilt = fs.existsSync(agentdBundle);
   if (!bundleBuilt) console.log('  · daemon bundle not built in this tree — the carry pin below is vacuous (run `npm run build:agentd`)');
-  ok(!bundleBuilt || /isCliProcess/.test(fs.readFileSync(agentdBundle, 'utf8')),
+  ok(!bundleBuilt || verdictOf(/isCliProcess/.test(fs.readFileSync(agentdBundle, 'utf8'))),
     'the BUILT daemon bundle carries the shared predicate (the device snapshot answers identity the way this machine does)');
   // THE LINE THAT MUST NOT BE CROSSED, unchanged: discovery answers "RUNNING",
   // it never answers "who receives a SIGTERM".
@@ -1243,7 +1243,7 @@ if (fs.existsSync('/proc/self')) {
   const kReady = ({ p, expect }) => expect(kargv(p.pid));
   const tK = Date.now();
   while (kprocs.some((e) => !kReady(e)) && Date.now() - tK < 10000) await new Promise((r) => setTimeout(r, 20));
-  ok(kprocs.every((e) => kReady(e) && alive2(e.p)),
+  ok(verdictOf(kprocs.every((e) => kReady(e) && alive2(e.p))),
     'every kill-path fixture is live and has EXEC\'d its own argv (not the suite\'s, which a pre-exec read would have judged) before any verdict is taken',
     { argvs: kprocs.map((e) => kargv(e.p.pid).join(' ').slice(0, 60)) });
 
@@ -1260,31 +1260,31 @@ if (fs.existsSync('/proc/self')) {
   const retiredKillShell = (p) => `C=$(ps -p ${p} -o args= 2>/dev/null); case "$C" in *claude*|*codex*) kill -TERM ${p} && echo VS_OK;; "") echo VS_GONE;; *) echo VS_NOTAGENT;; esac`;
   const retiredSays = runKill(retiredKillShell(rVictim.pid));
   await new Promise((r) => setTimeout(r, 300));
-  ok(retiredSays.includes('VS_OK') && !alive2(rVictim),
+  ok(gateOf(retiredSays.includes('VS_OK')) && !alive2(rVictim),
     'NEGATIVE CONTROL: the pre-r4 remote script KILLS `tail -f …/.claude/projects/<id>.jsonl` and reports success — a reader terminated on a machine the user cannot see',
     { out: retiredSays });
   const shippedClaudePath = runKill(killPidShell(rClaudePath.pid));
   const shippedCodexPath = runKill(killPidShell(rCodexPath.pid));
   await new Promise((r) => setTimeout(r, 300));
-  ok(shippedClaudePath.includes('VS_NOTAGENT') && alive2(rClaudePath),
+  ok(gateOf(shippedClaudePath.includes('VS_NOTAGENT')) && verdictOf(alive2(rClaudePath)),
     'the shipped remote script REFUSES a pid whose argv merely NAMES a claude transcript, and the reader survives', { out: shippedClaudePath });
-  ok(shippedCodexPath.includes('VS_NOTAGENT') && alive2(rCodexPath),
+  ok(gateOf(shippedCodexPath.includes('VS_NOTAGENT')) && verdictOf(alive2(rCodexPath)),
     '…and the same for a codex rollout path (the retired rule matched `*codex*` there too)', { out: shippedCodexPath });
   const killedClaude = runKill(killPidShell(wClaude.pid));
   const killedCodex = runKill(killPidShell(wCodex.pid));
   await new Promise((r) => setTimeout(r, 300));
-  ok(killedClaude.includes('VS_OK') && !alive2(wClaude),
+  ok(gateOf(killedClaude.includes('VS_OK')) && !alive2(wClaude),
     'POSITIVE CONTROL: a REAL claude CLI is still terminated by the shipped script (the narrowing did not break Terminate)', { out: killedClaude });
-  ok(killedCodex.includes('VS_OK') && !alive2(wCodex),
+  ok(gateOf(killedCodex.includes('VS_OK')) && !alive2(wCodex),
     '…and a real codex CLI too (both names go through the shared identity)', { out: killedCodex });
   const deadPid = Number(fs.readFileSync('/proc/sys/kernel/pid_max', 'utf8').trim()) + 1;
-  ok(runKill(killPidShell(deadPid)).includes('VS_GONE'),
+  ok(verdictOf(runKill(killPidShell(deadPid)).includes('VS_GONE')),
     'a pid that is not there still answers VS_GONE — the caller\'s three outcomes are unchanged');
-  ok(killPidShell(4242).includes(cliIdentityShellFns()) && !/\*claude\*\|\*codex\*/.test(killPidShell(4242)),
+  ok(gateOf(killPidShell(4242).includes(cliIdentityShellFns())) && !/\*claude\*\|\*codex\*/.test(killPidShell(4242)),
     'the remote Terminate script embeds THE shared identity VERBATIM and carries no whole-argv case');
   let badPidRejected = false;
   try { killPidShell('7; kill -9 -1'); } catch { badPidRejected = true; }
-  ok(badPidRejected, 'the script builder rejects a non-integer pid AT the place that builds shell text (never "the caller validated it")');
+  ok(verdictOf(badPidRejected), 'the script builder rejects a non-integer pid AT the place that builds shell text (never "the caller validated it")');
 
   // …and the script through the METHOD that ships it. A builder used by a
   // method but referenced as a free identifier throws only when the METHOD RUNS
@@ -1304,7 +1304,7 @@ if (fs.existsSync('/proc/self')) {
   { const t = Date.now(); while ([rMethod, wMethod].some((p) => !kprocs.find((e) => e.p === p) || !kReady(kprocs.find((e) => e.p === p))) && Date.now() - t < 10000) await new Promise((r) => setTimeout(r, 20)); }
   let methodRefused = '';
   try { await hm.killRemotePid('h1', rMethod.pid); } catch (e) { methodRefused = e.message; }
-  ok(/not a claude\/codex process/.test(methodRefused) && alive2(rMethod),
+  ok(gateOf(/not a claude\/codex process/.test(methodRefused)) && verdictOf(alive2(rMethod)),
     'killRemotePid ITSELF (the shipped method, device link stubbed to run the script here) refuses the reader — the builder is really wired, not just exported', { methodRefused });
   const methodKilled = await hm.killRemotePid('h1', wMethod.pid).catch((e) => ({ error: e.message }));
   await new Promise((r) => setTimeout(r, 300));
@@ -1332,7 +1332,7 @@ if (fs.existsSync('/proc/self')) {
     { comm: (() => { try { return execFileSync('ps', ['-p', String(wNpmCli.pid), '-o', 'comm='], { encoding: 'utf-8' }).trim(); } catch { return '?'; } })() });
   const localReader = await callKill(rLocalPath.pid);
   await new Promise((r) => setTimeout(r, 200));
-  ok(localReader.code === 400 && /not a claude\/codex process/.test(localReader.body?.error || '') && alive2(rLocalPath),
+  ok(localReader.code === 400 && gateOf(/not a claude\/codex process/.test(localReader.body?.error || '')) && verdictOf(alive2(rLocalPath)),
     'LOCAL branch: a reader whose argv merely names a transcript is REFUSED (400) and survives', { got: localReader });
   const localNpm = await callKill(wNpmCli.pid);
   await new Promise((r) => setTimeout(r, 300));
@@ -1344,11 +1344,11 @@ if (fs.existsSync('/proc/self')) {
   const storeSrc = fs.readFileSync(new URL('../src/session-store.js', import.meta.url), 'utf8');
   const hostsSrc2 = fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8');
   const codeOnly2 = (t) => t.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*|#)/.test(l)).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
-  ok(/isCliProcess\(pid, 'claude'\)/.test(sessSrc) && /isCliProcess\(pid, 'codex'\)/.test(sessSrc) && !/isProcessClaude/.test(sessSrc),
+  ok(gateOf(/isCliProcess\(pid, 'claude'\)/.test(sessSrc)) && gateOf(/isCliProcess\(pid, 'codex'\)/.test(sessSrc)) && !/isProcessClaude/.test(sessSrc),
     'WIRING PIN: /api/kill-pid\'s local branch asks the shared predicate for BOTH names, and the comm-substring import is gone from the route module');
-  ok(/const cmd = killPidShell\(p\);/.test(hostsSrc2) && !/\*claude\*\|\*codex\*/.test(codeOnly2(hostsSrc2)),
+  ok(gateOf(/const cmd = killPidShell\(p\);/.test(hostsSrc2)) && !/\*claude\*\|\*codex\*/.test(codeOnly2(hostsSrc2)),
     'WIRING PIN: killRemotePid builds its script from killPidShell, and no copy of the retired whole-argv case survives in hosts.js CODE');
-  ok(/\*claude\*\|\*codex\*/.test(retiredKillShell(1234)) && /comm/.test(String(retiredComm)),
+  ok(gateOf(/\*claude\*\|\*codex\*/.test(retiredKillShell(1234))) && verdictOf(/comm/.test(String(retiredComm))),
     'NEGATIVE CONTROL: both pins name shapes that really exist — they FIRE on the verbatim pre-r4 remote line and on the retired comm rule');
   // The surviving comm twin is DISCOVERY-ONLY, and that is the whole record
   // r3 got wrong (it named "the local sweep's PID-reuse fallback" and missed
@@ -1357,7 +1357,7 @@ if (fs.existsSync('/proc/self')) {
   const asyncCallers = storeSrc.split('\n')
     .map((l, i) => ({ l, i }))
     .filter(({ l }) => /isProcessClaudeAsync\(/.test(l) && !/^async function|^\s*(\/\/|\*)/.test(l));
-  ok(asyncCallers.length === 1 && /return isProcessClaudeAsync\(pid\);/.test(asyncCallers[0].l),
+  ok(asyncCallers.length === 1 && verdictOf(/return isProcessClaudeAsync\(pid\);/.test(asyncCallers[0].l)),
     'the surviving `comm` twin has exactly ONE caller — isLockClaude\'s no-procStart fallback (a card label, never a kill)',
     { callers: asyncCallers.map((c) => c.l.trim()) });
   ok(!/isProcessClaude\b(?!Async)/.test(codeOnly2(storeSrc)),
@@ -1428,7 +1428,7 @@ echo
   const psFix = [['ps-nl-tail', psNlTail], ['ps-nl-cli', psNlCli], ['ps-plain', psPlain]];
   const pArgv0 = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0] || ''; } catch { return ''; } };
   { const t = Date.now(); while (psFix.some(([, p]) => !pArgv0(p.pid)) && Date.now() - t < 10000) await new Promise((r) => setTimeout(r, 20)); }
-  ok(psFix.every(([, p]) => !!pArgv0(p.pid)) && pArgv0(psNlTail.pid).includes('\n') && pArgv0(psNlCli.pid).includes('\n'),
+  ok(gateOf(psFix.every(([, p]) => !!pArgv0(p.pid))) && gateOf(pArgv0(psNlTail.pid).includes('\n')) && verdictOf(pArgv0(psNlCli.pid).includes('\n')),
     'the ps-rung fixtures are live and have EXEC\'d their own argv, two of them carrying a newline INSIDE argv[0] (read back out of /proc)',
     { argv0s: psFix.map(([n, p]) => [n, JSON.stringify(pArgv0(p.pid))]) });
   // THE STAND-IN IS THE POINT, SO IT IS ASSERTED: this box's `ps` cannot make
@@ -1438,7 +1438,7 @@ echo
     'MEASURED: this box\'s procps `ps -o args=` renders the embedded newline as a SPACE — one line — so the local `ps` cannot produce the multi-line blob the r4 flattening exists for (the stand-in below is not decoration)',
     { realPs: JSON.stringify(realPsOut) });
   const shimOut = spawnSync(shimPs, ['-p', String(psNlTail.pid), '-o', 'args='], { encoding: 'utf8' }).stdout || '';
-  ok(shimOut.trimEnd().split('\n').length === 2 && shimOut.startsWith(pArgv0(psNlTail.pid).split('\n')[0]),
+  ok(shimOut.trimEnd().split('\n').length === 2 && verdictOf(shimOut.startsWith(pArgv0(psNlTail.pid).split('\n')[0])),
     '…and the stand-in DOES — its blob is two lines built from the live process\'s own argv words (the control below has something to get wrong)',
     { shim: JSON.stringify(shimOut) });
   // (a) the re-root: BOTH /proc reads must miss, or rung 3 decides instead.
@@ -1449,11 +1449,11 @@ echo
   const SHIPPED_PS_LINE = `ps -p "$1" -o args= 2>/dev/null | tr '\\n' ' ' | awk -v i="$(($2 + 1))" '{ print $i }'`;
   // git 77ac0825:src/cli-identity.js — the verbatim pre-r4 fallback line.
   const PRE_R4_PS_LINE = `ps -p "$1" -o args= 2>/dev/null | awk -v i="$(($2 + 1))" '{ print $i }'`;
-  ok(noProcIdent !== psIdent && !noProcIdent.includes('/proc/$1/') && noProcIdent.includes(SHIPPED_PS_LINE),
+  ok(noProcIdent !== psIdent && !noProcIdent.includes('/proc/$1/') && verdictOf(noProcIdent.includes(SHIPPED_PS_LINE)),
     'the no-/proc copy changed ONLY the /proc root — the `ps` fallback under test is the SHIPPED line, byte for byte');
   const preR4Ps = noProcIdent.replace(SHIPPED_PS_LINE, () => PRE_R4_PS_LINE);
   const psParses = (t) => { try { return spawnSync('sh', ['-n', '-c', t], { timeout: 20000 }).status === 0; } catch { return false; } };
-  ok(preR4Ps !== noProcIdent && preR4Ps.includes(PRE_R4_PS_LINE) && !preR4Ps.includes(SHIPPED_PS_LINE) && psParses(preR4Ps),
+  ok(preR4Ps !== noProcIdent && gateOf(preR4Ps.includes(PRE_R4_PS_LINE)) && !preR4Ps.includes(SHIPPED_PS_LINE) && verdictOf(psParses(preR4Ps)),
     'the negative control is that same copy with ONLY the `tr \'\\n\' \' \'` flattening removed — the VERBATIM pre-r4 line — and it PARSES (a broken revert answers NO for everything and fakes a pass)');
   // (b) the environment: the stand-in `ps` first on PATH, for BOTH spellings.
   const psEnv = { ...process.env, PATH: shimDir + ':' + process.env.PATH };
@@ -1475,13 +1475,13 @@ console.log(JSON.stringify({ argv: [0, 1, 2].map((i) => procArgv(pid, i)), isCli
 `);
   const jsNoProc = (pid) => { try { return JSON.parse(spawnSync(process.execPath, [jsDrv, String(pid)], { encoding: 'utf8', env: psEnv, timeout: 20000 }).stdout || 'null'); } catch { return null; } };
   const jsRows = psFix.map(([n, p]) => [n, jsNoProc(p.pid)]);
-  ok(jsRows.every(([, r]) => r && Array.isArray(r.argv) && r.argv[0]),
+  ok(verdictOf(jsRows.every(([, r]) => r && Array.isArray(r.argv) && r.argv[0])),
     'the JS twin really TOOK its own `ps` fallback (the /proc reads throw in that child) and answered from the stand-in blob — it is driven, not mirrored',
     { js: jsRows.map(([n, r]) => [n, r && r.argv[0]]) });
-  ok(psFix.every(([n, p], k) => [0, 1, 2].every((i) => shArgvWord(noProcIdent, p.pid, i) === jsRows[k][1].argv[i])),
+  ok(verdictOf(psFix.every(([n, p], k) => [0, 1, 2].every((i) => shArgvWord(noProcIdent, p.pid, i) === jsRows[k][1].argv[i]))),
     'PARITY: the SHIPPED shell `ps` fallback returns the identical word for argv[0..2] on all three fixtures — the two spellings index the same blob the same way',
     { shell: psFix.map(([n, p]) => [n, [0, 1, 2].map((i) => shArgvWord(noProcIdent, p.pid, i))]), js: jsRows.map(([n, r]) => [n, r.argv]) });
-  ok(psFix.every(([, p], k) => shSaysCli(noProcIdent, p.pid) === jsRows[k][1].isCli),
+  ok(verdictOf(psFix.every(([, p], k) => shSaysCli(noProcIdent, p.pid) === jsRows[k][1].isCli)),
     '…and the same VERDICT on all three (this rung reads a blob `ps` already flattened: fixture A is `claude` to BOTH spellings, which the /proc rung calls `tail` — a property of `ps`, not a divergence)',
     { shell: psFix.map(([n, p]) => [n, shSaysCli(noProcIdent, p.pid)]), js: jsRows.map(([n, r]) => [n, r.isCli]) });
   const preR4Verdicts = psFix.map(([n, p]) => [n, shSaysCli(preR4Ps, p.pid)]);
@@ -1531,7 +1531,7 @@ if (fs.existsSync('/proc/self')) {
   const bArgv = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean); } catch { return []; } };
   { const t = Date.now(); while (bprocs.some((p) => bArgv(p.pid).length === 0) && Date.now() - t < 10000) await new Promise((r) => setTimeout(r, 20)); }
   const bAlive = (p) => { try { process.kill(p.pid, 0); return true; } catch { return false; } };
-  ok(bprocs.every((p) => bArgv(p.pid).length > 0 && bAlive(p)),
+  ok(verdictOf(bprocs.every((p) => bArgv(p.pid).length > 0 && bAlive(p))),
     'every busybox kill-path fixture is live and has EXEC\'d its own argv before any verdict is taken',
     { argvs: bprocs.map((p) => bArgv(p.pid).join(' ').slice(0, 50)) });
   if (!bbPath) console.log('  · SKIP the busybox kill-path legs below: busybox absent (install busybox to run them)');
@@ -1542,7 +1542,7 @@ if (fs.existsSync('/proc/self')) {
   const bbArgv = bbPath ? [bbPath, 'sh'] : null;
   // busybox `ps` really cannot answer the pre-r5 probe — asserted, not assumed.
   const bbPsOut = bbPath ? spawnSync(bbPath, ['ps', '-p', String(bReaderCtl.pid), '-o', 'args='], { encoding: 'utf8' }) : null;
-  ok(!bbPath || ((bbPsOut.stdout || '') === '' && /invalid option/.test(bbPsOut.stderr || '')),
+  ok(!bbPath || ((bbPsOut.stdout || '') === '' && verdictOf(/invalid option/.test(bbPsOut.stderr || ''))),
     'MEASURED: busybox `ps -p N -o args=` prints NOTHING on stdout and complains on stderr — the pre-r5 capture is empty for a LIVE pid',
     { stdout: bbPsOut && bbPsOut.stdout, stderr: bbPsOut && String(bbPsOut.stderr || '').split('\n')[0] });
   // git ddab79bf:src/hosts.js — the verbatim pre-r5 script.
@@ -1555,12 +1555,12 @@ fi`;
   const ctlReader = bbPath ? runIn(bbArgv, preR5Kill(bReaderCtl.pid)) : null;
   const ctlCli = bbPath ? runIn(bbArgv, preR5Kill(bCliCtl.pid)) : null;
   await new Promise((r) => setTimeout(r, 250));
-  ok(!bbPath || (ctlReader === 'VS_GONE' && ctlCli === 'VS_GONE' && bAlive(bReaderCtl) && bAlive(bCliCtl)),
+  ok(!bbPath || (ctlReader === 'VS_GONE' && ctlCli === 'VS_GONE' && gateOf(bAlive(bReaderCtl)) && verdictOf(bAlive(bCliCtl))),
     'NEGATIVE CONTROL: under busybox the pre-r5 script answers VS_GONE for BOTH a live reader AND a live `claude` — killRemotePid would have returned {success:true, gone:true} with nothing signalled, and both processes are still running',
     { reader: ctlReader, cli: ctlCli, readerAlive: bAlive(bReaderCtl), cliAlive: bAlive(bCliCtl) });
   ok(!bbPath || runIn(bbArgv, kps(bReaderShip.pid)) === 'VS_NOTAGENT',
     'the SHIPPED script under busybox REFUSES the reader by name (VS_NOTAGENT) instead of calling it gone');
-  ok(!bbPath || bAlive(bReaderShip), '…and that reader is still alive');
+  ok(!bbPath || verdictOf(bAlive(bReaderShip)), '…and that reader is still alive');
   const bbKilled = bbPath ? runIn(bbArgv, kps(bCliShip.pid)) : null;
   await new Promise((r) => setTimeout(r, 300));
   ok(!bbPath || (bbKilled === 'VS_OK' && !bAlive(bCliShip)),
@@ -1575,7 +1575,7 @@ fi`;
   // the machine, not three edits.
   const shippedKill = kps(bReaderUnk.pid);
   const noProcKill = shippedKill.split('/proc/').join(`${bdir}/noproc/`);
-  ok(noProcKill !== shippedKill && !noProcKill.includes('/proc/') && noProcKill.includes('kill -0 "$1"'),
+  ok(noProcKill !== shippedKill && !noProcKill.includes('/proc/') && verdictOf(noProcKill.includes('kill -0 "$1"')),
     'the no-/proc copy of the kill script changed ONLY the /proc root — vs_alive\'s `kill -0` rung and the identity text are the shipped bytes');
   const unkOut = bbPath ? runIn(bbArgv, noProcKill) : null;
   const unkCtl = bbPath ? runIn(bbArgv, noProcKill.replace(/if ! vs_alive \d+; then[\s\S]*$/, () => {
@@ -1583,7 +1583,7 @@ fi`;
     return `C=$(ps -p ${p} -o args= 2>/dev/null)\nif [ -z "$C" ]; then echo VS_GONE\nelif vs_is_cli ${p} claude || vs_is_cli ${p} codex; then kill -TERM ${p} && echo VS_OK\nelse echo VS_NOTAGENT\nfi`;
   })) : null;
   await new Promise((r) => setTimeout(r, 250));
-  ok(!bbPath || (unkOut === 'VS_UNKNOWN' && bAlive(bReaderUnk)),
+  ok(!bbPath || (unkOut === 'VS_UNKNOWN' && verdictOf(bAlive(bReaderUnk))),
     'no /proc AND a `ps` that cannot answer ⇒ VS_UNKNOWN: the pid is known ALIVE (kill -0) and NOTHING about it could be read, so the script says so instead of guessing — and the process survives',
     { out: unkOut });
   ok(!bbPath || unkCtl === 'VS_GONE',
@@ -1598,7 +1598,7 @@ fi`;
   const stubOut = (text) => { hm5.deviceBounded = async () => ({ async runCmd() { return { stdout: text }; } }); };
   const callKill5 = async (text) => { stubOut(text); try { return { ok: await hm5.killRemotePid('h5', 4242) }; } catch (e) { return { err: e.message }; } };
   const unknownReply = await callKill5('VS_UNKNOWN\n');
-  ok(/could not be read/.test(unknownReply.err || '') && !unknownReply.ok,
+  ok(gateOf(/could not be read/.test(unknownReply.err || '')) && !unknownReply.ok,
     'killRemotePid THROWS on VS_UNKNOWN with an explanation — never {success:true}, and never the generic `kill failed: <token>` line', { unknownReply });
   const goneReply = await callKill5('VS_GONE\n');
   const okReply = await callKill5('VS_OK\n');
@@ -1608,11 +1608,11 @@ fi`;
   // now the SHARED text — r6 killed the enumerated sibling instead of reasoning
   // about it (§17).
   const kpsText = kps(4242);
-  ok(/kill -0 "\$1" 2>\/dev\/null && return 0/.test(kpsText) && !/^C=\$\(ps -p \d+ -o args=/m.test(kpsText),
+  ok(gateOf(/kill -0 "\$1" 2>\/dev\/null && return 0/.test(kpsText)) && !/^C=\$\(ps -p \d+ -o args=/m.test(kpsText),
     'WIRING PIN: the shipped kill script probes existence with `kill -0` and carries no `C=$(ps -p N -o args=)` existence capture');
-  ok(/^C=\$\(ps -p \d+ -o args=/m.test(preR5Kill(4242)),
+  ok(verdictOf(/^C=\$\(ps -p \d+ -o args=/m.test(preR5Kill(4242))),
     'NEGATIVE CONTROL: that pin names a shape that really exists — it FIRES on the verbatim pre-r5 script');
-  ok(kpsText.includes(cliIdentity.pidAliveShellFn()),
+  ok(verdictOf(kpsText.includes(cliIdentity.pidAliveShellFn())),
     'WIRING PIN: killPidShell embeds the SHARED `vs_alive` text verbatim — the ladder has one author (B-3185 r6)');
   for (const p of bprocs) { try { p.kill('SIGKILL'); } catch { } }
   fs.rmSync(bdir, { recursive: true, force: true });
@@ -1683,7 +1683,7 @@ if (fs.existsSync('/proc/self')) {
   await new Promise((r) => setTimeout(r, 400));
   const sAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const pState = (pid) => { try { return String(fs.readFileSync(`/proc/${pid}/stat`, 'utf8')).split(') ')[1].split(' ')[0]; } catch { return 'ABSENT'; } };
-  ok(spids.every((p) => sAlive(p) && pState(p) !== 'Z'),
+  ok(verdictOf(spids.every((p) => sAlive(p) && pState(p) !== 'Z')),
     'every signal-verdict fixture is live (and NOT a zombie) before any verdict is taken', { states: spids.map(pState) });
   // THE ZOMBIE EDGE, pinned so the ladder cannot be blamed for it later: a
   // reaped-pending process answers ALIVE to all four probes — the shipped
@@ -1699,7 +1699,7 @@ if (fs.existsSync('/proc/self')) {
     const zZombie = pState(z.pid) === 'Z';
     const zLadder = String((spawnSync('/bin/sh', ['-c', `${cliIdentity.pidAliveShellFn()}\nif vs_alive ${z.pid}; then echo ALIVE; else echo GONE; fi`], { encoding: 'utf8' }).stdout) || '').trim();
     const zPs = spawnSync('ps', ['-p', String(z.pid)], { stdio: 'ignore' }).status === 0;
-    ok(!zZombie || (zLadder === 'ALIVE' && zPs && sAlive(z.pid)),
+    ok(!zZombie || (zLadder === 'ALIVE' && gateOf(zPs) && verdictOf(sAlive(z.pid))),
       'HONEST EDGE: a ZOMBIE reads ALIVE to the shared ladder, to procps `ps -p` and to the local branch\'s `process.kill(pid,0)` alike — the ladder introduced no divergence, and it is why the fixtures above are orphans',
       { zZombie, zLadder, zPs });
     if (!zZombie) console.log('  · could not produce a zombie in 3s — the zombie-edge leg asserted vacuously');
@@ -1711,7 +1711,7 @@ if (fs.existsSync('/proc/self')) {
   // §16 (that leg measured `ps -p N -o args=`; this one measures the QUIET
   // form the signal script actually used).
   const bbQuiet = bbPath ? spawnSync(bbPath, ['sh', '-c', `if ps -p ${sIgnore} >/dev/null 2>&1; then echo ALIVE; else echo GONE; fi`], { encoding: 'utf8' }) : null;
-  ok(!bbPath || (String(bbQuiet.stdout || '').trim() === 'GONE' && sAlive(sIgnore)),
+  ok(!bbPath || (String(bbQuiet.stdout || '').trim() === 'GONE' && verdictOf(sAlive(sIgnore))),
     'MEASURED: under busybox `ps -p N >/dev/null 2>&1` answers NON-ZERO for a LIVE pid — the quiet existence form the signal script used is blind there too',
     { out: bbQuiet && String(bbQuiet.stdout || '').trim() });
   // git cf20753a:src/server/sysinfo-wiring.js — the verbatim pre-r6 script.
@@ -1721,12 +1721,12 @@ if (fs.existsSync('/proc/self')) {
     + `else if ps -p ${pid} >/dev/null 2>&1; then echo EPERM; else echo ESRCH; fi; fi`;
   // (b) NEGATIVE CONTROL: the pre-r6 script manufactures the false success.
   const ctlOut = bbPath ? runIn2(bbArgv2, preR6Sig(sIgnoreCtl, 'TERM')) : null;
-  ok(!bbPath || (ctlOut === 'OK-GONE' && sAlive(sIgnoreCtl)),
+  ok(!bbPath || (ctlOut === 'OK-GONE' && verdictOf(sAlive(sIgnoreCtl))),
     'NEGATIVE CONTROL: under busybox the pre-r6 script answers OK-GONE for a LIVE process that ignored the SIGTERM — signalProc would have returned {ok:true, gone:true} and the row would read "gone" while the process kept running',
     { out: ctlOut, stillAlive: sAlive(sIgnoreCtl) });
   // (c) the SHIPPED builder, same machine shape, same fixture shape.
   const shipAlive = bbPath ? runIn2(bbArgv2, signalVerdictScript(sIgnore, 'TERM')) : null;
-  ok(!bbPath || (shipAlive === 'OK-ALIVE' && sAlive(sIgnore)),
+  ok(!bbPath || (shipAlive === 'OK-ALIVE' && verdictOf(sAlive(sIgnore))),
     'the SHIPPED script under busybox says OK-ALIVE for that same process — and it is still alive', { out: shipAlive });
   // (d) POSITIVE CONTROL: the ladder is not simply stuck on "alive".
   const shipGone = bbPath ? runIn2(bbArgv2, signalVerdictScript(sDies, 'TERM')) : null;
@@ -1768,20 +1768,20 @@ if (fs.existsSync('/proc/self')) {
   const rEperm = await sigReply('EPERM\n');
   const rEsrch = await sigReply('ESRCH\n');
   ok(rAlive.ok?.gone === false && rGone.ok?.gone === true
-    && /permission denied/.test(rEperm.err || '') && /no such process/.test(rEsrch.err || ''),
+    && gateOf(/permission denied/.test(rEperm.err || '')) && verdictOf(/no such process/.test(rEsrch.err || '')),
     'signalProc maps the four verdicts honestly (OK-ALIVE ⇒ gone:false, OK-GONE ⇒ gone:true, EPERM/ESRCH ⇒ explained throws)',
     { rAlive, rGone, rEperm, rEsrch });
   // (g) STRUCTURAL: one probe, one author, and the kill still comes FIRST.
   const sigText = signalVerdictScript(4242, 'TERM');
-  ok(sigText.includes(cliIdentity.pidAliveShellFn()) && !/ps -p 4242/.test(sigText),
+  ok(gateOf(sigText.includes(cliIdentity.pidAliveShellFn())) && !/ps -p 4242/.test(sigText),
     'WIRING PIN: the signal script embeds the SHARED `vs_alive` text verbatim and carries no bare `ps -p <pid>` existence test');
-  ok(/ps -p \d+/.test(preR6Sig(4242, 'TERM')),
+  ok(verdictOf(/ps -p \d+/.test(preR6Sig(4242, 'TERM'))),
     'NEGATIVE CONTROL: that pin names a shape that really existed — it FIRES on the verbatim pre-r6 script');
   ok(sigText.indexOf('if kill -TERM 4242') < sigText.indexOf('vs_alive 4242'),
     'the kill is still ATTEMPTED before any existence probe runs — the probe explains an outcome, it never gates one (no probe-then-kill TOCTOU)');
   const badPids = [1, 0, -5, 1.5, NaN, '4242; rm -rf /'];
-  ok(badPids.every((p) => { try { signalVerdictScript(p, 'TERM'); return false; } catch { return true; } })
-    && (() => { try { signalVerdictScript(4242, 'USR1'); return false; } catch { return true; } })(),
+  ok(gateOf(badPids.every((p) => { try { signalVerdictScript(p, 'TERM'); return false; } catch { return true; } }))
+    && verdictOf((() => { try { signalVerdictScript(4242, 'USR1'); return false; } catch { return true; } })()),
     'the builder validates pid and signal ITSELF — a hostile pid never reaches the shell text, whatever the caller checked');
   // (h) THE STANDING SWEEP (the point of (g) in the B-3185 essay, applied to
   // the probe rather than the identity): NO `ps -p` may serve as an EXISTENCE
@@ -2000,7 +2000,7 @@ if (fs.existsSync('/proc/self')) {
     'src/plugins/tailscale.js', 'src/plugins/frp.js', 'src/vnc.js', 'src/port-forward.js', 'src/agentd/agentd.js',
     'src/ws-handler.js', 'src/ws-create.js', 'src/opencode-serve.js'];
   const gained = swp.files.filter((f) => !R6_HAND.has(f));
-  ok(R7_GAINED_MUST.every((f) => swp.files.includes(f) && !R6_HAND.has(f)) && gained.length >= R7_GAINED_MUST.length,
+  ok(gateOf(R7_GAINED_MUST.every((f) => swp.files.includes(f) && !R6_HAND.has(f))) && gained.length >= R7_GAINED_MUST.length,
     `REGRESSION PIN (r7): the r6 hand list MISSED ${gained.length} real kill/signal-path files — the derivation covers them, and re-narrowing to any hand list turns this red`,
     { missing: R7_GAINED_MUST.filter((f) => !swp.files.includes(f)), gained });
   // (j) NEGATIVE + POSITIVE CONTROLS, against a TEMP ROOT built to contain each
@@ -2067,27 +2067,27 @@ if (fs.existsSync('/proc/self')) {
     + '}\n');
   const nc = sweepKillPaths(ncRoot, PS_P_ALLOWED);
   const ncStray = (f) => nc.stray.some((s) => s.startsWith(f + ':'));
-  ok(ncStray('src/server/new-kill-path.js'),
+  ok(verdictOf(ncStray('src/server/new-kill-path.js')),
     'NEGATIVE CONTROL: a NEW file carrying the retired `ps -p N >/dev/null 2>&1` existence probe next to a kill IS caught — the derivation reaches files no hand list named',
     { stray: nc.stray });
-  ok(ncStray('src/impostor.js'),
+  ok(verdictOf(ncStray('src/impostor.js')),
     'NEGATIVE CONTROL: an ALLOWLISTED line copied into a different file is still stray — the exemption is per file, it does not travel with the text');
-  ok(nc.files.includes('src/clean-kill-path.js') && !ncStray('src/clean-kill-path.js'),
+  ok(gateOf(nc.files.includes('src/clean-kill-path.js')) && !ncStray('src/clean-kill-path.js'),
     'POSITIVE CONTROL: a kill path with no `ps -p` at all is swept and stays green — the sweep is not simply stuck on "stray"');
-  ok(ncStray('src/js-ps-probe.js'),
+  ok(verdictOf(ncStray('src/js-ps-probe.js')),
     "NEGATIVE CONTROL (residual (c)): a JS `execFileSync('ps', ['-p', …])` next to a kill IS caught — the argv spelling is the same probe, and it was invisible to this sweep while six real ones lived in the tree",
     { stray: nc.stray });
-  ok(nc.files.includes('src/js-not-ps.js') && !ncStray('src/js-not-ps.js'),
+  ok(gateOf(nc.files.includes('src/js-not-ps.js')) && !ncStray('src/js-not-ps.js'),
     'POSITIVE CONTROL (residual (c)): `execFileSync("psql", ["-p", …])` on a kill path is NOT flagged — the pattern names the `ps` PROGRAM, so it does not make every -p flag owe a reason');
   ok(!nc.files.includes('src/not-a-kill-path.js'),
     'SCOPE, measured not assumed: a `ps -p` in a file that signals nothing is NOT swept — the rule is about the probe in front of a kill');
-  ok(!nc.files.includes('scripts/test-something.mjs') && nc.skipped.includes('scripts/test-something.mjs'),
+  ok(!nc.files.includes('scripts/test-something.mjs') && verdictOf(nc.skipped.includes('scripts/test-something.mjs')),
     '…and the suites are excluded, which is the only reason THIS file may write the retired shape down as a control');
-  ok(nc.files.includes('data/bin/vibespace-newtool') && ncStray('data/bin/vibespace-newtool'),
+  ok(gateOf(nc.files.includes('data/bin/vibespace-newtool')) && verdictOf(ncStray('data/bin/vibespace-newtool')),
     'the extension-less agent CLIs are reached by their SHEBANG — a GENERATED (untracked) tool on every host\'s PATH was outside r6\'s `git ls-files data/bin` sweep');
-  ok(nc.files.includes('src/kill-dash-s.sh') && ncStray('src/kill-dash-s.sh'),
+  ok(gateOf(nc.files.includes('src/kill-dash-s.sh')) && verdictOf(ncStray('src/kill-dash-s.sh')),
     'NEGATIVE CONTROL (r7 verify): `kill -s TERM` / `kill -15` / bare `kill "$pid"` are kill paths too — swept by the widened markers and their retired probe is caught');
-  ok(nc.files.includes('src/handle-kill.js') && ncStray('src/handle-kill.js'),
+  ok(gateOf(nc.files.includes('src/handle-kill.js')) && verdictOf(ncStray('src/handle-kill.js')),
     'NEGATIVE CONTROL (r7 verify): node `handle.kill()` is a kill path — swept, and its retired probe is caught');
   // ⑦⑧ THE GENERATED BUCKET, both ways. ⑦ a bundle that only COPIES an
   //     authored probe passes (this is the daemon bundle's real shape, and the
@@ -2099,14 +2099,14 @@ if (fs.existsSync('/proc/self')) {
     'const t = `kill -TERM "$1"\n  ps -p "$1" >/dev/null 2>&1\n`;\n');
   const genOnly = (root, rels) => new Set(rels.filter((r) => /fake-bundle|injected-bundle/.test(r)));
   const ncGen = sweepKillPaths(ncRoot, PS_P_ALLOWED, genOnly);
-  ok(ncGen.generated.includes('data/bin/fake-bundle.js') && !ncGen.genUnauthored.length
+  ok(gateOf(ncGen.generated.includes('data/bin/fake-bundle.js')) && !ncGen.genUnauthored.length
     && !ncGen.stray.some((s) => s.startsWith('data/bin/fake-bundle.js')),
     'POSITIVE CONTROL: a GENERATED file whose only `ps -p` is a verbatim COPY of an authored one passes — a rebuilt daemon bundle never reddens a clean tree (it did before this bucket existed)',
     { generated: ncGen.generated, genUnauthored: ncGen.genUnauthored });
   fs.writeFileSync(path.join(ncRoot, 'data', 'bin', 'injected-bundle.js'),
     'kill -TERM\nconst injected = `if ps -p $PID 2>/dev/null; then :; fi`;\n');
   const ncGen2 = sweepKillPaths(ncRoot, PS_P_ALLOWED, genOnly);
-  ok(ncGen2.genUnauthored.some((s) => s.startsWith('data/bin/injected-bundle.js')),
+  ok(verdictOf(ncGen2.genUnauthored.some((s) => s.startsWith('data/bin/injected-bundle.js'))),
     'NEGATIVE CONTROL: a GENERATED file carrying a `ps -p` line that exists in NO authored file is caught — "generated" buys a different question, never an exemption',
     { genUnauthored: ncGen2.genUnauthored });
   fs.rmSync(ncRoot, { recursive: true, force: true });
@@ -2160,10 +2160,10 @@ if (fs.existsSync('/proc/self')) {
   });
   // ONE assert on purpose: `total` counts itself, so a second assert in this
   // block would make the number it checks wrong by one.
-  ok(claims.every((c) => c.ns.length > 0 && c.ns.every((n) => n === total)),
+  ok(verdictOf(claims.every((c) => c.ns.length > 0 && c.ns.every((n) => n === total))),
     `every doc that names this suite advertises the REAL assert count (${total})`,
     claims.map((c) => [c.rel, c.ns]));
 } else { console.log('  · SKIP the advertised-assert-count pin: /proc absent'); }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

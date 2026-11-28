@@ -30,7 +30,7 @@ import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'
 const { Transform } = await import('@tiptap/pm/transform');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) pass++; else { fail++; console.log('  ✗ ' + m); } return !!c; };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) pass++; else { fail++; console.log('  ✗ ' + m); } return !!c; };
 const FX = path.join(ROOT, 'scripts/fixtures/doc-wheel');
 const files = fs.readdirSync(FX).filter((f) => f.endsWith('.md')).sort();
 const EDIT = ' 编辑';
@@ -99,7 +99,7 @@ const verdicts = (R) => [R.untouched + R.refused >= 29, R.dropped.length === 0, 
 ok(R.untouched + R.refused >= 29 && R.refused === 1, `≥ 29/${R.n}: one edit keeps every untouched line byte-identical (${R.untouched} + ${R.refused} refused)`);
 ok(R.dropped.length === 0, 'the dropped-construct list is EMPTY');
 ok(R.same === R.n - R.refused, 'an unedited save writes the source byte-identical');
-ok(R.raw.length >= 2 && R.raw.some((x) => x.startsWith('17')) && R.raw.some((x) => x.startsWith('18')), 'raw HTML (17) and front matter (18) ride as raw blocks (carried as written, read-only)');
+ok(R.raw.length >= 2 && gateOf(R.raw.some((x) => x.startsWith('17'))) && verdictOf(R.raw.some((x) => x.startsWith('18'))), 'raw HTML (17) and front matter (18) ride as raw blocks (carried as written, read-only)');
 
 // ── THE LOSSLESS INLINE-HTML MARKS (lane doc-raw-blocks, 2.369.246): a paired tag is a mark keeping its spelling ──
 const marksOf = (doc) => { const out = []; doc.descendants((n) => { if (n.type.name === 'rawBlock') out.push('RAW'); if (n.type.name === 'table') out.push('TABLE'); if (n.isText) for (const m of n.marks) out.push(m.type.name + ':' + (m.attrs.tag || '')); if (n.type.name === 'htmlBreak') out.push('br:' + n.attrs.tag); }); return out; };
@@ -138,7 +138,7 @@ const kindsOf = (doc) => { const out = []; doc.forEach((n) => out.push(n.type.na
 const textsOf = (doc) => { let t = ''; doc.descendants((n) => { if (n.isText) t += n.text + '¦'; }); return t; };
 {
   const F31 = fs.readFileSync(path.join(FX, '31-table-inline-html.md'), 'utf8'), l31 = D.loadDoc(F31), g = marksOf(l31.doc);
-  ok(!R.raw.some((x) => x.startsWith('31')) && g.filter((x) => x === 'TABLE').length === 2 && !g.includes('RAW') && textsOf(l31.doc).includes('STEP-<code>-nn') && ['htmlCode:code', 'htmlKbd:kbd', 'htmlSup:sup', 'br:<br>', 'htmlBold:b', 'htmlSub:sub', 'htmlItalic:i', 'htmlItalic:em', 'htmlBold:strong', 'code:', 'bold:'].every((m) => g.includes(m)),
+  ok(!R.raw.some((x) => x.startsWith('31')) && g.filter((x) => x === 'TABLE').length === 2 && !g.includes('RAW') && gateOf(textsOf(l31.doc).includes('STEP-<code>-nn')) && verdictOf(['htmlCode:code', 'htmlKbd:kbd', 'htmlSup:sup', 'br:<br>', 'htmlBold:b', 'htmlSub:sub', 'htmlItalic:i', 'htmlItalic:em', 'htmlBold:strong', 'code:', 'bold:'].every((m) => g.includes(m))),
     'fixture 31 (the owner\'s shape: a GFM table whose cells hold <code> / <kbd> / <sup> / <br> beside backticks and bold) ⇒ a TABLE in the editor; its second table (a cell with a BARE <code> placeholder) is a TABLE too — the unpaired tag is its text (lane doc-table-native; the r2 raw block retired)', [...new Set(g)]);
 }
 
@@ -195,7 +195,7 @@ const F32 = fs.readFileSync(path.join(FX, '32-table-placeholder-cells.md'), 'utf
   ok(k32 === 'heading,paragraph,heading,paragraph,table,paragraph' && !marksOf(l32.doc).includes('RAW') && (textsOf(l32.doc).match(/<absent>/g) || []).length === 2 && !R.raw.some((x) => x.startsWith('32')), 'fixture 32 (the owner\'s SHAPE: 10 columns, two cells holding a bare <absent>, code spans with underscores, a long quoted last column) ⇒ a native TABLE, both <absent> as text, no raw block', k32);
   let at = -1; l32.doc.descendants((n, p) => { if (at < 0 && n.isText && n.text === '<absent>') at = p + n.nodeSize; });
   const ed = D.saveDoc(F32, l32, new Transform(l32.doc).insert(at, l32.doc.type.schema.text('Ⓧ')).doc), a = F32.split('\n'), b = String(ed.text || '').split('\n'), diff = a.map((l, i) => (l === b[i] ? null : i)).filter((x) => x != null);
-  ok(ed.ok && a.length === b.length && diff.length === 1 && b[diff[0]] === a[diff[0]].replace('| <absent> |', '| <absent>Ⓧ |') && /^\| R007 \|/.test(a[diff[0]]), 'fixture 32: a letter typed after the first <absent> + save ⇒ exactly that row\'s line changes, the tag kept as written', { diff, line: diff.length ? b[diff[0]].slice(0, 120) : ed.code });
+  ok(gateOf(ed.ok) && a.length === b.length && diff.length === 1 && b[diff[0]] === a[diff[0]].replace('| <absent> |', '| <absent>Ⓧ |') && verdictOf(/^\| R007 \|/.test(a[diff[0]])), 'fixture 32: a letter typed after the first <absent> + save ⇒ exactly that row\'s line changes, the tag kept as written', { diff, line: diff.length ? b[diff[0]].slice(0, 120) : ed.code });
 }
 
 // ── patchBlocks tables (PURE) ──
@@ -222,10 +222,10 @@ ok(M.patchBlocks(S1, M1, [{ keep: 2 }, { keep: 1 }]).code === 'order' && M.patch
 // ── rawReasons: the new list + the WHY ──
 ok(JSON.stringify(M.rawReasons('a\r\nb')) === '["crlf"]' && M.rawReasons('x'.repeat(M.LIMITS.source + 1))[0] === 'too_big', 'rawReasons = CRLF and the size cap only');
 for (const [name, src] of [['a table', '| a | b |\n| - | - |\n| 1 | 2 |\n'], ['raw HTML', '<details>\n<summary>x</summary>\n</details>\n'], ['a footnote', 'x[^1]\n\n[^1]: y\n'], ['front matter', '---\na: 1\n---\n\n# T\n'], ['a setext heading', 'T\n===\n']])
-  ok(!M.rawReasons(src).length && D.docFidelity(src).ok, `${name} opens RICH now (carried by the wheel or as a raw block)`);
+  ok(!M.rawReasons(src).length && verdictOf(D.docFidelity(src).ok), `${name} opens RICH now (carried by the wheel or as a raw block)`);
 for (const code of ['crlf', 'too_big', 'unparsed']) ok(typeof M.RAW_WHY[code] === 'string' && M.RAW_WHY[code].length > 20, `the reason ${code} says WHY in plain words`);
 const ui = fs.readFileSync(path.join(ROOT, 'src/lib/doc-window-ui.js'), 'utf8');
-for (const code of Object.keys(M.RAW_WHY)) ok(ui.includes(`${code}: t('${M.RAW_WHY[code]}')`), `the chip says the WHY of ${code} in the model's words (a literal t() for the dictionaries)`);
+for (const code of Object.keys(M.RAW_WHY)) ok(verdictOf(ui.includes(`${code}: t('${M.RAW_WHY[code]}')`)), `the chip says the WHY of ${code} in the model's words (a literal t() for the dictionaries)`);
 
 // ── 3 patched-copy controls: each mutant turns the suite's own verdicts red ──
 const mutant = async (label, file, from, to, want, { baseline = false } = {}) => {
@@ -245,7 +245,7 @@ const mutant = async (label, file, from, to, want, { baseline = false } = {}) =>
       fs.mkdirSync(path.join(nm, e));
       for (const x of fs.readdirSync(path.join(NM, e))) { const k = e + '/' + x; if (OWN.has(k)) fs.cpSync(path.join(NM, k), path.join(nm, k), { recursive: true, dereference: true }); else fs.symlinkSync(path.join(NM, k), path.join(nm, k)); }
     }
-    for (const f of ['src/doc-model.js', 'src/lib/doc-markdown.js', 'src/lib/doc-window-model.js']) { let t = fs.readFileSync(path.join(ROOT, f), 'utf8'); if (f === file) { ok(t.includes(from), `control "${label}": the needle is in ${f}`); t = t.replace(from, to); } fs.writeFileSync(path.join(dir, f), t); }
+    for (const f of ['src/doc-model.js', 'src/lib/doc-markdown.js', 'src/lib/doc-window-model.js']) { let t = fs.readFileSync(path.join(ROOT, f), 'utf8'); if (f === file) { ok(verdictOf(t.includes(from)), `control "${label}": the needle is in ${f}`); t = t.replace(from, to); } fs.writeFileSync(path.join(dir, f), t); }
     const d = await import(pathToFileURL(path.join(dir, 'src/lib/doc-markdown.js')).href + '?m=' + label.length);
     const m = (await import(pathToFileURL(path.join(dir, 'src/doc-model.js')).href)).default;
     // B-1747 (r3254): EVERY CONTROL IS JUDGED AND SAID — a throw inside one is that control's failure by name, never the suite's end;
@@ -269,4 +269,4 @@ await mutant('a close inside a code span counted', 'src/lib/doc-window-model.js'
 await mutant('a reason without a why', 'src/doc-model.js', "  crlf: 'it uses Windows", "  crlf_: 'it uses Windows", async (d, m) => [!(typeof m.RAW_WHY.crlf === 'string' && m.RAW_WHY.crlf.length > 20), `RAW_WHY.crlf under the mutant: ${JSON.stringify(m.RAW_WHY.crlf)}`]);
 
 console.log(`\ntest-doc-wheel: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

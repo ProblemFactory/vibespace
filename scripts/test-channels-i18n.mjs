@@ -238,24 +238,24 @@ export function imCensus(shot) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let pass = 0, fail = 0;
-  const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+  const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
   // ── ① the negative control, BEFORE chrome ──
   console.log('① the PURE census can go red');
   const planted = census([{ text: 'Nothing is fetched yet', paths: ['div.chan-empty < div.chan-list'], surfaces: ['panel-01-fresh'] }]);
-  ok(planted.violations.length === 1 && /latin:/.test(planted.violations[0].why), 'NEGATIVE CONTROL: one planted English literal on a chrome path is a violation', JSON.stringify(planted));
+  ok(planted.violations.length === 1 && verdictOf(/latin:/.test(planted.violations[0].why)), 'NEGATIVE CONTROL: one planted English literal on a chrome path is a violation', JSON.stringify(planted));
   // int258 → lane llm-plugin-rename (the key card is named by its provider): zh / ja give the card's name their own words
   // (语言模型 / 言語モデル) — no allowlist row; the untranslated Latin label stays a violation on a chrome path
   const dn = census([{ text: 'Language model (OpenAI / OpenRouter)', paths: ['b < div.integ-card-head'], surfaces: ['integ-01-window'] }]);
-  ok(dn.violations.length === 1 && /latin:Language/.test(dn.violations[0].why), 'CONTROL: the card name "Language model" left untranslated on the Integrations card is a violation (ja says 言語モデル; no allowlist row excuses it)', JSON.stringify(dn));
+  ok(dn.violations.length === 1 && verdictOf(/latin:Language/.test(dn.violations[0].why)), 'CONTROL: the card name "Language model" left untranslated on the Integrations card is a violation (ja says 言語モデル; no allowlist row excuses it)', JSON.stringify(dn));
   // (the URL sits on a CHROME path here so the pattern rule — not the data-path rule — is what excuses it)
   const excusedData = census([{ text: 'Ops room', paths: ['span.chan-row-title < div.chan-row-line'], surfaces: ['panel-02-rows'] }, { text: LARK_CALLBACK_URL, paths: ['code < div.mounts-field-hint'], surfaces: ['wizard-02-connect-lark-custom'] }, { text: 'Lark / 飞书', paths: ['b < div.chan-sec-head'], surfaces: ['panel-02-rows'] }]);
-  ok(excusedData.violations.length === 0 && excusedData.excused['data-path:chan-row-title'] === 1 && Object.keys(excusedData.excused).some((k) => k.startsWith('pattern:')), 'CONTROL: a fixture title (by path), a callback URL (by pattern) and a brand beside CJK are excused, each by a NAMED rule', JSON.stringify(excusedData.excused));
+  ok(excusedData.violations.length === 0 && excusedData.excused['data-path:chan-row-title'] === 1 && verdictOf(Object.keys(excusedData.excused).some((k) => k.startsWith('pattern:'))), 'CONTROL: a fixture title (by path), a callback URL (by pattern) and a brand beside CJK are excused, each by a NAMED rule', JSON.stringify(excusedData.excused));
   {   // int206: a vendor scope list (the narrowing row's title) is excused by the scope-list pattern — and a prose word inside it is not
     const SCOPES = 'auth:user.id:read im:message:readonly im:message.group_msg:get_as_user docx:document drive:drive';
     const sl = census([{ text: SCOPES, paths: ['div.mounts-oauth-narrow'], surfaces: ['wizard-04-reauth-port-busy'] }]);
     const prose = census([{ text: SCOPES + ' then retry', paths: ['div.mounts-oauth-narrow'], surfaces: ['wizard-04-reauth-port-busy'] }, { text: 'Note: retry later', paths: ['div.mounts-field-hint'], surfaces: ['wizard-04-reauth-port-busy'] }]);
-    ok(sl.violations.length === 0 && Object.keys(sl.excused).some((k) => k.startsWith('pattern:^[a-z][\\w.-]*(:')) && prose.violations.length === 2, 'CONTROL: an OAuth scope list is excused by the scope-list pattern; a prose word in it, or a "Label: words" sentence, is still a leak', JSON.stringify({ sl, prose: prose.violations.map((v) => v.why) }));
+    ok(sl.violations.length === 0 && gateOf(Object.keys(sl.excused).some((k) => k.startsWith('pattern:^[a-z][\\w.-]*(:'))) && prose.violations.length === 2, 'CONTROL: an OAuth scope list is excused by the scope-list pattern; a prose word in it, or a "Label: words" sentence, is still a leak', JSON.stringify({ sl, prose: prose.violations.map((v) => v.why) }));
   }
   // the rect census's negative control (④ below): every rule fires on a planted shot
   {
@@ -267,7 +267,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     hscroll: [{ cls: 'chanwin-list', over: true }] } };
     const v = imCensus(planted);
     const kinds = [...new Set(v.map((x) => x.what))].sort();
-    ok(['avatar-contrast', 'avatar-not-paint', 'cut', 'hscroll', 'outside', 'overlap', 'small-target'].every((k) => kinds.includes(k)) && v.filter((x) => x.what === 'small-target').length === 1 && v.filter((x) => x.what === 'cut').length === 2,
+    ok(gateOf(['avatar-contrast', 'avatar-not-paint', 'cut', 'hscroll', 'outside', 'overlap', 'small-target'].every((k) => kinds.includes(k))) && v.filter((x) => x.what === 'small-target').length === 1 && v.filter((x) => x.what === 'cut').length === 2,
       `NEGATIVE CONTROL (the rect census): a planted shot trips every rule — an overlap (the hover time over the text), a part past its row, a cut time + cut tag words, a 28 px phone button (the window's own chrome exempt), a 2.3 : 1 avatar, an avatar exposed to assistive tech, a sideways scroll (${kinds.join(', ')})`, JSON.stringify(v));
     const clean = imCensus({ tag: 'control', name: 'clean', im: { viewport: [1200, 800], groups: [{ name: 'seg', idx: 0, r: [0, 0, 200, 26], parts: { focus: { r: [0, 0, 101, 26], cut: false, text: 'a' }, all: { r: [100, 0, 100, 26], cut: false, text: 'b' } } }], targets: [{ tag: 'button', cls: 'icon-btn', text: '', iconOnly: true, r: [0, 0, 20, 20] }], avatars: [{ text: 'AE', color: 'color(srgb 0.9 0.9 0.95)', background: 'color(srgb 0.12 0.12 0.2)', ariaHidden: 'true' }], hscroll: [] } });
     ok(clean.length === 0, 'CONTROL: a segmented control\'s shared 1 px seam, a 20 px desktop icon button and a 12 : 1 avatar (a `color(srgb …)` computed value) are NOT violations', JSON.stringify(clean));
@@ -307,13 +307,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
     let leaks = null;
     try { leaks = JSON.parse(fs.readFileSync(path.join(out, `${tag}-latin-leaks.json`), 'utf-8')); } catch {}
-    ok(Array.isArray(leaks), `${lang}: the driver wrote the Latin-leak census (${tag}-latin-leaks.json)`);
+    ok(verdictOf(Array.isArray(leaks)), `${lang}: the driver wrote the Latin-leak census (${tag}-latin-leaks.json)`);
     const c = census(leaks || []);
     console.log(`  … ${lang}: ${(leaks || []).length} Latin-only strings on screen, excused by rule: ${JSON.stringify(c.excused)}`);
     ok(c.violations.length === 0, `${lang}: ZERO visible Latin-only text nodes outside the allowlist on the eight surfaces`,
       c.violations.slice(0, 40).map((v) => `${JSON.stringify(v.text)} [${v.why}] on ${v.surfaces.slice(0, 3).join(', ')} at ${v.paths[0] || '?'}`).join('\n    '));
     // the census is NON-VACUOUS: the fixture's own data is on screen and was excused BY PATH
-    ok((leaks || []).length > 0 && Object.keys(c.excused).some((k) => k.startsWith('data-path:')), `${lang}: the census saw the fixture's data and excused it by path (a census that sees nothing is not a census)`);
+    ok((leaks || []).length > 0 && verdictOf(Object.keys(c.excused).some((k) => k.startsWith('data-path:'))), `${lang}: the census saw the fixture's data and excused it by path (a census that sees nothing is not a census)`);
   }
 
   // ── ④ THE LOOK: the IM pass under the runner's face, the rect census over every shot ──
@@ -354,7 +354,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       try { d = JSON.parse(fs.readFileSync(path.join(imOut, sh.file.replace(/\.png$/, '.json')), 'utf-8')); } catch {}
       if (!d) { viol.push({ where: sh.name, what: 'no-json' }); continue; }
       groups += ((d.im && d.im.groups) || []).length; avatars += ((d.im && d.im.avatars) || []).length; targets += ((d.im && d.im.targets) || []).length;
-      if (FACE) ok(new RegExp(FACE).test((d.im && d.im.face) || ''), `${d.tag}/${d.name}: measured under '${FACE}'`, (d.im && d.im.face) || '');
+      if (FACE) ok(verdictOf(new RegExp(FACE).test((d.im && d.im.face) || '')), `${d.tag}/${d.name}: measured under '${FACE}'`, (d.im && d.im.face) || '');
       viol.push(...imCensus(d));
     }
     const byKind = viol.reduce((m, x) => ({ ...m, [x.what]: (m[x.what] || 0) + 1 }), {});
@@ -367,10 +367,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const railStates = imShots.reduce((m, x) => { const k = `${/-desktop-/.test(x.tag) ? 'desktop' : 'phone'}:${railOf(x)}`; return { ...m, [k]: (m[k] || 0) + 1 }; }, {});
     console.log(`  … the rail in the shots: ${JSON.stringify(railStates)}`);
     const lists = desk.filter((x) => /^list-/.test(x.name));
-    ok(lists.length > 0 && desk.every((x) => railOf(x) === 'labelled' || railOf(x) === 'none') && lists.every((x) => railOf(x) === 'labelled'),
+    ok(lists.length > 0 && gateOf(desk.every((x) => railOf(x) === 'labelled' || railOf(x) === 'none')) && verdictOf(lists.every((x) => railOf(x) === 'labelled')),
       'the desktop shots are the FIRST-WEEK rail (its words) — the list at every width included: the census measures what a newcomer sees', JSON.stringify(desk.filter((x) => railOf(x) !== 'labelled').map((x) => `${x.tag}/${x.name}:${railOf(x)}`).slice(0, 8)));
     const at200 = desk.filter((x) => x.name === 'list-focus-200');
-    ok(at200.length > 0 && at200.every((x) => x.rail.sidebar >= 224 && x.rail.sidebar - x.rail.w >= 156),
+    ok(at200.length > 0 && verdictOf(at200.every((x) => x.rail.sidebar >= 224 && x.rail.sidebar - x.rail.w >= 156)),
       '…and at the 200 px setting the words come out of the sidebar, not the panel: sidebar ≥ 224 px, panel ≥ 156 px (what the 200 px floor gave it before the words)', JSON.stringify(at200.map((x) => x.rail)));
     // ci358-reds (the .358 mirror's list-focus-200 red — the sidebar CLOSED, its 68 px rail measured): a pass's page left
     // open reconnected to the next pass's server and its layout record closed that pass's sidebar mid-shot. A shot never
@@ -383,4 +383,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
   process.exit(fail ? 1 : 0);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

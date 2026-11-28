@@ -39,7 +39,7 @@ const SHOTS = scratch('update-dialog-shots');
 fs.mkdirSync(FIXTURE, { recursive: true });
 fs.mkdirSync(SHOTS, { recursive: true });
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the fixture canonical ──
@@ -191,10 +191,10 @@ try {
     await sleep(200);
     await shot(`update-dialog-${lang}-${width}.png`);
     const want = lang === 'ja' ? expectOf('en') : expectOf(lang);
-    check(`${leg}: the head says v${RUNNING} → v${NEW[0]} and four entries are listed, newest first`, f.entries.length === 4 && new RegExp(`v${RUNNING.replace(/\./g, '\\.')}.*v${NEW[0].replace(/\./g, '\\.')}`).test(f.head || ''), { head: f.head, n: f.entries.length });
-    check(`${leg}: each entry reads "v<version> — <date>" (the old-format one: "v<version>")`, f.entries.length === 4 && f.entries.every((e, i) => e.ver === (want[i].date ? `v${want[i].version} — ${want[i].date}` : `v${want[i].version}`)), f.entries.map((e) => e.ver));
+    check(`${leg}: the head says v${RUNNING} → v${NEW[0]} and four entries are listed, newest first`, f.entries.length === 4 && verdictOf(new RegExp(`v${RUNNING.replace(/\./g, '\\.')}.*v${NEW[0].replace(/\./g, '\\.')}`).test(f.head || '')), { head: f.head, n: f.entries.length });
+    check(`${leg}: each entry reads "v<version> — <date>" (the old-format one: "v<version>")`, f.entries.length === 4 && verdictOf(f.entries.every((e, i) => e.ver === (want[i].date ? `v${want[i].version} — ${want[i].date}` : `v${want[i].version}`))), f.entries.map((e) => e.ver));
     const wantLang = lang === 'ja' ? want.map(() => 'en') : want.map((w) => w.lang);
-    check(`${leg}: each entry is in ${lang === 'en' ? 'English' : lang === 'zh' ? 'Chinese, the untranslated one in English' : 'English (the canonical has no ja file)'} (lang ${wantLang.join(',')})`, same(f.entries.map((e) => e.lang), wantLang), f.entries.map((e) => e.lang));
+    check(`${leg}: each entry is in ${lang === 'en' ? 'English' : lang === 'zh' ? 'Chinese, the untranslated one in English' : 'English (the canonical has no ja file)'} (lang ${wantLang.join(',')})`, verdictOf(same(f.entries.map((e) => e.lang), wantLang)), f.entries.map((e) => e.lang));
     for (let i = 0; i < want.length; i++) {
       const e = f.entries[i] || {}, w = want[i];
       if (w.old) {
@@ -203,9 +203,9 @@ try {
       }
       const words = SECTION_WORDS[w.lang] || SECTION_WORDS.en;
       check(`${leg}: v${w.version} — its sections are small headings in ${w.lang} (${e.sections && e.sections.join(' / ')}), its ${w.bullets} bullets list items, no paragraph`,
-        same(e.sections, w.sections) && e.sections.every((s) => words.includes(s)) && e.bullets === w.bullets && e.lists === w.sections.length && e.paras === 0, { got: e, want: w });
+        gateOf(same(e.sections, w.sections)) && gateOf(e.sections.every((s) => words.includes(s))) && e.bullets === w.bullets && e.lists === w.sections.length && e.paras === 0, { got: e, want: w });
     }
-    check(`${leg}: never a <pre>, and nothing but div / h4 / ul / li / p inside the list (${f.tags.join(',')})`, f.pre === 0 && f.tags.every((t) => ['DIV', 'H4', 'UL', 'LI', 'P'].includes(t)), f.tags);
+    check(`${leg}: never a <pre>, and nothing but div / h4 / ul / li / p inside the list (${f.tags.join(',')})`, f.pre === 0 && verdictOf(f.tags.every((t) => ['DIV', 'H4', 'UL', 'LI', 'P'].includes(t))), f.tags);
     if (phone) check(`${leg}: the dialog fits the phone (${Math.round(f.box.l)}..${Math.round(f.box.r)} of ${f.vw})`, f.box.l >= 0 && f.box.r <= f.vw + 0.5, f.box);
   }
 } catch (e) {
@@ -215,4 +215,4 @@ try {
 function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 console.log(`screenshots: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

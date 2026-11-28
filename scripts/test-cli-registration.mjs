@@ -28,7 +28,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cli-registration-'));
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
@@ -54,18 +54,18 @@ console.log('① the PURE words — the line, the row, the Diagnostics section')
   ok('Manage agents\' claude row says nothing while the hub\'s claude is registered, or before its version is read', W.hubRegistrationRow(reg({ version: NEWEST, registered: true }), { t }) === null && W.hubRegistrationRow(reg(null), { t }) === null && W.hubRegistrationRow(null, { t }) === null);
   const u = { version: '2.1.399', sources: ['hub'], firstSeen: 1792652400000, draft: null };
   const row = W.hubRegistrationRow(reg({ version: '2.1.399', registered: false }, [u]), { t });
-  ok('…an unregistered hub claude ⇒ the line + ONE button 「Draft the record table」 whose title says the binary is never run and names the file', !!row && row.line === LINE('2.1.399') && row.draft === null && row.button.label === 'Draft the record table' && /never run/.test(row.button.title) && row.button.title.includes('data/claude-cli-dumps/2.1.399.json'), row);
+  ok('…an unregistered hub claude ⇒ the line + ONE button 「Draft the record table」 whose title says the binary is never run and names the file', !!row && row.line === LINE('2.1.399') && row.draft === null && row.button.label === 'Draft the record table' && gateOf(/never run/.test(row.button.title)) && verdictOf(row.button.title.includes('data/claude-cli-dumps/2.1.399.json')), row);
   const taken = { file: 'data/claude-cli-dumps/2.1.399.json', changes: 2, against: NEWEST, takenAt: '2026-10-22T08:00:00.000Z' };
   const row2 = W.hubRegistrationRow(reg({ version: '2.1.399', registered: false }, [{ ...u, draft: taken }]), { t });
   ok('…once the draft is taken: its words (file, changes, against which build) and NO button', !!row2 && row2.button === null && row2.draft === `Record draft taken: data/claude-cli-dumps/2.1.399.json — 2 changes against claude ${NEWEST}`, row2);
   const zr = W.hubRegistrationRow(reg({ version: '2.1.399', registered: false }, [u]), { t: tOf(zh) }), jr = W.hubRegistrationRow(reg({ version: '2.1.399', registered: false }, [u]), { t: tOf(ja) });
-  ok('zh: the button is 「生成记录草稿」, the line names the build; ja too', zr.button.label === '生成记录草稿' && zr.line.startsWith('Claude Code 2.1.399 比这个 VibeSpace 的记录表新') && jr.button.label === '記録の下書きを作成' && jr.line.startsWith('Claude Code 2.1.399 はこの VibeSpace の記録表より新しい'), [zr, jr]);
+  ok('zh: the button is 「生成记录草稿」, the line names the build; ja too', zr.button.label === '生成记录草稿' && gateOf(zr.line.startsWith('Claude Code 2.1.399 比这个 VibeSpace 的记录表新')) && jr.button.label === '記録の下書きを作成' && verdictOf(jr.line.startsWith('Claude Code 2.1.399 はこの VibeSpace の記録表より新しい')), [zr, jr]);
   ok('Diagnostics: NO section while every build seen is registered', W.diagnosticsSection(reg({ version: NEWEST, registered: true }), { t, esc }) === '' && W.diagnosticsSection(null, { t, esc }) === '');
   const sec = W.diagnosticsSection(reg({ version: '2.1.399', registered: false }, [u, { version: '2.1.401', sources: ['conversation'], firstSeen: null, draft: null }]), { t, esc, when: () => 'WHEN' });
-  ok('Diagnostics: ONE section, a row per unregistered build — the line, where it was seen, and what to do (the hub\'s: the button / the road; another machine\'s: the road there)', (sec.match(/<h2>/g) || []).length === 1 && sec.includes(esc(LINE('2.1.399'))) && sec.includes(esc(LINE('2.1.401'))) && sec.includes('seen as the hub&#39;s claude'.replace('&#39;', "'")) && sec.includes("a conversation's records".replace("'", "'")) && sec.includes('Manage agents ▸ claude ▸ Draft the record table') && sec.includes('on the machine whose claude this is') && sec.includes(`it knows ${NEWEST} and older`), sec);
+  ok('Diagnostics: ONE section, a row per unregistered build — the line, where it was seen, and what to do (the hub\'s: the button / the road; another machine\'s: the road there)', (sec.match(/<h2>/g) || []).length === 1 && gateOf(sec.includes(esc(LINE('2.1.399')))) && gateOf(sec.includes(esc(LINE('2.1.401')))) && gateOf(sec.includes('seen as the hub&#39;s claude'.replace('&#39;', "'"))) && gateOf(sec.includes("a conversation's records".replace("'", "'"))) && gateOf(sec.includes('Manage agents ▸ claude ▸ Draft the record table')) && gateOf(sec.includes('on the machine whose claude this is')) && verdictOf(sec.includes(`it knows ${NEWEST} and older`)), sec);
   ok('…escaped: a version string can never write markup', !W.diagnosticsSection(reg(null, [{ version: '<b>2.1.399</b>', sources: ['hub'], draft: null }]), { t, esc }).includes('<b>2.1.399'));
   const zsec = W.diagnosticsSection(reg({ version: '2.1.399', registered: false }, [u]), { t: tOf(zh), esc, when: () => 'WHEN' });
-  ok('Diagnostics in zh: the heading and the line in Chinese', zsec.includes('没有记录表的 claude 版本') && zsec.includes('Claude Code 2.1.399 比这个 VibeSpace 的记录表新'), zsec.slice(0, 300));
+  ok('Diagnostics in zh: the heading and the line in Chinese', gateOf(zsec.includes('没有记录表的 claude 版本')) && verdictOf(zsec.includes('Claude Code 2.1.399 比这个 VibeSpace 的记录表新')), zsec.slice(0, 300));
   const src = read('src/lib/cli-registration-words.js');
   const lits = [...src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
   const ma = read('src/lib/manage-agents.js'), maCut = ma.slice(ma.indexOf('THE UNREGISTERED BUILD (lane cli-2-1-308-records'), ma.indexOf('row.append(left, actions);', ma.indexOf('THE UNREGISTERED BUILD (lane cli-2-1-308-records')));
@@ -84,7 +84,7 @@ console.log('② the registry — said ONCE per build, kept across a restart');
   const r0 = reg.note(NEWEST + ' (Claude Code)', 'hub');
   ok(`a registered build (${NEWEST}, the CLI's own words) is never said; the status names it`, r0.registered === true && r0.said === false && lines.length === 0 && events.length === 0 && reg.status().hub.version === NEWEST && reg.status().hub.registered === true && reg.status().unregistered.length === 0, { r0, lines });
   const r1 = reg.note('2.1.399 (Claude Code)', 'hub');
-  ok('an unregistered build seen as the hub\'s CLI ⇒ ONE journal line (the brief\'s sentence + where the draft is) and ONE telemetry event cli-unknown-version (Diagnostics\' «Harness drift» lists cli-unknown-*)', r1.said === true && r1.registered === false && lines.length === 1 && lines[0].startsWith('[cli-registration] ' + JLINE('2.1.399')) && /生成记录草稿/.test(lines[0]) && /claude-cli-dump\.mjs --auto/.test(lines[0]) && events.length === 1 && events[0][0] === 'cli-unknown-version' && events[0][1] === 'claude 2.1.399 · hub' && /^cli-unknown-/.test(events[0][0]), { lines, events });
+  ok('an unregistered build seen as the hub\'s CLI ⇒ ONE journal line (the brief\'s sentence + where the draft is) and ONE telemetry event cli-unknown-version (Diagnostics\' «Harness drift» lists cli-unknown-*)', r1.said === true && r1.registered === false && lines.length === 1 && gateOf(lines[0].startsWith('[cli-registration] ' + JLINE('2.1.399'))) && gateOf(/生成记录草稿/.test(lines[0])) && gateOf(/claude-cli-dump\.mjs --auto/.test(lines[0])) && events.length === 1 && events[0][0] === 'cli-unknown-version' && events[0][1] === 'claude 2.1.399 · hub' && verdictOf(/^cli-unknown-/.test(events[0][0])), { lines, events });
   reg.note('2.1.399', 'hub'); reg.note('2.1.399', 'conversation'); reg.note('2.1.399', 'conversation');
   const st = reg.status();
   ok('…every later sighting — the 15-min tick again, a conversation\'s drift card — adds no line and no event; the build lists both sources', lines.length === 1 && events.length === 1 && st.unregistered.length === 1 && st.unregistered[0].version === '2.1.399' && st.unregistered[0].sources.join() === 'hub,conversation' && st.unregistered[0].firstSeen === 1792652400000 && st.unregistered[0].draft === null, { lines, st });
@@ -95,7 +95,7 @@ console.log('② the registry — said ONCE per build, kept across a restart');
   ok('a RESTART (a new registry over the same data dir) does not say it again — data/cli-registration.json keeps the build', lines.length === 1 && events.length === 1 && JSON.parse(fs.readFileSync(path.join(dataDir, 'cli-registration.json'), 'utf8')).seen['2.1.399'].sources.join() === 'hub,conversation');
   const fresh = REG.create({ dataDir: path.join(tmp, 'data-fresh'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: () => { } });
   fresh.note('2.1.399', 'conversation');
-  ok('CONTROL: a registry over an EMPTY data dir does say it (the latch is the kept file, not a skip) — seen on a conversation\'s records', lines.length === 2 && /seen on a conversation's records/.test(lines[1]));
+  ok('CONTROL: a registry over an EMPTY data dir does say it (the latch is the kept file, not a skip) — seen on a conversation\'s records', lines.length === 2 && verdictOf(/seen on a conversation's records/.test(lines[1])));
   const next = mk([...R.SCHEMA_CLI_VERSIONS, '2.1.399']);
   ok('a release that REGISTERS the build drops it: nothing unregistered, the hub\'s claude registered', next.status().unregistered.length === 0 && next.note('2.1.399', 'hub').registered === true && next.status().hub.registered === true);
 }
@@ -105,11 +105,11 @@ console.log('②b THE LINE STOPS (lane cli-2-1-319-records): this release regist
   const lines = [], events = [];
   const on = REG.create({ dataDir: path.join(tmp, 'data-319'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   const r = on.note('2.1.319 (Claude Code)', 'hub');
-  ok('2.1.319 is registered: no journal line, no telemetry event, nothing for ⚙ Diagnostics to list — the hub\'s «[cli-registration] claude 2.1.319 is not registered» stops', R.SCHEMA_CLI_VERSIONS.includes('2.1.319') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
-  ok('…and its tracked dump stays beside the newer pinned builds (2.1.321, lane fable-52-cli-321; 2.1.322, B-9ff2 — the road the registry\'s draft diffs against next)', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.319.json')) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.319') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.319') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321'));
+  ok('2.1.319 is registered: no journal line, no telemetry event, nothing for ⚙ Diagnostics to list — the hub\'s «[cli-registration] claude 2.1.319 is not registered» stops', gateOf(R.SCHEMA_CLI_VERSIONS.includes('2.1.319')) && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
+  ok('…and its tracked dump stays beside the newer pinned builds (2.1.321, lane fable-52-cli-321; 2.1.322, B-9ff2 — the road the registry\'s draft diffs against next)', gateOf(fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.319.json'))) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.319') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.319') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321'));
   const off = REG.create({ dataDir: path.join(tmp, 'data-319-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.319'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   off.note('2.1.319 (Claude Code)', 'hub');
-  ok('RED CONTROL: over the .383 list (8b3fdb6ab) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.319 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.319', { lines });
+  ok('RED CONTROL: over the .383 list (8b3fdb6ab) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && gateOf(/2\.1\.319 is newer than this release's record table/.test(lines[0])) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.319', { lines });
 }
 
 console.log('②c MEASURED BEFORE THE BOX RUNS IT (lane fable-52-cli-321): this release registers 2.1.321 — the box\'s claude since 12:54 PT 11-09');
@@ -117,11 +117,11 @@ console.log('②c MEASURED BEFORE THE BOX RUNS IT (lane fable-52-cli-321): this 
   const lines = [], events = [];
   const on = REG.create({ dataDir: path.join(tmp, 'data-321'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   const r = on.note('2.1.321 (Claude Code)', 'hub');
-  ok('2.1.321 is registered: the owner\'s update to it says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', R.SCHEMA_CLI_VERSIONS.includes('2.1.321') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
-  ok('…its tracked dump stays pinned beside the newer 2.1.322 (B-9ff2)', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.321.json')) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.322'));
+  ok('2.1.321 is registered: the owner\'s update to it says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', gateOf(R.SCHEMA_CLI_VERSIONS.includes('2.1.321')) && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
+  ok('…its tracked dump stays pinned beside the newer 2.1.322 (B-9ff2)', gateOf(fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.321.json'))) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.322'));
   const off = REG.create({ dataDir: path.join(tmp, 'data-321-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.321'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   off.note('2.1.321 (Claude Code)', 'hub');
-  ok('RED CONTROL: over the .386 list (f5e087bb5) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.321 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.321', { lines });
+  ok('RED CONTROL: over the .386 list (f5e087bb5) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && gateOf(/2\.1\.321 is newer than this release's record table/.test(lines[0])) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.321', { lines });
 }
 
 console.log('②d THE BOX\'S 2.1.322 (B-9ff2, lane bl-tests-e): this release registers it — the box\'s claude by 2026-11-13, read as a static dump');
@@ -129,11 +129,11 @@ console.log('②d THE BOX\'S 2.1.322 (B-9ff2, lane bl-tests-e): this release reg
   const lines = [], events = [];
   const on = REG.create({ dataDir: path.join(tmp, 'data-322'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   const r = on.note('2.1.322 (Claude Code)', 'hub');
-  ok('2.1.322 is registered: the box\'s build says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', R.SCHEMA_CLI_VERSIONS.includes('2.1.322') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
-  ok('…its tracked dump stays pinned beside the newer 2.1.328 (B-9ff2 step 2)', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.322.json')) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.322') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.322') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.328'));
+  ok('2.1.322 is registered: the box\'s build says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', gateOf(R.SCHEMA_CLI_VERSIONS.includes('2.1.322')) && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
+  ok('…its tracked dump stays pinned beside the newer 2.1.328 (B-9ff2 step 2)', gateOf(fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.322.json'))) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.322') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.322') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.328'));
   const off = REG.create({ dataDir: path.join(tmp, 'data-322-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.322'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   off.note('2.1.322 (Claude Code)', 'hub');
-  ok('RED CONTROL: over the .407 list (b06f36e90) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.322 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.322', { lines });
+  ok('RED CONTROL: over the .407 list (b06f36e90) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && gateOf(/2\.1\.322 is newer than this release's record table/.test(lines[0])) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.322', { lines });
 }
 
 console.log('②e THE HOSTED RUNNER\'S 2.1.328 (B-9ff2 step 2, lane bl-ci): this release registers it — npm\'s newest on 2026-11-19, dumped ON the runner (ci.yml fast part 1), on no machine of ours');
@@ -141,13 +141,13 @@ console.log('②e THE HOSTED RUNNER\'S 2.1.328 (B-9ff2 step 2, lane bl-ci): this
   const lines = [], events = [];
   const on = REG.create({ dataDir: path.join(tmp, 'data-328'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   const r = on.note('2.1.328 (Claude Code)', 'hub');
-  ok('2.1.328 is registered: a hub that meets it says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', R.SCHEMA_CLI_VERSIONS.includes('2.1.328') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
+  ok('2.1.328 is registered: a hub that meets it says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', gateOf(R.SCHEMA_CLI_VERSIONS.includes('2.1.328')) && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
   const d328 = JSON.parse(read('scripts/fixtures/claude-cli/2.1.328.json'));
-  ok('…its tracked dump stays pinned beside the newer 2.1.332 (主开发 r5510), the build its own stamp names, read by the tree\'s method, no draft kept in it', R.SCHEMA_CLI_VERSIONS.indexOf('2.1.328') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.328') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.332') && d328.version === '2.1.328' && /^strings -n 8 <binary>/.test(d328.method) && !('draft' in d328));
+  ok('…its tracked dump stays pinned beside the newer 2.1.332 (主开发 r5510), the build its own stamp names, read by the tree\'s method, no draft kept in it', R.SCHEMA_CLI_VERSIONS.indexOf('2.1.328') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.328') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.332') && d328.version === '2.1.328' && gateOf(/^strings -n 8 <binary>/.test(d328.method)) && !('draft' in d328));
   // the .413 list (073cc4a1e) — the builds up to 2.1.322: 2.1.328 newer than all of them (2.1.332, pinned since, would make it a build BETWEEN two)
   const off = REG.create({ dataDir: path.join(tmp, 'data-328-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.328' && v !== '2.1.332'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   off.note('2.1.328 (Claude Code)', 'hub');
-  ok('RED CONTROL: over the .413 list (073cc4a1e) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.328 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.328', { lines });
+  ok('RED CONTROL: over the .413 list (073cc4a1e) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && gateOf(/2\.1\.328 is newer than this release's record table/.test(lines[0])) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.328', { lines });
 }
 
 console.log('②f THE HUB\'S MACHINE\'S 2.1.332 (主开发 r5510, lane cli-update-needs-nothing): this release registers it — the box\'s claude since 2026-11-26, dumped by the integrator\'s box row r5513 (the file read, never run)');
@@ -155,12 +155,12 @@ console.log('②f THE HUB\'S MACHINE\'S 2.1.332 (主开发 r5510, lane cli-updat
   const lines = [], events = [];
   const on = REG.create({ dataDir: path.join(tmp, 'data-332'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1793174400000 });
   const r = on.note('2.1.332 (Claude Code)', 'hub');
-  ok('2.1.332 is registered: a hub that meets it says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', R.SCHEMA_CLI_VERSIONS.includes('2.1.332') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
+  ok('2.1.332 is registered: a hub that meets it says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', gateOf(R.SCHEMA_CLI_VERSIONS.includes('2.1.332')) && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
   const d332 = JSON.parse(read('scripts/fixtures/claude-cli/2.1.332.json'));
-  ok('…its tracked dump is the newest pinned build (the road the registry\'s draft diffs against next), the build its own stamp names, read by the tree\'s method, no draft kept in it', R.SCHEMA_CLI_VERSION === '2.1.332' && d332.version === '2.1.332' && /^strings -n 8 <binary>/.test(d332.method) && !('draft' in d332));
+  ok('…its tracked dump is the newest pinned build (the road the registry\'s draft diffs against next), the build its own stamp names, read by the tree\'s method, no draft kept in it', R.SCHEMA_CLI_VERSION === '2.1.332' && d332.version === '2.1.332' && gateOf(/^strings -n 8 <binary>/.test(d332.method)) && !('draft' in d332));
   const off = REG.create({ dataDir: path.join(tmp, 'data-332-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.332'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1793174400000 });
   off.note('2.1.332 (Claude Code)', 'hub');
-  ok('RED CONTROL: over the list before this unit (the train 2.369.423\'s second pick) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.332 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.332', { lines });
+  ok('RED CONTROL: over the list before this unit (the train 2.369.423\'s second pick) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && gateOf(/2\.1\.332 is newer than this release's record table/.test(lines[0])) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.332', { lines });
 }
 
 console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the tracked dump); the binary is never run');
@@ -205,10 +205,10 @@ console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the 
   const t0 = Date.now(), r = await p1, ms = Date.now() - t0;
   const file = path.join(dataDir, 'claude-cli-dumps/2.1.399.json');
   const j = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
-  ok(`draft() ⇒ the child (scripts/claude-cli-dump.mjs --auto, ${ms} ms) wrote data/claude-cli-dumps/2.1.399.json: the dump the recipe writes + \`draft\` {takenAt, against ${NEWEST}, diff} naming the two plants`, r.ok === true && r.version === '2.1.399' && r.wrote === true && r.file === 'data/claude-cli-dumps/2.1.399.json' && r.changes === 2 && r.against === NEWEST && !!j && j.version === '2.1.399' && j.draft.against === NEWEST && j.draft.diff.changes === 2 && j.draft.diff.newKeys.join() === 'system/planted_probe' && (j.union.command_lifecycle || []).includes('x_399_probe') && typeof j.zod['system/planted_probe'] === 'string' && /^strings -n 8 /.test(j.method), { r, draft: j && j.draft });
+  ok(`draft() ⇒ the child (scripts/claude-cli-dump.mjs --auto, ${ms} ms) wrote data/claude-cli-dumps/2.1.399.json: the dump the recipe writes + \`draft\` {takenAt, against ${NEWEST}, diff} naming the two plants`, r.ok === true && r.version === '2.1.399' && r.wrote === true && r.file === 'data/claude-cli-dumps/2.1.399.json' && r.changes === 2 && r.against === NEWEST && !!j && j.version === '2.1.399' && j.draft.against === NEWEST && j.draft.diff.changes === 2 && j.draft.diff.newKeys.join() === 'system/planted_probe' && gateOf((j.union.command_lifecycle || []).includes('x_399_probe')) && typeof j.zod['system/planted_probe'] === 'string' && verdictOf(/^strings -n 8 /.test(j.method)), { r, draft: j && j.draft });
   const { draft: _d, ...asRecipe } = j || {};
   ok('…minus `draft` it IS a fixture: the recipe\'s keys exactly, no path, no person', JSON.stringify(Object.keys(asRecipe)) === JSON.stringify(Object.keys(dump)) && !JSON.stringify(j).includes(tmp) && !/\/home\/|\/Users\//.test(JSON.stringify(j)));
-  ok('…the journal says where the draft is (one line), and the status carries it — the row then shows its words, no button', lines.some((l) => l === `[cli-registration] record draft for claude 2.1.399: data/claude-cli-dumps/2.1.399.json — 2 changes against ${NEWEST}`) && reg.status().unregistered[0].draft?.changes === 2 && W.hubRegistrationRow(reg.status(), { t: tOf(null) }).button === null, { lines, st: reg.status() });
+  ok('…the journal says where the draft is (one line), and the status carries it — the row then shows its words, no button', gateOf(lines.some((l) => l === `[cli-registration] record draft for claude 2.1.399: data/claude-cli-dumps/2.1.399.json — 2 changes against ${NEWEST}`)) && reg.status().unregistered[0].draft?.changes === 2 && W.hubRegistrationRow(reg.status(), { t: tOf(null) }).button === null, { lines, st: reg.status() });
   const mtime = fs.statSync(file).mtimeMs;
   const r2 = await reg.draft();
   ok('a second press keeps the draft already taken (the box saw this build before) — not rewritten', r2.ok === true && r2.wrote === false && r2.changes === 2 && fs.statSync(file).mtimeMs === mtime, r2);
@@ -220,7 +220,7 @@ console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the 
   // the CLI entry by hand: one JSON line, exit 0; a registered build ⇒ nothing written
   const out = execFileSync(process.execPath, [path.join(REPO, 'scripts/claude-cli-dump.mjs'), '--auto', '--bin', bin, '--data', path.join(tmp, 'data-cli')], { encoding: 'utf8' });
   const o = JSON.parse(out.trim());
-  ok('`node scripts/claude-cli-dump.mjs --auto --bin … --data …` by hand: ONE JSON line, the draft written', o.version === '2.1.399' && o.wrote === true && fs.existsSync(path.join(tmp, 'data-cli/claude-cli-dumps/2.1.399.json')), o);
+  ok('`node scripts/claude-cli-dump.mjs --auto --bin … --data …` by hand: ONE JSON line, the draft written', o.version === '2.1.399' && o.wrote === true && verdictOf(fs.existsSync(path.join(tmp, 'data-cli/claude-cli-dumps/2.1.399.json'))), o);
   const bad = spawnSync(process.execPath, [path.join(REPO, 'scripts/claude-cli-dump.mjs'), '--auto', '--bin', path.join(REPO, `scripts/fixtures/claude-cli/${NEWEST}.json`), '--data', path.join(tmp, 'data-cli2')], { encoding: 'utf8' });
   let badOut = null; try { badOut = JSON.parse(String(bad.stdout).trim()); } catch { }
   // B-5e52 cure: the MANUAL road (`node scripts/claude-cli-dump.mjs <bin>`) on ~/.local/bin/claude — a link named «claude» whose
@@ -233,7 +233,7 @@ console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the 
   let asGiven = null; try { asGiven = D.dumpBinary(link2, []).version; } catch (e) { asGiven = e.message; }
   ok('the MANUAL road over ~/.local/bin/claude (a link named claude) reads the build off its REAL path — 2.1.399, its versions-dir name, never the stamp vote (2.1.398)', manV === '2.1.399', { manV });
   ok('RED CONTROL: the path as given (the road before the cure) leaves the build to the stamp vote — 2.1.398, the wrong build', asGiven === '2.1.398', { asGiven });
-  ok('…a file that names no build (here a JSON file: no versions-dir name, no VERSION stamp) ⇒ exit 1 and the error BY NAME, nothing written', bad.status === 1 && !!badOut && /names no version/.test(badOut.error || '') && !fs.existsSync(path.join(tmp, 'data-cli2/claude-cli-dumps')), { status: bad.status, out: bad.stdout });
+  ok('…a file that names no build (here a JSON file: no versions-dir name, no VERSION stamp) ⇒ exit 1 and the error BY NAME, nothing written', bad.status === 1 && !!badOut && gateOf(/names no version/.test(badOut.error || '')) && !fs.existsSync(path.join(tmp, 'data-cli2/claude-cli-dumps')), { status: bad.status, out: bad.stdout });
 }
 
 console.log('④ the wiring — the tick, the drift card, the routes, the clients');
@@ -250,7 +250,7 @@ console.log('④ the wiring — the tick, the drift card, the routes, the client
   const mm = createMessageManager('claude', 'test-cli-reg');
   mm.processLive({ type: 'system', subtype: 'init', cwd: '/w', session_id: 'e2e00000-0000-4000-8000-0000000003c1', uuid: 'u-1', model: 'claude-fable-5-1', claude_code_version: '2.1.399', x_399_unknown: 1 });
   delete global.__vsCliSeen;
-  ok('a drift card on a conversation tells global.__vsCliSeen its build (the init frame\'s claude_code_version)', cliSeen.includes('2.1.399'), cliSeen);
+  ok('a drift card on a conversation tells global.__vsCliSeen its build (the init frame\'s claude_code_version)', verdictOf(cliSeen.includes('2.1.399')), cliSeen);
   // mount: the two routes + the hook
   const routes = [], app = { get: (p, h) => routes.push(['GET', p, h]), post: (p, h) => routes.push(['POST', p, h]) };
   const reg = REG.mount(app, { dataDir: path.join(tmp, 'data-mount'), rootDir: REPO, log: () => { }, event: () => { } });
@@ -263,19 +263,19 @@ console.log('④ the wiring — the tick, the drift card, the routes, the client
   const p = res(); await routes[1][2]({}, p);
   ok('…POST for a registered hub claude ⇒ 409 {code: registered}', p.code === 409 && p.body.code === 'registered', p);
   const srv = read('server.js'), mmSrc = read('src/message-manager.js'), sf = read('src/lib/setup-flows.js'), ma = read('src/lib/manage-agents.js');
-  ok('server.js mounts it ON the oat-file-sync line (the size ratchet — no new line): onCliVersion = mount(app, {dataDir, rootDir, claudeCmd}).noteHub', /require\('\.\/src\/server\/oat-file-sync\.js'\)\.start\(\{ accounts, machineProbes, claudeCmd: \(\) => cliCmds\.current\('claude'\) \|\| CLAUDE_CMD, onCliVersion: require\('\.\/src\/server\/cli-registration\.js'\)\.mount\(app, \{ dataDir: path\.join\(__dirname, 'data'\), rootDir: __dirname, claudeCmd: [^}]+\}\)\.noteHub \}\);/.test(srv));
-  ok('message-manager _noteDrift calls global.__vsCliSeen with the build', /_noteDrift\(drift, raw, emit\) \{\n\s+const ver = [^\n]+\n\s+if \(ver\) \{ try \{ global\.__vsCliSeen\?\.\(ver\); \} catch \{\} \}/.test(mmSrc));
-  ok('⚙ Diagnostics fetches /api/cli-registration and places the section (PURE diagnosticsSection)', /fetchJson\('\/api\/cli-registration'\)/.test(sf) && sf.includes('${diagnosticsSection(reg, { t, esc, when })}') && sf.includes("import { diagnosticsSection } from './cli-registration-words.js'"));
-  ok('Manage agents\' claude row (this machine only — the SAME branch as the ephemeral-install warning: §78 counts harness branches) words it with hubRegistrationRow and POSTs the draft', /if \(!selectedHost && b\.key === 'claude' && info\.installed\) \{\n\s+if \(info\.install && !info\.install\.userLocal && b\.installCmd\) \{[\s\S]{0,2400}?const w = hubRegistrationRow\(await fetchJson\('\/api\/cli-registration'\), \{ t \}\);/.test(ma) && ma.includes("api('/api/cli-registration/draft', { method: 'POST' })"));
+  ok('server.js mounts it ON the oat-file-sync line (the size ratchet — no new line): onCliVersion = mount(app, {dataDir, rootDir, claudeCmd}).noteHub', verdictOf(/require\('\.\/src\/server\/oat-file-sync\.js'\)\.start\(\{ accounts, machineProbes, claudeCmd: \(\) => cliCmds\.current\('claude'\) \|\| CLAUDE_CMD, onCliVersion: require\('\.\/src\/server\/cli-registration\.js'\)\.mount\(app, \{ dataDir: path\.join\(__dirname, 'data'\), rootDir: __dirname, claudeCmd: [^}]+\}\)\.noteHub \}\);/.test(srv)));
+  ok('message-manager _noteDrift calls global.__vsCliSeen with the build', verdictOf(/_noteDrift\(drift, raw, emit\) \{\n\s+const ver = [^\n]+\n\s+if \(ver\) \{ try \{ global\.__vsCliSeen\?\.\(ver\); \} catch \{\} \}/.test(mmSrc)));
+  ok('⚙ Diagnostics fetches /api/cli-registration and places the section (PURE diagnosticsSection)', gateOf(/fetchJson\('\/api\/cli-registration'\)/.test(sf)) && gateOf(sf.includes('${diagnosticsSection(reg, { t, esc, when })}')) && verdictOf(sf.includes("import { diagnosticsSection } from './cli-registration-words.js'")));
+  ok('Manage agents\' claude row (this machine only — the SAME branch as the ephemeral-install warning: §78 counts harness branches) words it with hubRegistrationRow and POSTs the draft', gateOf(/if \(!selectedHost && b\.key === 'claude' && info\.installed\) \{\n\s+if \(info\.install && !info\.install\.userLocal && b\.installCmd\) \{[\s\S]{0,2400}?const w = hubRegistrationRow\(await fetchJson\('\/api\/cli-registration'\), \{ t \}\);/.test(ma)) && verdictOf(ma.includes("api('/api/cli-registration/draft', { method: 'POST' })")));
   const cr = read('src/server/cli-registration.js');
-  ok('the child: process.execPath scripts/claude-cli-dump.mjs --auto with serviceEnv (test-architecture §94: a builder site, no row), bounded by its timeout', /execFile\(process\.execPath, \[script, '--auto', '--data', dataDir, \.\.\.\(bin \? \['--bin', bin\] : \[\]\)\], \{ env: serviceEnv\(process\.env\), timeout: timeoutMs/.test(cr) && REG.DRAFT_TIMEOUT_MS === 120e3);
+  ok('the child: process.execPath scripts/claude-cli-dump.mjs --auto with serviceEnv (test-architecture §94: a builder site, no row), bounded by its timeout', gateOf(/execFile\(process\.execPath, \[script, '--auto', '--data', dataDir, \.\.\.\(bin \? \['--bin', bin\] : \[\]\)\], \{ env: serviceEnv\(process\.env\), timeout: timeoutMs/.test(cr)) && REG.DRAFT_TIMEOUT_MS === 120e3);
   // test-architecture §94 (the spawn-env census) on the draft child — and the same census over a copy whose child inherits the hub's env
   const SC = await import('./spawn-env-census.mjs');
   const site = (patch) => { const s = SC.scan(REPO, patch ? { patch } : {}); const j = SC.judge(s); return { row: j.table.find((x) => x.site.startsWith('src/server/cli-registration.js:')), red: j.red.filter((x) => x.includes('src/server/cli-registration.js')) }; };
   const real = site(null);
   ok('§94: the census sees the draft child (a tracked file) as a BUILDER site — execFile process.execPath on serviceEnv, no row needed, nothing red', !!real.row && real.row.class === 'serviceEnv' && real.row.cmd === 'process.execPath' && real.red.length === 0, real);
   const mut = site({ 'src/server/cli-registration.js': cr.replace('{ env: serviceEnv(process.env), timeout', '{ timeout') });
-  ok('…MUTANT: the same child with no env (it would inherit the hub\'s whole env, secrets included) ⇒ §94 RED, naming the site', cr.includes('{ env: serviceEnv(process.env), timeout') && mut.red.length === 1 && /UNLISTED raw/.test(mut.red[0]), mut);
+  ok('…MUTANT: the same child with no env (it would inherit the hub\'s whole env, secrets included) ⇒ §94 RED, naming the site', gateOf(cr.includes('{ env: serviceEnv(process.env), timeout')) && mut.red.length === 1 && verdictOf(/UNLISTED raw/.test(mut.red[0])), mut);
 }
 
 console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s r238, 2026-11-20 — K44): the tree\'s PINNED build installed; the registry\'s newest a look-ahead that never gates');
@@ -323,11 +323,11 @@ console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s 
   ok('ci.yml installs the TREE\'S PINNED claude in the fast job AND the heavy shards (`@$(node scripts/ci-claude.mjs pin)` — never typed, never bare) and keeps the registry\'s newest as a LOOK-AHEAD beside it: its own prefix, read by the tree\'s road, never a gate, part 1 on Node 22, its dump the artifact claude-cli-dump-<sha>', w.length === 0, w);
   // the pin's one reader prints the tree's constant (a real child: what the workflow's $(…) reads)
   const pinOut = execFileSync(process.execPath, [path.join(REPO, 'scripts/ci-claude.mjs'), 'pin'], { encoding: 'utf8' }).trim();
-  ok(`scripts/ci-claude.mjs pin prints the tree's pinned build — «${pinOut}» = SCHEMA_CLI_VERSION ${R.SCHEMA_CLI_VERSION}`, pinOut === R.SCHEMA_CLI_VERSION && /^\d+\.\d+\.\d+$/.test(pinOut), pinOut);
+  ok(`scripts/ci-claude.mjs pin prints the tree's pinned build — «${pinOut}» = SCHEMA_CLI_VERSION ${R.SCHEMA_CLI_VERSION}`, pinOut === R.SCHEMA_CLI_VERSION && verdictOf(/^\d+\.\d+\.\d+$/.test(pinOut)), pinOut);
   const CC = await import('./ci-claude.mjs');
   const P0 = R.SCHEMA_CLI_VERSION, LA = (r) => CC.lookAheadLine(P0, r);
   const lines = { same: LA({ version: P0, registered: true, file: '/x/' + P0 + '.json', changes: 0 }), ahead: LA({ version: '9.9.999', registered: false, file: '/x/9.9.999.json', changes: 54 }), older: LA({ version: '0.0.1', registered: false }), broken: LA({ error: 'no claude binary' }) };
-  ok('the look-ahead\'s ONE line says how far ahead: «' + lines.ahead + '» · the same build «nothing ahead» · an older one said · a failed read said — every one naming the pin, none a gate', /newest is 9\.9\.999, ahead of the pinned/.test(lines.ahead) && /54 change\(s\)/.test(lines.ahead) && /nothing registers itself/.test(lines.ahead) && /IS the pinned .* nothing ahead/.test(lines.same) && /OLDER than the pinned/.test(lines.older) && /could not be read — no claude binary/.test(lines.broken) && Object.values(lines).every((l) => l.includes(P0)), lines);
+  ok('the look-ahead\'s ONE line says how far ahead: «' + lines.ahead + '» · the same build «nothing ahead» · an older one said · a failed read said — every one naming the pin, none a gate', gateOf(/newest is 9\.9\.999, ahead of the pinned/.test(lines.ahead)) && gateOf(/54 change\(s\)/.test(lines.ahead)) && gateOf(/nothing registers itself/.test(lines.ahead)) && gateOf(/IS the pinned .* nothing ahead/.test(lines.same)) && gateOf(/OLDER than the pinned/.test(lines.older)) && gateOf(/could not be read — no claude binary/.test(lines.broken)) && verdictOf(Object.values(lines).every((l) => l.includes(P0))), lines);
   // CONTROLS — each planted fault named
   const typed = yml.replace(PIN, 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@' + P0 + '\n');
   // stale-pins: kept — the 96a0db36d form, the pin read inside the install's argument (r1682's red)
@@ -338,10 +338,10 @@ console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s 
   const noLook = yml.replace(/ {6}- name: Look ahead — install the registry's newest claude beside the pin[^\n]*\n(?: {8}.*\n)+/, '').replace(/ {6}- name: Look ahead — read the newest beside the pin[^\n]*\n(?: {8}.*\n)+/, '');
   const CTL = { typed: [typed, /an install of claude that is not the pin: bash scripts\/ci-npm\.sh install -g @anthropic-ai\/claude-code@\d/], bare: [bare, /an install of claude that is not the pin: bash scripts\/ci-npm\.sh install -g @anthropic-ai\/claude-code$/], inArg: [inArg, /an install of claude that is not the pin: bash scripts\/ci-npm\.sh install -g @anthropic-ai\/claude-code@\$\(node scripts\/ci-claude\.mjs pin\)$/], asGate: [asGate, /the look-ahead can fail the job/], overPin: [overPin, /installs over the pin/], noLook: [noLook, /keeps no look-ahead/] };
   const seen = Object.fromEntries(Object.entries(CTL).map(([k, [t, re]]) => [k, t !== yml && wiring(t).some((x) => re.test(x))]));
-  ok('CONTROL: a typed version, a bare install, the pin read inside the install\'s argument (the 96a0db36d form), a look-ahead that can fail the job, one that installs over the pin, and none at all — each RED by name', Object.values(seen).every(Boolean), seen);
+  ok('CONTROL: a typed version, a bare install, the pin read inside the install\'s argument (the 96a0db36d form), a look-ahead that can fail the job, one that installs over the pin, and none at all — each RED by name', verdictOf(Object.values(seen).every(Boolean)), seen);
   // THE PIN IS CHECKED AS A VERSION (r1682): pinOf names a read that throws and a value that is not x.y.z
   const okPin = CC.pinOf(() => '2.1.328'), thrown = CC.pinOf(() => { throw new Error("Cannot find module 'a-module-npm-ci-brings'"); }), notV = ['', undefined, '2.1', 'latest', '2.1.328 '].map((v) => CC.pinOf(() => v));
-  ok('pinOf: the pin is a version x.y.z or an ERROR named — a read that throws («could not be read», its first line said) and a value that is not x.y.z (empty, none, 2.1, latest, a trailing blank)', okPin.version === '2.1.328' && !okPin.error && /could not be read .*Cannot find module 'a-module-npm-ci-brings'/.test(thrown.error) && notV.every((r) => !r.version && /is not a version x\.y\.z/.test(r.error)), { okPin, thrown, notV });
+  ok('pinOf: the pin is a version x.y.z or an ERROR named — a read that throws («could not be read», its first line said) and a value that is not x.y.z (empty, none, 2.1, latest, a trailing blank)', okPin.version === '2.1.328' && !okPin.error && gateOf(/could not be read .*Cannot find module 'a-module-npm-ci-brings'/.test(thrown.error)) && verdictOf(notV.every((r) => !r.version && /is not a version x\.y\.z/.test(r.error))), { okPin, thrown, notV });
   // THE STEP's OWN LINE under GitHub's shell (bash -eo pipefail), in a stub tree: the real ci-claude.mjs, a recorder for scripts/ci-npm.sh,
   // and a src/record-shape.js that throws (a require only `npm ci` brings) or that holds the pin
   {
@@ -361,7 +361,7 @@ console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s 
       const IN_ARG = 'bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)';
       const good = stepRun(PIN_RUN, HOLDS), broken = stepRun(PIN_RUN, THROWS), unset = stepRun(PIN_RUN, NOTV), old = stepRun(IN_ARG, THROWS);
       ok(`the workflow's pin step, its own line under bash -eo pipefail: a readable pin installs @anthropic-ai/claude-code@${P0}; a pin that cannot be read FAILS the step (exit ${broken.status}) and installs NOTHING, saying why (${broken.stderr.slice(0, 120)}); a value that is not a version the same`,
-        good.status === 0 && good.installed === `install -g @anthropic-ai/claude-code@${P0}` && broken.status !== 0 && broken.installed === null && /ci-claude pin: the tree's pinned build could not be read/.test(broken.stderr) && unset.status !== 0 && unset.installed === null, { good, broken, unset });
+        good.status === 0 && good.installed === `install -g @anthropic-ai/claude-code@${P0}` && broken.status !== 0 && broken.installed === null && gateOf(/ci-claude pin: the tree's pinned build could not be read/.test(broken.stderr)) && unset.status !== 0 && unset.installed === null, { good, broken, unset });
       ok('…RED CONTROL: the 96a0db36d line (the pin read inside the install\'s argument), with the same unreadable pin, exits 0 and installs `@anthropic-ai/claude-code@` — an EMPTY version, the registry\'s newest under the pin\'s name (r1682\'s red)',
         old.status === 0 && old.installed === 'install -g @anthropic-ai/claude-code@', old);
     } finally { try { fs.rmSync(stubAt, { recursive: true, force: true }); } catch { } }
@@ -388,7 +388,7 @@ console.log('⑥ B-574d (主开发 r4764): the state through the STORE WRITER �
   };
   const g = await writerLeg(REG, 'real');
   ok(`the registry's saves go to the writer by name (${g.names}, ${g.mine} hand-overs), the last one the LATEST state (both sources; that a burst becomes ONE write is the real writer's own property, not shown at this seam), a failed landing answers false (${g.landed}) and is SAID (${g.said}), the old file stands whole`,
-    g.mine === 2 && g.names === 'cli-registration.write' && g.latest && g.landed === false && g.said === 1 && g.whole, JSON.stringify(g));
+    g.mine === 2 && g.names === 'cli-registration.write' && gateOf(g.latest) && g.landed === false && g.said === 1 && verdictOf(g.whole), JSON.stringify(g));
   const RED = mutantCopies('cli-reg-writer', REPO).load('src/server/cli-registration.js', anchored(fs.readFileSync(REG_FILE, 'utf8'),
     "onWritten: (ok, e) => { if (!ok) { log('[cli-registration] could not keep data/cli-registration.json:'", "onWritten: (ok, e) => { if (false) { log('[cli-registration] could not keep data/cli-registration.json:'", 'reg-fail-cut'), 'reg-fail-cut');
   const r = await writerLeg(RED, 'red');
@@ -401,4 +401,4 @@ console.log('⑥ B-574d (主开发 r4764): the state through the STORE WRITER �
 }
 
 console.log(fail ? `\n✗ (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

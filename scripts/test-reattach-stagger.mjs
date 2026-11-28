@@ -30,7 +30,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -194,12 +194,12 @@ function legs(Proto, label, expectFix = true) {
     r.leg4 = r.heldQueued && r.foreignDropped && r.disposeEnds && r.capPoisons && r.capStaysPoisoned && r.throwPoisons;
   }
   if (!expectFix) return r;
-  ok(`${label} ① an epoch-changed attached arms ONE timer; the ops inside the window are held (not rendered, watermark untouched)`, r.armed && r.heldNotRendered && r.watermarkUntouched && r.oneTimer, r);
-  ok(`${label} ① …the rebuild renders the slab, then the held ops IN ORDER (an edit lands on its create); the watermark = the last applied op; nothing pending, no catch-up`, r.slabThenOps && r.watermarkApplied && r.pendingCleared && r.catchUps === 0, r);
-  ok(`${label} ② a held op the slab already describes (seq ≤ opSeq) is skipped and a create the slab holds dedups by id — nothing renders twice`, r.leg2, r);
-  ok(`${label} ③ a lagged inside the window re-attaches from the OLD position (a full slab, never a held resume), the newer snapshot supersedes, the view is whole with one rebuild`, r.leg3, r);
-  ok(`${label} ④ a held resume while pending queues its replay; ops of another epoch are not this slab's; dispose ends the rebuild; a queue past the cap poisons the watermark`, r.heldQueued && r.foreignDropped && r.disposeEnds && r.capPoisons, r);
-  ok(`${label} ④ (r2) …and the overflow SURVIVES the rebuild's heal: poisoned after the drain + an attach with no seq (the full rung heals it); a rebuild that throws poisons the watermark`, r.capStaysPoisoned && r.throwPoisons, { capStaysPoisoned: r.capStaysPoisoned, throwPoisons: r.throwPoisons });
+  ok(`${label} ① an epoch-changed attached arms ONE timer; the ops inside the window are held (not rendered, watermark untouched)`, gateOf(r.armed) && gateOf(r.heldNotRendered) && gateOf(r.watermarkUntouched) && verdictOf(r.oneTimer), r);
+  ok(`${label} ① …the rebuild renders the slab, then the held ops IN ORDER (an edit lands on its create); the watermark = the last applied op; nothing pending, no catch-up`, gateOf(r.slabThenOps) && gateOf(r.watermarkApplied) && gateOf(r.pendingCleared) && r.catchUps === 0, r);
+  ok(`${label} ② a held op the slab already describes (seq ≤ opSeq) is skipped and a create the slab holds dedups by id — nothing renders twice`, verdictOf(r.leg2), r);
+  ok(`${label} ③ a lagged inside the window re-attaches from the OLD position (a full slab, never a held resume), the newer snapshot supersedes, the view is whole with one rebuild`, verdictOf(r.leg3), r);
+  ok(`${label} ④ a held resume while pending queues its replay; ops of another epoch are not this slab's; dispose ends the rebuild; a queue past the cap poisons the watermark`, gateOf(r.heldQueued) && gateOf(r.foreignDropped) && gateOf(r.disposeEnds) && verdictOf(r.capPoisons), r);
+  ok(`${label} ④ (r2) …and the overflow SURVIVES the rebuild's heal: poisoned after the drain + an attach with no seq (the full rung heals it); a rebuild that throws poisons the watermark`, gateOf(r.capStaysPoisoned) && verdictOf(r.throwPoisons), { capStaysPoisoned: r.capStaysPoisoned, throwPoisons: r.throwPoisons });
   return r;
 }
 
@@ -210,7 +210,7 @@ console.log('⑤ the jitter seam + wiring');
 {
   const v = mkView(ChatView.prototype);
   const j = Array.from({ length: 50 }, () => v._resetJitterMs());
-  ok('⑤ _resetJitterMs() = 0–500 ms (the 2.338.0 stagger is kept; a suite pins it to its maximum through the seam)', j.every((x) => x >= 0 && x < 500) && new Set(j).size > 1);
+  ok('⑤ _resetJitterMs() = 0–500 ms (the 2.338.0 stagger is kept; a suite pins it to its maximum through the seam)', gateOf(j.every((x) => x >= 0 && x < 500)) && new Set(j).size > 1);
   timers.length = 0;
   v._resetJitterMs = () => 500;
   v._reattach(true);
@@ -218,10 +218,10 @@ console.log('⑤ the jitter seam + wiring');
   ok('⑤ the timer is armed with the seam\'s value', pendingTimers().length === 1 && pendingTimers()[0].ms === 500);
   fireTimers();
   const cv = read('src/lib/chat-view.js');
-  ok('⑤ wiring: _onOp holds while a rebuild is pending — the FIRST thing it does', /_onOp\(op\) \{\s*\n(\s*\/\/.*\n)*\s*if \(this\._resetPending\) \{ this\._holdResetOp\(op\); return; \}/.test(cv));
-  ok('⑤ wiring: the epoch branch arms the reset (and a pending one re-arms with the newer snapshot); no bare setTimeout(_fullViewReset) is left', /if \(epochChanged \|\| this\._resetPending\) \{[\s\S]*?this\._armViewReset\(msg\);/.test(cv) && !/setTimeout\(\(\) => \{ if \(!this\._disposed\) this\._fullViewReset\(msg\); \}/.test(cv));
-  ok('⑤ wiring: _fullViewReset consumes the pending state FIRST and drains AFTER loadHistory (the slab it post-dates)', (() => { const a = cv.indexOf('  _fullViewReset(msg) {'); const b = cv.indexOf('this._resetPending = null;', a); const c = cv.indexOf('this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);', a); const d = cv.indexOf('this._drainResetQueue(held, msg);', a); return a > 0 && b > a && c > b && d > c; })());
-  ok('⑤ wiring: dispose ends a pending rebuild', /if \(this\._resetTimer\) \{ clearTimeout\(this\._resetTimer\); this\._resetTimer = null; \}[^\n]*\n\s*this\._resetPending = null; this\._resetQueue = null;/.test(cv.slice(cv.indexOf('  dispose() {'))));
+  ok('⑤ wiring: _onOp holds while a rebuild is pending — the FIRST thing it does', verdictOf(/_onOp\(op\) \{\s*\n(\s*\/\/.*\n)*\s*if \(this\._resetPending\) \{ this\._holdResetOp\(op\); return; \}/.test(cv)));
+  ok('⑤ wiring: the epoch branch arms the reset (and a pending one re-arms with the newer snapshot); no bare setTimeout(_fullViewReset) is left', gateOf(/if \(epochChanged \|\| this\._resetPending\) \{[\s\S]*?this\._armViewReset\(msg\);/.test(cv)) && !/setTimeout\(\(\) => \{ if \(!this\._disposed\) this\._fullViewReset\(msg\); \}/.test(cv));
+  ok('⑤ wiring: _fullViewReset consumes the pending state FIRST and drains AFTER loadHistory (the slab it post-dates)', verdictOf((() => { const a = cv.indexOf('  _fullViewReset(msg) {'); const b = cv.indexOf('this._resetPending = null;', a); const c = cv.indexOf('this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);', a); const d = cv.indexOf('this._drainResetQueue(held, msg);', a); return a > 0 && b > a && c > b && d > c; })()));
+  ok('⑤ wiring: dispose ends a pending rebuild', verdictOf(/if \(this\._resetTimer\) \{ clearTimeout\(this\._resetTimer\); this\._resetTimer = null; \}[^\n]*\n\s*this\._resetPending = null; this\._resetQueue = null;/.test(cv.slice(cv.indexOf('  dispose() {')))));
 }
 
 console.log('⑥ CONTROL: the pre-fix _onOp (no hold) — the ops of the window land in the list the slab replaces');
@@ -229,7 +229,7 @@ console.log('⑥ CONTROL: the pre-fix _onOp (no hold) — the ops of the window 
   const M = mutantCopies('reattach-stagger', REPO);
   const src = read('src/lib/chat-view.js');
   const needle = '    if (this._resetPending) { this._holdResetOp(op); return; }\n';
-  ok('⑥ the patch site exists', src.includes(needle));
+  ok('⑥ the patch site exists', verdictOf(src.includes(needle)));
   const mut = M.write('src/lib/chat-view.js', editAnchor(src, needle, '', "src/lib/chat-view.js"), 'no-hold');
   const { ChatView: Mut } = await import(pathToFileURL(mut).href);
   const r = legs(Mut.prototype, '⑥ mutant', false);
@@ -237,14 +237,14 @@ console.log('⑥ CONTROL: the pre-fix _onOp (no hold) — the ops of the window 
   ok('⑥ CONTROL: …and the lagged-in-window leg is not whole either', r.wholeAfterLagged === false, r);
   // ⑥b (r2): the rebuild's heal clearing an overflow (the pre-r2 shape) — the ④ (r2) leg can go red
   const needle2 = '    if (overflow) {\n      this._seqPoisoned = true;';
-  ok('⑥b the overflow-heal patch site exists', src.includes(needle2));
+  ok('⑥b the overflow-heal patch site exists', verdictOf(src.includes(needle2)));
   const mut2 = M.write('src/lib/chat-view.js', editAnchor(src, needle2, '    if (false) {\n      this._seqPoisoned = true;', "src/lib/chat-view.js"), 'overflow-cleared');
   const { ChatView: Mut2 } = await import(pathToFileURL(mut2).href);
   const r2 = legs(Mut2.prototype, '⑥b mutant', false);
   ok('⑥b CONTROL: without the overflow re-poison the heal clears the flag and no heal attach is sent — the dropped op is lost with a clean watermark', r2.capStaysPoisoned === false && r2.capPoisons === true, { capStaysPoisoned: r2.capStaysPoisoned });
-  for (const row of copiesCensus(M.files, M.dir, REPO, { label: '⑥ ' })) ok(row.name, row.pass, row.detail);
+  for (const row of copiesCensus(M.files, M.dir, REPO, { label: '⑥ ' })) ok(row.name, verdictOf(row.pass), row.detail);
 }
 
 globalThis.setTimeout = realSetTimeout; globalThis.clearTimeout = realClearTimeout;
 console.log(`\n${fail ? '✗' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

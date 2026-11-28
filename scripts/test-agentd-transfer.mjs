@@ -30,7 +30,7 @@ const GM = require(path.join(REPO, 'src/grant-model.js'));
 const GS = require(path.join(REPO, 'src/server/grants-store.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
 const section = async (name, fn) => { console.log(name); try { await fn(); } catch (e) { fail++; console.error(`  ✗ ${name} threw: ${e.stack || e.message}`); } };
 const settle = async (p) => { try { return { v: await p }; } catch (e) { return { e }; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -108,8 +108,8 @@ await section('① a 100 MiB pull through the real agent: whole, sha256 per wind
   const t0 = Date.now();
   const r = await settle(mgr.pull(A, 'wa', 'BOX', { remote: BIG, local: path.join(PROJ, 'nomad.bin') }));
   H.stop();
-  ok(r.v && r.v.bytes === 100 * MiB && r.v.sha256 === bigSha && r.v.verified === 'sha256', `pulled 100 MiB in ${Date.now() - t0} ms — the hub's sha256 equals the file's, verified "sha256" (each window compared with the device's hash)`, r.e ? r.e.message : { ...r.v, line: undefined });
-  ok(fs.existsSync(path.join(PROJ, 'nomad.bin')) && shaFile(path.join(PROJ, 'nomad.bin')) === bigSha && !fs.readdirSync(PROJ).some((f) => /\.vs-part$/.test(f)), 'the file on disk is the same bytes; no .vs-part left');
+  ok(gateOf(r.v) && r.v.bytes === 100 * MiB && r.v.sha256 === bigSha && r.v.verified === 'sha256', `pulled 100 MiB in ${Date.now() - t0} ms — the hub's sha256 equals the file's, verified "sha256" (each window compared with the device's hash)`, r.e ? r.e.message : { ...r.v, line: undefined });
+  ok(gateOf(fs.existsSync(path.join(PROJ, 'nomad.bin'))) && shaFile(path.join(PROJ, 'nomad.bin')) === bigSha && !fs.readdirSync(PROJ).some((f) => /\.vs-part$/.test(f)), 'the file on disk is the same bytes; no .vs-part left');
   ok(H.at >= 100 && H.peak <= 2 * WIN, `the hub held at most ${mib(H.peak)} of the file at once (the bytes off its link minus the part on disk, at each of ${H.at} socket reads) — ≤ two 8 MiB windows (never the file)`, { peak: H.peak, reads: H.at });
   const C1 = await linkHold(() => 0);
   const whole = await dm.fsReadRange(BIG, 0, 100 * MiB);
@@ -121,7 +121,7 @@ await section('① a 100 MiB pull through the real agent: whole, sha256 per wind
   fs.writeFileSync(KEPT, Buffer.concat(kept)); kept.length = 0;
   C2.stop(); fs.rmSync(KEPT, { force: true });
   ok(rk.sent === 100 * MiB && C2.peak >= 90 * MiB, `CONTROL: a sink that keeps every piece (credited at once, written at the end) holds ${mib(C2.peak)} — the judge sees a hold the link's credit does not bound`, C2.peak);
-  ok(/^pulled .*nomad\.bin from "BOX" → .*nomad\.bin — 100\.0 MiB \(104857600 bytes\) · sha256 [0-9a-f]{64} verified · \d+\.\d s$/.test(r.v && r.v.line), 'the CLI line: what, where, the size, the hash, the time', r.v && r.v.line);
+  ok(verdictOf(/^pulled .*nomad\.bin from "BOX" → .*nomad\.bin — 100\.0 MiB \(104857600 bytes\) · sha256 [0-9a-f]{64} verified · \d+\.\d s$/.test(r.v && r.v.line)), 'the CLI line: what, where, the size, the hash, the time', r.v && r.v.line);
 });
 
 await section('② the same file pushed back: .vs-part, then a rename once the count and the sha256 matched', async () => {
@@ -129,8 +129,8 @@ await section('② the same file pushed back: .vs-part, then a rename once the c
   const source = fs.createReadStream(got);
   const H = sourceHold(source, onDisk(dst));
   const r = await settle(mgr.push(A, 'wa', 'BOX', { remote: dst, local: got, size: fs.statSync(got).size, source }));
-  ok(r.v && r.v.bytes === 100 * MiB && r.v.sha256 === bigSha && r.v.verified === 'sha256', 'pushed 100 MiB — the device\'s sha256 (compared device-side with the hub\'s) equals the file\'s', r.e ? r.e.message : r.v);
-  ok(fs.existsSync(dst) && shaFile(dst) === bigSha && !fs.existsSync(dst + '.vs-part'), 'the bytes on the machine equal; the missing folder was made; no .vs-part left');
+  ok(gateOf(r.v) && r.v.bytes === 100 * MiB && r.v.sha256 === bigSha && r.v.verified === 'sha256', 'pushed 100 MiB — the device\'s sha256 (compared device-side with the hub\'s) equals the file\'s', r.e ? r.e.message : r.v);
+  ok(gateOf(fs.existsSync(dst)) && shaFile(dst) === bigSha && !fs.existsSync(dst + '.vs-part'), 'the bytes on the machine equal; the missing folder was made; no .vs-part left');
   ok(H.at >= 100 && H.peak <= 2 * WIN, `the hub held at most ${mib(H.peak)} of the file at once (the bytes it read off the disk minus the device's part, at each of ${H.at} reads; the link and the device's queue count too) — ≤ two windows`, { peak: H.peak, reads: H.at });
   fs.rmSync(dst, { force: true });
 });
@@ -141,18 +141,18 @@ await section('③ ④ the device refuses a lying end; an abort and a dropped li
   const chan = conn.nextChan++;
   conn.sessions.set(chan, {});
   const open = await dm._request({ op: 'fs-op', action: 'write-stream', step: 'open', path: dst, chan, size: 4, waitMs: 10000, by: 'system:test' });
-  ok(open.ready === true && fs.existsSync(dst + '.vs-part'), 'open ⇒ ready, the part made', open);
+  ok(open.ready === true && verdictOf(fs.existsSync(dst + '.vs-part')), 'open ⇒ ready, the part made', open);
   conn.mux.data(chan, Buffer.from('abcd'));
   const lie = await settle(dm._request({ op: 'fs-op', action: 'write-stream', step: 'end', path: dst, chan, sent: 4, sha256: '0'.repeat(64), waitMs: 20000, by: 'system:test' }));
   conn.sessions.delete(chan);
   await sleep(300);
-  ok(lie.e && /hash_mismatch/.test(lie.e.message) && !fs.existsSync(dst) && !fs.existsSync(dst + '.vs-part'), 'a sha256 that is not the bytes\' ⇒ hash_mismatch; the part removed; nothing at the path', lie.e ? lie.e.message : lie.v);
+  ok(gateOf(lie.e) && gateOf(/hash_mismatch/.test(lie.e.message)) && !fs.existsSync(dst) && !fs.existsSync(dst + '.vs-part'), 'a sha256 that is not the bytes\' ⇒ hash_mismatch; the part removed; nothing at the path', lie.e ? lie.e.message : lie.v);
   // a source that dies after 3 MiB
   const dst2 = path.join(REM, 'dies.bin');
   async function* dying() { yield crypto.randomBytes(3 * MiB); throw new Error('the local disk failed'); }
   const d = await settle(dm.fsWriteStream(dst2, { by: 'system:test', source: dying(), size: 10 * MiB }));
   await sleep(300);
-  ok(d.e && /local disk failed/.test(d.e.message) && !fs.existsSync(dst2) && !fs.existsSync(dst2 + '.vs-part'), 'a source dying mid-push ⇒ abort ⇒ the part removed, nothing at the path', d.e && d.e.message);
+  ok(gateOf(d.e) && gateOf(/local disk failed/.test(d.e.message)) && !fs.existsSync(dst2) && !fs.existsSync(dst2 + '.vs-part'), 'a source dying mid-push ⇒ abort ⇒ the part removed, nothing at the path', d.e && d.e.message);
   // the link dropped mid-push: a SECOND connection to the same agent, stopped while its push waits for more bytes
   const dm2 = await newDm();
   const dst3 = path.join(REM, 'dropped.bin');
@@ -165,47 +165,47 @@ await section('③ ④ the device refuses a lying end; an abort and a dropped li
   dm2.stop(); release();
   await p3;
   let gone = false; for (let i = 0; i < 50 && !gone; i++) { await sleep(40); gone = !fs.existsSync(dst3 + '.vs-part'); }
-  ok(had && gone && !fs.existsSync(dst3), 'the link dropped mid-push ⇒ the agent removes the part (onDead); nothing at the path', { had, gone });
+  ok(gateOf(had) && gateOf(gone) && !fs.existsSync(dst3), 'the link dropped mid-push ⇒ the agent removes the part (onDead); nothing at the path', { had, gone });
 });
 
 await section('⑤ /dev/zero, a growing file, 0 bytes, an existing destination', async () => {
   const z = await settle(mgr.pull(A, 'wa', 'BOX', { remote: '/dev/zero', local: path.join(PROJ, 'zero.bin') }));
-  ok(z.e && z.e.code === 'not_a_file' && /is not a regular file \(a device, a pipe or a socket\)/.test(z.e.message) && !fs.existsSync(path.join(PROJ, 'zero.bin')), '/dev/zero ⇒ not_a_file (its stat says a device) — never an endless read', z.e && z.e.message);
+  ok(gateOf(z.e) && z.e.code === 'not_a_file' && gateOf(/is not a regular file \(a device, a pipe or a socket\)/.test(z.e.message)) && !fs.existsSync(path.join(PROJ, 'zero.bin')), '/dev/zero ⇒ not_a_file (its stat says a device) — never an endless read', z.e && z.e.message);
   const G = path.join(REM, 'grows.bin'); fs.writeFileSync(G, crypto.randomBytes(20 * MiB));
   let first = true;
   wrap = (d) => ({ status: () => d.status(), fsStat: (p) => d.fsStat(p), fsReadRange: async (...a) => { const r = await d.fsReadRange(...a); if (first) { first = false; fs.appendFileSync(G, crypto.randomBytes(MiB)); } return r; } });
   const g = await settle(mgr.pull(A, 'wa', 'BOX', { remote: G, local: path.join(PROJ, 'grows.bin') }));
   wrap = (d) => d;
-  ok(g.e && g.e.code === 'transfer_failed' && /changed size while it was read/.test(g.e.message) && !fs.existsSync(path.join(PROJ, 'grows.bin')) && !fs.readdirSync(PROJ).some((f) => /\.vs-part$/.test(f)), 'a file that grows during the pull ⇒ transfer_failed by name, nothing kept', g.e && g.e.message);
+  ok(gateOf(g.e) && g.e.code === 'transfer_failed' && gateOf(/changed size while it was read/.test(g.e.message)) && !fs.existsSync(path.join(PROJ, 'grows.bin')) && !fs.readdirSync(PROJ).some((f) => /\.vs-part$/.test(f)), 'a file that grows during the pull ⇒ transfer_failed by name, nothing kept', g.e && g.e.message);
   const Z0 = path.join(REM, 'empty.bin'); fs.writeFileSync(Z0, '');
   const e0 = await settle(mgr.pull(A, 'wa', 'BOX', { remote: Z0, local: path.join(PROJ, 'empty.bin') }));
-  ok(e0.v && e0.v.bytes === 0 && e0.v.verified === 'sha256' && e0.v.sha256 === crypto.createHash('sha256').digest('hex') && fs.statSync(path.join(PROJ, 'empty.bin')).size === 0, 'a 0-byte pull lands (one empty window, its hash compared)', e0.e ? e0.e.message : e0.v);
+  ok(gateOf(e0.v) && e0.v.bytes === 0 && e0.v.verified === 'sha256' && e0.v.sha256 === crypto.createHash('sha256').digest('hex') && fs.statSync(path.join(PROJ, 'empty.bin')).size === 0, 'a 0-byte pull lands (one empty window, its hash compared)', e0.e ? e0.e.message : e0.v);
   const p0 = await settle(mgr.push(A, 'wa', 'BOX', { remote: path.join(REM, 'empty-back.bin'), local: path.join(PROJ, 'empty.bin'), size: 0, source: fs.createReadStream(path.join(PROJ, 'empty.bin')) }));
-  ok(p0.v && p0.v.bytes === 0 && fs.statSync(path.join(REM, 'empty-back.bin')).size === 0, 'a 0-byte push lands', p0.e ? p0.e.message : p0.v);
+  ok(gateOf(p0.v) && p0.v.bytes === 0 && fs.statSync(path.join(REM, 'empty-back.bin')).size === 0, 'a 0-byte push lands', p0.e ? p0.e.message : p0.v);
   const X = path.join(REM, 'keep.txt'); fs.writeFileSync(X, 'theirs');
   const L = path.join(PROJ, 'mine.txt'); fs.writeFileSync(L, 'mine!');
   const ex = await settle(mgr.push(A, 'wa', 'BOX', { remote: X, local: L, size: 5, source: fs.createReadStream(L) }));
-  ok(ex.e && ex.e.code === 'exists' && fs.readFileSync(X, 'utf8') === 'theirs', 'push onto an existing file ⇒ exists (nothing replaced)', ex.e && ex.e.message);
+  ok(gateOf(ex.e) && ex.e.code === 'exists' && fs.readFileSync(X, 'utf8') === 'theirs', 'push onto an existing file ⇒ exists (nothing replaced)', ex.e && ex.e.message);
   const ow = await settle(mgr.push(A, 'wa', 'BOX', { remote: X, local: L, size: 5, source: fs.createReadStream(L), overwrite: true }));
-  ok(ow.v && fs.readFileSync(X, 'utf8') === 'mine!' && !fs.existsSync(X + '.vs-part'), '…with --overwrite ⇒ replaced (one rename)', ow.e && ow.e.message);
+  ok(gateOf(ow.v) && fs.readFileSync(X, 'utf8') === 'mine!' && !fs.existsSync(X + '.vs-part'), '…with --overwrite ⇒ replaced (one rename)', ow.e && ow.e.message);
   fs.writeFileSync(path.join(REM, 'stale.bin.vs-part'), 'a dead transfer\'s part');
   const st = await settle(mgr.push(A, 'wa', 'BOX', { remote: path.join(REM, 'stale.bin'), local: L, size: 5, source: fs.createReadStream(L) }));
-  ok(st.v && fs.readFileSync(path.join(REM, 'stale.bin'), 'utf8') === 'mine!', 'a stale .vs-part from a dead transfer is replaced, never appended to', st.e && st.e.message);
+  ok(gateOf(st.v) && fs.readFileSync(path.join(REM, 'stale.bin'), 'utf8') === 'mine!', 'a stale .vs-part from a dead transfer is replaced, never appended to', st.e && st.e.message);
   // fix r1 ②: two pulls into ONE local target through the real agent — the second is refused target_busy at once, the first lands whole
   const T2 = path.join(PROJ, 'twice.bin');
   const pA = settle(mgr.pull(A, 'wa', 'BOX', { remote: BIG, local: T2 }));
   const rB = await settle(mgr.pull(A, 'wa', 'BOX', { remote: BIG, local: T2 }));
   const rA = await pA;
-  ok(rB.e && rB.e.code === 'target_busy' && rA.v && rA.v.sha256 === bigSha && shaFile(T2) === bigSha && !fs.readdirSync(PROJ).some((f) => /\.vs-part$/.test(f)), 'fix r1 ②: a second pull into the target a first one is writing ⇒ target_busy; the first lands whole (its sha256 is the file\'s); no part left', { b: rB.e ? rB.e.message : 'landed', a: rA.e ? rA.e.message : rA.v.sha256 });
+  ok(gateOf(rB.e) && rB.e.code === 'target_busy' && gateOf(rA.v) && rA.v.sha256 === bigSha && shaFile(T2) === bigSha && !fs.readdirSync(PROJ).some((f) => /\.vs-part$/.test(f)), 'fix r1 ②: a second pull into the target a first one is writing ⇒ target_busy; the first lands whole (its sha256 is the file\'s); no part left', { b: rB.e ? rB.e.message : 'landed', a: rA.e ? rA.e.message : rA.v.sha256 });
 });
 
 await section('⑥ never a shell: the agent spawned nothing during any transfer', async () => {
   const n = spawns() - s0;
   ok(n === 0, `0 child_process calls on the agent across ①–⑤ beside its hello's shell probe (a Windows machine has no sh; a transfer needs none)${n ? ': ' + spawnLines().slice(-n).join(' | ') : ''}`, n);
   const r = await dm.runShell('true', { by: 'system:test', timeoutMs: 30000 });
-  ok(r && r.code === 0 && spawns() - s0 >= 1, 'CONTROL: a `run` on the same agent IS logged by the census (it sees a spawn when one happens)', spawns() - s0);
+  ok(gateOf(r) && r.code === 0 && spawns() - s0 >= 1, 'CONTROL: a `run` on the same agent IS logged by the census (it sees a spawn when one happens)', spawns() - s0);
 });
 
 try { dm.stop(); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

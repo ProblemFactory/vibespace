@@ -76,7 +76,7 @@ const wt = scratch('vpaste-wt'), PROFILE = scratch('vpaste-chrome'), fakeHome = 
 for (const d of [fakeHome, stubDir]) fs.mkdirSync(d, { recursive: true });
 const CWD = path.join(fakeHome, 'project'); fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SIGN_IN = 'paste-leg-sign-in-7';
 const SECOND = 'paste leg second password';
@@ -187,7 +187,7 @@ try {
   await cdp('Page.enable'); await cdp('Network.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   startServer();
-  check('the hub boots (sign-in password on)', await ready());
+  check('the hub boots (sign-in password on)', verdictOf(await ready()));
   const URL = `http://127.0.0.1:${PORT}/`;
   /** THE RELOAD (lane vp393 — see the header): navigate, then wait for ① a NEW document (timeOrigin moved), complete, no splash;
    *  ② the window holds the vault door's listener (DOMDebugger.getEventListeners — the listener's own fact); ③ every GET
@@ -236,11 +236,11 @@ try {
 
   console.log('② THE ASK — the agent\'s verb, the tray\'s row and its masked box');
   const a1 = await ask(['the OpenAI key for the judged rules', '--purpose', 'judge your notification rules', '--into', 'llm.apiKey'], TOKEN);
-  check('`vibespace-vault request "<what>" --purpose "<why>" --into llm.apiKey` ⇒ exit 0, a request id, where it goes', a1.code === 0 && !!a1.id && /llm\.apiKey/.test(a1.out) && /never ask for the secret in the chat/.test(a1.out), a1);
+  check('`vibespace-vault request "<what>" --purpose "<why>" --into llm.apiKey` ⇒ exit 0, a request id, where it goes', a1.code === 0 && !!a1.id && gateOf(/llm\.apiKey/.test(a1.out)) && verdictOf(/never ask for the secret in the chat/.test(a1.out)), a1);
   await realClick('#taskbar-user-todos');
   check('the tray opens on its row with the paste box', !!(await until(visible(boxOf(a1.id)), { timeout: 10000 })));
   const row = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a1.id))}); const it = b.closest('.ut-item'); const i = b.querySelector('input'); return { text: it.querySelector('.ut-text').textContent, plan: (it.querySelector('.ut-secret-plan') || {}).textContent || '', type: i.type, ac: i.getAttribute('autocomplete'), sc: i.spellcheck, reply: !!it.querySelector('.ut-reply-btn'), save: b.querySelector('.ut-secret-save').textContent, deny: b.querySelector('.ut-secret-deny').textContent, value: i.value }; })()`);
-  check('the row says who asks and what; its words say what for and WHERE it goes (the Integrations card\'s field)', /Paste lane asks you for a secret: the OpenAI key for the judged rules/.test(row.text) && /judge your notification rules/.test(row.plan) && /llm\.apiKey/.test(row.plan) && /never the value/.test(row.plan), row);
+  check('the row says who asks and what; its words say what for and WHERE it goes (the Integrations card\'s field)', gateOf(/Paste lane asks you for a secret: the OpenAI key for the judged rules/.test(row.text)) && gateOf(/judge your notification rules/.test(row.plan)) && gateOf(/llm\.apiKey/.test(row.plan)) && verdictOf(/never the value/.test(row.plan)), row);
   check('a MASKED field — type password, autocomplete off, no spell-check, empty — with Save to vault / Refuse and NO reply box (a reply goes to the chat)', row.type === 'password' && row.ac === 'off' && row.sc === false && row.value === '' && row.save === 'Save to vault' && row.deny === 'Refuse' && !row.reply, row);
 
   console.log('③ PASTE ⇒ STORED — the integration store, the row resolved, the agent\'s next turn');
@@ -252,7 +252,7 @@ try {
   const other = await new Promise((resolve) => { const c = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-ask'), 'a question that repaints the tray'], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: `http://127.0.0.1:${PORT}`, VIBESPACE_SESSION_TOKEN: TOKEN } }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out })); });
   check('another item arrives while the value sits in the box (the tray repaints)', other.code === 0 && !!(await until(`[...document.querySelectorAll('#user-todos-popup .ut-item .ut-text')].some((e) => /a question that repaints the tray/.test(e.textContent))`, { timeout: 8000 })), other);
   const kept = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a1.id))}); const i = b && b.querySelector('input'); return { same: b === window.__pasteBox, value: i ? i.value === ${JSON.stringify(V_FIELD)} : false, focus: document.activeElement === i }; })()`);
-  check('the SAME box survives the repaint — the pasted value and the focus kept (never rebuilt under the owner)', kept.same && kept.value && kept.focus, kept);
+  check('the SAME box survives the repaint — the pasted value and the focus kept (never rebuilt under the owner)', gateOf(kept.same) && gateOf(kept.value) && verdictOf(kept.focus), kept);
   check('a real click on Save to vault', (await realClick(boxOf(a1.id) + ' .ut-secret-save')) === true);
   check('the box is gone — the row resolved itself', !!(await until(`!document.querySelector(${JSON.stringify(boxOf(a1.id))})`, { timeout: 10000 })));
   check('the toast says it is in the vault and the agent is told only that', !!(await until(`[...document.querySelectorAll('.toast, [class*=toast]')].some((t) => /Saved to the vault — the agent is told it is there, never the value/.test(t.textContent))`, { timeout: 5000 })));
@@ -260,15 +260,15 @@ try {
   const llm = ((integ.json && integ.json.integrations) || []).find((x) => x.id === 'llm');
   check('the Integrations card holds it: set, the owner\'s own, masked', !!llm && llm.set.apiKey === true && llm.source === 'user' && !!llm.masked.apiKey && hitsIn(JSON.stringify(llm), V_FIELD) === 0, llm && { set: llm.set, source: llm.source, masked: llm.masked });
   const turn1 = await nextTurn(TOKEN);
-  check('the agent\'s NEXT TURN carries the receipt: STORED, llm.apiKey, the purpose — never the value', /STORED/.test(turn1) && /llm\.apiKey/.test(turn1) && /judge your notification rules/.test(turn1) && hitsIn(turn1, V_FIELD) === 0, turn1.slice(0, 900));
+  check('the agent\'s NEXT TURN carries the receipt: STORED, llm.apiKey, the purpose — never the value', gateOf(/STORED/.test(turn1)) && gateOf(/llm\.apiKey/.test(turn1)) && gateOf(/judge your notification rules/.test(turn1)) && hitsIn(turn1, V_FIELD) === 0, turn1.slice(0, 900));
   const uses = await cli(['uses'], TOKEN);
-  check('`vibespace-vault uses` shows the paste as a use line (door paste, ok, a receipt) — no value', uses.code === 0 && /via paste\s+ok\s+receipt vr-/.test(uses.out) && hitsIn(uses.out, V_FIELD) === 0, uses);
+  check('`vibespace-vault uses` shows the paste as a use line (door paste, ok, a receipt) — no value', uses.code === 0 && gateOf(/via paste\s+ok\s+receipt vr-/.test(uses.out)) && hitsIn(uses.out, V_FIELD) === 0, uses);
 
   console.log('④ THE VALUE IS NOWHERE — the DOM, the WebSocket frames, the server log');
   await sleep(600);
   check('the page\'s DOM (markup, text, every field) holds it in no form', hitsIn(await pageText(), V_FIELD) === 0);
-  check(`no WebSocket frame the page saw holds it (${WS_FRAMES.length} frames)`, WS_FRAMES.length > 5 && WS_FRAMES.every((f) => hitsIn(f, V_FIELD) === 0), WS_FRAMES.length);
-  check('the server log holds it in no form', fs.existsSync(LOG) && hitsIn(fs.readFileSync(LOG, 'utf8'), V_FIELD) === 0);
+  check(`no WebSocket frame the page saw holds it (${WS_FRAMES.length} frames)`, WS_FRAMES.length > 5 && verdictOf(WS_FRAMES.every((f) => hitsIn(f, V_FIELD) === 0)), WS_FRAMES.length);
+  check('the server log holds it in no form', gateOf(fs.existsSync(LOG)) && hitsIn(fs.readFileSync(LOG, 'utf8'), V_FIELD) === 0);
 
   console.log('⑤ 拒绝 — the agent is told');
   const a2 = await ask(['the sandbox password', '--purpose', 'log in to the sandbox', '--kind', 'password'], TOKEN);
@@ -276,15 +276,15 @@ try {
   check('a real click on Refuse', (await realClick(boxOf(a2.id) + ' .ut-secret-deny')) === true);
   check('the row resolved', !!(await until(`!document.querySelector(${JSON.stringify(boxOf(a2.id))})`, { timeout: 10000 })));
   const turn2 = await nextTurn(TOKEN);
-  check('the agent\'s next turn says REFUSED (by the press), do not ask again for 10 minutes', /REFUSED/.test(turn2) && /pressed Refuse/.test(turn2) && /10 minutes/.test(turn2), turn2.slice(0, 600));
+  check('the agent\'s next turn says REFUSED (by the press), do not ask again for 10 minutes', gateOf(/REFUSED/.test(turn2)) && gateOf(/pressed Refuse/.test(turn2)) && verdictOf(/10 minutes/.test(turn2)), turn2.slice(0, 600));
   if (await trayOpen()) await realClick('#taskbar-user-todos');
 
   console.log('⑥ THE PHONE over a RESTART — the hub boots LOCKED; 解锁… inline; the free entry');
   const NOTE3 = 'The home router\'s admin login (192.168.1.1, user admin) — changes DNS and port forwards.';
   const a3 = await ask(['the router admin password', '--purpose', 'change the router\'s DNS for you', '--kind', 'password', '--name', 'Router admin', '--note', NOTE3], TOKEN);
-  check('a free-entry ask filed while unlocked (a new password entry «Router admin», its description said back)', a3.code === 0 && !!a3.id && /new vault entry «Router admin»/.test(a3.out) && a3.out.includes('its description: ' + NOTE3), a3);
+  check('a free-entry ask filed while unlocked (a new password entry «Router admin», its description said back)', a3.code === 0 && !!a3.id && gateOf(/new vault entry «Router admin»/.test(a3.out)) && verdictOf(a3.out.includes('its description: ' + NOTE3)), a3);
   await stopServer(); startServer();
-  check('the hub is back (LOCKED at boot — no lock act ran, so the request waits)', await ready());
+  check('the hub is back (LOCKED at boot — no lock act ran, so the request waits)', verdictOf(await ready()));
   await cdp('Emulation.setDeviceMetricsOverride', { width: 448, height: 850, deviceScaleFactor: 2, mobile: true });
   await cdp('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36', platform: 'Linux armv8l' });
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
@@ -301,12 +301,12 @@ try {
   await tap(ROW3);
   check('the phone\'s tray sheet shows the request kept over the restart, with its box', !!(await until(visible(boxOf(a3.id)), { timeout: 10000 })));
   const locked = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const u = b.querySelector('.ut-secret-unlock'); return { state: b.dataset.state, words: b.querySelector('.ut-secret-words').textContent, unlock: !!u && u.getBoundingClientRect().height > 0 }; })()`);
-  check('LOCKED is said by name in the box (vault_locked) with 解锁… inline — never a silent failure', locked.state === 'locked' && /vault_locked/.test(locked.words) && locked.unlock, locked);
+  check('LOCKED is said by name in the box (vault_locked) with 解锁… inline — never a silent failure', locked.state === 'locked' && gateOf(/vault_locked/.test(locked.words)) && verdictOf(locked.unlock), locked);
   check('a tap on 解锁… opens THE unlock dialog', (await tap(boxOf(a3.id) + ' .ut-secret-unlock')) === true && !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
   await evalJs(`(() => { const i = document.getElementById('vault-unlock-pw'); i.focus(); i.value = ${JSON.stringify(SECOND)}; document.querySelector('#vault-unlock-dialog .vault-unlock-go').click(); return true; })()`);
   check('unlocked ⇒ the box is ready (its words gone, 解锁… hidden)', !!(await until(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); return !!b && b.dataset.state === 'ready'; })()`, { timeout: 15000 })));
   const words3 = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const n = b.querySelector('input.ut-secret-name'), d = b.querySelector('textarea.ut-secret-desc'); return n && d ? { name: n.value, note: d.value, nfont: parseFloat(getComputedStyle(n).fontSize), dfont: parseFloat(getComputedStyle(d).fontSize), right: Math.max(n.getBoundingClientRect().right, d.getBoundingClientRect().right), vw: innerWidth, above: n.getBoundingClientRect().bottom <= b.querySelector('input.ut-secret-input').getBoundingClientRect().top } : null; })()`);
-  check('the box shows the agent\'s NAME and DESCRIPTION in their own fields above the masked one (16 px on the phone, inside the screen)', !!words3 && words3.name === 'Router admin' && words3.note === NOTE3 && words3.nfont >= 16 && words3.dfont >= 16 && words3.right <= words3.vw && words3.above, words3);
+  check('the box shows the agent\'s NAME and DESCRIPTION in their own fields above the masked one (16 px on the phone, inside the screen)', !!words3 && words3.name === 'Router admin' && words3.note === NOTE3 && words3.nfont >= 16 && words3.dfont >= 16 && words3.right <= words3.vw && verdictOf(words3.above), words3);
   await evalJs(`(() => { const n = document.querySelector(${JSON.stringify(boxOf(a3.id) + ' input.ut-secret-name')}); n.focus(); n.select(); return true; })()`);
   await cdp('Input.insertText', { text: 'Home router admin' });   // the owner renames it before pasting (the keyboard's own road)
   const fit = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const i = b.querySelector('input.ut-secret-input'); const s = b.querySelector('.ut-secret-save').getBoundingClientRect(), d = b.querySelector('.ut-secret-deny').getBoundingClientRect(); return { font: parseFloat(getComputedStyle(i).fontSize), ih: i.getBoundingClientRect().height, sh: s.height, dh: d.height, right: Math.max(s.right, d.right, i.getBoundingClientRect().right), vw: innerWidth }; })()`);
@@ -319,9 +319,9 @@ try {
   const freeRow = ((contents && contents.rows) || []).find((r) => /^secret:[0-9a-f]{10}$/.test(r.entry) && r.label === 'Home router admin');
   check('the Vault window\'s contents list it: «Home router admin» (the OWNER\'s name won), the agent\'s description, a password, revealable, its delete door — and no value', !!freeRow && freeRow.note === NOTE3 && freeRow.noteShared === true && freeRow.kind === 'password' && freeRow.revealable === true && !!(freeRow.doors && freeRow.doors.delete) && hitsIn(JSON.stringify(contents), V_ENTRY) === 0, freeRow);
   const turn3 = await nextTurn(TOKEN);
-  check('the agent\'s next turn: STORED as a vault reference it may run with (granted 8 hours) — never the value', /STORED/.test(turn3) && /vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret/.test(turn3) && /vibespace-vault run --env NAME=/.test(turn3) && hitsIn(turn3, V_ENTRY) === 0, turn3.slice(0, 900));
+  check('the agent\'s next turn: STORED as a vault reference it may run with (granted 8 hours) — never the value', gateOf(/STORED/.test(turn3)) && gateOf(/vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret/.test(turn3)) && gateOf(/vibespace-vault run --env NAME=/.test(turn3)) && hitsIn(turn3, V_ENTRY) === 0, turn3.slice(0, 900));
   await sleep(600);
-  check('…and the phone value is in no DOM, frame or log line either', hitsIn(await pageText(), V_ENTRY) === 0 && WS_FRAMES.every((f) => hitsIn(f, V_ENTRY) === 0) && hitsIn(fs.readFileSync(LOG, 'utf8'), V_ENTRY) === 0);
+  check('…and the phone value is in no DOM, frame or log line either', hitsIn(await pageText(), V_ENTRY) === 0 && gateOf(WS_FRAMES.every((f) => hitsIn(f, V_ENTRY) === 0)) && hitsIn(fs.readFileSync(LOG, 'utf8'), V_ENTRY) === 0);
   await cdp('Emulation.clearDeviceMetricsOverride'); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
   // lane vault-entry-description: a LATER change of an entry's words waits for the owner — the agent's `describe` ⇒ ONE card in the
   // tray (允许 / 拒绝), the Vault window's row marks it; 允许 writes it, the row and the agent's `list` read the new words
@@ -332,22 +332,22 @@ try {
   const ROWID3 = REF3 ? `secrets:${REF3.slice('vault://secrets/'.length, -'/secret'.length)}#secret` : '';
   const NEW3 = 'The home router admin login (192.168.1.1, user admin): DNS, DHCP and port forwards — never the Wi-Fi password.';
   const rl6 = await reload();
-  check(`⑥b ${RELOADED} (${rl6.ms} ms)`, rl6.ok, rl6);
+  check(`⑥b ${RELOADED} (${rl6.ms} ms)`, verdictOf(rl6.ok), rl6);
   const lst0 = await cli(['list'], TOKEN);
-  check('`list` names it by the OWNER\'s name and says what it is for (the agent\'s description)', lst0.code === 0 && !!REF3 && lst0.out.includes(REF3) && lst0.out.includes('Home router admin') && lst0.out.includes('what it is: ' + NOTE3), lst0);
+  check('`list` names it by the OWNER\'s name and says what it is for (the agent\'s description)', lst0.code === 0 && !!REF3 && gateOf(lst0.out.includes(REF3)) && gateOf(lst0.out.includes('Home router admin')) && verdictOf(lst0.out.includes('what it is: ' + NOTE3)), lst0);
   const dsc = await cli(['describe', REF3, '--note', NEW3], TOKEN);
   const tid = (/\((ut-[0-9a-z]+)\)/.exec(dsc.out) || [])[1] || '';
-  check('`vibespace-vault describe` ⇒ proposed, nothing changed yet (its filed line names the item)', dsc.code === 0 && /proposed \(ew-[0-9a-f]{12}\)/.test(dsc.out) && /nothing changes until the user allows it/.test(dsc.out) && !!tid, dsc);
+  check('`vibespace-vault describe` ⇒ proposed, nothing changed yet (its filed line names the item)', dsc.code === 0 && gateOf(/proposed \(ew-[0-9a-f]{12}\)/.test(dsc.out)) && gateOf(/nothing changes until the user allows it/.test(dsc.out)) && !!tid, dsc);
   await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);   // ONCE (lane vp393): a door the app said is ready must open
   check('ONE press of the vault door (vs-vault-door) after the reload said ready ⇒ the Vault window opens (else: a door a person could press too early)', !!(await until(`!!document.querySelector('.vw-row')`, { timeout: 10000 })));
   const ROWSEL = `.vw-row[data-id=${JSON.stringify(ROWID3)}]`;
   const mark = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROWSEL)}); if (!r) return null; const d = r.querySelector('.vw-desc'), p = r.querySelector('.vw-desc-pending'); return p && !p.hidden && p.getBoundingClientRect().height > 0 ? { desc: d && d.textContent, pend: p.textContent, edit: !!r.querySelector('.vw-words-edit'), band: !!document.querySelector('.vw-band-row .vw-band-allow') } : null; })()`, { timeout: 15000 });
-  check('the Vault row: its description under the name, «An agent proposes new words» while the card waits, its Edit…; the band offers 允许', !!mark && mark.desc === NOTE3 && /proposes new words/.test(mark.pend) && mark.edit && mark.band, mark);
+  check('the Vault row: its description under the name, «An agent proposes new words» while the card waits, its Edit…; the band offers 允许', !!mark && mark.desc === NOTE3 && gateOf(/proposes new words/.test(mark.pend)) && gateOf(mark.edit) && verdictOf(mark.band), mark);
   await shot('vault-row-pending.png');
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   const CARD = `${TRAY} .ut-item[data-id="${tid}"]`;
   const card = await until(`(() => { const c = document.querySelector(${JSON.stringify(CARD)}); if (!c) return null; const a = c.querySelector('.ut-hub-allow'), d = c.querySelector('.ut-hub-deny'); return a && d ? { text: c.innerText, allow: a.textContent, deny: d.textContent } : null; })()`, { timeout: 15000 });
-  check('the tray card: who wants to change the description of «Home router admin», the old → new words, 允许 / 拒绝', !!card && /wants to change the description of «Home router admin»/.test(card.text) && card.text.includes(NEW3) && card.text.includes(NOTE3) && card.allow === 'Allow' && card.deny === 'Deny', card);
+  check('the tray card: who wants to change the description of «Home router admin», the old → new words, 允许 / 拒绝', !!card && gateOf(/wants to change the description of «Home router admin»/.test(card.text)) && gateOf(card.text.includes(NEW3)) && gateOf(card.text.includes(NOTE3)) && card.allow === 'Allow' && card.deny === 'Deny', card);
   await shot('tray-words-card.png');
   await evalJs(`document.querySelector(${JSON.stringify(CARD + ' .ut-hub-allow')})?.scrollIntoView({ block: 'center' }); true`); await sleep(1500);   // the press-arm rule: an Allow that just appeared under the pointer is not the one the owner read
   check('a real click on Allow (after the pointer rests — the press-arm rule)', (await realClick(CARD + ' .ut-hub-allow')) === true);
@@ -355,12 +355,12 @@ try {
   check('allowed ⇒ the Vault row reads the new description, the mark is gone', !!after, await evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`));
   const turn4 = await nextTurn(TOKEN);
   const lst1 = await cli(['list'], TOKEN);
-  check('the agent\'s next turn: APPLIED with the words now; its `list` says the new description', /APPLIED/.test(turn4) && turn4.includes(NEW3) && lst1.out.includes('what it is: ' + NEW3), { turn4: turn4.slice(0, 600), lst1: lst1.out.slice(0, 600) });
+  check('the agent\'s next turn: APPLIED with the words now; its `list` says the new description', gateOf(/APPLIED/.test(turn4)) && gateOf(turn4.includes(NEW3)) && verdictOf(lst1.out.includes('what it is: ' + NEW3)), { turn4: turn4.slice(0, 600), lst1: lst1.out.slice(0, 600) });
   await shot('vault-row-applied.png');
   // lane vault-entry-description r2 (the ruling): the RUN card says what the entry is — a held `vibespace-vault run` with it
   const runP = new Promise((resolve) => { const c = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-vault'), 'run', '--env', `K=${REF3}`, '--', process.execPath, '-e', 'process.exit(0)'], { cwd: CWD, env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: `http://127.0.0.1:${PORT}`, VIBESPACE_SESSION_TOKEN: TOKEN } }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out })); });
   const runCard = await until(`(() => { const c = [...document.querySelectorAll(${JSON.stringify(TRAY + ' .ut-item')})].find((x) => x.querySelector('.ut-run') && /Home router admin/.test(x.innerText)); return c ? { id: c.dataset.id, text: c.innerText } : null; })()`, { timeout: 20000 });
-  check('the RUN card a held `vibespace-vault run` draws says what the entry is (its description under the name)', !!runCard && runCard.text.includes('What it is: ' + NEW3), runCard && runCard.text.slice(0, 900));
+  check('the RUN card a held `vibespace-vault run` draws says what the entry is (its description under the name)', !!runCard && verdictOf(runCard.text.includes('What it is: ' + NEW3)), runCard && runCard.text.slice(0, 900));
   await shot('tray-run-card.png');
   const asks = await pageApi('GET', '/api/user-todos');
   const runItem = ((asks.json && asks.json.todos && asks.json.todos.open) || []).find((i) => i.action && i.action.type === 'vault-run-ask');
@@ -381,22 +381,22 @@ try {
     const focusType = async (sel, text) => { await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); i.focus(); i.select && i.select(); return true; })()`); await cdp('Input.insertText', { text }); };
     const C = (id, sel = boxOf(id)) => `(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return null; const it = b.closest('.ut-item'); const q = (s) => b.querySelector(s); return { text: it ? it.querySelector('.ut-text').textContent : '', plan: it ? (it.querySelector('.ut-secret-plan') || {}).textContent || '' : '', target: b.dataset.target, site: q('input.vault-login-site').value, ro: q('input.vault-login-site').readOnly, user: q('input.vault-login-user').value, pw: q('input.vault-login-pass').value, pwType: q('input.vault-login-pass').type, otp: q('input.vault-login-otp').value, list: !!q('input.vault-login-otp').list, two: (q('.ut-secret-totp') || {}).textContent, tick: q('input.ut-login-allow-box').checked, says: q('.ut-login-says').textContent, kept: q('.ut-login-kept').textContent, save: q('.ut-secret-save').textContent, words: q('.ut-secret-words').textContent, state: b.dataset.state, labels: [...b.querySelectorAll('.vault-secret-label')].map((x) => x.textContent), hint: /Only the site itself/.test(b.textContent), reply: !!(it && it.querySelector('.ut-reply-btn')), inRow: !!it && !b.closest('[role=dialog]') }; })()`;   // a box moved into its own window has no row
     const rl8 = await reload();
-    check(`⑧ ${RELOADED} (${rl8.ms} ms)`, rl8.ok, rl8);
+    check(`⑧ ${RELOADED} (${rl8.ms} ms)`, verdictOf(rl8.ok), rl8);
     const bad8 = await cli(['request', 'the wiki login', '--purpose', 'read the wiki', '--kind', 'login', '--host', 'http://wiki.example.test'], TOKEN);
-    check('a site the add door refuses (plain http) ⇒ refused at the CLI by name, before any card', bad8.code !== 0 && /https site/.test(bad8.out), bad8);
+    check('a site the add door refuses (plain http) ⇒ refused at the CLI by name, before any card', bad8.code !== 0 && verdictOf(/https site/.test(bad8.out)), bad8);
     const eph8 = await cli(['request', 'the shop login on ephemeral browser', '--purpose', 'order the replacement parts', '--kind', 'login', '--host', 'shop.example.test'], TOKEN);
-    check('a website login request on an unmediated temporary browser ⇒ refused by name before any card is filed', eph8.code !== 0 && /temporary browser|mediated named browser profile/i.test(eph8.out), eph8);
+    check('a website login request on an unmediated temporary browser ⇒ refused by name before any card is filed', eph8.code !== 0 && verdictOf(/temporary browser|mediated named browser profile/i.test(eph8.out)), eph8);
     const newProf8 = await fetch(`http://127.0.0.1:${PORT}/api/agent/browser/new`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ label: 'Shop' }) }).then((r) => r.json());
     const pinProf8 = await fetch(`http://127.0.0.1:${PORT}/api/agent/browser/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ profile: 'Shop' }) }).then((r) => r.json());
     check('local mediated named profile created and pinned for this conversation', !!(newProf8 && newProf8.profile && newProf8.profile.id && pinProf8 && pinProf8.pin && pinProf8.pin.profileId === newProf8.profile.id), { newProf8, pinProf8 });
     const long8 = 'the parts shop login so I can order the replacement parts you listed this morning — '.repeat(4).slice(0, 200);
     const l1 = await ask([long8, '--purpose', 'order the replacement parts', '--kind', 'login', '--host', 'shop.example.test'], TOKEN);
-    check('`request "<200 characters>" --purpose … --kind login --host shop.example.test` ⇒ exit 0 — «a website login on https://shop.example.test — only that site is ever filled with it»', l1.code === 0 && !!l1.id && /a website login on https:\/\/shop\.example\.test — only that site is ever filled with it/.test(l1.out), l1);
+    check('`request "<200 characters>" --purpose … --kind login --host shop.example.test` ⇒ exit 0 — «a website login on https://shop.example.test — only that site is ever filled with it»', l1.code === 0 && !!l1.id && verdictOf(/a website login on https:\/\/shop\.example\.test — only that site is ever filled with it/.test(l1.out)), l1);
     const l9 = await ask(['the book shop login', '--purpose', 'order the book', '--kind', 'login', '--host', 'https://bücher.example.test'], TOKEN);
     await realClick('#taskbar-user-todos');
     check('the tray opens on the login card', !!(await until(visible(boxOf(l1.id)), { timeout: 10000 })));
     const c1 = await evalJs(C(l1.id));
-    check('its FIRST line: who asks, for which site, typed only there — the agent\'s words below it, with what for', !!c1 && c1.text === `Paste lane asks you for a website login on ${SITE8} — it is typed only on that site` && c1.plan.includes(long8) && /order the replacement parts/.test(c1.plan), c1 && { text: c1.text, plan: c1.plan.slice(0, 300) });
+    check('its FIRST line: who asks, for which site, typed only there — the agent\'s words below it, with what for', !!c1 && c1.text === `Paste lane asks you for a website login on ${SITE8} — it is typed only on that site` && gateOf(c1.plan.includes(long8)) && verdictOf(/order the replacement parts/.test(c1.plan)), c1 && { text: c1.text, plan: c1.plan.slice(0, 300) });
     // bl-vault-ckpt61-hosted-cure: the two-step field is VIBESPACE'S OWN LIST since lane vault-2fa-pick (9a89b0de6 — the owner: the
     // browser's native list read as its own suggestion, «没有vibespace自己的下拉框»): no `list`, no <datalist> in the card; a combobox whose
     // controlled list sits INSIDE this card and, OPENED BY A REAL PRESS, holds the vault's code names — one planted for the leg, dropped
@@ -413,15 +413,15 @@ try {
     check('RED control (ckpt61): the browser\'s native list on the field (a <datalist> + `list`, the shape before vault-2fa-pick) is refused', plant8.status === 200 && !ownList8(nat8), { plant: plant8.status, nat8 });
     await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     const drop8 = await pageApi('DELETE', `/api/vault/totp/${PROBE8}`);
-    check('the box IS the add door\'s form: Site (the ask\'s, read-only) · User name · Password (masked) · Two-step code (the vault\'s names, through VibeSpace\'s OWN list: opened by a real press inside this card, a combobox, no native list) + «Two-step code…», its «only the site itself» line, inline in the tray row (no popup, no reply box)', !!c1 && c1.target === 'login' && JSON.stringify(c1.labels) === JSON.stringify(['Site', 'User name', 'Password', 'Two-step code']) && c1.site === SITE8 && c1.ro && c1.pwType === 'password' && !c1.list && ownList8(own8) && drop8.status === 200 && c1.two === 'Two-step code…' && c1.hint && !c1.reply && c1.inRow, { c1, own8, drop: drop8.status });
-    check('«Let Paste lane sign in to it» starts TICKED (the setting\'s default) and says what «allowed» IS before the press — it can sign in as you on that site until you remove it, no time limit — and the button names the moment: Save and allow', !!c1 && c1.tick && /^Paste lane can sign in as you on https:\/\/shop\.example\.test with it until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit\.$/.test(c1.says) && c1.save === 'Save and allow', c1 && [c1.tick, c1.says, c1.save]);
+    check('the box IS the add door\'s form: Site (the ask\'s, read-only) · User name · Password (masked) · Two-step code (the vault\'s names, through VibeSpace\'s OWN list: opened by a real press inside this card, a combobox, no native list) + «Two-step code…», its «only the site itself» line, inline in the tray row (no popup, no reply box)', !!c1 && c1.target === 'login' && JSON.stringify(c1.labels) === JSON.stringify(['Site', 'User name', 'Password', 'Two-step code']) && c1.site === SITE8 && gateOf(c1.ro) && c1.pwType === 'password' && !c1.list && gateOf(ownList8(own8)) && drop8.status === 200 && c1.two === 'Two-step code…' && gateOf(c1.hint) && !c1.reply && verdictOf(c1.inRow), { c1, own8, drop: drop8.status });
+    check('«Let Paste lane sign in to it» starts TICKED (the setting\'s default) and says what «allowed» IS before the press — it can sign in as you on that site until you remove it, no time limit — and the button names the moment: Save and allow', !!c1 && gateOf(c1.tick) && gateOf(/^Paste lane can sign in as you on https:\/\/shop\.example\.test with it until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit\.$/.test(c1.says)) && c1.save === 'Save and allow', c1 && [c1.tick, c1.says, c1.save]);
     await realClick(boxOf(l1.id) + ' input.ut-login-allow-box');
     const c1u = await evalJs(C(l1.id));
     await realClick(boxOf(l1.id) + ' input.ut-login-allow-box');
     const c1t = await evalJs(C(l1.id));
-    check('unticked ⇒ «Paste lane cannot sign in with it until you allow it…» and «Save only»; ticked again ⇒ back', !c1u.tick && /^Paste lane cannot sign in with it until you allow it in Vault ▸ Web logins ▸ Use for…\.$/.test(c1u.says) && c1u.save === 'Save only' && c1t.tick && c1t.save === 'Save and allow', [c1u.says, c1u.save, c1t.save]);
+    check('unticked ⇒ «Paste lane cannot sign in with it until you allow it…» and «Save only»; ticked again ⇒ back', !c1u.tick && gateOf(/^Paste lane cannot sign in with it until you allow it in Vault ▸ Web logins ▸ Use for…\.$/.test(c1u.says)) && c1u.save === 'Save only' && gateOf(c1t.tick) && c1t.save === 'Save and allow', [c1u.says, c1u.save, c1t.save]);
     const c9 = await evalJs(C(l9.id));
-    check('an IDN site: the punycode origin the fill compares, its Unicode form beside it — on the first line and in the fixed field', !!c9 && c9.text.includes('https://xn--bcher-kva.example.test (https://bücher.example.test)') && c9.site === 'https://xn--bcher-kva.example.test (https://bücher.example.test)', c9 && [c9.text, c9.site]);
+    check('an IDN site: the punycode origin the fill compares, its Unicode form beside it — on the first line and in the fixed field', !!c9 && gateOf(c9.text.includes('https://xn--bcher-kva.example.test (https://bücher.example.test)')) && c9.site === 'https://xn--bcher-kva.example.test (https://bücher.example.test)', c9 && [c9.text, c9.site]);
     await realClick(boxOf(l9.id) + ' .ut-secret-deny');
     await until(`!document.querySelector(${JSON.stringify(boxOf(l9.id))})`, { timeout: 10000 });
     // r2 (the rebase onto .388, 主开发's question) — B-ab6c (主开发 r5287 must 2): words holding a link the door's belt would mask
@@ -432,7 +432,7 @@ try {
     const MW = `sign in from https://shop.example.test/cb?access_token=${TOK8}&state=x`;
     const lm = await cli(['request', MW, '--purpose', 'sign in for the order', '--kind', 'login', '--host', 'https://masked.example.test'], TOKEN);
     const fm = await cli(['request', MW, '--purpose', 'sign in for the order', '--kind', 'password', '--name', 'Masked link entry'], TOKEN);
-    check('B-ab6c r5287: words holding a masked link are refused AT SUBMIT for a login card and a free-entry paste alike — exit 1, words_masked with the way to say it, never the words', [lm, fm].every((r) => r.code === 1 && /\(words_masked\)/.test(r.out || '') && /Say what happened without it/.test(r.out || '') && !String(r.out || '').includes(TOK8)), [lm, fm].map((r) => ({ code: r.code, out: String(r.out || '').slice(0, 300) })));   // the helper's `out` holds stdout and stderr
+    check('B-ab6c r5287: words holding a masked link are refused AT SUBMIT for a login card and a free-entry paste alike — exit 1, words_masked with the way to say it, never the words', verdictOf([lm, fm].every((r) => r.code === 1 && /\(words_masked\)/.test(r.out || '') && /Say what happened without it/.test(r.out || '') && !String(r.out || '').includes(TOK8))), [lm, fm].map((r) => ({ code: r.code, out: String(r.out || '').slice(0, 300) })));   // the helper's `out` holds stdout and stderr
     await focusType(boxOf(l1.id) + ' input.vault-login-user', 'Owner@Shop.Example');
     const ck = await evalJs(C(l1.id));
     check('the user name as the vault will keep it — «Saved as «owner@shop.example»» (lower case: what the fill uses)', ck.kept === 'Saved as «owner@shop.example» — the vault keeps user names in lower case', ck.kept);
@@ -447,9 +447,9 @@ try {
     const D8 = '.vault-totp-add-dialog', ANY = `.vault-paste-dialog .ut-secret[data-req="${l1.id}"]`;   // r3: the card in its own form
     check('«Two-step code…» opens THE 两步验证… dialog', !!(await until(visible(D8), { timeout: 8000 })));
     const moved = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(ANY)}); return { same: b === window.__loginBox, inForm: !!(b && b.closest('.vault-paste-dialog')), boxes: document.querySelectorAll(${JSON.stringify(ANY)}).length }; })()`);
-    check('…THIS card moves into its own form window first (the same box — never rebuilt)', moved.same && moved.inForm && moved.boxes === 1, moved);
+    check('…THIS card moves into its own form window first (the same box — never rebuilt)', gateOf(moved.same) && gateOf(moved.inForm) && moved.boxes === 1, moved);
     const behind = await evalJs(`(() => { const d = document.querySelector(${JSON.stringify(D8)}).getBoundingClientRect(); const t = document.getElementById('taskbar-user-todos'); const r = t.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const h = document.elementFromPoint(x, y); const inside = x >= d.left && x <= d.right && y >= d.top && y <= d.bottom; const b = document.querySelector(${JSON.stringify(ANY)}); const at = (sel) => { const e = document.querySelector(sel); if (!e) return false; const q = e.getBoundingClientRect(); const z = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!z && (z === e || e.contains(z)); }; return { reach: !!h && (h === t || t.contains(h)), inside, front: at(${JSON.stringify(D8 + ' .vt-name')}), overlay: !!document.querySelector('.dialog-overlay:not(.hidden):not([hidden])'), user: b && b.querySelector('input.vault-login-user').value, pw: b && b.querySelector('input.vault-login-pass').value === ${JSON.stringify(V_LOGIN)} }; })()`);
-    check('…the dialog is in FRONT, blocks nothing behind it (no overlay; the page\'s own controls answer a press outside it) and the card keeps every typed field', behind.reach && !behind.inside && behind.front && !behind.overlay && behind.user === 'Owner@Shop.Example' && behind.pw, behind);
+    check('…the dialog is in FRONT, blocks nothing behind it (no overlay; the page\'s own controls answer a press outside it) and the card keeps every typed field', gateOf(behind.reach) && !behind.inside && gateOf(behind.front) && !behind.overlay && behind.user === 'Owner@Shop.Example' && verdictOf(behind.pw), behind);
     await realClick(D8 + ' .vt-way[data-way="seed"]');
     await typeInto(D8 + ' .vt-seed', SEED8);
     await typeInto(D8 + ' .vt-name', 'shop-code');
@@ -458,7 +458,7 @@ try {
     await realClick(D8 + ' .vt-save');
     check('the code saved there ⇒ its dialog closes', !!(await until(`!document.querySelector(${JSON.stringify(D8)})`, { timeout: 10000 })));
     const cn = await evalJs(C(l1.id, ANY));
-    check('…and its NAME is in the card\'s field — no retyping; the same box, the other fields kept', !!cn && cn.otp === 'shop-code' && cn.user === 'Owner@Shop.Example' && cn.pw === V_LOGIN && (await evalJs(`document.querySelector(${JSON.stringify(ANY)}) === window.__loginBox`)), cn);
+    check('…and its NAME is in the card\'s field — no retyping; the same box, the other fields kept', !!cn && cn.otp === 'shop-code' && cn.user === 'Owner@Shop.Example' && cn.pw === V_LOGIN && (verdictOf(await evalJs(`document.querySelector(${JSON.stringify(ANY)}) === window.__loginBox`))), cn);
     check('a real click on Save and allow (in the card\'s own window)', (await realClick(ANY + ' .ut-secret-save')) === true);
     check('stored ⇒ the card resolved (its window closed) and the toast says the agent may sign in with it there; VibeSpace never hands it the password', !!(await until(`!document.querySelector(${JSON.stringify(ANY)})`, { timeout: 10000 })) && !!(await until(`[...document.querySelectorAll('.toast, [class*=toast]')].some((t) => /Saved to the vault — the agent may sign in with it on that site; VibeSpace never hands it the password/.test(t.textContent))`, { timeout: 6000 })));
     const wl = await pageApi('GET', '/api/vault/web-logins');
@@ -466,7 +466,7 @@ try {
     const gr = (e1 && e1.grants) || [];
     check('ONE web-login entry (the owner\'s, the add door\'s name) and ONE grant: this conversation on THIS account — nothing wider', !!e1 && e1.source === 'owner' && gr.length === 1 && gr[0].scope === 'this-account' && (gr[0].to || []).length === 1 && gr[0].to[0].kind === 'conversation' && hitsIn(JSON.stringify(wl.json), V_LOGIN) === 0, { e1, grants: gr });
     const turn8 = await nextTurn(TOKEN);
-    check('the agent\'s next turn: STORED for the site with its user (it may fill it), standing, HOW TO USE IT — never the password', /STORED — a website login for https:\/\/shop\.example\.test \(user owner@shop\.example\)/.test(turn8) && /vibespace-browser fill <@ref> --vault https:\/\/shop\.example\.test#owner@shop\.example\/user/.test(turn8) && /--vault https:\/\/shop\.example\.test#owner@shop\.example\/password/.test(turn8) && /VibeSpace never hands you the password/.test(turn8) && hitsIn(turn8, V_LOGIN) === 0, turn8.slice(0, 900));
+    check('the agent\'s next turn: STORED for the site with its user (it may fill it), standing, HOW TO USE IT — never the password', gateOf(/STORED — a website login for https:\/\/shop\.example\.test \(user owner@shop\.example\)/.test(turn8)) && gateOf(/vibespace-browser fill <@ref> --vault https:\/\/shop\.example\.test#owner@shop\.example\/user/.test(turn8)) && gateOf(/--vault https:\/\/shop\.example\.test#owner@shop\.example\/password/.test(turn8)) && gateOf(/VibeSpace never hands you the password/.test(turn8)) && hitsIn(turn8, V_LOGIN) === 0, turn8.slice(0, 900));
 
     // ⑨ (r3, law B) EVERY SURFACE THAT DRAWS THE CARD — the census's legs. On each: type both fields → «Two-step code…» → a press
     // INSIDE the dialog → both fields still hold what was typed → save a code → its name lands in THAT box (the same element)
@@ -541,10 +541,10 @@ try {
       if (!(await firmPress(D8 + ' .vt-name', touch))) return fail('a press INSIDE the 两步验证… dialog lands on it', await spotOf(D8 + ' .vt-name'));
       await sleep(400);
       const held = await evalJs(`(() => { const b = window.__sBox; return { on: !!b && b.isConnected, inForm: !!(b && b.closest('.vault-paste-dialog')), user: b ? b.querySelector('input.vault-login-user').value : null, pw: b ? b.querySelector('input.vault-login-pass').value === ${JSON.stringify(PW9)} : false }; })()`);
-      check(`[surface:${sid}] «Two-step code…» opens the 两步验证… dialog; after a press INSIDE it both fields still hold what was typed (THIS box, in the card's own form)`, held.on && held.inForm && held.user === U && held.pw, held);
+      check(`[surface:${sid}] «Two-step code…» opens the 两步验证… dialog; after a press INSIDE it both fields still hold what was typed (THIS box, in the card's own form)`, gateOf(held.on) && gateOf(held.inForm) && held.user === U && verdictOf(held.pw), held);
       const b3 = await B3(reqId), added = addedOf(pre, b3.others);
       check(`[surface:${sid}] law B(3) after the move: the form window holds exactly ONE box for the request — THIS one; ${b3.origin ? 'the surface it came from holds none' : 'born in its form (the window draws no box of its own)'}; no surface holds a submittable copy it did not hold before the press (the others, each surface's own: ${placesSaid(b3.others)})`,
-        b3.forms === 1 && b3.thisInForm && b3.originHolds === 0 && added.length === 0, { pre, added, ...b3 });
+        b3.forms === 1 && gateOf(b3.thisInForm) && b3.originHolds === 0 && added.length === 0, { pre, added, ...b3 });
       if (!(await firmPress(D8 + ' .vt-way[data-way="seed"]', touch))) return fail('the dialog\'s «Type the seed» press lands', null);
       if (!(await firmType(D8 + ' .vt-seed', T8.base32Encode(crypto.randomBytes(20)), touch))) return fail('the dialog\'s seed field takes what is typed (read back)', await spotOf(D8 + ' .vt-seed'));
       if (!(await firmType(D8 + ' .vt-name', CODE, touch))) return fail('the dialog\'s name field takes what is typed (read back)', await spotOf(D8 + ' .vt-name'));
@@ -553,7 +553,7 @@ try {
       if (!(await firmPress(D8 + ' .vt-save', touch))) return fail('the dialog\'s Save press lands', null);
       await until(`!document.querySelector(${JSON.stringify(D8)})`, { timeout: 10000 });
       const landed = await evalJs(`(() => { const b = window.__sBox; return { on: !!b && b.isConnected, otp: b ? b.querySelector('input.vault-login-otp').value : null, user: b ? b.querySelector('input.vault-login-user').value : null, pw: b ? b.querySelector('input.vault-login-pass').value === ${JSON.stringify(PW9)} : false }; })()`);
-      check(`[surface:${sid}] the saved code's name lands in THAT box (on the page, its typed fields kept — the password too)`, landed.on && landed.otp === CODE && landed.user === U && landed.pw, landed);
+      check(`[surface:${sid}] the saved code's name lands in THAT box (on the page, its typed fields kept — the password too)`, gateOf(landed.on) && landed.otp === CODE && landed.user === U && verdictOf(landed.pw), landed);
       // law B(3) (iv): where a person's act redraws the surface the card came from, it draws the away line — never a new box
       if (redraw && typeof redraw === 'object') {
         await redraw.open();
@@ -561,7 +561,7 @@ try {
         const words = await evalJs(`(() => { const a = document.querySelector(${JSON.stringify(`${redraw.where} .ut-secret-away[data-req="${reqId}"]`)}); return a ? [...a.children].map((c) => c.textContent).join(' · ') : ''; })()`);
         const b3r = await B3(reqId), addedR = addedOf(pre, b3r.others);
         check(`[surface:${sid}] law B(3) — ${redraw.how}: the surface the card came from draws «${words || 'This login card is open in its own window · Show it'}», never a second box; no surface holds a submittable copy it did not hold before the press (${placesSaid(b3r.others)})`,
-          Array.isArray(drawn) && drawn.length === 1 && drawn[0] === 'away' && addedR.length === 0 && b3r.thisInForm && b3r.forms === 1, { drawn, added: addedR, ...b3r });
+          gateOf(Array.isArray(drawn)) && drawn.length === 1 && drawn[0] === 'away' && addedR.length === 0 && gateOf(b3r.thisInForm) && b3r.forms === 1, { drawn, added: addedR, ...b3r });
         await redraw.close();
       } else if (redraw) console.log(`    · [surface:${sid}] law B(3) (iv): ${redraw}`);
       if (!(await firmPress(`.vault-paste-dialog .ut-secret[data-req="${reqId}"] .ut-secret-deny`, touch))) return fail('Refuse in the card\'s own form lands', null);   // done: its answer closes the form
@@ -586,7 +586,7 @@ try {
     const sM = await askS('mini-inbox');
     await until(`(() => { const w = ${CHATW}; return !!(w && w.titleBar.querySelector(':scope > .win-inbox-badge')); })()`, { timeout: 12000 });
     const badge = await evalJs(`(() => { const w = ${CHATW}; app.wm.focusWindow(w.id); const b = w.titleBar.querySelector(':scope > .win-inbox-badge'); b.id = 'vs-test-mini-badge'; return true; })()`);
-    check('[surface:mini-inbox] the press on the title bar\'s inbox badge lands', await firmPress('#vs-test-mini-badge'));
+    check('[surface:mini-inbox] the press on the title bar\'s inbox badge lands', verdictOf(await firmPress('#vs-test-mini-badge')));
     const BADGE = `(${CHATW})?.titleBar.querySelector(':scope > .win-inbox-badge')`, MINI_OPEN = `!!document.querySelector('.ut-mini-popover')`;
     await surfaceLeg('mini-inbox', sM, '.ut-mini-popover', false, { where: '.ut-mini-popover', how: 'the title bar\'s inbox badge pressed again',
       open: async () => { if (await evalJs(MINI_OPEN)) { await evalJs(`${BADGE}?.click(); true`); await until(`!${MINI_OPEN}`, { timeout: 5000 }); } await evalJs(`${BADGE}?.click(); true`); await until(MINI_OPEN, { timeout: 5000 }); },
@@ -595,14 +595,14 @@ try {
     const sF = await askS('foryou-window');
     const itF = await itemOf(sF);
     await evalJs(`app.openInbox({ itemId: ${JSON.stringify(itF && itF.id)} }); true`);
-    check('[surface:foryou-window] the press on «Paste and save…» lands', await firmPress('.iw-act[data-act="secret-paste"]'));
+    check('[surface:foryou-window] the press on «Paste and save…» lands', verdictOf(await firmPress('.iw-act[data-act="secret-paste"]')));
     const FSEL = `.vault-paste-dialog .ut-secret[data-req="${sF}"]`;
     await until(visible(FSEL), { timeout: 10000 });
-    check('law C: a typed user name lands (read back)', await firmType(FSEL + ' input.vault-login-user', 'only-a-name'));
+    check('law C: a typed user name lands (read back)', verdictOf(await firmType(FSEL + ' input.vault-login-user', 'only-a-name')));
     for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     const asked = await until(`(() => { const s = document.querySelector('.vault-paste-dialog .dialog-unsaved'); return s && s.getClientRects().length ? true : null; })()`, { timeout: 5000 });
     check('law C: a typed user name ALONE (no password) — Escape ASKS before the form closes («unsaved changes»: Save / Discard / Keep editing)', !!asked);
-    check('law C: the press on Keep editing lands', await firmPress('.vault-paste-dialog .dialog-unsaved-keep'));
+    check('law C: the press on Keep editing lands', verdictOf(await firmPress('.vault-paste-dialog .dialog-unsaved-keep')));
     check('law C: Keep editing ⇒ the form stays, the typed name kept', (await evalJs(`document.querySelector(${JSON.stringify(FSEL + ' input.vault-login-user')})?.value`)) === 'only-a-name');
     await surfaceLeg('foryou-window', sF, '.vault-paste-dialog', false, 'born in its form — the window\'s «Paste and save…» draws no box; pressed again it raises THE form (test-vault-paste ⑬b)');
     // the Vault window's 「需要你」: its «Paste and save…» opens the same form
@@ -617,31 +617,31 @@ try {
     console.log('⑩ a two-step code — the card IS the 两步验证… dialog\'s fields; ONE totp entry; the asker reads its current code (lane totp-request-card)');
     const SEED10 = T8.base32Encode(crypto.randomBytes(20));
     const k10 = await ask(['the CI box two-step code', '--purpose', 'sign the release on the CI box', '--kind', 'totp', '--name', 'ci-two-step'], TOKEN);
-    check('⑩ the agent asks for a two-step code (--kind totp --name ci-two-step) ⇒ ONE card filed', k10.code === 0 && !!k10.id && /two-step code/.test(k10.out), k10);
+    check('⑩ the agent asks for a two-step code (--kind totp --name ci-two-step) ⇒ ONE card filed', k10.code === 0 && !!k10.id && verdictOf(/two-step code/.test(k10.out)), k10);
     if (!(await trayOpen())) await realClick('#taskbar-user-todos');
     const B10 = k10.id ? await pickVisible('totp-desk', k10.id, TRAY) : null;
     const f10 = B10 ? await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(B10)}); const q = (s) => b.querySelector(s); const it = b.closest('.ut-item'); return { head: it ? (it.querySelector('.ut-text') || {}).textContent : '', ways: [...b.querySelectorAll('.vt-way')].map((x) => x.textContent), seedMasked: q('input.vt-seed').type === 'password', name: q('input.vt-name').value, tick: q('input.ut-login-allow-box').checked, saveShown: !q('.ut-secret-save').hidden, says: (q('.ut-login-says') || {}).textContent }; })()`) : null;
     check(`⑩ the card: its first line «${f10?.head}»; the dialog's own two ways (${(f10?.ways || []).join(' · ')}), the seed field masked; the proposed name pre-filled; «read its current code» ticked; Save not drawn before a preview`,
-      !!f10 && /asks you for a two-step code \(TOTP\) for: sign the release on the CI box/.test(f10.head) && f10.ways.join('|') === 'Paste an otpauth link|Type the seed' && f10.seedMasked && f10.name === 'ci-two-step' && f10.tick === true && f10.saveShown === false && /read its current code \(never the seed\) while it runs/.test(f10.says), f10);
+      !!f10 && gateOf(/asks you for a two-step code \(TOTP\) for: sign the release on the CI box/.test(f10.head)) && f10.ways.join('|') === 'Paste an otpauth link|Type the seed' && gateOf(f10.seedMasked) && f10.name === 'ci-two-step' && f10.tick === true && f10.saveShown === false && verdictOf(/read its current code \(never the seed\) while it runs/.test(f10.says)), f10);
     if (B10) {
       check('⑩ «Type the seed» lands', !!(await firmPress(B10 + ' .vt-way[data-way="seed"]')));
-      check('⑩ the seed is typed into the dialog\'s own masked field (read back)', await firmType(B10 + ' input.vt-seed', SEED10));
+      check('⑩ the seed is typed into the dialog\'s own masked field (read back)', verdictOf(await firmType(B10 + ' input.vt-seed', SEED10)));
       check('⑩ Preview lands', !!(await firmPress(B10 + ' .vt-preview-b')));
       const pv10 = await until(`(() => { const b = document.querySelector(${JSON.stringify(B10)}); const c = b && b.querySelector('.vw-code-digits'); const s = b && b.querySelector('.ut-secret-save'); return c && /\\d{3} \\d{3}/.test(c.textContent) && s && !s.hidden ? { code: c.textContent, save: s.textContent } : null; })()`, { timeout: 10000 });
       check(`⑩ the hub's preview shows the code the seed makes now (${pv10 && pv10.code}) — and only then Save: «${pv10 && pv10.save}»`, !!pv10 && pv10.save === 'Save and allow', pv10);
       check('⑩ Save and allow lands', !!(await firmPress(B10 + ' .ut-secret-save')));
       const toast10 = await until(`(() => { const t = [...document.querySelectorAll('.toast, [class*=toast]')].map((x) => x.textContent).find((x) => /Saved «ci-two-step»/.test(x)); return t || null; })()`, { timeout: 10000 });
-      check(`⑩ the toast: «${toast10}»`, /the agent may read its current code while it runs; it never sees the seed/.test(String(toast10 || '')), toast10);
+      check(`⑩ the toast: «${toast10}»`, verdictOf(/the agent may read its current code while it runs; it never sees the seed/.test(String(toast10 || ''))), toast10);
     }
     const gone10 = await until(`!document.querySelector('.ut-secret[data-req="${k10.id}"]')`, { timeout: 10000 });
     const list10 = await pageApi('GET', '/api/vault/totp');
     const e10 = ((list10.json || {}).entries || []).find((x) => x.name === 'ci-two-step');
-    check('⑩ stored ⇒ the card resolved; the Vault lists ONE two-step code «ci-two-step», granted to this conversation', !!gone10 && !!e10 && (e10.grants || []).length === 1 && /^session:/.test(e10.grants[0].subject), { gone: gone10, entry: e10 });
+    check('⑩ stored ⇒ the card resolved; the Vault lists ONE two-step code «ci-two-step», granted to this conversation', !!gone10 && !!e10 && (e10.grants || []).length === 1 && verdictOf(/^session:/.test(e10.grants[0].subject)), { gone: gone10, entry: e10 });
     const turn10 = await nextTurn(TOKEN);
-    check('⑩ the agent\'s next turn: STORED, its name, the grant (this run), how to use it — never the seed', /STORED — a two-step code «ci-two-step» is in the vault/.test(turn10) && /vibespace-vault totp ci-two-step answers its current code \(never the seed\)/.test(turn10) && hitsIn(turn10, SEED10) === 0, turn10.slice(0, 700));
+    check('⑩ the agent\'s next turn: STORED, its name, the grant (this run), how to use it — never the seed', gateOf(/STORED — a two-step code «ci-two-step» is in the vault/.test(turn10)) && gateOf(/vibespace-vault totp ci-two-step answers its current code \(never the seed\)/.test(turn10)) && hitsIn(turn10, SEED10) === 0, turn10.slice(0, 700));
     const code10 = await cli(['totp', 'ci-two-step'], TOKEN);
-    check('⑩ `vibespace-vault totp ci-two-step` (the asker) answers its current code — never the seed', code10.code === 0 && /\b\d{3} ?\d{3}\b/.test(code10.out) && hitsIn(code10.out, SEED10) === 0, code10);
-    check('⑩ the seed is in no DOM, WebSocket frame or server log line', WS_FRAMES.every((f) => hitsIn(f, SEED10) === 0) && hitsIn(fs.readFileSync(LOG, 'utf8'), SEED10) === 0 && hitsIn(await pageText(), SEED10) === 0, WS_FRAMES.length);
+    check('⑩ `vibespace-vault totp ci-two-step` (the asker) answers its current code — never the seed', code10.code === 0 && gateOf(/\b\d{3} ?\d{3}\b/.test(code10.out)) && hitsIn(code10.out, SEED10) === 0, code10);
+    check('⑩ the seed is in no DOM, WebSocket frame or server log line', gateOf(WS_FRAMES.every((f) => hitsIn(f, SEED10) === 0)) && hitsIn(fs.readFileSync(LOG, 'utf8'), SEED10) === 0 && hitsIn(await pageText(), SEED10) === 0, WS_FRAMES.length);
     if (await trayOpen()) await realClick('#taskbar-user-todos');
 
     // THE PHONE over a RESTART (locked at boot — no lock act); a SECOND client sees the card resolve live
@@ -649,7 +649,7 @@ try {
     check('a second login ask, filed while unlocked', l2.code === 0 && !!l2.id, l2);
     if (await trayOpen()) await realClick('#taskbar-user-todos');
     await stopServer(); startServer();
-    check('the hub is back (LOCKED at boot — the ask waits)', await ready());
+    check('the hub is back (LOCKED at boot — the ask waits)', verdictOf(await ready()));
     await cdp('Emulation.setDeviceMetricsOverride', { width: 448, height: 850, deviceScaleFactor: 2, mobile: true });
     await cdp('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36', platform: 'Linux armv8l' });
     await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
@@ -678,9 +678,9 @@ try {
     await focusType(boxOf(l2.id) + ' input.vault-login-pass', V_LOGIN2);
     await tap(boxOf(l2.id) + ' .ut-login-allow');
     const cp = await evalJs(C(l2.id));
-    check('the phone card: locked said by name with 解锁… inline; unticked by a tap on its words ⇒ «Save only»', cp.state === 'locked' && /vault_locked/.test(cp.words) && !cp.tick && cp.save === 'Save only', cp);
+    check('the phone card: locked said by name with 解锁… inline; unticked by a tap on its words ⇒ «Save only»', cp.state === 'locked' && gateOf(/vault_locked/.test(cp.words)) && !cp.tick && cp.save === 'Save only', cp);
     const fit8 = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(l2.id))}); const vw = innerWidth; const H = (s) => { const e = b.querySelector(s); return e ? Math.round(e.getBoundingClientRect().height) : 0; }; const inputs = [...b.querySelectorAll('input.vault-pw')].map((i) => [Math.round(i.getBoundingClientRect().height), parseFloat(getComputedStyle(i).fontSize)]); const texts = [...b.querySelectorAll('*')].filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && e.getBoundingClientRect().height > 0).map((e) => [String(e.className || e.tagName), parseFloat(getComputedStyle(e).fontSize)]); const right = Math.max(...[...b.querySelectorAll('*')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.getBoundingClientRect().right)); return { vw, right: Math.round(right), inputs, small: texts.filter(([, f]) => f < 16), save: H('.ut-secret-save'), deny: H('.ut-secret-deny'), totp: H('.ut-secret-totp'), allow: H('.ut-login-allow'), unlock: H('.ut-secret-unlock') }; })()`);
-    check('the phone card: every field ≥ 44 px with 16 px text (no zoom), every target ≥ 44 px, EVERY text ≥ 16 px, all inside the screen', fit8.inputs.length === 4 && fit8.inputs.every(([h, f]) => h >= 44 && f >= 16) && fit8.small.length === 0 && fit8.save >= 44 && fit8.deny >= 44 && fit8.totp >= 44 && fit8.allow >= 44 && fit8.unlock >= 44 && fit8.right <= fit8.vw, fit8);
+    check('the phone card: every field ≥ 44 px with 16 px text (no zoom), every target ≥ 44 px, EVERY text ≥ 16 px, all inside the screen', fit8.inputs.length === 4 && gateOf(fit8.inputs.every(([h, f]) => h >= 44 && f >= 16)) && fit8.small.length === 0 && fit8.save >= 44 && fit8.deny >= 44 && fit8.totp >= 44 && fit8.allow >= 44 && fit8.unlock >= 44 && fit8.right <= fit8.vw, fit8);
     check('a tap on Save only while LOCKED', (await tap(boxOf(l2.id) + ' .ut-secret-save')) === true);
     const cl = await until(`(() => { const c = ${C(l2.id)}; return c && c.words && /unlock/i.test(c.words) && c.state === 'locked' ? c : null; })()`, { timeout: 8000 });
     check('…the box says the vault is locked and where to unlock (解锁… inline), EVERY field kept — nothing stored', !!cl && cl.user === 'forum-user' && cl.pw === V_LOGIN2 && !cl.tick, cl);
@@ -699,14 +699,14 @@ try {
     for (const t0 = Date.now(); ;) { const wl2 = await pageApi('GET', '/api/vault/web-logins'); e2 = ((wl2.json && wl2.json.entries) || []).find((e) => e.name === 'web-login:https://forum.example.test#forum-user') || null; if (e2 || Date.now() - t0 > STORE_CEIL) break; await sleep(250); }
     check('stored with NO grant (Save only)', !!e2 && (e2.grants || []).length === 0, e2);
     const turn9 = await nextTurn(TOKEN);
-    check('the agent\'s next turn: STORED, not allowed yet (where the owner allows it) — and it names NO user', /STORED — a website login for https:\/\/forum\.example\.test is in the vault/.test(turn9) && /did not let this conversation sign in with it/.test(turn9) && !turn9.includes('forum-user') && hitsIn(turn9, V_LOGIN2) === 0, turn9.slice(0, 900));
+    check('the agent\'s next turn: STORED, not allowed yet (where the owner allows it) — and it names NO user', gateOf(/STORED — a website login for https:\/\/forum\.example\.test is in the vault/.test(turn9)) && gateOf(/did not let this conversation sign in with it/.test(turn9)) && !turn9.includes('forum-user') && hitsIn(turn9, V_LOGIN2) === 0, turn9.slice(0, 900));
     await sleep(600);
     // r5380 (b): the secrecy leg is judged ONLY on a witness that the store landed (its entry read back): where it did not, the paste box
     // still holds what the person typed, the scene did not form, and a NAMED skip (the gate counts it) says so with where the values stand
     const where9 = async () => [['the first password', await whereOf(V_LOGIN, { dom: false })], ['the second password', await whereOf(V_LOGIN2)]].map(([n, pl]) => `${n}: ${whereSaid(pl)}`).join(' | ');
     if (!e2) console.log(`  ⊘ SKIP: the two passwords' secrecy is NOT judged — the store did not land inside its ceiling (${STORE_CEIL / 1000} s: no entry read back), so the paste box still holds what was typed; where they stand: ${await where9()}`);
     else { const clean = [V_LOGIN, V_LOGIN2].every((v) => WS_FRAMES.every((f) => hitsIn(f, v) === 0) && hitsIn(fs.readFileSync(LOG, 'utf8'), v) === 0) && hitsIn(await pageText(), V_LOGIN2) === 0;
-      check('the two passwords are in no DOM, WebSocket frame or server log line', clean, clean ? undefined : `where they stand (kind and count, never the value; ${WS_FRAMES.length} frames): ${await where9()}`); }
+      check('the two passwords are in no DOM, WebSocket frame or server log line', verdictOf(clean), clean ? undefined : `where they stand (kind and count, never the value; ${WS_FRAMES.length} frames): ${await where9()}`); }
     try { ws2.close(); await cdp('Target.closeTarget', { targetId: t2.targetId }); } catch { }
     // ⑨ the phone's page — the same leg by taps
     const sP = await askS('phone-page');
@@ -722,7 +722,7 @@ try {
     const rowShown = await until(`(() => { const r = ${visRow}; if (!r) return null; r.dataset.legRow = 'phone'; return true; })()`, { timeout: 10000 });
     check('[surface:phone-page] a VISIBLE row of the ask stands on the phone', !!rowShown, await boxesOf(sP));
     const boxShown = await evalJs(`(() => { const b = document.querySelector('.ut-item[data-leg-row="phone"] .ut-secret[data-req="${sP}"]'); if (!b) return false; const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })()`);
-    if (rowShown && !boxShown) check('[surface:phone-page] a tap on the folded row opens it', await firmPress('.ut-item[data-leg-row="phone"]', true), lastSpot);   // the ROW is the tap (⑥'s and ⑧'s phone legs tap it): a folded row opens in place — a miss says what the look saw
+    if (rowShown && !boxShown) check('[surface:phone-page] a tap on the folded row opens it', verdictOf(await firmPress('.ut-item[data-leg-row="phone"]', true)), lastSpot);   // the ROW is the tap (⑥'s and ⑧'s phone legs tap it): a folded row opens in place — a miss says what the look saw
     await surfaceLeg('phone-page', sP, '.ut-item[data-leg-row="phone"]', true, SURF === TRAY ? trayRedraw('the For-you sheet closed and opened again') : 'the row stood on the phone\'s page (no sheet open): the page redraws on its own schedule — the redraw road is test-vault-paste ⑬b\'s');
     // ⑩ the two-step card ON THE PHONE — the same fields by taps; its targets and its text
     const SEEDP = T8.base32Encode(crypto.randomBytes(20));
@@ -740,8 +740,8 @@ try {
     const z0 = await sizesOf();
     check(`⑩ phone: every control of the two-step card ≥ 44 px (${z0 && z0.n}), every text ≥ 16 px, nothing off the screen`, !!z0 && z0.n >= 4 && !z0.small.length && !z0.tiny.length && !z0.out.length, z0);
     check('⑩ phone: «Type the seed» by a tap', !!(await firmPress(BP + ' .vt-way[data-way="seed"]', true)));
-    check('⑩ phone: the seed typed (read back)', await firmType(BP + ' input.vt-seed', SEEDP, true));
-    check('⑩ phone: the name typed (read back) — none was proposed', await firmType(BP + ' input.vt-name', 'jump-host', true));
+    check('⑩ phone: the seed typed (read back)', verdictOf(await firmType(BP + ' input.vt-seed', SEEDP, true)));
+    check('⑩ phone: the name typed (read back) — none was proposed', verdictOf(await firmType(BP + ' input.vt-name', 'jump-host', true)));
     check('⑩ phone: «read its current code» unticked by a tap', !!(await firmPress(BP + ' input.ut-login-allow-box', true)) && (await evalJs(`!document.querySelector(${JSON.stringify(BP + ' input.ut-login-allow-box')}).checked`)) === true);
     check('⑩ phone: Preview by a tap', !!(await firmPress(BP + ' .vt-preview-b', true)));
     const pvP = await until(`(() => { const b = document.querySelector(${JSON.stringify(BP)}); const s = b && b.querySelector('.ut-secret-save'); return s && !s.hidden ? s.textContent : null; })()`, { timeout: 10000 });
@@ -750,7 +750,7 @@ try {
     check('⑩ phone: Save only by a tap', !!(await firmPress(BP + ' .ut-secret-save', true)));
     const goneP = await until(`!document.querySelector('.ut-secret[data-req="${kP.id}"]')`, { timeout: 10000 });
     const turnP = await nextTurn(TOKEN);
-    check('⑩ phone: stored unticked ⇒ the card resolved; the next turn says «jump-host» is stored and NOT given — never the seed', !!goneP && /STORED — a two-step code «jump-host» is in the vault/.test(turnP) && /did not let this conversation read its code/.test(turnP) && hitsIn(turnP, SEEDP) === 0, turnP.slice(0, 600));
+    check('⑩ phone: stored unticked ⇒ the card resolved; the next turn says «jump-host» is stored and NOT given — never the seed', !!goneP && gateOf(/STORED — a two-step code «jump-host» is in the vault/.test(turnP)) && gateOf(/did not let this conversation read its code/.test(turnP)) && hitsIn(turnP, SEEDP) === 0, turnP.slice(0, 600));
     const retried = PRESSES.filter((x) => x.at > 1), missed = PRESSES.filter((x) => x.at === 0);
     console.log(`    (⑨'s firm presses: ${PRESSES.length} — ${PRESSES.filter((x) => x.at === 1).length} at the first look, ${retried.length} after a retry${retried.length ? ': ' + retried.map((x) => `${x.sel} @${x.at}`).join(', ') : ''}, ${missed.length} missed)`);
     await cdp('Emulation.clearDeviceMetricsOverride'); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
@@ -760,12 +760,12 @@ try {
   const doorFile = path.join(wt, 'src/server/vault-paste-door.js');
   const src = fs.readFileSync(doorFile, 'utf8');
   const anchor = "settle(q, 'stored', { ref, grantHours, receipt });";   // lane vault-use-grants round 10: the anchor names the LIVE settle line (r6 `100a1ab0` dropped «standing» from it) — an anchor names the code as it is, never a past spelling
-  check('the mutant\'s anchor is in the door', src.includes(anchor));
+  check('the mutant\'s anchor is in the door', verdictOf(src.includes(anchor)));
   fs.writeFileSync(doorFile, src.replace(anchor, "log('stored ' + vv.value); try { userTodos.add(q.sessionKey || 'vault', { origin: 'vault', kind: 'notice', text: 'stored ' + vv.value }); } catch { } " + anchor));
   await stopServer(); startServer();
-  check('the mutant hub is up', await ready());
+  check('the mutant hub is up', verdictOf(await ready()));
   const rl7 = await reload();
-  check(`⑦ ${RELOADED} (${rl7.ms} ms)`, rl7.ok, rl7);
+  check(`⑦ ${RELOADED} (${rl7.ms} ms)`, verdictOf(rl7.ok), rl7);
   if (await evalJs(`!!document.getElementById('vault-unlock-dialog')`)) { await evalJs(`(() => { const i = document.getElementById('vault-unlock-pw'); i.focus(); i.value = ${JSON.stringify(SECOND)}; document.querySelector('#vault-unlock-dialog .vault-unlock-go').click(); return true; })()`); await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 15000 }); }
   else await pageApi('POST', '/api/vault/unlock', { password: SECOND });
   const a4 = await ask(['a mutant key', '--purpose', 'the red control', '--kind', 'secret'], TOKEN);
@@ -787,4 +787,4 @@ try {
   await stopServer();
 }
 console.log(`\n${failed ? '✗' : '✓'} test-vault-paste-chrome: ${passed} passed, ${failed} failed`);
-if (failed) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${passed})`); process.exit(0); }
+if (failed) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${passed})`); process.exit(0); };import { verdictOf, gateOf } from './lib/check.mjs';

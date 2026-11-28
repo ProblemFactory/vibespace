@@ -40,7 +40,7 @@ const BF = require('../src/browser-fact.js');
 const MED = require('../src/browser-mediation.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 80) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await pred()) return true; } catch { } await sleep(every); } try { return !!(await pred()); } catch { return false; } };
@@ -131,7 +131,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   let journal = '';
   const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000, 100)), 'the worktree server booted', journal.slice(-800))) return;
   const j = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   const wsMain = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });
@@ -141,7 +141,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const ups = []; let chromeProc = null; let fchrome = null;
   let cdp = null;   // B-7a99: the page socket, held where the finally sees it (it was a const in the try: the finally closed nothing)
   try {
-    if (!ok(Object.values(SID).every(Boolean), 'three chat sessions were created on the fake claude', journal.slice(-600))) return;
+    if (!ok(verdictOf(Object.values(SID).every(Boolean)), 'three chat sessions were created on the fake claude', journal.slice(-600))) return;
     await sleep(1200);
     const keyOf = async (sid) => (await j('GET', `/api/browser/session/${sid}`)).json?.browserKey || null;
     const bkP = await keyOf(SID.P);
@@ -171,7 +171,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
     const booted = await until(async () => ev('if (!window.app || !window.app.ready) return false; return await Promise.race([window.app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 100))]);'), 40000, 250);
-    if (!ok(booted, 'the app booted in headless chrome (1280×900)')) return;
+    if (!ok(verdictOf(booted), 'the app booted in headless chrome (1280×900)')) return;
     await sleep(1000);
     await ev('await app.refreshBrowserProfiles(); return true;');
     const mouse = (type, x, y, extra = {}) => send('Input.dispatchMouseEvent', { type, x, y, ...extra });
@@ -192,15 +192,15 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await until(() => ev(`return !!props(${S(SID.P)});`), 5000);
     // the study's T5-09: Session Properties was open BEFORE the pin and must follow it without a reopen
     let r = await j('POST', '/api/browser/pin', { sessionId: SID.P, profile: 'work' });
-    ok(r.status === 200 && r.json.pin && r.json.pin.profileId === WORK1.id, 'the user pins "work" (the pin route — the picker\'s one write)', S(r.json).slice(0, 200));
-    ok(await until(async () => { const p = await propsLine(SID.P); return p && /work/.test(p.text); }, 8000), 'Session Properties (open since before the pin) now says "work" — no reopen');
+    ok(r.status === 200 && gateOf(r.json.pin) && r.json.pin.profileId === WORK1.id, 'the user pins "work" (the pin route — the picker\'s one write)', S(r.json).slice(0, 200));
+    ok(verdictOf(await until(async () => { const p = await propsLine(SID.P); return p && /work/.test(p.text); }, 8000)), 'Session Properties (open since before the pin) now says "work" — no reopen');
     r = await j('POST', '/api/browser/attach', { sessionId: SID.P, profile: 'Personal' });
     ok(r.status === 200, 'Personal is attached instead (the study\'s T5: pinned one, running another)', S(r.json).slice(0, 200));
     await ev(`app.openBrowserLive({ sessionId: ${S(SID.P)} }); return true;`);
     const liveUp = await until(() => ev(`const L = live(${S(SID.P)}); return !!(L && L._browserLive.state().frames >= 1);`), 15000);
-    ok(liveUp, 'the live view of Pin chat draws');
+    ok(verdictOf(liveUp), 'the live view of Pin chat draws');
     const want1 = 'pinned work · running Personal — Personal is attached instead';
-    ok(await until(async () => (await lineOf(SID.P)) === want1, 8000), `THE fact (server-computed, carried on active-sessions) says "${want1}"`, await lineOf(SID.P));
+    ok(verdictOf(await until(async () => (await lineOf(SID.P)) === want1, 8000)), `THE fact (server-computed, carried on active-sessions) says "${want1}"`, await lineOf(SID.P));
     const surfaces = async (sid) => {
       const chip = await chipOf(sid);
       const pl = await propsLine(sid);
@@ -210,32 +210,32 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       return { chip, props: pl, live: lv, card, menu };
     };
     const s1 = await surfaces(SID.P);
-    ok(s1.chip && s1.chip.text === 'Agent browser · ' + want1 && s1.chip.amber, 'the status-bar chip prints it (amber, both names)', S(s1.chip));
+    ok(gateOf(s1.chip) && s1.chip.text === 'Agent browser · ' + want1 && verdictOf(s1.chip.amber), 'the status-bar chip prints it (amber, both names)', S(s1.chip));
     ok(s1.menu === want1, 'the chip\'s menu prints the same line (never "pinned: ephemeral (no profile)")', S(s1.menu));
-    ok(await until(async () => { const p = await propsLine(SID.P); return p && p.text === want1 && p.amber; }, 6000), 'Session Properties prints the same line (it re-renders on the broadcast the fact rides)', S(await propsLine(SID.P)));
-    ok(s1.card.includes('Agent browser · ' + want1), 'the sidebar card\'s chip prints the same line', S(s1.card));
-    ok(s1.live && s1.live.target === PERS.id && s1.live.inUse.length === 1 && /^Personal/.test(s1.live.inUse[0]) && /^Personal/.test(s1.live.title), 'the live view shows the browser in use (Personal): its title names it and the strip marks that tab "(in use)" — the ONE marker, never the set\'s "(default)"', S(s1.live));
+    ok(verdictOf(await until(async () => { const p = await propsLine(SID.P); return p && p.text === want1 && p.amber; }, 6000)), 'Session Properties prints the same line (it re-renders on the broadcast the fact rides)', S(await propsLine(SID.P)));
+    ok(verdictOf(s1.card.includes('Agent browser · ' + want1)), 'the sidebar card\'s chip prints the same line', S(s1.card));
+    ok(gateOf(s1.live) && s1.live.target === PERS.id && s1.live.inUse.length === 1 && gateOf(/^Personal/.test(s1.live.inUse[0])) && verdictOf(/^Personal/.test(s1.live.title)), 'the live view shows the browser in use (Personal): its title names it and the strip marks that tab "(in use)" — the ONE marker, never the set\'s "(default)"', S(s1.live));
     // the pinned profile attached too ⇒ it is the default ⇒ everything says "work", neutral
     r = await j('POST', '/api/browser/attach', { sessionId: SID.P, profile: 'work' });
     ok(r.status === 200, 'work is attached (the pin is now among the attachments — the default)');
-    ok(await until(async () => (await lineOf(SID.P)) === 'work', 8000), 'THE fact now says "work"', await lineOf(SID.P));
-    ok(await until(async () => { const c = await chipOf(SID.P); return c && c.text === 'Agent browser · work' && !c.amber; }, 8000), 'the chip says "Agent browser · work", neutral', S(await chipOf(SID.P)));
+    ok(verdictOf(await until(async () => (await lineOf(SID.P)) === 'work', 8000)), 'THE fact now says "work"', await lineOf(SID.P));
+    ok(verdictOf(await until(async () => { const c = await chipOf(SID.P); return c && c.text === 'Agent browser · work' && !c.amber; }, 8000)), 'the chip says "Agent browser · work", neutral', S(await chipOf(SID.P)));
     await until(async () => { const p = await propsLine(SID.P); return p && p.text === 'work'; }, 6000);
     const s2 = await surfaces(SID.P);
-    ok(s2.menu === 'work' && s2.props && s2.props.text === 'work' && !s2.props.amber, 'the menu and Session Properties say "work" too', S({ menu: s2.menu, props: s2.props }));
-    ok(await until(() => ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); return st.target && st.target.profileId === ${S(WORK1.id)} && st.frames >= 1;`), 10000), 'the live view FOLLOWED the conversation onto work by itself (it was showing the browser in use)', S(await ev(`const st = live(${S(SID.P)})._browserLive.state(); return { target: st.target, followed: st.followed };`)));
+    ok(s2.menu === 'work' && gateOf(s2.props) && s2.props.text === 'work' && !s2.props.amber, 'the menu and Session Properties say "work" too', S({ menu: s2.menu, props: s2.props }));
+    ok(verdictOf(await until(() => ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); return st.target && st.target.profileId === ${S(WORK1.id)} && st.frames >= 1;`), 10000)), 'the live view FOLLOWED the conversation onto work by itself (it was showing the browser in use)', S(await ev(`const st = live(${S(SID.P)})._browserLive.state(); return { target: st.target, followed: st.followed };`)));
     // Session Properties: one line, the window's own buttons, Esc closes
     const pbt = await ev(`const w = props(${S(SID.P)}); const b = w.content.querySelector('.session-props-browser-pin'); const l = w.content.querySelector('.session-props-browser-live'); const cs = getComputedStyle(b); return { cls: b.className + ' ' + l.className, bg: cs.backgroundColor, border: cs.borderTopStyle, radius: cs.borderTopLeftRadius };`);
     const bgInput = await ev(`const d = document.createElement('div'); d.style.background = 'var(--bg-input)'; document.body.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c;`);
-    ok(/task-detail-btn/.test(pbt.cls) && pbt.bg === bgInput && pbt.radius !== '0px', 'Session Properties\' two buttons are the window\'s own (task-detail-btn: the theme\'s input fill + radius), never the browser\'s white default', S({ pbt, bgInput }));
+    ok(gateOf(/task-detail-btn/.test(pbt.cls)) && pbt.bg === bgInput && pbt.radius !== '0px', 'Session Properties\' two buttons are the window\'s own (task-detail-btn: the theme\'s input fill + radius), never the browser\'s white default', S({ pbt, bgInput }));
     const pl = await propsLine(SID.P);
-    ok(pl && pl.ws === 'nowrap', 'the profile NAME never wraps (white-space: nowrap on its span — never "wor / k")', S(pl));
+    ok(gateOf(pl) && pl.ws === 'nowrap', 'the profile NAME never wraps (white-space: nowrap on its span — never "wor / k")', S(pl));
     // 2026-09-28 (the naive-user verifier): the value wraps BETWEEN its parts — the ellipsis used to cut the words that say
     // who can use the profile and how many use it now, with no way to read them
-    ok(pl && !pl.clipped && /every conversation can use it/.test(pl.whole) && /conversation\(s\) using it now/.test(pl.whole), 'the whole Browser value is on screen — nothing cut (who can use it · how many use it now)', S(pl));
+    ok(gateOf(pl) && !pl.clipped && gateOf(/every conversation can use it/.test(pl.whole)) && verdictOf(/conversation\(s\) using it now/.test(pl.whole)), 'the whole Browser value is on screen — nothing cut (who can use it · how many use it now)', S(pl));
     await ev(`const w = props(${S(SID.P)}); w.element.focus(); return true;`);
     await key('Escape', 'Escape', 27);
-    ok(await until(() => ev(`return !props(${S(SID.P)});`), 3000), 'Esc closes Session Properties');
+    ok(verdictOf(await until(() => ev(`return !props(${S(SID.P)});`), 3000)), 'Esc closes Session Properties');
 
     // ── 2 · the live view follows a RECREATED profile; Reconnect re-resolves ──
     console.log('— 2 · work is recreated: the live view retargets by itself; Reconnect re-resolves a stale view');
@@ -254,8 +254,8 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const followed = await until(() => ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); return st.target && st.target.profileId === ${S(WORK2.id)} && st.connected && !st.error;`), 15000);
     const followMs = Date.now() - tFollow0; // how long THIS machine takes to resolve a retarget (the Reconnect deadline scales on it)
     const f2 = await ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); const se = L._browserLive.el().querySelector('.browser-live-status'); return { target: st.target, error: st.error, followed: st.followed, statusShown: se.style.display !== 'none', statusText: se.textContent, statusError: se.classList.contains('error') };`);
-    ok(followed && U.W2.connections >= 1 && !(f2.statusShown && f2.statusError), 'the open live view RETARGETED to the new work by itself — its stream connected, no red overlay (the study: "stays on the old browser, red not-attached overlay")', S(f2));
-    ok(await until(() => ev(`return live(${S(SID.P)})._browserLive.state().frames >= 1 && live(${S(SID.P)})._browserLive.state().target.profileId === ${S(WORK2.id)};`), 6000), '…and draws the new browser\'s frames');
+    ok(gateOf(followed) && U.W2.connections >= 1 && !(f2.statusShown && f2.statusError), 'the open live view RETARGETED to the new work by itself — its stream connected, no red overlay (the study: "stays on the old browser, red not-attached overlay")', S(f2));
+    ok(verdictOf(await until(() => ev(`return live(${S(SID.P)})._browserLive.state().frames >= 1 && live(${S(SID.P)})._browserLive.state().target.profileId === ${S(WORK2.id)};`), 6000)), '…and draws the new browser\'s frames');
     // a view forced onto the OLD id shows the refusal; a REAL click on Reconnect re-resolves it
     await ev(`live(${S(SID.P)})._browserLive.switchTo(${S(WORK1.id)}); return true;`);
     const stale = await until(() => ev(`const st = live(${S(SID.P)})._browserLive.state(); return !!(st.error && st.error.code === 'not_attached');`), 8000);
@@ -279,12 +279,12 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       return out;
     };
     const re = await settledRect('.browser-live-reconnect', 8000);
-    ok(stale && !!re, 'a view on the OLD work id is refused not_attached and offers Reconnect (the study\'s overlay) — its button settled after the bar\'s fold', S({ stale, re }));
+    ok(gateOf(stale) && !!re, 'a view on the OLD work id is refused not_attached and offers Reconnect (the study\'s overlay) — its button settled after the bar\'s fold', S({ stale, re }));
     const reBefore = await ev(`const st = live(${S(SID.P)})._browserLive.state(); return { followed: st.followed, profileRef: st.profileRef };`);
     if (re) await click(centre(re));
     const reDeadline = Math.max(10000, 5 * followMs);
     const back = await until(() => ev(`const st = live(${S(SID.P)})._browserLive.state(); return st.followed > ${reBefore.followed} && st.target && st.target.profileId === ${S(WORK2.id)} && st.connected && !st.error;`), reDeadline);
-    ok(back, `a REAL click on Reconnect RE-RESOLVED the target — the view is on the new work (the study: "Reconnect does nothing"; deadline ${reDeadline} ms = 5× the ${followMs} ms follow)`, S({ state: await ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); const b = L._browserLive.el().querySelector('.browser-live-reconnect'); return { target: st.target, error: st.error, followed: st.followed, profileRef: st.profileRef, rectNow: b ? rect(b) : null, folded: st.folded }; `), rectClicked: re, before: reBefore }));
+    ok(verdictOf(back), `a REAL click on Reconnect RE-RESOLVED the target — the view is on the new work (the study: "Reconnect does nothing"; deadline ${reDeadline} ms = 5× the ${followMs} ms follow)`, S({ state: await ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); const b = L._browserLive.el().querySelector('.browser-live-reconnect'); return { target: st.target, error: st.error, followed: st.followed, profileRef: st.profileRef, rectNow: b ? rect(b) : null, folded: st.folded }; `), rectClicked: re, before: reBefore }));
 
     // ── 3 · delete a pinned profile from the panel ──
     console.log('— 3 · Set aside a PINNED profile: the dialog asks, one click unpins, no dangling id anywhere');
@@ -296,7 +296,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await until(async () => { const c = await chipOf(SID.D); return c && /gone/.test(c.text); }, 8000);
     await ev('app.openBrowserProfiles(); return true;');
     const setAside = await until(() => ev(`const pr = document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]'); const b = pr && pr.querySelector('.bprof-more'); return !!b;`), 10000); // design 015: Delete… is the row's ⋯ menu item
-    ok(setAside, 'the Browser panel lists "gone" with its ⋯ menu (Delete… inside)', S(await ev(`const pr = document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]'); const b = pr && pr.querySelector('.bprof-forget'); return { row: !!pr, rows: [...document.querySelectorAll('.bprof-profile')].map((x) => x.dataset.profileId), b: !!b, disabled: b ? b.disabled : null, title: b ? b.title : null };`)));
+    ok(verdictOf(setAside), 'the Browser panel lists "gone" with its ⋯ menu (Delete… inside)', S(await ev(`const pr = document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]'); const b = pr && pr.querySelector('.bprof-forget'); return { row: !!pr, rows: [...document.querySelectorAll('.bprof-profile')].map((x) => x.dataset.profileId), b: !!b, disabled: b ? b.disabled : null, title: b ? b.title : null };`)));
     await ev(`document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]').scrollIntoView({ block: 'center' }); return true;`);
     const fr0 = await ev(`return rect(document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"] .bprof-more'));`);
     await click(centre(fr0));
@@ -307,18 +307,18 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const dlg = await until(() => ev(`return !!${hintJs};`), 5000);
     const dtext = await ev(`const h = ${hintJs}; const ok = [...document.querySelectorAll('button.btn-create')].find((b) => b.textContent.trim() === 'Delete'); return { text: h ? h.textContent : null, ok: ok ? rect(ok) : null };`);
     const dName = await ev(`const r = row(${S(SID.D)}); return String(app.sidebar.getCustomName(r) || r.name || r.webuiName || '');`); // the row's OWN displayed name (the 2.369.102 lesson: never a spelling the product may replace)
-    ok(dlg && /^1 conversation\(s\) use it — they go back to a temporary browser\./.test(dtext.text) && dtext.text.includes('(' + dName + ')') && !!dtext.ok, 'the dialog WARNS before the act: "1 conversation(s) use it — they go back to a temporary browser." naming the chat, with a one-click "Delete" (owner ruling A (6): release + unpin + set aside in one step)', S(dtext));
+    ok(gateOf(dlg) && gateOf(/^1 conversation\(s\) use it — they go back to a temporary browser\./.test(dtext.text)) && gateOf(dtext.text.includes('(' + dName + ')')) && !!dtext.ok, 'the dialog WARNS before the act: "1 conversation(s) use it — they go back to a temporary browser." naming the chat, with a one-click "Delete" (owner ruling A (6): release + unpin + set aside in one step)', S(dtext));
     if (dtext.ok) await click(centre(dtext.ok));
     const goneOk = await until(async () => (await j('GET', '/api/browser/profiles')).json.profiles.every((p) => p.id !== GONE.id), 8000);
-    ok(goneOk, '"gone" was set aside (removed from the registry)');
+    ok(verdictOf(goneOk), '"gone" was set aside (removed from the registry)');
     const want3 = 'gone was deleted — its pin was cleared · running nothing';
-    ok(await until(async () => { const c = await chipOf(SID.D); return c && c.text === 'Agent browser · ' + want3 && c.amber; }, 8000), `Delete chat's chip says "${want3}" (never a raw id, never silence)`, S(await chipOf(SID.D)));
+    ok(verdictOf(await until(async () => { const c = await chipOf(SID.D); return c && c.text === 'Agent browser · ' + want3 && c.amber; }, 8000)), `Delete chat's chip says "${want3}" (never a raw id, never silence)`, S(await chipOf(SID.D)));
     await ev(`app.openSessionProps(row(${S(SID.D)})); return true;`);
     await until(() => ev(`return !!props(${S(SID.D)});`), 5000);
     const dp = await ev(`const w = props(${S(SID.D)}); return w ? w.content.textContent : '';`);
-    ok(!/\bbp-[0-9a-f]{8}\b/.test(dp) && dp.includes(want3), 'its Session Properties show the same line and NO raw bp- id (the study: PINNED PROFILE "bp-17eb27c4")', dp.slice(0, 600));
+    ok(!/\bbp-[0-9a-f]{8}\b/.test(dp) && verdictOf(dp.includes(want3)), 'its Session Properties show the same line and NO raw bp- id (the study: PINNED PROFILE "bp-17eb27c4")', dp.slice(0, 600));
     const sd = (await j('GET', `/api/browser/session/${SID.D}`)).json;
-    ok(sd && sd.pin === null && (await ev(`return row(${S(SID.D)}).browserProfileId || null;`)) === null, 'no dangling pin anywhere: the keeper\'s pin is null and the session row carries none', S(sd && sd.pin));
+    ok(gateOf(sd) && sd.pin === null && (await ev(`return row(${S(SID.D)}).browserProfileId || null;`)) === null, 'no dangling pin anywhere: the keeper\'s pin is null and the session row carries none', S(sd && sd.pin));
 
     // ── 4 · the New Session dialog reads the registry and follows it while open ──
     console.log('— 4 · the New Session dialog lists every profile (a shared one too) and follows the registry while open');
@@ -327,12 +327,12 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await ev('app.showNewSessionDialog(); return true;');
     const opts0 = await until(() => ev(`const s = document.getElementById('input-browser-profile'); return !!(s && s.options.length > 1 && s.offsetParent);`), 5000);
     const o0 = await ev(`return [...document.getElementById('input-browser-profile').options].map((o) => o.textContent);`);
-    ok(opts0 && o0[0] === 'No profile (temporary browser)' && o0.includes('work') && o0.includes('Personal') && o0.includes('Shared work'), 'the dropdown lists the recreated "work", Personal and the SHARED profile (the study lost the recreated shared "work") — "No profile (temporary browser)" first, never "None (ephemeral)"', S(o0));
+    ok(gateOf(opts0) && o0[0] === 'No profile (temporary browser)' && gateOf(o0.includes('work')) && gateOf(o0.includes('Personal')) && verdictOf(o0.includes('Shared work')), 'the dropdown lists the recreated "work", Personal and the SHARED profile (the study lost the recreated shared "work") — "No profile (temporary browser)" first, never "None (ephemeral)"', S(o0));
     await ev(`const s = document.getElementById('input-browser-profile'); s.value = [...s.options].find((o) => o.textContent === 'Personal').value; s.dispatchEvent(new Event('change')); return true;`);
     const FRESH = await mkProfile('Fresh');
     const o1ok = await until(() => ev(`return [...document.getElementById('input-browser-profile').options].some((o) => o.textContent === 'Fresh');`), 6000);
     const o1 = await ev(`const s = document.getElementById('input-browser-profile'); return { opts: [...s.options].map((o) => o.textContent), picked: s.options[s.selectedIndex].textContent, origin: s.dataset.origin };`);
-    ok(o1ok && FRESH && o1.picked === 'Personal' && o1.origin === 'chosen', 'a profile created while the dialog is OPEN appears without reopening it — and the user\'s pick survives the refill', S(o1));
+    ok(gateOf(o1ok) && gateOf(FRESH) && o1.picked === 'Personal' && o1.origin === 'chosen', 'a profile created while the dialog is OPEN appears without reopening it — and the user\'s pick survives the refill', S(o1));
     await ev(`app.hideDialogs ? app.hideDialogs() : null; return true;`);
 
     // ── 5 · every input has a receipt (a SHARED profile: the mediated path) ──
@@ -367,27 +367,27 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await until(() => ev(`return !!chat(${S(SID.M)});`), 10000);
     await ev(`app.openBrowserLive({ sessionId: ${S(SID.M)} }); return true;`);
     const mUp = await until(() => ev(`const L = live(${S(SID.M)}); return !!(L && L._browserLive.state().frames >= 1 && L._browserLive.state().connected);`), 15000);
-    ok(mUp && UM.connections >= 1, 'its live view draws from the session\'s own (mediated) stream');
+    ok(gateOf(mUp) && UM.connections >= 1, 'its live view draws from the session\'s own (mediated) stream');
     await ev(`const w = live(${S(SID.M)}); app.goToWinId ? app.goToWinId(w.id) : wm.focusWindow(w.id); return true;`);
     await sleep(300);
     const tk = await ev(`const b = live(${S(SID.M)})._browserLive.el().querySelector('.browser-live-mode-btn'); return b && b.offsetParent ? rect(b) : null;`);
     if (tk) await click(centre(tk));
     const driving = await until(() => ev(`const st = live(${S(SID.M)})._browserLive.state(); return st.mode === 'takeover' && st.mine && st.ownsKeyboard;`), 6000);
-    ok(driving, 'a REAL click on Take over: the user drives and the view owns the keyboard');
+    ok(verdictOf(driving), 'a REAL click on Take over: the user drives and the view owns the keyboard');
     const chromeKeys0 = fchrome.saw.filter((x) => x === 'Input.dispatchKeyEvent').length;
     await key('a', 'KeyA', 65, 'a');
     const delivered = await until(() => ev(`const st = live(${S(SID.M)})._browserLive.state(); return st.receipts.delivered >= 1 && st.receipts.pending === 0;`), 5000);
     const d5 = await ev(`const st = live(${S(SID.M)})._browserLive.state(); return { receipts: st.receipts, kbdChip: st.kbdChip, kbdText: st.kbdText, echo: st.echo };`);
-    ok(delivered && fchrome.saw.filter((x) => x === 'Input.dispatchKeyEvent').length > chromeKeys0 && !d5.receipts.failing, 'DISPATCHED: the key reached the (fake) Chrome THROUGH the mediator while the user drives, and its receipt came back delivered (the study: nothing reached the page)', S({ d5, saw: fchrome.saw.slice(-8) }));
-    ok(d5.kbdChip && d5.kbdText === 'Typing goes to the browser', 'the bar keeps "Typing goes to the browser" — true now', S(d5));
+    ok(gateOf(delivered) && fchrome.saw.filter((x) => x === 'Input.dispatchKeyEvent').length > chromeKeys0 && !d5.receipts.failing, 'DISPATCHED: the key reached the (fake) Chrome THROUGH the mediator while the user drives, and its receipt came back delivered (the study: nothing reached the page)', S({ d5, saw: fchrome.saw.slice(-8) }));
+    ok(gateOf(d5.kbdChip) && d5.kbdText === 'Typing goes to the browser', 'the bar keeps "Typing goes to the browser" — true now', S(d5));
     mode = 'drop';
     await key('b', 'KeyB', 66, 'b');
     const notDelivered = await until(() => ev(`const st = live(${S(SID.M)})._browserLive.state(); return !!st.receipts.failing;`), 4000);
     const d6 = await ev(`const st = live(${S(SID.M)})._browserLive.state(); const chip = live(${S(SID.M)})._browserLive.el().querySelector('.browser-live-kbd-chip'); return { receipts: st.receipts, kbdText: st.kbdText, echo: st.echo, chipFailing: chip.classList.contains('failing') };`);
-    ok(notDelivered && d6.kbdText === 'Input is not reaching the browser' && d6.chipFailing && /^not delivered — /.test(d6.echo || ''), `DROPPED: within ~1.5 s the bar says "${d6.kbdText}" and "${d6.echo}" — never "Typing goes to the browser" over input that reaches nothing`, S(d6));
+    ok(gateOf(notDelivered) && d6.kbdText === 'Input is not reaching the browser' && gateOf(d6.chipFailing) && verdictOf(/^not delivered — /.test(d6.echo || '')), `DROPPED: within ~1.5 s the bar says "${d6.kbdText}" and "${d6.echo}" — never "Typing goes to the browser" over input that reaches nothing`, S(d6));
     mode = 'dispatch';
     await key('c', 'KeyC', 67, 'c');
-    ok(await until(() => ev(`const st = live(${S(SID.M)})._browserLive.state(); return !st.receipts.failing && st.kbdText === 'Typing goes to the browser';`), 5000), 'the next delivered key clears it (the chip says "Typing goes to the browser" again)');
+    ok(verdictOf(await until(() => ev(`const st = live(${S(SID.M)})._browserLive.state(); return !st.receipts.failing && st.kbdText === 'Typing goes to the browser';`), 5000)), 'the next delivered key clears it (the chip says "Typing goes to the browser" again)');
     const hb = await ev(`const b = live(${S(SID.M)})._browserLive.el().querySelector('.browser-live-handback'); return b && b.offsetParent ? rect(b) : null;`);
     if (hb) await click(centre(hb));
     try { medWs?.close(); } catch { }
@@ -406,4 +406,4 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await sleep(500);
   }
 })().catch((e) => ok(false, 'the suite threw', e && (e.stack || e.message)));
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

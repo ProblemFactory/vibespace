@@ -27,7 +27,7 @@ import { paramTextEdits, censusAll } from './lib/param-text-census.mjs';   // B-
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const acorn = createRequire(path.join(REPO, 'package.json'))('acorn');
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 
 /** Every *.mjs / *.cjs / *.js under <root>/scripts (node_modules aside), as paths relative to <root>, sorted. */
 export function codeFiles(root) {
@@ -103,11 +103,11 @@ console.log('§1 THE TREE — every file under scripts/ that Node would load as 
   const admit = admitBy(SCRIPT_RE);
   const r = unparseable(REPO, { visit: (rel, src, ast) => { const key = admit(rel); if (!key) return; const m = [rel, key]; if (key === PLANT_KEY) PLANT_SRC = src; const { edits: e, helpers: h, paramEdits: pe } = censusAll(src, { ast }); if (e.length) EDITS[m[1]] = e; if (h.length) HELPERS[m[1]] = h; if (pe.length) PARAMS[m[1]] = pe; } });
   const ms = Math.round(performance.now() - t0);
-  ok(r.files.length >= 1000 && r.files.includes('scripts/ci.mjs') && r.files.includes('scripts/test-suite-files-parse.mjs'),
+  ok(r.files.length >= 1000 && gateOf(r.files.includes('scripts/ci.mjs')) && verdictOf(r.files.includes('scripts/test-suite-files-parse.mjs')),
     `the walk met ${r.files.length} files (${(r.bytes / 1e6).toFixed(1)} MB: ${r.kinds.module} ES modules, ${r.kinds.commonjs} CommonJS, ${r.kinds.detect} by Node's detection), this suite and scripts/ci.mjs among them`);
   ok(r.bad.length === 0, `EVERY ONE PARSES (${ms} ms)${r.bad.length ? ` — ${r.bad.length} DO NOT:\n      ${r.bad.map(said).join('\n      ')}` : ''}`);
   const tops = fs.readdirSync(path.join(REPO, 'scripts')).filter((n) => /^test-.*\.mjs$/.test(n)).map((n) => `scripts/${n}`);
-  ok(tops.length > 500 && tops.every((f) => r.files.includes(f)), `every scripts/test-*.mjs (${tops.length}) is among them`);
+  ok(tops.length > 500 && verdictOf(tops.every((f) => r.files.includes(f))), `every scripts/test-*.mjs (${tops.length}) is among them`);
 }
 
 console.log('§2 THE CONTROLS — a scratch tree through the same walk and the same parse');
@@ -141,15 +141,15 @@ console.log('§2 THE CONTROLS — a scratch tree through the same walk and the s
     put('scripts/node_modules/x/never.mjs', 'this is not code (\n'); put('scripts/fixtures/not-code.txt', 'this is not code (\n'); put('scripts/fixtures/n.json', '{ broken\n');
     const r = unparseable(root);
     const reds = Object.fromEntries(r.bad.map((b) => [b.file, b]));
-    ok(reds['scripts/test-cut-call.mjs'] && reds['scripts/test-cut-call.mjs'].line === 5,
+    ok(gateOf(reds['scripts/test-cut-call.mjs']) && reds['scripts/test-cut-call.mjs'].line === 5,
       'the mid-line comment that cuts a call is RED by its file and the line the parse stopped at (5, under the cut on 4)', reds['scripts/test-cut-call.mjs'] && said(reds['scripts/test-cut-call.mjs']));
-    ok(reds['scripts/measure-cut-arrow.mjs'] && reds['scripts/measure-cut-arrow.mjs'].line === 2, 'the arrow whose return the comment took is RED by file and line', reds['scripts/measure-cut-arrow.mjs'] && said(reds['scripts/measure-cut-arrow.mjs']));
-    ok(!reds['scripts/tla.mjs'] && reds['scripts/tla.cjs'], 'top-level await: green as an ES module, RED as CommonJS');
-    ok(!reds['scripts/ret.cjs'] && reds['scripts/ret.mjs'], 'a top-level return: green as CommonJS (Node wraps it), RED as an ES module');
+    ok(gateOf(reds['scripts/measure-cut-arrow.mjs']) && reds['scripts/measure-cut-arrow.mjs'].line === 2, 'the arrow whose return the comment took is RED by file and line', reds['scripts/measure-cut-arrow.mjs'] && said(reds['scripts/measure-cut-arrow.mjs']));
+    ok(!reds['scripts/tla.mjs'] && verdictOf(reds['scripts/tla.cjs']), 'top-level await: green as an ES module, RED as CommonJS');
+    ok(!reds['scripts/ret.cjs'] && verdictOf(reds['scripts/ret.mjs']), 'a top-level return: green as CommonJS (Node wraps it), RED as an ES module');
     ok(!reds['scripts/hashbang.mjs'] && !reds['scripts/fixtures/detect/esm.js'] && !reds['scripts/fixtures/detect/cjs.js'] && !reds['scripts/fixtures/typed/a.js'],
       'a hashbang, a .js ES module by Node\'s detection, a .js CommonJS file and a .js under "type": "module" are all green');
-    ok(reds['scripts/fixtures/typed2/b.js'] && reds['scripts/fixtures/typed2/b.js'].kind === 'commonjs', 'module syntax in a .js under "type": "commonjs" is RED (Node refuses it there)');
-    ok(reds['scripts/fixtures/deep/er/broken.cjs'] && reds['scripts/fixtures/deep/er/broken.cjs'].line === 1, 'a red deep in a subfolder is found, by file and line');
+    ok(gateOf(reds['scripts/fixtures/typed2/b.js']) && reds['scripts/fixtures/typed2/b.js'].kind === 'commonjs', 'module syntax in a .js under "type": "commonjs" is RED (Node refuses it there)');
+    ok(gateOf(reds['scripts/fixtures/deep/er/broken.cjs']) && reds['scripts/fixtures/deep/er/broken.cjs'].line === 1, 'a red deep in a subfolder is found, by file and line');
     ok(!r.files.some((f) => f.includes('node_modules') || /\.(txt|json)$/.test(f)), 'node_modules and non-code files are never read');
     ok(r.bad.length === 6, `exactly the six planted reds, nothing else (${r.bad.length}: ${r.bad.map((b) => b.file).join(', ')})`);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -213,7 +213,7 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   // ONE anchor helper. A walk, or a census, that read nothing finds nothing there. The plants stand outside every list.
   const plantSaid = (c) => (c ? `${c.edits.length} edit(s)${c.edits.length ? ' at line ' + c.edits.map((e) => e.line).join(', ') : ''}, ${c.helpers.length} helper(s)${c.helpers.length ? ' ' + c.helpers.map((h) => h.name).join(', ') : ''}` : 'the walk did not meet it');
   const plantFound = (c) => !!c && c.edits.length === 1 && c.helpers.length === 1 && c.helpers[0].name === 'plantedCut' && c.edits[0].line === c.helpers[0].line;
-  ok(plantFound(PLANT), `the walk finds the PLANTED site in ${PLANT_REL} (${plantSaid(PLANT)}) — the census can see: non-vacuous by a plant, not by the list's debt (the live list: ${total} edits in ${Object.keys(per).length} scripts)`);
+  ok(verdictOf(plantFound(PLANT)), `the walk finds the PLANTED site in ${PLANT_REL} (${plantSaid(PLANT)}) — the census can see: non-vacuous by a plant, not by the list's debt (the live list: ${total} edits in ${Object.keys(per).length} scripts)`);
   const censusOf = (t) => { let ast = null; try { ast = acorn.parse(t, OPTS.module); } catch { return null; } return censusAll(t, { ast }); };   // a copy that does not parse: null, a red by name
   const unplanted = PLANT ? PLANT.src.split('\n').filter((l) => !l.startsWith('export const plantedCut')).join('\n') : '';
   const UNP = PLANT ? censusOf(unplanted) : null;
@@ -242,13 +242,13 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
     const lineOf = (t, head) => (t.split('\n').find((l) => l.trim().startsWith(head)) || '').trim();
     const DOOR = "!/\\.(?:replace|replaceAll|join)\\(/.test(src) || !/(?:\\.load|\\.write|_compile|runIn\\w*Context|compileFunction|writeFileSync|new Function)\\(/.test(src)";
     const same = { walk: !!lineOf(PT, 'const walkAst = ') && MC.split('\n').some((l) => l.trim() === lineOf(PT, 'const walkAst = ')), read: !!lineOf(PT, 'const READ = ') && MC.includes(lineOf(PT, 'const READ = ')), door: PT.includes(DOOR) && MC.includes(DOOR) };
-    ok(same.walk && same.read && same.door, `the second list's door and walk are the first list's own text (scripts/lib/param-text-census.mjs ≡ scripts/mutant-copy.mjs: walk ${same.walk}, product read ${same.read}, edit / loader door ${same.door})`); }
+    ok(gateOf(same.walk) && gateOf(same.read) && verdictOf(same.door), `the second list's door and walk are the first list's own text (scripts/lib/param-text-census.mjs ≡ scripts/mutant-copy.mjs: walk ${same.walk}, product read ${same.read}, edit / loader door ${same.door})`); }
   // ITS PLANT and ITS RED: plantedHandedText in the same plant file — one edit of this list, none of the first's
   const plant2 = (c) => !!c && c.paramEdits.length === 1 && c.paramEdits[0].text === "text.replace('const ', 'let ')";
-  ok(plant2(PLANT) && plantFound(PLANT), `the walk finds the second list's PLANTED site in ${PLANT_REL} (plantedHandedText: ${PLANT ? PLANT.paramEdits.map((e) => `line ${e.line} ${e.text}`).join(', ') || 'none' : 'the walk did not meet it'}), and the first list's plant is unchanged by it (${plantSaid(PLANT)})`);
+  ok(gateOf(plant2(PLANT)) && verdictOf(plantFound(PLANT)), `the walk finds the second list's PLANTED site in ${PLANT_REL} (plantedHandedText: ${PLANT ? PLANT.paramEdits.map((e) => `line ${e.line} ${e.text}`).join(', ') || 'none' : 'the walk did not meet it'}), and the first list's plant is unchanged by it (${plantSaid(PLANT)})`);
   const unplanted2 = PLANT ? PLANT.src.split('\n').filter((l) => !l.startsWith('export const plantedHandedText')).join('\n') : '';
   const UNP2 = PLANT ? censusOf(unplanted2) : null;
-  ok(!!UNP2 && unplanted2 !== PLANT.src && !plant2(UNP2) && !UNP2.paramEdits.length && plantFound(UNP2), `RED CONTROL: the same census over a copy of the plant with plantedHandedText taken out finds ${UNP2 ? UNP2.paramEdits.length : '?'} edit(s) of the second list — the leg above would go red — and still the first plant (${plantSaid(UNP2)}: the census answered on the copy)`);
+  ok(!!UNP2 && unplanted2 !== PLANT.src && !plant2(UNP2) && !UNP2.paramEdits.length && verdictOf(plantFound(UNP2)), `RED CONTROL: the same census over a copy of the plant with plantedHandedText taken out finds ${UNP2 ? UNP2.paramEdits.length : '?'} edit(s) of the second list — the leg above would go red — and still the first plant (${plantSaid(UNP2)}: the census answered on the copy)`);
   const overE = overLines(j.added, per, LISTED, EDITS, (e) => `line ${e.line} ${e.text}`);
   ok(!overE.length, `the unanchored control edits never rise without a row's id beside it (the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(LISTED).length} files)${overE.length ? ` — ${overE.length} file(s) over their count, EVERY ONE on its own line below with all its edits: build the new edit with anchored() from scripts/scratch.mjs, or raise the file's count under YOUR backlog row's id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)` : ''}`);
   sayOver(overE);
@@ -257,16 +257,16 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const T = 'const x = 1;\nconst y = 2;\n';
   ok(anchored(T, 'const y = 2;', 'const y = 3;', 'plant') === 'const x = 1;\nconst y = 3;\n', 'anchored(): an anchor present once is replaced');
   const threw = (f) => { try { f(); return null; } catch (e) { return String(e.message); } };
-  ok(/^ANCHOR GONE «plant-gone»/.test(threw(() => anchored(T, 'const z = 9;', '', 'plant-gone')) || ''), 'CONTROL: an anchor that is gone THROWS BY NAME («ANCHOR GONE» + the control\'s name)');
-  ok(/^ANCHOR NOT UNIQUE «plant-two»: .* — 2 times/.test(threw(() => anchored(T, 'const ', 'let ', 'plant-two')) || ''), 'CONTROL: an anchor found twice THROWS BY NAME («ANCHOR NOT UNIQUE» + its count)');
-  ok(anchored(T, /const (\w)/, 'let $1', 're', { count: 'any' }) === 'let x = 1;\nlet y = 2;\n' && /^ANCHOR GONE/.test(threw(() => anchored(T, /var /, '', 're-gone')) || ''), 'anchored(): a RegExp anchor (count any); a RegExp that matches nothing throws by name');
+  ok(verdictOf(/^ANCHOR GONE «plant-gone»/.test(threw(() => anchored(T, 'const z = 9;', '', 'plant-gone')) || '')), 'CONTROL: an anchor that is gone THROWS BY NAME («ANCHOR GONE» + the control\'s name)');
+  ok(verdictOf(/^ANCHOR NOT UNIQUE «plant-two»: .* — 2 times/.test(threw(() => anchored(T, 'const ', 'let ', 'plant-two')) || '')), 'CONTROL: an anchor found twice THROWS BY NAME («ANCHOR NOT UNIQUE» + its count)');
+  ok(anchored(T, /const (\w)/, 'let $1', 're', { count: 'any' }) === 'let x = 1;\nlet y = 2;\n' && verdictOf(/^ANCHOR GONE/.test(threw(() => anchored(T, /var /, '', 're-gone')) || '')), 'anchored(): a RegExp anchor (count any); a RegExp that matches nothing throws by name');
   const seen = []; const viaFn = anchored(T, 'const ', (m, at) => { seen.push(at); return 'let '; }, 'plant-fn', { count: 'any' });
-  ok(anchored(T, /const y/y, 'let y', 're-sticky') === 'const x = 1;\nlet y = 2;\n' && /^ANCHOR MATCHES NOTHING «re-empty»/.test(threw(() => anchored(T, /z*/, '!', 're-empty', { count: 'any' })) || '')
+  ok(anchored(T, /const y/y, 'let y', 're-sticky') === 'const x = 1;\nlet y = 2;\n' && gateOf(/^ANCHOR MATCHES NOTHING «re-empty»/.test(threw(() => anchored(T, /z*/, '!', 're-empty', { count: 'any' })) || ''))
     && viaFn === 'let x = 1;\nlet y = 2;\n' && seen.join() === '0,13',
     'anchored(): a sticky RegExp is found anywhere (its flag ignored); one that can match the empty string is refused by name; a replacer is called once per match with its offset, whatever the count');
   const MUT = mutantCopies('files-parse-b0d3e', REPO);
   const real = fs.readFileSync(path.join(REPO, 'src/pairing-token.js'), 'utf-8');
-  ok(/^CONTROL BUILT NOTHING: the copy of src\/pairing-token\.js \(«gone-anchor»\)/.test(threw(() => MUT.write('src/pairing-token.js', real.replace('a line no file has', ''), 'gone-anchor')) || ''), 'CONTROL: a mutant copy byte-identical to its file (its edit found no anchor) FAILS BY NAME in scripts/mutant-copy.mjs');
+  ok(verdictOf(/^CONTROL BUILT NOTHING: the copy of src\/pairing-token\.js \(«gone-anchor»\)/.test(threw(() => MUT.write('src/pairing-token.js', real.replace('a line no file has', ''), 'gone-anchor')) || '')), 'CONTROL: a mutant copy byte-identical to its file (its edit found no anchor) FAILS BY NAME in scripts/mutant-copy.mjs');
   ok(!threw(() => MUT.write('src/pairing-token.js', real, 'deliberate', { same: true })) && !threw(() => MUT.write('src/pairing-token.js', real, null, { name: 'closed-world-copy' })) && !threw(() => MUT.write('src/pairing-token.js', real + '\n// planted', 'edited')), 'a deliberate unpatched copy says so ({ same: true }, or a closed world\'s name); a real edit writes');
   const P = (body) => `import fs from 'node:fs';\nconst src = fs.readFileSync(path.join(REPO, 'src/x.js'), 'utf8');\n${body}\n`;
   // THE SECOND LIST'S RULES (B-0d3e slice 8), each pinned by a planted script (P builds it: a product read, then the body; `true` = the body alone)
@@ -313,7 +313,7 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const NONE = 'const x = 1;\n';
   const one = (t) => { const f = scriptCensus(t, { ast: acorn.parse(t, OPTS.module) }); return { e: f.edits, h: f.helpers, same: JSON.stringify(f.edits) === JSON.stringify(unanchoredEdits(t)) && JSON.stringify(f.helpers) === JSON.stringify(anchorHelpers(t)) }; };
   const fb = one(BOTH), fe = one(E_ONLY), fh = one(H_ONLY), fn0 = one(NONE);
-  ok(fb.same && fb.e.length === 1 && fb.h.length === 1 && fe.same && fe.e.length === 0 && fe.h.length === 0 && fh.same && fh.e.length === 0 && fh.h.length === 1 && fn0.same && !fn0.e.length && !fn0.h.length,
+  ok(gateOf(fb.same) && fb.e.length === 1 && fb.h.length === 1 && gateOf(fe.same) && fe.e.length === 0 && fe.h.length === 0 && gateOf(fh.same) && fh.e.length === 0 && fh.h.length === 1 && gateOf(fn0.same) && !fn0.e.length && !fn0.h.length,
     `CONTROL (B-7e49): the ONE walk answers what the two calls answer — a script both doors admit ${fb.e.length} edit / ${fb.h.length} helper (the plants found), the edits' door alone ${fe.e.length} / ${fe.h.length}, the helpers' door alone ${fh.e.length} / ${fh.h.length}, neither ${fn0.e.length} / ${fn0.h.length}`);
   // B-0d3e's reach (lane lg-text-legs-2): a chain is followed to its read THROUGH a cured link (a suite's editAnchor, scratch.mjs
   // anchored()), inline or held in a name — before it, a call base was no name and an edit appended after a cure was invisible
@@ -370,16 +370,16 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const oldCut = JSON.stringify(mj.added.slice(0, 6).map((f) => `${f}: ${mper[f]} > 0 — a new edit: ${many[f].slice(0, 2).map((e) => `line ${e.line} ${e.text}`).join(' · ')} — build it with anchored() from scripts/scratch.mjs, or raise its count to ${mper[f]} under YOUR backlog row\'s id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)`)).slice(0, 600);
   const printed = []; sayOver(whole, (x) => printed.push(x));
   const named = (s) => Object.keys(many).filter((f) => s.includes(f)).length;
-  ok(whole.length === 9 && whole.every((l, i) => l.startsWith(`test-over-${i}.mjs: 30 > 0 — line 1 `) && l.includes(' · line 30 ')) && printed.length === 9 && printed.every((l, i) => l === '      ' + whole[i]) && named(printed.join('\n')) === 9 && named(oldCut) < 6,
+  ok(whole.length === 9 && gateOf(whole.every((l, i) => l.startsWith(`test-over-${i}.mjs: 30 > 0 — line 1 `) && l.includes(' · line 30 '))) && printed.length === 9 && gateOf(printed.every((l, i) => l === '      ' + whole[i])) && named(printed.join('\n')) === 9 && named(oldCut) < 6,
     `CONTROL: an over-count red names EVERY file, one printed line each, whole, with all its items — 9 files over their counts ⇒ ${printed.length} printed lines naming ${named(printed.join('\n'))}; RED (the old edits message: six files, its detail cut at 600 characters) named ${named(oldCut)}, under the six its slice kept`);
   const W19 = 'a why of nineteen c'.slice(0, 19), W20 = 'a why of twenty char'.slice(0, 20), row = (why, files) => ({ why, files });
   const cA = capsOf({ files: { 'test-a.mjs': 2 } }), cB = capsOf({ rows: { 'X-1': row('a row id that is no backlog id at all', { 'test-a.mjs': 2 }) } });
   const cC = capsOf({ rows: { 'B-0001': row(W19, { 'test-a.mjs': 2 }) } }), cC20 = capsOf({ rows: { 'B-0001': row(W20, { 'test-a.mjs': 2 }) } });
   const cN = capsOf({ rows: { 'B-0001': row('a count written as a word is no count', { 'test-a.mjs': 'two' }) } });
   const cD = capsOf({ rows: { 'B-0001': row('the first list of this census, counted in once', { 'test-a.mjs': 2 }), 'B-0002': row('a unit that raised one file under its own row', { 'test-a.mjs': 3 }) } });
-  ok(cA.bad.length === 1 && /plain «files»/.test(cA.bad[0]) && cB.bad.length === 1 && /row «X-1»: its id is no backlog id/.test(cB.bad[0])
-    && cC.bad.length === 1 && /row «B-0001»: a why of fewer than 20 characters/.test(cC.bad[0]) && !cC20.bad.length
-    && cN.bad.length === 1 && /a count that is not a whole number \(test-a\.mjs: "two"\)/.test(cN.bad[0])
+  ok(cA.bad.length === 1 && gateOf(/plain «files»/.test(cA.bad[0])) && cB.bad.length === 1 && gateOf(/row «X-1»: its id is no backlog id/.test(cB.bad[0]))
+    && cC.bad.length === 1 && gateOf(/row «B-0001»: a why of fewer than 20 characters/.test(cC.bad[0])) && !cC20.bad.length
+    && cN.bad.length === 1 && gateOf(/a count that is not a whole number \(test-a\.mjs: "two"\)/.test(cN.bad[0]))
     && !cD.bad.length && cD.caps['test-a.mjs'] === 3
     && judge({ 'test-a.mjs': 4 }, cD.caps).added.join() === 'test-a.mjs' && !judge({ 'test-a.mjs': 3 }, cD.caps).added.length && judge({ 'test-a.mjs': 1 }, cD.caps).fell.join() === 'test-a.mjs',
     'CONTROL: a count with no row id beside it is RED by its words — a plain «files» map, an id that is no B-xxxx, a why of 19 characters (20 holds), a count that is not a whole number; a file\'s cap is the largest count any row gives it — one over it is a rise (red), at it held, under it a fall (said)');
@@ -388,8 +388,8 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const fNew = capsOf({ rows: { 'B-0001': row('the founding list as it was pinned', { 'test-a.mjs': 2 }), 'B-0002': row('a unit that raised one file under its own row', { 'test-a.mjs': 3 }) } }, PIN);
   const fFell = capsOf({ rows: { 'B-0001': row('the founding list after a file fell', { 'test-a.mjs': 1 }) } }, PIN);
   const fFile = capsOf({ rows: { 'B-0001': row('the founding list given a file it never had', { 'test-a.mjs': 2, 'test-b.mjs': 1 }) } }, PIN);
-  ok(fRaised.bad.length === 1 && /the founding row «B-0001» raised above its pin \(test-a\.mjs 3 > its pin 2\) — it is fall-only: add a row under YOUR OWN backlog id/.test(fRaised.bad[0])
-    && !fNew.bad.length && fNew.caps['test-a.mjs'] === 3 && !fFell.bad.length && fFile.bad.length === 1 && /test-b\.mjs 1 > its pin 0/.test(fFile.bad[0]),
+  ok(fRaised.bad.length === 1 && gateOf(/the founding row «B-0001» raised above its pin \(test-a\.mjs 3 > its pin 2\) — it is fall-only: add a row under YOUR OWN backlog id/.test(fRaised.bad[0]))
+    && !fNew.bad.length && fNew.caps['test-a.mjs'] === 3 && !fFell.bad.length && fFile.bad.length === 1 && verdictOf(/test-b\.mjs 1 > its pin 0/.test(fFile.bad[0])),
     'CONTROL: THE FOUNDING ROW IS FALL-ONLY — raised above its pin in place is RED by name (and a file it never had), the same rise as a NEW row under its own id holds, a fall holds');
   // THE ANCHOR HELPERS (the row's «every helper that builds a control from an anchor»): a function whose own parameter is
   // an anchor and whose body reaches a loader FAILS BY NAME — it throws or checks ABOUT the anchor (B-287c: under a test of it,
@@ -409,7 +409,7 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   // a listed helper that stays on purpose says why («<file>#<name>»: a control skipped by name on a base without its line, or a caller that names the anchor)
   const HWHY = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8')).why || {};
   const whyDead = Object.keys(HWHY).filter((k) => { const [f, n] = k.split('#'); return !(HELPERS[f] || []).some((h) => h.name === n); });
-  ok(Object.values(HWHY).every((w) => typeof w === 'string' && w.length >= 20), `every helper that stays on purpose says why (${Object.keys(HWHY).length} in the list)`);
+  ok(verdictOf(Object.values(HWHY).every((w) => typeof w === 'string' && w.length >= 20)), `every helper that stays on purpose says why (${Object.keys(HWHY).length} in the list)`);
   if (whyDead.length) console.log(`    (${whyDead.length} why row(s) name no live helper — not red; drop them: ${whyDead.join(', ')})`);
   const H = (body) => anchorHelpers(P(body)).length;
   const hA = H("const cut = (from, to) => { if (src.split(from).length !== 2) return null; return MUT.load('src/x.js', src.replace(from, to), 't'); };");
@@ -443,20 +443,20 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
     ['a check through an imported verdictOf that a block binds again', 1, "import { verdictOf } from './lib/check.mjs'; const cut = (from, to) => { const verdictOf = (x) => true; const m = src.replace(from, to); ok(verdictOf(m !== src), 'CONTROL: the patch applies'); return MUT.load('src/x.js', m, 't'); };"],
   ];
   const got287 = PLANTS287.map(([n, want, body]) => [n, want, H(body)]);
-  ok(got287.every(([, want, got]) => got === want), `CONTROL (B-287c): each plant is judged by what it is about — ${got287.map(([n, want, got]) => `${n} ${got}${got === want ? '' : ` (want ${want})`}`).join(' · ')}`);
+  ok(verdictOf(got287.every(([, want, got]) => got === want)), `CONTROL (B-287c): each plant is judged by what it is about — ${got287.map(([n, want, got]) => `${n} ${got}${got === want ? '' : ` (want ${want})`}`).join(' · ')}`);
   // RED (B-1747, r3179): the walk WITHOUT its look-through reads the three wrapped checks as helpers that do not fail by name
   const MUTX = mutantCopies('suite-files-parse-wrap', REPO), MCSRC = fs.readFileSync(path.join(REPO, 'scripts', 'mutant-copy.mjs'), 'utf-8');
   const LOOK = "      if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && CHECKER.has(n.callee.name) && n.arguments.length === 1) return ofAnchor(n.arguments[0]);\n";
   const NOLOOK = await import(pathToFileURL(MUTX.write('scripts/mutant-copy.mjs', anchored(MCSRC, LOOK, '', 'the walk without the look-through'), 'mc-no-look')).href);
   const wrapped = PLANTS287.filter(([n]) => /guard tool's verdictOf|its gate \(gateOf\)|the alias \(verdictOfGuard\)/.test(n));
   const red = wrapped.map(([n, , body]) => [n, NOLOOK.anchorHelpers(P(body)).length]);
-  ok(wrapped.length === 3 && red.every(([, got]) => got === 1), `RED (the walk without its look-through through the guard tool's wraps): each wrapped check reads as a helper that does not fail by name — ${red.map(([n, got]) => `${n} ${got}`).join(' · ')}`);
+  ok(wrapped.length === 3 && verdictOf(red.every(([, got]) => got === 1)), `RED (the walk without its look-through through the guard tool's wraps): each wrapped check reads as a helper that does not fail by name — ${red.map(([n, got]) => `${n} ${got}`).join(' · ')}`);
   // RED (the reader's find): the walk WITHOUT its alone rule reads through the block's own verdictOf — the plant reads 0
   const ALONE = "    for (const nm of [...CHECKER]) if (seen.get(nm) !== 1) CHECKER.delete(nm);\n";
   const NOALONE = await import(pathToFileURL(MUTX.write('scripts/mutant-copy.mjs', anchored(MCSRC, ALONE, '', 'the walk without the alone rule'), 'mc-no-alone')).href);
   const shadow = PLANTS287.filter(([n]) => /a block binds again/.test(n)), redA = shadow.map(([n, , body]) => [n, NOALONE.anchorHelpers(P(body)).length]);
-  ok(shadow.length === 1 && redA.every(([, got]) => got === 0), `RED (the walk without its alone rule): the check through a block's own verdictOf reads as looked through — ${redA.map(([n, got]) => `${n} ${got}`).join(' · ')}`);
+  ok(shadow.length === 1 && verdictOf(redA.every(([, got]) => got === 0)), `RED (the walk without its alone rule): the check through a block's own verdictOf reads as looked through — ${redA.map(([n, got]) => `${n} ${got}`).join(' · ')}`);
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

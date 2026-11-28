@@ -18,7 +18,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const Q = require(path.join(REPO, 'src/desktop-quality.js'));
 const S = require(path.join(REPO, 'src/desktop-screens.js'));
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 700) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -51,33 +51,33 @@ const table = (M) => TABLE.filter(([inp, rung, still, slow, why]) => { const p =
 console.log('§1 qualityPlan');
 ok(table(Q).length === 0, `the truth table: ${TABLE.length} rows (moving 3/1, settling < ${Q.STILL_MS} ms stays fluid, still ≥ ${Q.STILL_MS} ms ⇒ 8/2, a slow link < ${Q.SLOW_KBPS} kbps one rung down, back at ≥ ${Q.SLOW_KBPS * Q.FAST_AGAIN})`, table(Q));
 const lv = Object.fromEntries(Q.RUNGS.map((r) => [r.rung, `${r.qualityLevel}/${r.compressionLevel}`]));
-ok(same(lv, { sharp: '8/2', balanced: '6/4', fluid: '3/1', lean: '1/6' }) && Q.RUNGS.every((r, i) => i === 0 || r.qualityLevel < Q.RUNGS[i - 1].qualityLevel), 'the ladder, sharpest first: sharp 8/2 · balanced 6/4 · fluid 3/1 · lean 1/6 (quality falls rung by rung)', lv);
-ok(same([Q.qualityPlan({ moving: true }).qualityLevel, Q.qualityPlan({ moving: true }).compressionLevel, Q.qualityPlan({ idleMs: 500 }).qualityLevel, Q.qualityPlan({ idleMs: 500 }).compressionLevel], [3, 1, 8, 2]), 'the design\'s two numbers: input / a changing picture ⇒ quality 3 / compression 1; still ⇒ 8 / 2');
+ok(gateOf(same(lv, { sharp: '8/2', balanced: '6/4', fluid: '3/1', lean: '1/6' })) && verdictOf(Q.RUNGS.every((r, i) => i === 0 || r.qualityLevel < Q.RUNGS[i - 1].qualityLevel)), 'the ladder, sharpest first: sharp 8/2 · balanced 6/4 · fluid 3/1 · lean 1/6 (quality falls rung by rung)', lv);
+ok(verdictOf(same([Q.qualityPlan({ moving: true }).qualityLevel, Q.qualityPlan({ moving: true }).compressionLevel, Q.qualityPlan({ idleMs: 500 }).qualityLevel, Q.qualityPlan({ idleMs: 500 }).compressionLevel], [3, 1, 8, 2])), 'the design\'s two numbers: input / a changing picture ⇒ quality 3 / compression 1; still ⇒ 8 / 2');
 ok(Q.qualityPlan({ moving: true, kbps: 'x' }).slow === false && Q.qualityPlan({ idleMs: -1 }).why === 'settling' && Q.qualityPlan().rung === 'sharp', 'odd inputs: a non-number kbps is no measure; no arguments = still');
 
 console.log('§2 the small rules');
-ok(Q.pictureChanging({ changes: 2, changeBytes: 24 * 1024 }) && !Q.pictureChanging({ changes: 1, changeBytes: 4e6 }) && !Q.pictureChanging({ changes: 10, changeBytes: 2000 }) && !Q.pictureChanging(null),
+ok(gateOf(Q.pictureChanging({ changes: 2, changeBytes: 24 * 1024 })) && !Q.pictureChanging({ changes: 1, changeBytes: 4e6 }) && !Q.pictureChanging({ changes: 10, changeBytes: 2000 }) && !Q.pictureChanging(null),
   'pictureChanging: ≥ 2 updates carrying ≥ 24 KB in a second — one big refresh is not, ten caret blinks are not');
 const two = Uint8Array.from([3, 1, 0, 0, 0, 0, 0, 10, 0, 10, 5, 0, 0, 1, 0, 2, 5, 8, 0, 1, 0, 2]);
-ok(Q.sentInput(4, null) && Q.sentInput(255, null) && !Q.sentInput(3, two, 0) && !Q.sentInput(5, two, 10) && Q.sentInput(5, two, 16) && !Q.sentInput(5, Uint8Array.from([5]), 0),
+ok(gateOf(Q.sentInput(4, null)) && gateOf(Q.sentInput(255, null)) && !Q.sentInput(3, two, 0) && !Q.sentInput(5, two, 10) && gateOf(Q.sentInput(5, two, 16)) && !Q.sentInput(5, Uint8Array.from([5]), 0),
   'sentInput: a key (4, QEMU 255) and a press / wheel (5 with a mask bit) are input; a hover (mask 0) and a request are not');
-ok(same([...Q.refreshRequest({ x: 1280, y: 0, w: 1280, h: 800 })], [3, 0, 5, 0, 0, 0, 5, 0, 3, 32]) && same([...Q.refreshRequest({ x: -5, y: 70000, w: 10.7, h: null })], [3, 0, 0, 0, 255, 255, 0, 10, 0, 0]),
+ok(gateOf(same([...Q.refreshRequest({ x: 1280, y: 0, w: 1280, h: 800 })], [3, 0, 5, 0, 0, 0, 5, 0, 3, 32])) && verdictOf(same([...Q.refreshRequest({ x: -5, y: 70000, w: 10.7, h: null })], [3, 0, 0, 0, 255, 255, 0, 10, 0, 0])),
   'refreshRequest: type 3, incremental 0, x y w h u16 big-endian (clamped to 0…65535)');
-ok(same(Q.pasteChord({ ctrlKey: true, code: 'KeyV', key: 'v' }), { keysym: 0x76, code: 'KeyV' }) && same(Q.pasteChord({ metaKey: true, code: 'KeyV', key: 'v' }), { keysym: 0x76, code: 'KeyV' })
+ok(gateOf(same(Q.pasteChord({ ctrlKey: true, code: 'KeyV', key: 'v' }), { keysym: 0x76, code: 'KeyV' })) && gateOf(same(Q.pasteChord({ metaKey: true, code: 'KeyV', key: 'v' }), { keysym: 0x76, code: 'KeyV' }))
   && Q.pasteChord({ ctrlKey: true, shiftKey: true, code: 'KeyV', key: 'V' }).keysym === 0x56 && Q.pasteChord({ ctrlKey: true, key: 'v' }).keysym === 0x76
   && Q.pasteChord({ ctrlKey: true, altKey: true, code: 'KeyV' }) === null && Q.pasteChord({ code: 'KeyV', key: 'v' }) === null && Q.pasteChord({ ctrlKey: true, code: 'KeyC' }) === null && Q.pasteChord(null) === null,
   'pasteChord: Ctrl+V / ⌘V (⇧ ⇒ V) — never with Alt (AltGr on Windows), never a bare V or another letter');
 ok(Q.pasteText('a\r\nb\rc\nd') === 'a\nb\nc\nd' && Q.pasteText('') === null && Q.pasteText(null) === null && Q.pasteText('héllo 你好') === 'héllo 你好',
   'pasteText: lines end with LF alone (RFB), nothing to paste ⇒ null, other text untouched (noVNC encodes it)');
 const g = (o) => Q.keyboardLockGate(o);
-ok(same(g({ secure: false, api: true, fullscreen: true, want: true }), { lock: false, why: 'insecure' }) && g({ secure: true, api: false, fullscreen: true }).why === 'no_api' && g({ secure: true, api: true, fullscreen: true, want: false }).why === 'off'
-  && g({ secure: true, api: true, fullscreen: false }).why === 'not_fullscreen' && same(g({ secure: true, api: true, fullscreen: true }), { lock: true, why: 'ok' }),
+ok(gateOf(same(g({ secure: false, api: true, fullscreen: true, want: true }), { lock: false, why: 'insecure' })) && g({ secure: true, api: false, fullscreen: true }).why === 'no_api' && g({ secure: true, api: true, fullscreen: true, want: false }).why === 'off'
+  && g({ secure: true, api: true, fullscreen: false }).why === 'not_fullscreen' && verdictOf(same(g({ secure: true, api: true, fullscreen: true }), { lock: true, why: 'ok' })),
   'keyboardLockGate: an http page never locks (its words), nor a browser without the API, a toggle that is off, or outside full screen');
 ok(Q.NAGLE_REFERENCE.beforeMs === 42.0 && Q.NAGLE_REFERENCE.afterMs === 0.70 && Q.NAGLE_REFERENCE.lane === 'picture-path-nodelay', 'the comparison segment\'s reference = lane picture-path-nodelay\'s recorded 42.0 → 0.70 ms');
 
 console.log('§3 the timing table');
 const cut = Uint8Array.from([3, 1, 0, 0, 0, 0, 0, 10, 0, 10, 255, 0, 0, 1, 0, 0, 0, 0x76, 0, 0, 0, 47, 4, 1, 0, 0, 0, 0, 0, 0x76]);
-ok(same(S.clientCuts(cut), [{ type: 3, at: 0 }, { type: 255, at: 10 }, { type: 4, at: 22 }]) && same(S.clientMessages(cut), [3, 255, 4]), 'clientCuts: each message with its offset (QEMU\'s 12-byte key cut too); clientMessages keeps the types', S.clientCuts(cut));
+ok(gateOf(same(S.clientCuts(cut), [{ type: 3, at: 0 }, { type: 255, at: 10 }, { type: 4, at: 22 }])) && verdictOf(same(S.clientMessages(cut), [3, 255, 4])), 'clientCuts: each message with its offset (QEMU\'s 12-byte key cut too); clientMessages keeps the types', S.clientCuts(cut));
 let t = S.updateTimer();
 t.request(0, false); t.received(5, 100000); t.received(55, 100000); t.request(60, true);
 let st = t.stats(60);
@@ -110,9 +110,9 @@ const mutant = (name, from, to) => {
   return require(f);
 };
 const m1 = mutant('settle-sharp', "(why === 'still' ? 0 : 2)", "(why === 'moving' ? 2 : 0)");
-ok(m1 && table(m1).length > 0, `RED CONTROL: "settling counts as still" (sharp the instant input stops) fails ${m1 ? table(m1).length : '?'} row(s)`, m1 && table(m1));
+ok(gateOf(m1) && table(m1).length > 0, `RED CONTROL: "settling counts as still" (sharp the instant input stops) fails ${m1 ? table(m1).length : '?'} row(s)`, m1 && table(m1));
 const m2 = mutant('no-hysteresis', 'slow ? k < SLOW_KBPS * FAST_AGAIN : k < SLOW_KBPS', 'k < SLOW_KBPS');
-ok(m2 && table(m2).length > 0, `RED CONTROL: no hysteresis (a link at the bound flaps) fails ${m2 ? table(m2).length : '?'} row(s)`, m2 && table(m2));
+ok(gateOf(m2) && table(m2).length > 0, `RED CONTROL: no hysteresis (a link at the bound flaps) fails ${m2 ? table(m2).length : '?'} row(s)`, m2 && table(m2));
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

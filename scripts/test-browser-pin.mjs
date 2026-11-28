@@ -55,7 +55,7 @@ const RG = require('../src/runaway-guard.js');
 const { SPAWN_ORIGINS } = require('../src/resume-continuity.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -157,25 +157,25 @@ console.log('— ① the pin ladder (§3.2.5): five rungs, stated origins, the t
   ok(B.browserKeyFor({ prior: KEY_A, resume: true, mint }).key === KEY_A, 'while a resume keeps the conversation\'s key');
   // the two-site vocabulary
   const emitted = new Set([p1, p2, p3, p4, p5].map((x) => x.origin));
-  ok([...emitted].every((o) => SPAWN_ORIGINS.includes(o)) && emitted.size === 5, `every origin the ladder emits is in SPAWN_ORIGINS (${[...emitted].join(', ')})`);
-  ok(B.PIN_ORIGINS.every((o) => SPAWN_ORIGINS.includes(o)), 'PIN_ORIGINS ⊆ SPAWN_ORIGINS (one vocabulary, two tiers)');
+  ok(gateOf([...emitted].every((o) => SPAWN_ORIGINS.includes(o))) && emitted.size === 5, `every origin the ladder emits is in SPAWN_ORIGINS (${[...emitted].join(', ')})`);
+  ok(verdictOf(B.PIN_ORIGINS.every((o) => SPAWN_ORIGINS.includes(o))), 'PIN_ORIGINS ⊆ SPAWN_ORIGINS (one vocabulary, two tiers)');
   const { spawnValueOrigin } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
-  ok(B.PIN_ORIGINS.every((o) => spawnValueOrigin(o, 'x', 'x') === o), 'the client mirror (agent-meta.spawnValueOrigin) recognises every pin origin — incl. the fifth value task-group');
+  ok(verdictOf(B.PIN_ORIGINS.every((o) => spawnValueOrigin(o, 'x', 'x') === o)), 'the client mirror (agent-meta.spawnValueOrigin) recognises every pin origin — incl. the fifth value task-group');
   ok(spawnValueOrigin('off-vocabulary', 'x', 'x') !== 'off-vocabulary', 'NEGATIVE CONTROL: an off-vocabulary string is NOT passed through as its own label');
   const sp = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
-  ok(B.PIN_ORIGINS.every((o) => new RegExp(`['"]?${o.replace('-', '\\-')}['"]?:\\s*\\(\\)\\s*=>`).test(sp)), 'Session Properties labels every pin origin (ORIGIN_LABEL has a row per value)');
-  for (const dict of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(fs.readFileSync(path.join(REPO, dict), 'utf8').includes("'Task-Group default'"), `${dict} carries the task-group label`);
+  ok(verdictOf(B.PIN_ORIGINS.every((o) => new RegExp(`['"]?${o.replace('-', '\\-')}['"]?:\\s*\\(\\)\\s*=>`).test(sp))), 'Session Properties labels every pin origin (ORIGIN_LABEL has a row per value)');
+  for (const dict of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(verdictOf(fs.readFileSync(path.join(REPO, dict), 'utf8').includes("'Task-Group default'")), `${dict} carries the task-group label`);
   // OWNER RULING A (2026-09-26): a pin OPENS the profile through the keeper (joined when running) — nothing is relaunched;
   // the P1 "RELAUNCHES the running browser" sentence described a second Chrome on the profile's directory (exit 21)
   { const live = B.pinApplyNotice({ liveBrowser: true, label: 'Work' }), idle = B.pinApplyNotice({ liveBrowser: false, label: 'Work' }), un = B.pinApplyNotice({ liveBrowser: true });
-    ok(/opens "Work"/.test(live) && /never relaunched/.test(live) && /left as it is/.test(live) && !/RELAUNCH/.test(live + idle + un) && !/left as it is/.test(idle) && /temporary browser/.test(un), 'owner ruling A: the mid-session pin says the next command OPENS the profile (joined, never relaunched) and leaves the running browser as it is; the unpin says a temporary browser', JSON.stringify({ live, idle, un })); }
+    ok(gateOf(/opens "Work"/.test(live)) && gateOf(/never relaunched/.test(live)) && gateOf(/left as it is/.test(live)) && !/RELAUNCH/.test(live + idle + un) && !/left as it is/.test(idle) && verdictOf(/temporary browser/.test(un)), 'owner ruling A: the mid-session pin says the next command OPENS the profile (joined, never relaunched) and leaves the running browser as it is; the unpin says a temporary browser', JSON.stringify({ live, idle, un })); }
 }
 
 // ═══ ② the registry + lease model, PURE ══════════════════════════════════
 console.log('— ② the registry record, the lease and the keeper\'s verdicts (§3.3–§3.5)');
 {
   const v = B.validateProfileInput({ label: '  Work  ', proxy: 'http://proxy.example:3128' });
-  ok(v.ok && v.value.label === 'Work' && v.value.provider === 'chromium' && v.value.proxy === 'http://proxy.example:3128', 'a valid create: label cleaned, chromium by default, the proxy\'s address kept');
+  ok(gateOf(v.ok) && v.value.label === 'Work' && v.value.provider === 'chromium' && v.value.proxy === 'http://proxy.example:3128', 'a valid create: label cleaned, chromium by default, the proxy\'s address kept');
   // B-8b87: a login inside the address is refused at the create — it goes in the vault (test-browser-proxy ①)
   const vi = B.validateProfileInput({ label: 'Inline', proxy: 'http://user:secret@proxy.example:3128' });
   ok(!vi.ok && vi.code === 'bad_proxy_inline_credential' && !String(vi.error).includes('secret'), 'a proxy address carrying its user:password is refused BY NAME (bad_proxy_inline_credential) — the login goes in the vault', vi);
@@ -196,58 +196,58 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   // a record saved BEFORE the law with its password in the address (built directly, as stored then) — the public view masks it
   const legacy = B.newProfileRecord({ id: 'bp-0000000f', label: 'Legacy', proxy: 'http://user:secret@proxy.example:3128', dir: '/tmp/y', owner: { kind: 'session', id: KEY_A }, now: 5 });
   ok(B.publicProfileView(legacy).proxy === 'http://***@proxy.example:3128' && B.publicProfileView(legacy).proxyPasswordInProfile === true && B.publicProfileView(rec).proxy === 'http://proxy.example:3128', 'the public view masks the proxy\'s secret half (a record saved before the law: drawn without it, flagged for «Move the password to the vault»)');
-  ok(B.mintProfileId('deadbeef') === 'bp-deadbeef' && B.isProfileId('bp-deadbeef') && !B.isProfileId('bp-xyz'), 'profile ids are minted bp-<8 hex>');
+  ok(B.mintProfileId('deadbeef') === 'bp-deadbeef' && gateOf(B.isProfileId('bp-deadbeef')) && !B.isProfileId('bp-xyz'), 'profile ids are minted bp-<8 hex>');
   ok(!B.profileDirName('bp-00000001').includes('Work'), 'the label never reaches a path (the dir name is the id)');
   const profiles = [rec, withUse({ id: 'bp-00000002', label: 'Team', owner: { kind: 'instance', id: null } }), withUse({ id: 'bp-00000003', label: 'team', owner: { kind: 'task', id: 'tg-1' } })];
   ok(B.findProfile(profiles, 'bp-00000002').id === 'bp-00000002' && B.findProfile(profiles, 'work').id === 'bp-00000001', 'a profile resolves by id or by label (case-insensitive)');
-  ok(Array.isArray(B.findProfile(profiles, 'TEAM').ambiguous), 'two profiles differing only in case are AMBIGUOUS by label');
-  ok(B.mayAttach(profiles[1], { browserKey: KEY_B }).ok && B.mayAttach(withUse({ ...rec, legacy: true, owner: { kind: 'session', id: KEY_A } }), { browserKey: KEY_B }).ok, 'an instance-owned or legacy profile admits any conversation');
-  ok(B.mayAttach(rec, { browserKey: KEY_A }).ok && B.mayAttach(rec, { browserKey: KEY_A + '.3' }).ok && B.mayAttach(rec, { browserKey: KEY_B }).code === 'not_owner', 'a session-owned profile admits its conversation (children included) and refuses another');
-  ok(B.mayAttach(profiles[2], { browserKey: KEY_B, taskIds: ['tg-1'] }).ok && B.mayAttach(profiles[2], { browserKey: KEY_B, taskIds: [] }).code === 'not_owner', 'a task-owned profile admits the sessions bound to that Task Group');
+  ok(verdictOf(Array.isArray(B.findProfile(profiles, 'TEAM').ambiguous)), 'two profiles differing only in case are AMBIGUOUS by label');
+  ok(gateOf(B.mayAttach(profiles[1], { browserKey: KEY_B }).ok) && verdictOf(B.mayAttach(withUse({ ...rec, legacy: true, owner: { kind: 'session', id: KEY_A } }), { browserKey: KEY_B }).ok), 'an instance-owned or legacy profile admits any conversation');
+  ok(gateOf(B.mayAttach(rec, { browserKey: KEY_A }).ok) && gateOf(B.mayAttach(rec, { browserKey: KEY_A + '.3' }).ok) && B.mayAttach(rec, { browserKey: KEY_B }).code === 'not_owner', 'a session-owned profile admits its conversation (children included) and refuses another');
+  ok(gateOf(B.mayAttach(profiles[2], { browserKey: KEY_B, taskIds: ['tg-1'] }).ok) && B.mayAttach(profiles[2], { browserKey: KEY_B, taskIds: [] }).code === 'not_owner', 'a task-owned profile admits the sessions bound to that Task Group');
   // "WHO CAN USE IT" IS A LIST (2026-09-27): a PIN NEVER AUTHORIZES — the admission takes no `pinned` / `by` (the user's
   // pick WRITES the list, keeper.setPin); the refusal names the BUTTON, never a command line
   ok(B.mayAttach(rec, { browserKey: KEY_B, pinned: true }).code === 'not_owner' && B.mayAttach(rec, { browserKey: KEY_B, by: 'user' }).code === 'not_owner' && B.mayAttach(profiles[2], { browserKey: KEY_B, pinned: true }).code === 'not_owner', 'the list (2026-09-27): a pin or a `by:\'user\'` is no admission input any more — a profile kept to ANOTHER conversation refuses a pinned conversation (the user\'s pick writes the list instead)');
-  { const r = B.mayAttach(rec, { browserKey: KEY_B }); ok(r.code === 'not_owner' && /kept to some of the user's conversations and Task Groups/.test(r.error) && /"Who can use it" in the Agent browser panel \(Change…\)/.test(r.error) && /"All agents"/.test(r.error) && !/vibespace-browser/.test(r.error + (r.remedy || '')) && /Never create a second profile/.test(r.error), 'owner ruling A (5): not_owner names the buttons ("Who can use it" → Change… in the Agent browser panel, or "All agents" — lane everyone-principal) and no command line', r.error); }
+  { const r = B.mayAttach(rec, { browserKey: KEY_B }); ok(r.code === 'not_owner' && gateOf(/kept to some of the user's conversations and Task Groups/.test(r.error)) && gateOf(/"Who can use it" in the Agent browser panel \(Change…\)/.test(r.error)) && gateOf(/"All agents"/.test(r.error)) && !/vibespace-browser/.test(r.error + (r.remedy || '')) && verdictOf(/Never create a second profile/.test(r.error)), 'owner ruling A (5): not_owner names the buttons ("Who can use it" → Change… in the Agent browser panel, or "All agents" — lane everyone-principal) and no command line', r.error); }
   ok(B.scopeOf(profiles[1]) === 'all' && B.scopeOf(rec) === 'only' && B.scopeOf(profiles[2]) === 'only' && B.scopeOf(withUse({ ...rec, legacy: true })) === 'all' && B.scopeOf(withUse(B.newProfileRecord({ id: 'bp-0000000f', label: 'x', dir: '/tmp/x' }))) === 'all' && B.SCOPES.join() === 'all,only', 'owner ruling A: scopeOf reads ONE field (owner): instance/legacy = all, a list (or a pre-list single session / task owner) = only — and a new record with no owner is ALL');
   ok(rec.owner.kind === 'only' && rec.owner.who.length === 1 && rec.owner.who[0].kind === 'session' && rec.owner.who[0].id === KEY_A, 'a create handed a pre-list single `session` owner stores the WRITE shape: a one-row list');
   // the lease: ONE per (profile, conversation)
   let leases = [];
   const a1 = B.decideAttach({ profile: profiles[1], leases, browserKey: KEY_A, sessionId: 'sess-1', now: 10 });
-  ok(a1.ok && a1.created && a1.lease.input === 'agent' && a1.lease.sessionId === 'sess-1' && a1.others === 0, 'first attach creates the lease with input held by the agent');
+  ok(gateOf(a1.ok) && gateOf(a1.created) && a1.lease.input === 'agent' && a1.lease.sessionId === 'sess-1' && a1.others === 0, 'first attach creates the lease with input held by the agent');
   leases = [a1.lease];
   const a2 = B.decideAttach({ profile: profiles[1], leases, browserKey: KEY_A, sessionId: 'sess-2', now: 20 });
-  ok(a2.ok && !a2.created && a2.resumed && a2.lease.sessionId === 'sess-2' && a2.lease.since === 10, 'a resume (same conversation, new webui session) RE-CARRIES the lease in place — never a second one');
+  ok(gateOf(a2.ok) && !a2.created && gateOf(a2.resumed) && a2.lease.sessionId === 'sess-2' && a2.lease.since === 10, 'a resume (same conversation, new webui session) RE-CARRIES the lease in place — never a second one');
   const a3 = B.decideAttach({ profile: profiles[1], leases, browserKey: KEY_B, sessionId: 'sess-3', now: 30 });
-  ok(a3.ok && a3.created && a3.others === 1, 'another conversation on the same profile gets its OWN lease and counts the other');
+  ok(gateOf(a3.ok) && gateOf(a3.created) && a3.others === 1, 'another conversation on the same profile gets its OWN lease and counts the other');
   leases.push(a3.lease);
   ok(B.decideAttach({ profile: profiles[1], leases, browserKey: 'nope', sessionId: 's' }).code === 'bad-request', 'a lease needs a browser key');
   const d = B.decideDetach({ leases, profileId: 'bp-00000002', browserKey: KEY_A });
-  ok(d.ok && d.remaining.length === 1 && d.others === 1 && d.lease.browserKey === KEY_A, 'detach removes exactly that conversation\'s lease');
+  ok(gateOf(d.ok) && d.remaining.length === 1 && d.others === 1 && d.lease.browserKey === KEY_A, 'detach removes exactly that conversation\'s lease');
   ok(B.decideDetach({ leases: d.remaining, profileId: 'bp-00000002', browserKey: KEY_A }).code === 'no_lease', 'detaching twice ⇒ no_lease');
   leases.push({ profileId: 'bp-00000002', browserKey: KEY_A + '.1', sessionId: null, since: 40, input: 'agent' });
   ok(B.leasesOf(leases, KEY_A).length === 1 && B.leasesOf(leases, KEY_A, { children: true }).length === 2, 'a parent\'s set includes its children only when asked (§3.7 child handles)');
-  ok(B.isChildKey(KEY_A + '.12') && B.parentKeyOf(KEY_A + '.12') === KEY_A && !B.isChildKey(KEY_A), 'a child handle is bk-<parent>.<n>');
+  ok(gateOf(B.isChildKey(KEY_A + '.12')) && B.parentKeyOf(KEY_A + '.12') === KEY_A && !B.isChildKey(KEY_A), 'a child handle is bk-<parent>.<n>');
   // reconciliation: boot drops at once, runtime after a grace
   const r0 = B.reconcileLeases({ leases, liveKeys: new Set([KEY_B]), now: 100, graceMs: 0 });
-  ok(r0.kept.length === 1 && r0.dropped.length === 2 && r0.dropped.every((x) => /no live session carries/.test(x.why)), 'at BOOT (grace 0) every lease nobody carries is dropped at once, incl. the child of an absent parent');
+  ok(r0.kept.length === 1 && r0.dropped.length === 2 && verdictOf(r0.dropped.every((x) => /no live session carries/.test(x.why))), 'at BOOT (grace 0) every lease nobody carries is dropped at once, incl. the child of an absent parent');
   const r1 = B.reconcileLeases({ leases, liveKeys: new Set([KEY_B]), now: 100, graceMs: 1000 });
   ok(r1.kept.length === 3 && r1.stamped.length === 2 && r1.dropped.length === 0, 'at RUNTIME the loss is stamped first (a session restart must not cost a cold browser)');
   const r2 = B.reconcileLeases({ leases: r1.kept, liveKeys: new Set([KEY_B]), now: 1200, graceMs: 1000 });
   ok(r2.kept.length === 1 && r2.dropped.length === 2, '…and dropped once the grace has passed');
   const r3 = B.reconcileLeases({ leases: r1.kept, liveKeys: new Set([KEY_A, KEY_B]), now: 500, graceMs: 1000 });
-  ok(r3.kept.every((l) => !l.carrierLostAt), 'a carrier that comes back un-stamps its lease');
+  ok(verdictOf(r3.kept.every((l) => !l.carrierLostAt)), 'a carrier that comes back un-stamps its lease');
   // the ceiling
   const running = [{ profileId: 'bp-00000001', label: 'Work', state: 'ready' }, { profileId: 'bp-00000002', label: 'Team', state: 'ready' }, { profileId: 'bp-00000009', state: 'stopped' }];
   const cap = B.ceilingVerdict(running, leases, { CONCURRENT_CAP: 2 });
   // MULTIVIEW D4 / B-325a (docs/design-browser-multiview.zh.md): the machine ceiling names ONLY the asking
   // conversation's own holders — every other one is a COUNT (another session's name / lease id never reaches it)
-  ok(cap && cap.code === 'cap' && cap.scope === 'machine' && cap.holders.length === 0 && cap.others === 2 && /browser ceiling reached \(2\/2 running on this machine/.test(cap.error) && !/bp-0000000|Work|Team|bk-/.test(cap.error), 'at the ceiling (nobody asking) the refusal names NO holder — "2 are in other conversations or desktop apps"', cap && cap.error);
+  ok(gateOf(cap) && cap.code === 'cap' && cap.scope === 'machine' && cap.holders.length === 0 && cap.others === 2 && gateOf(/browser ceiling reached \(2\/2 running on this machine/.test(cap.error)) && !/bp-0000000|Work|Team|bk-/.test(cap.error), 'at the ceiling (nobody asking) the refusal names NO holder — "2 are in other conversations or desktop apps"', cap && cap.error);
   const owner = leases.find((l) => l.profileId === 'bp-00000002');
   const capMine = B.ceilingVerdict(running, leases, { CONCURRENT_CAP: 2 }, { browserKey: owner.browserKey });
-  ok(capMine && capMine.holders.length === 1 && capMine.holders[0].label === 'Team' && capMine.others === 1 && /yours: Team; 1 is in other conversations/.test(capMine.error) && !/Work|bp-00000001/.test(capMine.error) && !capMine.holders.some((h) => h.sessions.length), 'asked BY a holder: only ITS holder is named (label only, no lease ids), the rest a count', capMine && capMine.error);
+  ok(gateOf(capMine) && capMine.holders.length === 1 && capMine.holders[0].label === 'Team' && capMine.others === 1 && gateOf(/yours: Team; 1 is in other conversations/.test(capMine.error)) && !/Work|bp-00000001/.test(capMine.error) && !capMine.holders.some((h) => h.sessions.length), 'asked BY a holder: only ITS holder is named (label only, no lease ids), the rest a count', capMine && capMine.error);
   ok(B.ceilingVerdict(running, leases, { CONCURRENT_CAP: 3 }) === null, 'below the ceiling nothing is refused (stopped records do not count)');
   // idle / runaway / pid / adoption verdicts
-  ok(B.browserIdle({ profileId: 'bp-00000002', startedAt: 0, lastLeaseDroppedAt: 100 }, [], 700, 500).expired && !B.browserIdle({ profileId: 'bp-00000002', startedAt: 0, lastLeaseDroppedAt: 100 }, leases, 700, 500).expired, 'a browser is idle only with NO lease, from its last drop');
+  ok(gateOf(B.browserIdle({ profileId: 'bp-00000002', startedAt: 0, lastLeaseDroppedAt: 100 }, [], 700, 500).expired) && !B.browserIdle({ profileId: 'bp-00000002', startedAt: 0, lastLeaseDroppedAt: 100 }, leases, 700, 500).expired, 'a browser is idle only with NO lease, from its last drop');
   ok(!B.browserIdle({ profileId: 'bp-00000002', startedAt: 0 }, [], 10 ** 9, 0).expired, 'idleMs 0 = never');
   // the per-provider numbers + the resource verdict live in src/runaway-guard.js since 2026-09-25 (test-runaway-guard
   // owns the verdict); here: chromium's numbers are the browser floor, and browser-profiles carries no park any more
@@ -255,15 +255,15 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   ok(guard.GUARD_MEM_BYTES > LIMITS.GUARD_MEM_BYTES && guard.GUARD_CPU_PCT > LIMITS.GUARD_CPU_PCT && guard.GUARD_SAMPLE_MS === LIMITS.GUARD_SAMPLE_MS, 'chromium\'s resource numbers are per-PROVIDER (higher floor), the cadence shared');
   ok(!('runawayVerdict' in B) && !('runawayParkVerdict' in B) && !('providerGuard' in B) && !('runawayParkedUntil' in B.normalizeRegistry({ runawayParkedUntil: { 'bp-00000001': 9e15 } })), 'browser-profiles carries NO verdict and NO park: an old file\'s park map is dropped on read');
   ok(B.pidVerdict({ alive: false }) === 'gone' && B.pidVerdict({ alive: true, sameStart: false }) === 'unproven' && B.pidVerdict({ alive: true, sameStart: true }) === 'ours', 'pid verdicts: gone / unproven / ours');
-  ok(B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'ours', active: true }).state === 'ready' && B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'unproven', active: true }).state === 'stopped' && /never signalled/.test(B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'unproven' }).lastError) && B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'ours', active: false }).state === 'stopped' && B.adoptVerdict({ state: 'stopped' }, { verdict: 'ours', active: true }) === null, 'adoption: ready only for a proven pid whose namespace answers; unproven ⇒ ended and never signalled');
+  ok(B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'ours', active: true }).state === 'ready' && B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'unproven', active: true }).state === 'stopped' && gateOf(/never signalled/.test(B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'unproven' }).lastError)) && B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'ours', active: false }).state === 'stopped' && B.adoptVerdict({ state: 'stopped' }, { verdict: 'ours', active: true }) === null, 'adoption: ready only for a proven pid whose namespace answers; unproven ⇒ ended and never signalled');
   // naive study 2 (2026-09-25): THE KEEPER IS THE ONLY LAUNCHER — an attached session reaches the keeper's browser over its
   // CDP url, never the profile DIRECTORY (measured on 0.38.1: a second session given the directory starts its own Chrome
   // there and dies on SingletonLock). This pin said `AGENT_BROWSER_PROFILE=/p/dir` — the shape that broke "bank".
   const env = B.attachedEnvFor({ browserKey: KEY_A, profileId: 'bp-00000002', profileDir: '/p/dir', cdpUrl: 'ws://127.0.0.1:9333/devtools/browser/k' });
-  ok(env.includes(`AGENT_BROWSER_SESSION=vs-${KEY_A}`) && env.includes('AGENT_BROWSER_NAMESPACE=vs-bp-00000002') && env.includes('AGENT_BROWSER_CDP=ws://127.0.0.1:9333/devtools/browser/k') && !env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && env.includes('AGENT_BROWSER_IDLE_TIMEOUT_MS=0'), 'an attached session browses in the profile\'s namespace with its OWN context (the tab is the unit), over the keeper browser\'s CDP url — NEVER its directory — and the CLI timeout off (the keeper owns the clock)');
+  ok(gateOf(env.includes(`AGENT_BROWSER_SESSION=vs-${KEY_A}`)) && gateOf(env.includes('AGENT_BROWSER_NAMESPACE=vs-bp-00000002')) && gateOf(env.includes('AGENT_BROWSER_CDP=ws://127.0.0.1:9333/devtools/browser/k')) && !env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && verdictOf(env.includes('AGENT_BROWSER_IDLE_TIMEOUT_MS=0')), 'an attached session browses in the profile\'s namespace with its OWN context (the tab is the unit), over the keeper browser\'s CDP url — NEVER its directory — and the CLI timeout off (the keeper owns the clock)');
   ok(B.attachedEnvFor({ browserKey: KEY_A, profileId: 'bp-00000002', profileDir: '/p/dir' }) === null && B.attachedEnvFor({ browserKey: KEY_A, profileId: 'bp-00000002', profileDir: '/p/dir', cdpUrl: 'ws://10.0.0.5:9333/x' }) === null, 'no loopback CDP url ⇒ null (the keeper refuses `browser_no_cdp` by name) — never a directory fallback');
   const reg = B.normalizeRegistry({ profiles: [rec, { id: 'junk' }], leases: [{ profileId: 'bp-00000002', browserKey: 'zzz' }, a1.lease], browsers: { x: 1 }, pins: null, extra: 1 });
-  ok(reg.profiles.length === 1 && reg.leases.length === 1 && reg.version === 1 && !('extra' in reg) && reg.pins && typeof reg.pins === 'object', 'normalizeRegistry keeps only well-formed rows and drops unknown keys');
+  ok(reg.profiles.length === 1 && reg.leases.length === 1 && reg.version === 1 && !('extra' in reg) && gateOf(reg.pins) && typeof reg.pins === 'object', 'normalizeRegistry keeps only well-formed rows and drops unknown keys');
 }
 
 // ═══ ③ the REAL keeper over the fake binary ═══════════════════════════════
@@ -292,39 +292,39 @@ let kA, workId, teamId, thirdId;
   ok(kA._facts.lastVersion() === '0.38.0', 'the keeper probed the fake binary\'s version (0.38.0 ≥ the 0.37.1 floor ⇒ shared profiles ON)');
   const work = kA.createProfile({ label: 'Work' }, { owner: { kind: 'session', id: KEY_A } });
   workId = work.id;
-  ok(B.isProfileId(work.id) && work.owner.kind === 'only' && work.owner.who.length === 1 && work.owner.who[0].id === KEY_A && work.scope === 'only' && work.use.mode === 'only' && work.use.who[0].key === KEY_A && work.dir === path.join(HOME, '.agent-browser', 'vs-' + work.id), `createProfile mints ${work.id} kept to the conversation (a one-row list; the digest's use names its key), dir under ~/.agent-browser/`);
+  ok(gateOf(B.isProfileId(work.id)) && work.owner.kind === 'only' && work.owner.who.length === 1 && work.owner.who[0].id === KEY_A && work.scope === 'only' && work.use.mode === 'only' && work.use.who[0].key === KEY_A && work.dir === path.join(HOME, '.agent-browser', 'vs-' + work.id), `createProfile mints ${work.id} kept to the conversation (a one-row list; the digest's use names its key), dir under ~/.agent-browser/`);
   ok((fs.statSync(work.dir).mode & 0o777) === 0o700, 'the profile directory is 0700');
   ok(((landedU5b(), fs).statSync(kA.storeFile).mode & 0o777) === 0o600 && JSON.parse((landedU5b(), fs).readFileSync(kA.storeFile, 'utf8')).profiles.length === 1, 'data/browser-profiles.json is written 0600 and carries the record');
   ok(bcast.length >= 1 && bcast[bcast.length - 1].type === 'browser-profiles-updated' && bcast[bcast.length - 1].profiles.length === 1, 'every commit broadcasts browser-profiles-updated with the digest (multi-client law)');
   const e = await threw(() => kA.createProfile({ label: 'work' }));
-  ok(e && e.code === 'label_taken', 'a duplicate label is refused with the PURE validator\'s code');
+  ok(gateOf(e) && e.code === 'label_taken', 'a duplicate label is refused with the PURE validator\'s code');
   teamId = kA.createProfile({ label: 'Team' }, { owner: { kind: 'instance', id: null } }).id;
   thirdId = kA.createProfile({ label: 'Third' }, { owner: { kind: 'instance', id: null } }).id;
 
   // attach KEY_A → Work: reuse-or-spawn
   const at1 = await kA.attach({ profile: 'Work', browserKey: KEY_A, sessionId: 'sess-1' });
-  ok(at1.created && at1.lease.browserKey === KEY_A && at1.lease.sessionId === 'sess-1' && at1.browser.state === 'ready', 'attach creates the lease and starts the profile\'s browser (state ready)');
+  ok(gateOf(at1.created) && at1.lease.browserKey === KEY_A && at1.lease.sessionId === 'sess-1' && at1.browser.state === 'ready', 'attach creates the lease and starts the profile\'s browser (state ready)');
   const l1 = launches();
   ok(l1.length === 1 && l1[0].ns === 'vs-' + workId && l1[0].profile === work.dir && l1[0].idle === '0', `the browser launched ONCE, under the profile\'s namespace, on the profile\'s dir, with the CLI timeout OFF (the keeper owns the idle clock)`);
   const recW = reg(kA).browsers[workId];
-  ok(Number.isInteger(recW.pid) && alive(recW.pid) && recW.starttime != null && F.sameProcess(recW.pid, recW.starttime), 'the record carries the daemon\'s pid AND starttime, and the process is alive');
-  ok(/^ws:\/\//.test(at1.cdpUrl) && at1.pinTab === true, 'the wrapper answer carries the CDP url and pinTab (floor satisfied)');
-  ok(at1.env.includes(`AGENT_BROWSER_CDP=${recW.cdpUrl}`) && !at1.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && at1.env.includes('AGENT_BROWSER_NAMESPACE=vs-' + workId), 'the session\'s env names the keeper browser\'s CDP url + the profile\'s namespace — never the directory (naive study 2: a second Chrome on it dies on SingletonLock)');
+  ok(gateOf(Number.isInteger(recW.pid)) && gateOf(alive(recW.pid)) && recW.starttime != null && verdictOf(F.sameProcess(recW.pid, recW.starttime)), 'the record carries the daemon\'s pid AND starttime, and the process is alive');
+  ok(gateOf(/^ws:\/\//.test(at1.cdpUrl)) && at1.pinTab === true, 'the wrapper answer carries the CDP url and pinTab (floor satisfied)');
+  ok(gateOf(at1.env.includes(`AGENT_BROWSER_CDP=${recW.cdpUrl}`)) && !at1.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && verdictOf(at1.env.includes('AGENT_BROWSER_NAMESPACE=vs-' + workId)), 'the session\'s env names the keeper browser\'s CDP url + the profile\'s namespace — never the directory (naive study 2: a second Chrome on it dies on SingletonLock)');
   ok(kA.list().browsers[workId].cdpUrl === undefined, 'the LIST view never carries a CDP url');
   const at2 = await kA.attach({ profile: workId, browserKey: KEY_A, sessionId: 'sess-2' });
-  ok(!at2.created && at2.resumed && reg(kA).leases.filter((l) => l.profileId === workId).length === 1 && launches().length === 1, 'a resume re-carries the ONE lease (one holder) and launches nothing new');
+  ok(!at2.created && gateOf(at2.resumed) && reg(kA).leases.filter((l) => l.profileId === workId).length === 1 && launches().length === 1, 'a resume re-carries the ONE lease (one holder) and launches nothing new');
   const e2 = await threw(() => kA.attach({ profile: 'Work', browserKey: KEY_B, sessionId: 'sess-9' }));
-  ok(e2 && e2.code === 'not_owner' && /All agents/.test(e2.message) && !/vibespace-browser/.test(e2.message), 'another conversation\'s AGENT cannot attach to a profile the user kept to one conversation — refused with the button sentence');
+  ok(gateOf(e2) && e2.code === 'not_owner' && gateOf(/All agents/.test(e2.message)) && !/vibespace-browser/.test(e2.message), 'another conversation\'s AGENT cannot attach to a profile the user kept to one conversation — refused with the button sentence');
   // THE PICK WRITES THE LIST (2026-09-27): the USER pins Work for KEY_B (Session properties) — KEY_B is ADDED to Work's list
   // (said on the answer) and joins the SAME browser (no second launch on the directory); then the leg puts everything back
   {
     const e2a = await threw(() => kA.setPin(KEY_B, workId, { by: 'agent' }));
-    ok(e2a && e2a.code === 'not_owner', 'an AGENT\'s own pin on a profile kept to another conversation is refused not_owner (only the user\'s pick writes the list)');
+    ok(gateOf(e2a) && e2a.code === 'not_owner', 'an AGENT\'s own pin on a profile kept to another conversation is refused not_owner (only the user\'s pick writes the list)');
     const pinB = kA.setPin(KEY_B, workId, { by: 'user' });
-    ok(pinB && pinB.added && pinB.added.profileId === workId && B.whoMayUse(kA.profile(workId)).who.map((w) => w.id).join() === [KEY_A, KEY_B].join(), 'the user\'s pick ADDS KEY_B to Work\'s list (the answer says `added`) — the list, not the pin, lets it in');
+    ok(gateOf(pinB) && gateOf(pinB.added) && pinB.added.profileId === workId && B.whoMayUse(kA.profile(workId)).who.map((w) => w.id).join() === [KEY_A, KEY_B].join(), 'the user\'s pick ADDS KEY_B to Work\'s list (the answer says `added`) — the list, not the pin, lets it in');
     const L0 = launches().length;
     const j2 = await kA.attach({ profile: 'Work', browserKey: KEY_B, sessionId: 'sess-9', by: 'pin' });
-    ok(j2.created && j2.others === 1 && launches().length === L0 && j2.env.some((kv) => kv === `AGENT_BROWSER_CDP=${reg(kA).browsers[workId].cdpUrl}`) && reg(kA).leases.find((l) => l.profileId === workId && l.browserKey === KEY_B).via === 'pin', 'owner ruling A (1): the conversation now on the list is admitted and JOINS the running browser — same CDP endpoint, no second launch; the lease says the pin made it');
+    ok(gateOf(j2.created) && j2.others === 1 && launches().length === L0 && gateOf(j2.env.some((kv) => kv === `AGENT_BROWSER_CDP=${reg(kA).browsers[workId].cdpUrl}`)) && reg(kA).leases.find((l) => l.profileId === workId && l.browserKey === KEY_B).via === 'pin', 'owner ruling A (1): the conversation now on the list is admitted and JOINS the running browser — same CDP endpoint, no second launch; the lease says the pin made it');
     kA.detach({ profileId: workId, browserKey: KEY_B, by: 'user' }); kA.setPin(KEY_B, null);
     kA.updateProfile(workId, { use: { mode: 'only', who: [{ kind: 'session', key: KEY_A }] } }); // back to "only KEY_A" for the legs below
   }
@@ -332,13 +332,13 @@ let kA, workId, teamId, thirdId;
   const t1 = await kA.attach({ profile: 'Team', browserKey: KEY_A, sessionId: 'sess-1' });
   const t2 = await kA.attach({ profile: 'Team', browserKey: KEY_B, sessionId: 'sess-3' });
   ok(t1.others === 0 && t2.others === 1 && launches().length === 2 && reg(kA).leases.filter((l) => l.profileId === teamId).length === 2, 'two conversations on one profile = two leases, ONE browser');
-  ok(t2.env.includes(`AGENT_BROWSER_SESSION=vs-${KEY_B}`) && t2.env.includes('AGENT_BROWSER_NAMESPACE=vs-' + teamId), 'each keeps its OWN context inside the shared daemon');
+  ok(gateOf(t2.env.includes(`AGENT_BROWSER_SESSION=vs-${KEY_B}`)) && verdictOf(t2.env.includes('AGENT_BROWSER_NAMESPACE=vs-' + teamId)), 'each keeps its OWN context inside the shared daemon');
   const st = kA.statusFor(KEY_A);
   ok(st.leases.length === 2 && st.leases.find((l) => l.profileId === teamId).others === 1 && st.leases.find((l) => l.profileId === workId).others === 0, 'statusFor names each lease with how many OTHER sessions share it');
   // the ceiling (cap 2)
   const e3 = await threw(() => kA.attach({ profile: 'Third', browserKey: KEY_B, sessionId: 'sess-3' }));
   // MULTIVIEW D4 / B-325a: KEY_B holds Team (shared) — it hears "yours: Team" and a COUNT for Work (KEY_A's), never KEY_A
-  ok(e3 && e3.code === 'cap' && e3.holders.length === 1 && e3.holders[0].label === 'Team' && /yours: Team; 1 is in other conversations/.test(e3.message) && !/Work/.test(e3.message) && !new RegExp(KEY_A).test(e3.message), 'at the ceiling the third browser is refused, naming only the asker\'s own holder (another conversation\'s browser is a count)', e3 && e3.message);
+  ok(gateOf(e3) && e3.code === 'cap' && e3.holders.length === 1 && e3.holders[0].label === 'Team' && gateOf(/yours: Team; 1 is in other conversations/.test(e3.message)) && !/Work/.test(e3.message) && !new RegExp(KEY_A).test(e3.message), 'at the ceiling the third browser is refused, naming only the asker\'s own holder (another conversation\'s browser is a count)', e3 && e3.message);
   ok(!reg(kA).leases.some((l) => l.profileId === thirdId) && launches().length === 2, '…and no lease, no launch');
   ok(kA.list().cap.used === 2 && kA.list().cap.cap === 2, 'the digest reports used/cap');
   // detach
@@ -347,14 +347,14 @@ let kA, workId, teamId, thirdId;
   const d2 = kA.detach({ profileId: teamId, browserKey: KEY_B });
   ok(d2.others === 0 && reg(kA).browsers[teamId].lastLeaseDroppedAt > 0, 'the LAST detach stamps the idle clock');
   const e4 = await threw(() => kA.detach({ browserKey: KEY_B }));
-  ok(e4 && e4.code === 'no_lease', 'detaching with no lease ⇒ no_lease');
+  ok(gateOf(e4) && e4.code === 'no_lease', 'detaching with no lease ⇒ no_lease');
   // idle stop
   const teamPid = reg(kA).browsers[teamId].pid;
   skew += 60001;
   await kA.tick();
-  ok(await until(() => reg(kA).browsers[teamId].state === 'stopped'), 'past browser.idleTimeoutMs with no lease the keeper STOPS the browser');
-  ok(await until(() => !alive(teamPid)) && /idle timeout/.test(reg(kA).browsers[teamId].lastError), 'the daemon is gone and the record says idle');
-  ok(reg(kA).browsers[workId].state === 'ready' && alive(reg(kA).browsers[workId].pid), 'the still-leased browser is untouched');
+  ok(verdictOf(await until(() => reg(kA).browsers[teamId].state === 'stopped')), 'past browser.idleTimeoutMs with no lease the keeper STOPS the browser');
+  ok(gateOf(await until(() => !alive(teamPid))) && verdictOf(/idle timeout/.test(reg(kA).browsers[teamId].lastError)), 'the daemon is gone and the record says idle');
+  ok(reg(kA).browsers[workId].state === 'ready' && verdictOf(alive(reg(kA).browsers[workId].pid)), 'the still-leased browser is untouched');
   // the resource REPORT (2026-09-25, the owner's ruling: a browser a person or an agent is using is never stopped by a
   // resource guard — it is reported). An over-threshold sample leaves the browser RUNNING, files a notice when a
   // crossing begins (r2: re-armed only after REPORT_REARM_SAMPLES clear samples, never inside the per-session floor,
@@ -367,16 +367,16 @@ let kA, workId, teamId, thirdId;
   const sampleTick = async (fn) => { F.treeUsage = async (pid) => fn(pid); skew += LIMITS.GUARD_SAMPLE_MS + 1; try { await kA.tick(); } finally { F.treeUsage = origTree; } };
   await sampleTick(overSample);
   await sleep(300);
-  ok(reg(kA).browsers[workId].state === 'ready' && alive(workPid) && !/runaway/.test(reg(kA).browsers[workId].lastError || ''), 'NO KILL: a 4 GB (PSS) sample over chromium\'s 3 GB number leaves the browser RUNNING, its daemon alive, no runaway on the record');
+  ok(reg(kA).browsers[workId].state === 'ready' && gateOf(alive(workPid)) && !/runaway/.test(reg(kA).browsers[workId].lastError || ''), 'NO KILL: a 4 GB (PSS) sample over chromium\'s 3 GB number leaves the browser RUNNING, its daemon alive, no runaway on the record');
   const u = kA.usageOf(workId);
-  ok(u && u.memBytes === 4 * 1024 ** 3 && u.memMetric === 'pss' && /^memory \(PSS\) 4\.0 GB \(limit 3\.0 GB\)$/.test(u.over || '') && u.since > 0 && u.rssBytes === 9 * 1024 ** 3, 'the live row carries memBytes + memMetric, the report sentence (`over`, the metric named) and since when (rssBytes kept, deprecated)', u);
+  ok(gateOf(u) && u.memBytes === 4 * 1024 ** 3 && u.memMetric === 'pss' && gateOf(/^memory \(PSS\) 4\.0 GB \(limit 3\.0 GB\)$/.test(u.over || '')) && u.since > 0 && u.rssBytes === 9 * 1024 ** 3, 'the live row carries memBytes + memMetric, the report sentence (`over`, the metric named) and since when (rssBytes kept, deprecated)', u);
   ok(resourceNotices().length === 1 && resourceNotices()[0].t === 'The agent browser of profile "Work" is using 4.0 GB (PSS) — Stop it from the Browser panel if that is not what you expect', 'ONE server notice names the profile, the reading with its metric, and the user\'s own lever', resourceNotices());
-  ok(tel.some((e) => e.name === 'browser-resource' && e.value === 4096) && !tel.some((e) => e.name === 'browser-runaway'), 'telemetry browser-resource (value = MB) — the fleet still sees a hot browser');
+  ok(gateOf(tel.some((e) => e.name === 'browser-resource' && e.value === 4096)) && !tel.some((e) => e.name === 'browser-runaway'), 'telemetry browser-resource (value = MB) — the fleet still sees a hot browser');
   ok(!('runawayParkedUntil' in reg(kA)) && !('runawayParkedUntil' in JSON.parse((landedU5b(), fs).readFileSync(kA.storeFile, 'utf8'))), 'nothing is parked: no park map in memory or on disk');
   await sampleTick(overSample);
   ok(resourceNotices().length === 1, 'still over on the next sample ⇒ no second notice (a level, not a timer)');
   const st0 = await kA.start(workId);
-  ok(st0 && st0.state === 'ready', 'a start is never refused by a past sample (there is no park)');
+  ok(gateOf(st0) && st0.state === 'ready', 'a start is never refused by a past sample (there is no park)');
   await sampleTick(normalSample);
   ok(kA.usageOf(workId).over === null && kA.usageOf(workId).since === null && resourceNotices().length === 1, 'a normal sample clears the report (over null) and files nothing');
   await sampleTick(overSample);
@@ -401,12 +401,12 @@ let kA, workId, teamId, thirdId;
   ok(tel.filter((e) => e.name === 'browser-resource').length === telBefore + 1, '…and the re-sends are the notice only — one telemetry event per crossing');
   await sampleTick((pid) => ({ cpuTicks: 0, memBytes: 12 * 1024 ** 3, memMetric: 'rss', rssBytes: 12 * 1024 ** 3, pids: [pid] }));
   await sampleTick(normalSample);
-  ok(reg(kA).browsers[workId].state === 'ready' && alive(workPid) && lines.filter((l) => /memory is not judged for this session/.test(l)).length === 1, 'a summed-RSS-only sample (12 GB) is not judged on memory — said ONCE in the journal — and the browser runs on');
+  ok(reg(kA).browsers[workId].state === 'ready' && gateOf(alive(workPid)) && lines.filter((l) => /memory is not judged for this session/.test(l)).length === 1, 'a summed-RSS-only sample (12 GB) is not judged on memory — said ONCE in the journal — and the browser runs on');
   const at3 = await kA.attach({ profile: 'Work', browserKey: KEY_A, sessionId: 'sess-2' });
   ok(!at3.created && at3.browser.state === 'ready' && at3.browser.pid === workPid && launches().length === 2, 'the lease and the browser survived every report; re-attaching reuses the SAME daemon (no relaunch)');
   await kA.attach({ profile: 'Team', browserKey: KEY_B, sessionId: 'sess-3' });
   ok(launches().length === 3 && reg(kA).browsers[teamId].state === 'ready', 'Team is back up for KEY_B');
-  ok(lines.some((l) => /dropped the lease|attached to/.test(l)), 'the keeper journals in words');
+  ok(verdictOf(lines.some((l) => /dropped the lease|attached to/.test(l))), 'the keeper journals in words');
 }
 
 // "SIGKILL": keeper A is dropped without shutdown; keeper B boots on the same store
@@ -434,7 +434,7 @@ const MUT = mutantCopies('browser-pin', REPO);
   ok(!noKillHolds, 'CONTROL: the stop-on-over copy ends the browser — the NO KILL assertion is RED against it (it judges the branch, not luck)');
   try { await kc.stop(pc.id); } catch { /* already stopped */ }
   kc.shutdown();
-  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1, label: '③a ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1, label: '③a ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log('— ③b adoption across a keeper death (§3.5 boot order: drop → judge → tick)');
@@ -442,7 +442,7 @@ console.log('— ③b adoption across a keeper death (§3.5 boot order: drop →
   const before = JSON.parse(fs.readFileSync(path.join(DATA, K.STORE_FILE), 'utf8'));
   ok(before.leases.length === 2 && Object.values(before.browsers).filter((b) => b.state === 'ready').length === 2, 'on disk: two leases (KEY_A on Work, KEY_B on Team), two ready browsers');
   const workPid = before.browsers[workId].pid, teamPid = before.browsers[teamId].pid;
-  ok(alive(workPid) && alive(teamPid), 'both daemons are alive with nobody keeping them (the keeper is "dead")');
+  ok(gateOf(alive(workPid)) && verdictOf(alive(teamPid)), 'both daemons are alive with nobody keeping them (the keeper is "dead")');
   lines.length = 0;
   kA.detachGrants();   // the «SIGKILL»: a dead process answers nothing — here keeper A shares the process, so its grant hook goes (the moved2 cure 2: a removal's grant row goes at the landing, after keeper B's commit)
   const kB = mkKeeper(new Set([KEY_A])); // KEY_B did not survive the "restart"
@@ -456,24 +456,24 @@ console.log('— ③b adoption across a keeper death (§3.5 boot order: drop →
   ok(kB.statusFor(KEY_A).leases.length === 1 && kB.statusFor(KEY_A).leases[0].browser.state === 'ready', 'the surviving conversation still holds its tab after the restart');
   skew += 60001;
   await kB.tick();
-  ok(await until(() => reg(kB).browsers[teamId].state === 'stopped') && await until(() => !alive(teamPid)), 'the orphaned browser idles out; the leased one is kept');
-  ok(reg(kB).browsers[workId].state === 'ready' && alive(workPid), 'Work is still up for KEY_A');
+  ok(gateOf(await until(() => reg(kB).browsers[teamId].state === 'stopped')) && verdictOf(await until(() => !alive(teamPid))), 'the orphaned browser idles out; the leased one is kept');
+  ok(reg(kB).browsers[workId].state === 'ready' && verdictOf(alive(workPid)), 'Work is still up for KEY_A');
   // the tick notices a daemon that died behind our back
   process.kill(workPid, 'SIGKILL');
   await until(() => !alive(workPid));
   await kB.tick();
-  ok(reg(kB).browsers[workId].state === 'stopped' && /daemon exited/.test(reg(kB).browsers[workId].lastError), 'a daemon that exits behind the keeper is recorded stopped by the tick');
+  ok(reg(kB).browsers[workId].state === 'stopped' && verdictOf(/daemon exited/.test(reg(kB).browsers[workId].lastError)), 'a daemon that exits behind the keeper is recorded stopped by the tick');
   // stop() proper: the CLI's own close first, then a verified signal
   const at = await kB.attach({ profile: 'Work', browserKey: KEY_A, sessionId: 'sess-2' });
   const pid = reg(kB).browsers[workId].pid;
   const st = await kB.stop(workId);
-  ok(st.state === 'stopped' && st.stoppedBy === 'user' && !st.lastError && closes().some((c) => c.ns === 'vs-' + workId) && await until(() => !alive(pid)), 'stop = the CLI\'s own close --all under that namespace, clean, daemon gone');
+  ok(st.state === 'stopped' && st.stoppedBy === 'user' && !st.lastError && gateOf(closes().some((c) => c.ns === 'vs-' + workId)) && verdictOf(await until(() => !alive(pid))), 'stop = the CLI\'s own close --all under that namespace, clean, daemon gone');
   ok(reg(kB).leases.length === 1, 'a stop keeps the lease (the browser restarts on the next attach)');
   const e = await threw(() => kB.removeProfile(workId));
-  ok(e && e.code === 'leased', 'a leased profile cannot be removed');
+  ok(gateOf(e) && e.code === 'leased', 'a leased profile cannot be removed');
   kB.detach({ profileId: workId, browserKey: KEY_A });
   const rm = kB.removeProfile(workId);
-  ok(rm.removed === workId && fs.existsSync(rm.dir) && !reg(kB).profiles.some((p) => p.id === workId), 'removal drops the record and KEEPS the directory (deletion is a human act, D8)');
+  ok(rm.removed === workId && gateOf(fs.existsSync(rm.dir)) && !reg(kB).profiles.some((p) => p.id === workId), 'removal drops the record and KEEPS the directory (deletion is a human act, D8)');
   // pins through the keeper
   const pin = kB.setPin(KEY_A, teamId, { origin: 'chosen' });
   ok(pin.profileId === teamId && pin.origin === 'chosen' && kB.pinFor(KEY_A).label === 'Team', 'setPin/pinFor record the conversation\'s pin with its origin');
@@ -488,9 +488,9 @@ console.log('— ③b adoption across a keeper death (§3.5 boot order: drop →
   // lane S2 (naive study 2, T7): a PINNED profile is never removed out from under a conversation — refused `pinned`
   // with the count; with `unpin` every pin that named it is cleared and MARKED (the browser fact says so)
   let pinnedRefusal = null; try { kB.removeProfile(thirdId); } catch (e) { pinnedRefusal = e; }
-  ok(pinnedRefusal && pinnedRefusal.code === 'pinned' && pinnedRefusal.pinnedCount === 1 && reg(kB).profiles.some((p) => p.id === thirdId), 'removing a PINNED profile is refused `pinned` (lane S2) — the record stays');
+  ok(gateOf(pinnedRefusal) && pinnedRefusal.code === 'pinned' && pinnedRefusal.pinnedCount === 1 && verdictOf(reg(kB).profiles.some((p) => p.id === thirdId)), 'removing a PINNED profile is refused `pinned` (lane S2) — the record stays');
   kB.removeProfile(thirdId, { unpin: true });
-  ok(!kB.pinFor(KEY_B) && kB.pinForCreate({ priorKey: KEY_B, resume: true }).origin === 'harness' && reg(kB).pins[KEY_B] && reg(kB).pins[KEY_B].cleared && reg(kB).pins[KEY_B].cleared.label === 'Third', 'removing it WITH unpin drops the pins that named it, each keeping the cleared mark the browser fact reads');
+  ok(!kB.pinFor(KEY_B) && kB.pinForCreate({ priorKey: KEY_B, resume: true }).origin === 'harness' && gateOf(reg(kB).pins[KEY_B]) && gateOf(reg(kB).pins[KEY_B].cleared) && reg(kB).pins[KEY_B].cleared.label === 'Third', 'removing it WITH unpin drops the pins that named it, each keeping the cleared mark the browser fact reads');
   ok(kB.setPin(KEY_A, null) === null && !reg(kB).pins[KEY_A], 'setPin(null) unpins');
   kB.shutdown();
 }
@@ -518,11 +518,11 @@ console.log('— ③c an unproven pid is never signalled; a gone pid is recorded
   const r = await kC.boot();
   ok(r.browsers === 0, 'neither record is adopted');
   const u = reg(kC).browsers['bp-000000ee'], g = reg(kC).browsers['bp-000000ff'];
-  ok(u.state === 'stopped' && /not provably the recorded daemon/.test(u.lastError) && alive(stranger.pid), 'a live pid whose starttime differs is recorded ended and the process is LEFT ALONE (still alive)');
-  ok(g.state === 'stopped' && /exited while VibeSpace was down/.test(g.lastError), 'a pid that is gone is recorded ended with the reason');
+  ok(u.state === 'stopped' && gateOf(/not provably the recorded daemon/.test(u.lastError)) && verdictOf(alive(stranger.pid)), 'a live pid whose starttime differs is recorded ended and the process is LEFT ALONE (still alive)');
+  ok(g.state === 'stopped' && verdictOf(/exited while VibeSpace was down/.test(g.lastError)), 'a pid that is gone is recorded ended with the reason');
   ok(reg(kC).leases.length === 1, 'the carried lease survives — the next attach relaunches');
   const st = await kC.stop('bp-000000ee');
-  ok(st.state === 'stopped' && alive(stranger.pid), 'stop() on an ended record signals nothing');
+  ok(st.state === 'stopped' && verdictOf(alive(stranger.pid)), 'stop() on an ended record signals nothing');
   process.kill(stranger.pid, 'SIGKILL');
   kC.shutdown();
 }
@@ -537,19 +537,19 @@ console.log('— ④ migration step 2 (§8): the shared profile becomes "Shared 
   fs.writeFileSync(path.join(HOME2, '.agent-browser', 'config.json'), JSON.stringify({ profile: 'legacy-shared', headed: true }));
   const { create } = require('../src/server/migrations.js');
   const m = create({ rootDir: ROOT2, homeDir: HOME2, serverNotice: () => { } });
-  ok(m.MIGRATIONS.some((x) => x.id === '2026-09-adopt-legacy-browser-profile'), 'the migration is registered under a dated id');
+  ok(verdictOf(m.MIGRATIONS.some((x) => x.id === '2026-09-adopt-legacy-browser-profile')), 'the migration is registered under a dated id');
   const res = m.runLocalMigrations();
   ok(res.find((x) => x.id === '2026-09-adopt-legacy-browser-profile')?.status === 'ran', 'it ran');
   const st = JSON.parse(fs.readFileSync(path.join(ROOT2, 'data', K.STORE_FILE), 'utf8'));
   const legacy = st.profiles.find((p) => p.legacy);
-  ok(legacy && legacy.label === 'Shared (legacy)' && legacy.sharing === 'instance' && legacy.dir === path.join(HOME2, '.agent-browser', 'legacy-shared') && legacy.owner.kind === 'instance', 'the config\'s profile dir is the "Shared (legacy)" record — sharing instance, marked legacy, the directory untouched');
-  ok(fs.readFileSync(path.join(HOME2, '.agent-browser', 'config.json'), 'utf8').includes('"headed":true'), 'the user\'s config file is read, never written (§8 step 4)');
+  ok(gateOf(legacy) && legacy.label === 'Shared (legacy)' && legacy.sharing === 'instance' && legacy.dir === path.join(HOME2, '.agent-browser', 'legacy-shared') && legacy.owner.kind === 'instance', 'the config\'s profile dir is the "Shared (legacy)" record — sharing instance, marked legacy, the directory untouched');
+  ok(verdictOf(fs.readFileSync(path.join(HOME2, '.agent-browser', 'config.json'), 'utf8').includes('"headed":true')), 'the user\'s config file is read, never written (§8 step 4)');
   const res2 = m.runLocalMigrations();
   ok(res2.find((x) => x.id === '2026-09-adopt-legacy-browser-profile')?.status === 'already' && JSON.parse(fs.readFileSync(path.join(ROOT2, 'data', K.STORE_FILE), 'utf8')).profiles.length === 1, 'idempotent: the ledger skips it and the registry still holds ONE record');
   const k2 = mkKeeper(new Set([KEY_C]), { dataDir: path.join(ROOT2, 'data'), homeDir: HOME2 });
   ok(k2.adoptDirectory({ label: 'Shared (legacy)', dir: legacy.dir, legacy: true }).created === false, 'adoptDirectory is idempotent on the directory too');
   const at = await k2.attach({ profile: 'Shared (legacy)', browserKey: KEY_C, sessionId: 'sess-c' });
-  ok(at.created && at.env.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=ws://')) && !at.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')), 'a conversation that asks for the legacy profile gets its OWN tab in it (a pinned tab over its browser\'s CDP url instead of a stolen one — never a second Chrome on its directory)');
+  ok(gateOf(at.created) && gateOf(at.env.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=ws://'))) && !at.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')), 'a conversation that asks for the legacy profile gets its OWN tab in it (a pinned tab over its browser\'s CDP url instead of a stolen one — never a second Chrome on its directory)');
   await k2.stop(legacy.id);
   k2.shutdown();
   // a machine with no shared profile adopts nothing
@@ -585,27 +585,27 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   };
   const bearer = (t) => ({ Authorization: 'Bearer ' + t });
   let r = await j('GET', '/api/browser/profiles');
-  ok(r.status === 200 && Array.isArray(r.json.profiles) && r.json.cap && 'floor' in r.json && r.json.floor === null, 'GET /api/browser/profiles: the digest (profiles/leases/browsers/cap/floor — the floor is null, not a guess, until something probed it)');
+  ok(r.status === 200 && gateOf(Array.isArray(r.json.profiles)) && gateOf(r.json.cap) && 'floor' in r.json && r.json.floor === null, 'GET /api/browser/profiles: the digest (profiles/leases/browsers/cap/floor — the floor is null, not a guess, until something probed it)');
   r = await j('GET', '/api/browser/profiles?host=other-box');
-  ok(r.status === 400 && r.json.code === 'unsupported-host' && /other-box/.test(r.json.error), 'a non-local host is refused BY NAME');
+  ok(r.status === 400 && r.json.code === 'unsupported-host' && verdictOf(/other-box/.test(r.json.error)), 'a non-local host is refused BY NAME');
   r = await j('POST', '/api/browser/profiles', { label: 'Squad' });
   ok(r.status === 200 && r.json.profile.owner.kind === 'instance', 'POST creates an instance-owned profile');
   const teamId2 = r.json.profile.id;
   r = await j('POST', '/api/browser/profiles', { label: 'squad' });
-  ok(r.status === 409 && r.json.code === 'label_taken' && r.json.error, 'every failure answers {error, code} with a status by code');
+  ok(r.status === 409 && r.json.code === 'label_taken' && verdictOf(r.json.error), 'every failure answers {error, code} with a status by code');
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-1', profile: 'Squad' });
-  ok(r.status === 200 && r.json.lease.browserKey === KEY_A && !('cdpUrl' in r.json) && r.json.env.some((kv) => kv.startsWith('AGENT_BROWSER_NAMESPACE=vs-' + teamId2)), 'POST /attach: a live session\'s conversation leases the profile — the UI answer carries NO cdp url') || console.error('    ' + JSON.stringify({ status: r.status, json: r.json, mem: Object.values(reg(kR).browsers).map((b) => [b.profileId, b.state, b.pid, b.closed || null]), file: (() => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(DATA, K.STORE_FILE), 'utf8')).browsers || {}).map((b) => [b.profileId, b.state, b.pid]); } catch (e) { return String(e.message); } })() }).slice(0, 2500));
+  ok(r.status === 200 && r.json.lease.browserKey === KEY_A && !('cdpUrl' in r.json) && verdictOf(r.json.env.some((kv) => kv.startsWith('AGENT_BROWSER_NAMESPACE=vs-' + teamId2))), 'POST /attach: a live session\'s conversation leases the profile — the UI answer carries NO cdp url') || console.error('    ' + JSON.stringify({ status: r.status, json: r.json, mem: Object.values(reg(kR).browsers).map((b) => [b.profileId, b.state, b.pid, b.closed || null]), file: (() => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(DATA, K.STORE_FILE), 'utf8')).browsers || {}).map((b) => [b.profileId, b.state, b.pid]); } catch (e) { return String(e.message); } })() }).slice(0, 2500));
   ok(r.json.pinTab === true && kR._facts.lastVersion() === '0.38.0', 'the attach path probed the floor ITSELF, so pinTab is answered on the first attach (the wrapper form then passes --pin-tab)');
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-nokey', profile: 'Squad' });
   // B-f7ab: a keyless live session now gets its key on first use (routes → ctx.ensureBrowserKey, test-browser-share-model ③);
   // this router is wired WITHOUT the engine, so the refusal is the named `unavailable` one — never the old dead end
-  ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'unavailable' && r.json.error && r.json.remedy && !/predates/.test(r.json.error), 'a session with no browser key and no late-key engine is refused BY NAME (no_browser_key · unavailable), not silently');
+  ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'unavailable' && gateOf(r.json.error) && gateOf(r.json.remedy) && !/predates/.test(r.json.error), 'a session with no browser key and no late-key engine is refused BY NAME (no_browser_key · unavailable), not silently');
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-none', profile: 'Squad' });
   ok(r.status === 404 && r.json.code === 'not-found', 'an unknown session ⇒ 404');
   r = await j('GET', '/api/browser/session/sess-1');
   ok(r.status === 200 && r.json.leases.length === 1 && r.json.leases[0].label === 'Squad', 'GET /session/:id answers that session\'s leases');
   r = await j('POST', '/api/browser/pin', { sessionId: 'sess-1', profile: 'Squad' });
-  ok(r.status === 200 && r.json.pin.origin === 'chosen' && /applies/.test(r.json.appliesFrom) && active.get('sess-1')._browserProfileId === teamId2 && active.get('sess-1')._browserPinOrigin === 'chosen', 'POST /pin records the conversation\'s pin, stamps the live session and says when it applies');
+  ok(r.status === 200 && r.json.pin.origin === 'chosen' && gateOf(/applies/.test(r.json.appliesFrom)) && active.get('sess-1')._browserProfileId === teamId2 && active.get('sess-1')._browserPinOrigin === 'chosen', 'POST /pin records the conversation\'s pin, stamps the live session and says when it applies');
   r = await j('POST', '/api/browser/pin', { sessionId: 'sess-1', profile: null });
   ok(r.status === 200 && r.json.pin === null && active.get('sess-1')._browserProfileId === null, 'profile:null unpins');
   r = await j('DELETE', '/api/browser/profiles/' + teamId2);
@@ -622,11 +622,11 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   r = await j('POST', '/api/agent/browser/use', { profile: 'Squad' }, bearer(TOKEN_A));
   ok(r.status === 200 && !('cdpUrl' in r.json), 'POST /use (plain) never returns a CDP url (§5.1)');
   r = await j('POST', '/api/agent/browser/use', { profile: 'Squad', wrapper: true }, bearer(TOKEN_A));
-  ok(r.status === 200 && /^ws:\/\//.test(r.json.cdpUrl), '…only the WRAPPER form asks for it explicitly');
+  ok(r.status === 200 && verdictOf(/^ws:\/\//.test(r.json.cdpUrl)), '…only the WRAPPER form asks for it explicitly');
   r = await j('POST', '/api/agent/browser/new', { label: 'Mine' }, bearer(TOKEN_A));
-  ok(r.status === 200 && !('owner' in r.json.profile) && !('createdBy' in r.json.profile) && r.json.profile.scope === 'all' && r.json.profile.use && r.json.profile.use.mode === 'all' && kR.profile(r.json.profile.id).owner.kind === 'instance' && kR.profile(r.json.profile.id).createdBy === KEY_A, 'owner ruling A: POST /new creates a profile EVERY conversation of the user\'s can use (created by THIS one); the answer is the agent\'s view (identity r3: no owner / createdBy on the wire)');
+  ok(r.status === 200 && !('owner' in r.json.profile) && !('createdBy' in r.json.profile) && r.json.profile.scope === 'all' && gateOf(r.json.profile.use) && r.json.profile.use.mode === 'all' && kR.profile(r.json.profile.id).owner.kind === 'instance' && kR.profile(r.json.profile.id).createdBy === KEY_A, 'owner ruling A: POST /new creates a profile EVERY conversation of the user\'s can use (created by THIS one); the answer is the agent\'s view (identity r3: no owner / createdBy on the wire)');
   r = await j('GET', '/api/agent/browser/profiles', undefined, bearer(TOKEN_A));
-  ok(r.status === 200 && r.json.me.leases.length === 1 && r.json.profiles.some((p) => p.label === 'Mine') && r.json.profiles.some((p) => p.label === 'Squad'), 'GET /api/agent/browser/profiles = the digest + my status');
+  ok(r.status === 200 && r.json.me.leases.length === 1 && gateOf(r.json.profiles.some((p) => p.label === 'Mine')) && verdictOf(r.json.profiles.some((p) => p.label === 'Squad')), 'GET /api/agent/browser/profiles = the digest + my status');
 
   // the shipped CLI
   const CLI = path.join(REPO, 'data/bin/vibespace-browser');
@@ -638,30 +638,30 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
     status: err ? (typeof err.code === 'number' ? err.code : null) : 0, signal: (err && err.signal) || null, stdout: String(stdout || ''), stderr: String(stderr || ''),
   })));
   let c = await cli(['profiles'], { PATH: PATH_ENV, HOME });
-  ok(c.status === 2 && /not inside a VibeSpace session/.test(c.stderr), 'no token ⇒ exit 2 with the reason');
+  ok(c.status === 2 && verdictOf(/not inside a VibeSpace session/.test(c.stderr)), 'no token ⇒ exit 2 with the reason');
   c = await cli(['profiles']);
-  ok(c.status === 0 && /^\* Squad/m.test(c.stdout) && /^  Mine/m.test(c.stdout) && /\d\/2 browsers running/.test(c.stdout), '`profiles` lists every profile, marks mine with *, and says how many browsers run');
+  ok(c.status === 0 && gateOf(/^\* Squad/m.test(c.stdout)) && gateOf(/^  Mine/m.test(c.stdout)) && verdictOf(/\d\/2 browsers running/.test(c.stdout)), '`profiles` lists every profile, marks mine with *, and says how many browsers run');
   c = await cli(['use', 'Squad', '--print']);
-  ok(c.status === 1 && /\[not_offered\]/.test(c.stderr) && !/export /.test(c.stdout), '`use --print` is not offered (takeover C2): nothing to export');
+  ok(c.status === 1 && gateOf(/\[not_offered\]/.test(c.stderr)) && !/export /.test(c.stdout), '`use --print` is not offered (takeover C2): nothing to export');
   c = await cli(['use', 'Squad']);
-  ok(c.status === 0 && !/export /.test(c.stdout) && /profile: Squad \(bp-/.test(c.stdout), '`use` attaches and names the profile it acted on (§3.8 layer ①) — no env, no subshell');
+  ok(c.status === 0 && !/export /.test(c.stdout) && verdictOf(/profile: Squad \(bp-/.test(c.stdout)), '`use` attaches and names the profile it acted on (§3.8 layer ①) — no env, no subshell');
   ok(!/ws:\/\/|devtools|cdpUrl/i.test(c.stdout + c.stderr), '…and NEVER a CDP url (§5.1)');
   c = await cli(['use', 'nope']);
-  ok(c.status === 1 && /\[not-found\]/.test(c.stderr), 'an unknown profile ⇒ exit 1 with the server\'s code');
+  ok(c.status === 1 && verdictOf(/\[not-found\]/.test(c.stderr)), 'an unknown profile ⇒ exit 1 with the server\'s code');
   c = await cli(['status']);
-  ok(c.status === 0 && /Squad \(bp-/.test(c.stdout) && /pin: none/.test(c.stdout), '`status` shows my lease and my pin');
+  ok(c.status === 0 && gateOf(/Squad \(bp-/.test(c.stdout)) && verdictOf(/pin: none/.test(c.stdout)), '`status` shows my lease and my pin');
   // B-f7ab verify r1: a NON-page verb's refusal prints the way out too (`status` on a session that could not get its
   // browser key — this router has no late-key engine ⇒ no_browser_key · unavailable — says what happened AND what to do)
   c = await cli(['status'], { ...cliEnv, VIBESPACE_SESSION_TOKEN: TOKEN_N });
-  ok(c.status === 1 && /\[no_browser_key\]/.test(c.stderr) && /^  remedy: /m.test(c.stderr) && !/predates/.test(c.stderr), '`status` on a session with no browser key: exit 1, the named refusal AND its remedy line (a non-page verb says the way out too)');
+  ok(c.status === 1 && gateOf(/\[no_browser_key\]/.test(c.stderr)) && gateOf(/^  remedy: /m.test(c.stderr)) && !/predates/.test(c.stderr), '`status` on a session with no browser key: exit 1, the named refusal AND its remedy line (a non-page verb says the way out too)');
   c = await cli(['pin', 'Squad']);
-  ok(c.status === 0 && /pinned this conversation to Squad/.test(c.stdout), '`pin <profile>` pins the conversation');
+  ok(c.status === 0 && verdictOf(/pinned this conversation to Squad/.test(c.stdout)), '`pin <profile>` pins the conversation');
   c = await cli(['status']);
-  ok(/pin: Squad \(bp-.*origin: chosen/.test(c.stdout), '…which `status` now reports with its origin');
+  ok(verdictOf(/pin: Squad \(bp-.*origin: chosen/.test(c.stdout)), '…which `status` now reports with its origin');
   c = await cli(['pin', '--none']);
-  ok(c.status === 0 && /unpinned/.test(c.stdout), '`pin --none` unpins');
+  ok(c.status === 0 && verdictOf(/unpinned/.test(c.stdout)), '`pin --none` unpins');
   c = await cli(['watch']);
-  ok(c.status === 0 && /browser_paused/.test(c.stdout) && /Take over/.test(c.stdout) && !/not available yet/.test(c.stdout), '`watch` explains the user\'s live view, Take over and the typed browser_paused refusal (P3 — never "not available yet")');
+  ok(c.status === 0 && gateOf(/browser_paused/.test(c.stdout)) && gateOf(/Take over/.test(c.stdout)) && !/not available yet/.test(c.stdout), '`watch` explains the user\'s live view, Take over and the typed browser_paused refusal (P3 — never "not available yet")');
   // LANE H VERIFY r2 L6: `close --all` under an ATTACHMENT closes MY session only — never the namespace. The binary's own
   // `close --all` closes every session of the namespace, and for a profile that is the keeper's daemon + the one Chrome
   // every lease shares (measured on 0.38.1: {closed:2, sessions:[s1,s2]}, the profile daemon dead). The CLI maps it to
@@ -670,13 +670,13 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   const daemonPid = reg(kR).browsers[teamId2].pid;
   c = await cli(['--', 'close', '--all']);
   let last = closes()[closes().length - 1];
-  ok(c.status === 0 && last && last.all === false && last.ns === 'vs-' + teamId2 && last.session === 'vs-' + KEY_A && last.pinTab === true && /\[close_all_scoped\]/.test(c.stderr) && /1 other session/.test(c.stderr), 'r2 L6: with another session attached, `-- close --all` runs MY session\'s close (the profile\'s namespace, my session, `--pin-tab`) — never the namespace-wide one — and says so', JSON.stringify({ last, se: c.stderr.slice(0, 300) }));
-  ok(alive(daemonPid) && reg(kR).browsers[teamId2].state === 'ready' && reg(kR).leases.some((l) => l.browserKey === KEY_B && l.profileId === teamId2) && !reg(kR).leases.some((l) => l.browserKey === KEY_A && l.profileId === teamId2) && /lease dropped/.test(c.stderr), 'r2 L6: …the keeper\'s daemon still runs, the record is ready, the OTHER lease stands and only MY lease was dropped');
+  ok(c.status === 0 && gateOf(last) && last.all === false && last.ns === 'vs-' + teamId2 && last.session === 'vs-' + KEY_A && last.pinTab === true && gateOf(/\[close_all_scoped\]/.test(c.stderr)) && verdictOf(/1 other session/.test(c.stderr)), 'r2 L6: with another session attached, `-- close --all` runs MY session\'s close (the profile\'s namespace, my session, `--pin-tab`) — never the namespace-wide one — and says so', JSON.stringify({ last, se: c.stderr.slice(0, 300) }));
+  ok(gateOf(alive(daemonPid)) && reg(kR).browsers[teamId2].state === 'ready' && gateOf(reg(kR).leases.some((l) => l.browserKey === KEY_B && l.profileId === teamId2)) && !reg(kR).leases.some((l) => l.browserKey === KEY_A && l.profileId === teamId2) && verdictOf(/lease dropped/.test(c.stderr)), 'r2 L6: …the keeper\'s daemon still runs, the record is ready, the OTHER lease stands and only MY lease was dropped');
   kR.detach({ profileId: teamId2, browserKey: KEY_B });
   c = await cli(['use', 'Squad']);
   const closeAllAlone = async (cliPath) => { const c1 = await new Promise((resolve) => execFile(process.execPath, [cliPath, '--', 'close', '--all'], { env: cliEnv, encoding: 'utf8', timeout: 30000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') }))); return { c1, last: closes()[closes().length - 1], daemonAlive: alive(reg(kR).browsers[teamId2].pid), state: reg(kR).browsers[teamId2].state, leaseLeft: reg(kR).leases.some((l) => l.browserKey === KEY_A && l.profileId === teamId2) }; };
   const alone = await closeAllAlone(CLI);
-  ok(c.status === 0 && alone.c1.status === 0 && alone.last.all === false && alone.last.session === 'vs-' + KEY_A && alone.daemonAlive && alone.state === 'ready' && !alone.leaseLeft && /\[close_all_scoped\]/.test(alone.c1.stderr), 'r2 L6: the SINGLE holder\'s `-- close --all` leaves the keeper\'s daemon pid alive and the record ready (its session\'s close, then its lease dropped)', JSON.stringify({ last: alone.last, daemonAlive: alone.daemonAlive, state: alone.state }));
+  ok(c.status === 0 && alone.c1.status === 0 && alone.last.all === false && alone.last.session === 'vs-' + KEY_A && gateOf(alone.daemonAlive) && alone.state === 'ready' && !alone.leaseLeft && verdictOf(/\[close_all_scoped\]/.test(alone.c1.stderr)), 'r2 L6: the SINGLE holder\'s `-- close --all` leaves the keeper\'s daemon pid alive and the record ready (its session\'s close, then its lease dropped)', JSON.stringify({ last: alone.last, daemonAlive: alone.daemonAlive, state: alone.state }));
   // CONTROL (scripts/mutant-copy.mjs): the pre-fix CLI passes `--all` through — the namespace-wide close kills the profile's daemon
   {
     const M6 = mutantCopies('browser-pin-l6', REPO);
@@ -688,10 +688,10 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
       const ctl = await closeAllAlone(cliCopy);
       ok(c.status === 0 && ctl.last.all === true && !ctl.daemonAlive, 'r2 L6 CONTROL: a CLI copy that passes `--all` through runs the namespace-wide close and the keeper\'s daemon is DEAD — the legs above can go red', JSON.stringify({ last: ctl.last, daemonAlive: ctl.daemonAlive }));
     } else ok(false, 'r2 L6 CONTROL: the argv line was not found in data/bin/vibespace-browser');
-    for (const r of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r2 L6 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+    for (const r of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r2 L6 ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
   }
   c = await cli(['detach']);
-  ok(c.status === 1 && /\[no_lease\]/.test(c.stderr), '`detach` with no lease ⇒ no_lease');
+  ok(c.status === 1 && verdictOf(/\[no_lease\]/.test(c.stderr)), '`detach` with no lease ⇒ no_lease');
   // LANE H VERIFY r3 (the verifier's code-read note): a takeover that BEGINS while the binary runs a `close` on an attachment
   // makes the post-close detach `browser_paused` — the CLI says the close ran and the lease was NOT dropped, with the code
   // and the way out, and exits non-zero (r2: the detach sat in a bare `try { … } catch {}`)
@@ -711,7 +711,7 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
       return { ...r, use: u.status, took, leased, detachAfter: d.status };
     };
     const hc = await heldClose(CLI);
-    ok(hc.use === 0 && hc.took && !hc.took.error && hc.status !== 0 && /\[browser_paused\]/.test(hc.stderr) && /your `close` ran, but your lease on "Squad" was NOT dropped/.test(hc.stderr) && /after they hand it back/.test(hc.stderr) && !/lease dropped/.test(hc.stderr) && hc.leased && hc.detachAfter === 0, `r3: a takeover begun DURING the binary's \`close\` — the post-close detach is refused browser_paused and the CLI says so (the close ran, the lease was NOT dropped, [browser_paused], exit ${hc.status}); the lease stands until the agent detaches after the handback (observed: exit ${hc.status}, last line "${hc.stderr.trim().split('\n').pop().slice(0, 200)}", lease ${hc.leased ? 'stands' : 'gone'})`);
+    ok(hc.use === 0 && gateOf(hc.took) && !hc.took.error && hc.status !== 0 && gateOf(/\[browser_paused\]/.test(hc.stderr)) && gateOf(/your `close` ran, but your lease on "Squad" was NOT dropped/.test(hc.stderr)) && gateOf(/after they hand it back/.test(hc.stderr)) && !/lease dropped/.test(hc.stderr) && gateOf(hc.leased) && hc.detachAfter === 0, `r3: a takeover begun DURING the binary's \`close\` — the post-close detach is refused browser_paused and the CLI says so (the close ran, the lease was NOT dropped, [browser_paused], exit ${hc.status}); the lease stands until the agent detaches after the handback (observed: exit ${hc.status}, last line "${hc.stderr.trim().split('\n').pop().slice(0, 200)}", lease ${hc.leased ? 'stands' : 'gone'})`);
     const M7 = mutantCopies('browser-pin-r3-detach', REPO);
     const csrc7 = fs.readFileSync(CLI, 'utf8');
     const R2LINE = "    if (rest[0] === 'close' && profileId && r.kind === 'attachment') { try { await call('POST', '/api/agent/browser/detach', { profile: profileId }); console.error(profileLine(r.profile, null, r.others, r.handle) + ' · lease dropped'); } catch { } }\n";
@@ -720,12 +720,12 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
     if (fixStart >= 0 && fixEnd > fixStart) {
       const cmut7 = csrc7.slice(0, fixStart) + R2LINE + csrc7.slice(fixEnd + '\n    }\n'.length);
       const ctl7 = await heldClose(M7.write('data/bin/vibespace-browser', cmut7, 'r2-detach'));
-      ok(!/was NOT dropped/.test(ctl7.stderr) && ctl7.leased, `r3 CONTROL: the r2 CLI (the detach in a bare try/catch) never says the lease was NOT dropped — it prints ${ctl7.status === 0 ? 'nothing (exit 0)' : 'only the server\'s refusal, exit ' + ctl7.status} while the lease stands: the leg above can go red (observed: exit ${ctl7.status}, last line "${ctl7.stderr.trim().split('\n').pop().slice(0, 200)}")`);
+      ok(!/was NOT dropped/.test(ctl7.stderr) && verdictOf(ctl7.leased), `r3 CONTROL: the r2 CLI (the detach in a bare try/catch) never says the lease was NOT dropped — it prints ${ctl7.status === 0 ? 'nothing (exit 0)' : 'only the server\'s refusal, exit ' + ctl7.status} while the lease stands: the leg above can go red (observed: exit ${ctl7.status}, last line "${ctl7.stderr.trim().split('\n').pop().slice(0, 200)}")`);
     } else ok(false, 'r3 CONTROL: the post-close detach block was not found in data/bin/vibespace-browser');
-    for (const r of copiesCensus(M7.files, M7.dir, REPO, { minCopies: 1, label: 'r3 detach ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+    for (const r of copiesCensus(M7.files, M7.dir, REPO, { minCopies: 1, label: 'r3 detach ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
   }
   c = await cli(['new', 'Fresh', '--notes', 'hello']);
-  ok(c.status === 0 && /created Fresh \(bp-/.test(c.stdout) && /every conversation of the user's can use it/.test(c.stdout) && reg(kR).profiles.find((p) => p.label === 'Fresh').owner.kind === 'instance' && reg(kR).profiles.find((p) => p.label === 'Fresh').createdBy === KEY_A, 'owner ruling A: `new <label>` creates a profile every conversation of the user\'s can use (created by this one) and says so');
+  ok(c.status === 0 && gateOf(/created Fresh \(bp-/.test(c.stdout)) && gateOf(/every conversation of the user's can use it/.test(c.stdout)) && reg(kR).profiles.find((p) => p.label === 'Fresh').owner.kind === 'instance' && reg(kR).profiles.find((p) => p.label === 'Fresh').createdBy === KEY_A, 'owner ruling A: `new <label>` creates a profile every conversation of the user\'s can use (created by this one) and says so');
   await kR.stop(teamId2).catch(() => { });
   kR.shutdown();
   srv.close(); srv = null;
@@ -746,16 +746,16 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
     return { k5, D5, writtenAtChange: after !== before && after.includes('U5b Team'), owed: SWb.storeWriter().pending(path.resolve(k5.storeFile)) };
   };
   const a = await scene(K, 'moved');
-  ok(!a.writtenAtChange && a.owed, 'U5b: a profile made hands browser-profiles.json to the store writer — owed, NOT written on the main thread at the change', { written: a.writtenAtChange, owed: a.owed });
+  ok(!a.writtenAtChange && verdictOf(a.owed), 'U5b: a profile made hands browser-profiles.json to the store writer — owed, NOT written on the main thread at the change', { written: a.writtenAtChange, owed: a.owed });
   SWb.storeWriter().flushSync([path.resolve(a.k5.storeFile)]);
   const doc = JSON.parse(fs.readFileSync(a.k5.storeFile, 'utf8'));
-  ok(doc.profiles.some((x) => x.label === 'U5b Team') && (fs.statSync(a.k5.storeFile).mode & 0o777) === 0o600, 'U5b: …landed by the writer: the record is in the file, 0600 (the keeper\'s own mode)', doc.profiles.map((x) => x.label));
+  ok(gateOf(doc.profiles.some((x) => x.label === 'U5b Team')) && (fs.statSync(a.k5.storeFile).mode & 0o777) === 0o600, 'U5b: …landed by the writer: the record is in the file, 0600 (the keeper\'s own mode)', doc.profiles.map((x) => x.label));
   // RED CONTROL: the change removed — the old synchronous save (the writer bypassed, a mutant copy)
   const kSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/server/browser-keeper.js'), 'utf8');
   const aK = "  const writerOf = () => require('../store-writer.js').storeWriter();";
   const SyncK = mutantCopies('browser-pin-u5b', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', anchored(kSrc, aK, "  const writerOf = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce(), { mode: o.mode }), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) });", 'the keeper\'s one writer line'), 'sync-save');   // ALSO CURED (the moved2 cure 2): through anchored()
   const r = await scene(SyncK, 'red');
-  ok(r.writtenAtChange && !r.owed, 'U5b CONTROL: the old synchronous save ⇒ browser-profiles.json is written on the main thread at the change — the first check above would be red', { written: r.writtenAtChange });
+  ok(gateOf(r.writtenAtChange) && !r.owed, 'U5b CONTROL: the old synchronous save ⇒ browser-profiles.json is written on the main thread at the change — the first check above would be red', { written: r.writtenAtChange });
   try { a.k5.shutdown(); r.k5.shutdown(); } catch { }
   // the U5b cure (keeper reader 3's should): «WRITTEN BEFORE THE MOVE», behaviourally — a lineage moved through moveDirLineage is
   // ON DISK when the call returns (nothing owed for the registry, the file names the new key, not the old); RED: the move's
@@ -773,11 +773,11 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
     return { mv, owed, onDiskNew: !!(mv && mv.key && disk[mv.key]), onDiskOld: !!disk[from] };
   };
   const mvOk = await moveLeg(K, 'moved');
-  ok(mvOk.mv && mvOk.mv.ok && mvOk.mv.moved && !mvOk.owed && mvOk.onDiskNew && !mvOk.onDiskOld, 'U5b «written before the move», behaviourally: moveDirLineage returns with the lineage ON DISK under the new key (nothing owed for the registry)', mvOk);
+  ok(gateOf(mvOk.mv) && gateOf(mvOk.mv.ok) && gateOf(mvOk.mv.moved) && !mvOk.owed && gateOf(mvOk.onDiskNew) && !mvOk.onDiskOld, 'U5b «written before the move», behaviourally: moveDirLineage returns with the lineage ON DISK under the new key (nothing owed for the registry)', mvOk);
   const aMv = 'if (!saveNow()) { reg.dirHosts = before;';
   const NoWaitK = mutantCopies('browser-pin-u5b-mv', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', anchored(kSrc, aMv, 'if (!save()) { reg.dirHosts = before;', 'the move waits on saveNow()'), 'move-no-wait');   // stale-pins: kept — the mutant's PLANTED text (save() for saveNow()), absent from the product on purpose
   const mvRed = await moveLeg(NoWaitK, 'red');
-  ok(mvRed.mv && mvRed.mv.moved && mvRed.owed && !mvRed.onDiskNew, 'U5b CONTROL: the move\'s saveNow() back to save() ⇒ the lineage is owed, NOT on disk when the move returns — the check above would be red', mvRed);
+  ok(gateOf(mvRed.mv) && gateOf(mvRed.mv.moved) && gateOf(mvRed.owed) && !mvRed.onDiskNew, 'U5b CONTROL: the move\'s saveNow() back to save() ⇒ the lineage is owed, NOT on disk when the move returns — the check above would be red', mvRed);
   // THE MOVED2 CURE 2 (主开发's ruling — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING; its must 2: no half-taken removal): a
   // profile's removal is TAKEN at once (out of the registry in memory, its store marked); its passkeys, grant row, marked config,
   // drop listeners and the machine's folder go only once the registry has LANDED — the reply waits its bound and says «not yet»,
@@ -800,13 +800,13 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
     return { before, after };
   };
   const rmOk = await rmLeg(K, 'real');
-  ok(rmOk.before.landed === false && rmOk.before.dropped === 0 && !rmOk.before.listed && rmOk.before.onDisk,
+  ok(rmOk.before.landed === false && rmOk.before.dropped === 0 && !rmOk.before.listed && verdictOf(rmOk.before.onDisk),
     'THE STEP RIDES THE LANDING: a profile\'s removal not landed is TAKEN (gone from the list, never rolled back) and its passkeys are KEPT — the disk still holds the record whole (a start would find it with them); the reply says not yet', rmOk.before);
   ok(rmOk.after.dropped === 1 && !rmOk.after.onDisk, '…and once the storage answers the record lands and the passkeys (grant row, marked config, the machine\'s folder) go BY THEMSELVES — once, nothing half taken', rmOk.after);
   const RM_RIDE = "rideLanding(() => (ran = step()), { what: `profile ${id}'s removal`, timeoutMs: replyMs })";
   const RmK = mutantCopies('browser-pin-ride', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', anchored(kSrc, RM_RIDE, 'Promise.resolve({ landed: true, value: (ran = step()) })   /* MUTANT: the step runs at the act */', 'the removal rides the landing'), 'ride-ignored');
   const rmX = await rmLeg(RmK, 'red');
-  ok(rmX.before.dropped === 1 && rmX.before.onDisk, 'CONTROL (a copy whose step runs at the act): the passkeys are DROPPED while the disk still holds the record — a kill now leaves a profile without them (red)', rmX.before);
+  ok(rmX.before.dropped === 1 && verdictOf(rmX.before.onDisk), 'CONTROL (a copy whose step runs at the act): the passkeys are DROPPED while the disk still holds the record — a kill now leaves a profile without them (red)', rmX.before);
   // THE CENSUS CURE (主开发 2026-11-19 08:56Z — the hunt's finding 6): a launch stamps THIS machine's name on its record (the lineage
   // the next start reads to judge the profile's lock) and LANDS it before Chrome writes its lock into the folder — the storage
   // refusing the registry ⇒ the start is REFUSED by name (launch_not_on_disk) and nothing is launched. The three stamping roads
@@ -836,10 +836,10 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
     LAND_EPH, "        commit();   // MUTANT: the record left owed when Chrome starts", 'the ephemeral launch lands its record first');
   const NoLandK = mutantCopies('browser-pin-launch', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', owedSrc, 'launch-owed');
   const lnX = await launchLeg(NoLandK, 'red');
-  ok(lnX.code !== 'launch_not_on_disk' && (lnX.ready || !!lnX.pid), 'CONTROL (a copy whose start leaves the record owed): the browser LAUNCHES while the disk does not hold this machine\'s name on it (red)', lnX);
+  ok(lnX.code !== 'launch_not_on_disk' && (verdictOf(lnX.ready) || !!lnX.pid), 'CONTROL (a copy whose start leaves the record owed): the browser LAUNCHES while the disk does not hold this machine\'s name on it (red)', lnX);
   SWb.storeWriter().flushSync();
 }
 
 reapAll();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

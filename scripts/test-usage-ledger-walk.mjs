@@ -27,7 +27,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -182,7 +182,7 @@ console.log('§1 EQUALITY — every interval, rate and estimate is 05082bbd0\'s:
     o2._costFn = (ids) => (f, t) => masterWalk(w2.uh, ids, f, t); o2._primePairs = () => { };
     w2.est._rateCache.clear(); w2.est._estMemo.clear(); w2.zero();
     const after = w2.est.estimateFor('sub-a', null, NOW), want = o2.estimateFor('sub-a', null, NOW), rAfter = w2.est.ratesFor('email:a@x'), rWant = o2.ratesFor('email:a@x');
-    ok(during === null && partial && !!rDuring && landed && near(after, want) && near(rAfter, rWant), `THE FIRST LEARN STEPPED: while the sweep runs (${w2.est._priming?.result?.intervals} intervals in 2-day slices) no estimate and rates from the frozen costSince (partial, not persisted); once it lands the estimate and the rates are the walk's`, { during, partial, landed, after, want });
+    ok(during === null && gateOf(partial) && !!rDuring && gateOf(landed) && gateOf(near(after, want)) && verdictOf(near(rAfter, rWant)), `THE FIRST LEARN STEPPED: while the sweep runs (${w2.est._priming?.result?.intervals} intervals in 2-day slices) no estimate and rates from the frozen costSince (partial, not persisted); once it lands the estimate and the rates are the walk's`, { during, partial, landed, after, want });
     fs.rmSync(w2.data, { recursive: true, force: true });
   }
   // A2: PRIMING IS LOADING — FOR EVERYONE: the pool engine's gate (wholeLedgerGate, with the estimator's prime) holds while
@@ -200,7 +200,7 @@ console.log('§1 EQUALITY — every interval, rate and estimate is 05082bbd0\'s:
     const o3 = new (w3.est.constructor)({ anchorsDir: w3.adir, usageHistory: w3.uh, resolveIdentity: w3.est.resolveIdentity, lagS: 20 });
     o3._costFn = (ids) => (f, t) => masterWalk(w3.uh, ids, f, t); o3._primePairs = () => { };
     const after = ran[0], want = { rates: o3.ratesFor('email:a@x'), cost: masterWalk(w3.uh, ['sub-a'], NOW - 3 * DAY, NOW - DAY) };
-    ok(held.first === 'waiting' && held.holds && held.loading && held.loading.priming && held.est === null && held.partial && !held.ratesWritten && !!after && near(after.rates, want.rates) && near(after.cost, want.cost) && !w3.uh.ledgerLoading(),
+    ok(held.first === 'waiting' && gateOf(held.holds) && gateOf(held.loading) && gateOf(held.loading.priming) && held.est === null && gateOf(held.partial) && !held.ratesWritten && !!after && gateOf(near(after.rates, want.rates)) && gateOf(near(after.cost, want.cost)) && !w3.uh.ledgerLoading(),
       'A2: PRIMING IS LOADING FOR EVERYONE — while the first learn runs stepped the pool engine\'s gate holds (the sweep queued, no decision), the ledger says loading, no estimate, costs partial, no rate persisted; the queued sweep runs when it lands, on master\'s numbers', { held, after: !!after });
     fs.rmSync(w3.data, { recursive: true, force: true });
   }
@@ -226,7 +226,7 @@ console.log('§1 EQUALITY — every interval, rate and estimate is 05082bbd0\'s:
       const cost = near(w4.UA.costBetweenMulti(w4.uh, ['sub-a'], NOW - 3 * DAY, NOW - DAY), masterWalk(w4.uh, ['sub-a'], NOW - 3 * DAY, NOW - DAY));
       const r = { released: !w4.uh.ledgerLoading(), gateNow, queuedRan: ran.includes(1), rates, est, cost, uncaught: uncaught.length, said: said.length, saidText: said.join(' | '), failed: w4.est._priming?.result?.failed || null };
       fs.rmSync(w4.data, { recursive: true, force: true });
-      ok(r.released && r.gateNow === 'ran' && r.queuedRan && r.rates && r.est && r.cost && r.uncaught === 0 && r.said === 1 && !!r.failed, `A5 ${name}: the hold released, nothing landed, 0 uncaught, said once («${r.failed}»), the gate runs, rates / estimate / cost are the walk's`, r);
+      ok(gateOf(r.released) && r.gateNow === 'ran' && gateOf(r.queuedRan) && gateOf(r.rates) && gateOf(r.est) && gateOf(r.cost) && r.uncaught === 0 && r.said === 1 && !!r.failed, `A5 ${name}: the hold released, nothing landed, 0 uncaught, said once («${r.failed}»), the gate runs, rates / estimate / cost are the walk's`, r);
     };
     await scene('a version read that THROWS mid-prime (pricingToken, its third call)', (w4) => { let n = 0; const real = w4.uh.pricingToken.bind(w4.uh); w4.uh.pricingToken = () => { if (++n === 3) { w4.uh.pricingToken = real; throw new Error('pricingToken threw'); } return real(); }; return {}; });
     await scene('a STORE that throws EVERY time — master\'s road (主开发 16:57Z: on a fault master is the oracle, said once with the step that threw; the pool decides)', () => ({ storeHook: () => { throw new Error('the store threw'); } }));
@@ -252,7 +252,7 @@ console.log('§1 EQUALITY — every interval, rate and estimate is 05082bbd0\'s:
     const est = near(w4.est.estimateFor('sub-a', null, NOW), o4.estimateFor('sub-a', null, NOW));
     const stalls = said.filter((m) => /made no step/.test(m)).length;
     fs.rmSync(w4.data, { recursive: true, force: true });
-    ok(!broken && stalls === 1 && !w4.uh.ledgerLoading() && res && !res.abandoned && res.intervals > 0 && ran.includes(1) && rates && est && uncaught.length === 0,
+    ok(!broken && stalls === 1 && !w4.uh.ledgerLoading() && gateOf(res) && !res.abandoned && res.intervals > 0 && gateOf(ran.includes(1)) && gateOf(rates) && gateOf(est) && uncaught.length === 0,
       `a prime whose steps STOP coming back: dropped after a window with no step (said once: «${(said.find((m) => /made no step/.test(m)) || '').slice(8, 70)}…»), its epoch left unlearned — the next ask's NEW stepped prime landed (${res && res.intervals} intervals), the gate's sweep ran, rates and estimate the walk's (never the pair-by-pair road for slowness)`, { said, res, ran, rates, est, uncaught });
   }
   // …and the RELEASED code itself, when this clone holds it
@@ -331,7 +331,7 @@ const getCount = (TREE) => {
   const hot = w.uh._evCache.events.length;
   ok(cmp <= 10, `3 rows arriving re-sort 3 rows, not the ${hot} hot ones (${cmp} comparisons) — and the order is the full stable sort's`, cmp);
   const full = w.uh._evCache.events.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
-  ok(full.every((e, i) => e === w.uh._evCache.sorted[i]), 'the appended view IS the stable full sort (same rows, same order, ties in load order)');
+  ok(verdictOf(full.every((e, i) => e === w.uh._evCache.sorted[i])), 'the appended view IS the stable full sort (same rows, same order, ties in load order)');
   rmWorld(w);
 }
 
@@ -359,8 +359,8 @@ const getCount = (TREE) => {
     return { live, inv, same: after[0] === fresh[0] && after.slice(1).every((x, i) => x === before[i + 1]), withEst: after.filter((x) => x !== 'null').length, planted, dropAsked };
   };
   const r = run(false), c = run(true);
-  ok(r.live === 1 && r.inv === 1 && r.same && r.withEst >= 3, `U3 a record streamed for sub-a recomputes ${r.live} estimate of 4 (${r.withEst} members with one), an invalidation of email:b@x ${r.inv}; sub-a's answer = a fresh estimator's, the three others' = theirs before the record (their memo, as with none)`, r);
-  ok(c.planted && c.dropAsked >= 1 && c.live === 4, `control (the release's whole clear per record; the plant asked ${c.dropAsked}×): ${c.live} of 4 recomputed ⇒ RED`, c);
+  ok(r.live === 1 && r.inv === 1 && gateOf(r.same) && r.withEst >= 3, `U3 a record streamed for sub-a recomputes ${r.live} estimate of 4 (${r.withEst} members with one), an invalidation of email:b@x ${r.inv}; sub-a's answer = a fresh estimator's, the three others' = theirs before the record (their memo, as with none)`, r);
+  ok(gateOf(c.planted) && c.dropAsked >= 1 && c.live === 4, `control (the release's whole clear per record; the plant asked ${c.dropAsked}×): ${c.live} of 4 recomputed ⇒ RED`, c);
   // the chain's cure (small): AN ACCOUNT SWITCH refuses the memo at once — sub-b's entry was built under its identity; the account
   // now resolves to another (a switch the scan's invalidate never names): its next ask is a fresh estimate, not the old identity's
   // for up to 30 s. RED: acad2351a's hit check (planted in a copy) ⇒ the old identity's entry served
@@ -379,7 +379,7 @@ const getCount = (TREE) => {
   const esrc = fs.readFileSync(path.join(REPO, 'src/usage-estimator.js'), 'utf8'), HIT = '(m.ik || null) === ikNow && ';
   const ERel = mutantCopies('usage-memo-switch', REPO).load('src/usage-estimator.js', editAnchor(esrc, HIT, '', "src/usage-estimator.js"), 'no-switch');
   const s1 = sw(null), s0 = sw(ERel);
-  ok(esrc.split(HIT).length === 2 && s1.was && s1.was !== 'email:switched@x' && s1.rebuilt === 1 && s1.now === 'email:switched@x' && s0.rebuilt === 0 && s0.now === s1.was,
+  ok(esrc.split(HIT).length === 2 && gateOf(s1.was) && s1.was !== 'email:switched@x' && s1.rebuilt === 1 && s1.now === 'email:switched@x' && s0.rebuilt === 0 && s0.now === s1.was,
     `an account switch refuses its memo at once: sub-b's entry (${s1.was}) is rebuilt for the identity it resolves to now (${s1.rebuilt} estimate, ${s1.now}); RED (acad2351a's hit): the old identity's entry served (${s0.rebuilt} built, ${s0.now})`, { s1, s0 });
 }
 
@@ -415,7 +415,7 @@ let storeBlind = null, twoLoads = null, countBlind = null, boundFatal = null; //
     ["          if (!_primePlanFinish(usageHistory, plan)) { end({ intervals: 0, rows: 0 }); return; }", "          { const m2 = _memoNow(usageHistory, { forPrime: true }); if (!m2) { end({ intervals: 0, rows: 0 }); return; } Object.assign(plan, { memo: m2, epoch: m2.epoch, gen: usageHistory.ledgerGen || 0, tok: usageHistory.pricingToken(), cache: usageHistory._evCache }); }\n          if (!_primePlanFinish(usageHistory, plan)) { end({ intervals: 0, rows: 0 }); return; }"]]);
   twoLoads = plant('an-ask-loads-again', "  try { unpin = usageHistory && typeof usageHistory._pinLoad === 'function' ? usageHistory._pinLoad() : null; }", "  try { unpin = null; }"); // round 2, MUST 2 (§9)
   boundFatal = plant('the-bound-is-fatal', "      if (steps === seen) {", "      if (true) { end(fail(new Error(`its steps did not finish within ${holdNamedMs} ms`))); return; }\n      if (steps === seen) {"); // adbd03b3c's: the bound ends the prime ⇒ master's pair-by-pair road
-  ok(otherAcct && pastEnd && cap && noExt && blind && noGen && landsAnyway && storeBlind && twoLoads && countBlind && boundFatal, 'the eleven patch sites exist');
+  ok(gateOf(otherAcct) && gateOf(pastEnd) && gateOf(cap) && gateOf(noExt) && gateOf(blind) && gateOf(noGen) && gateOf(landsAnyway) && gateOf(storeBlind) && gateOf(twoLoads) && gateOf(countBlind) && verdictOf(boundFatal), 'the eleven patch sites exist');
   // the generation ignored: a same-count rewrite serves the old ledger's money
   { const w = world(REPO, { seed: 14 });
     const hd = path.join(w.data, 'usage-history'), f = fs.readdirSync(hd).filter((x) => /^events-/.test(x)).sort().pop(), fp = path.join(hd, f), ls = fs.readFileSync(fp, 'utf8').trim().split('\n');
@@ -425,7 +425,7 @@ let storeBlind = null, twoLoads = null, countBlind = null, boundFatal = null; //
     const e0 = JSON.parse(ls[k0]); e0.i += 900000; ls[k0] = JSON.stringify(e0);
     fs.writeFileSync(fp, ls.join('\n') + '\n'); w.uh._rebuildOnLoop();
     const got = noGen.costBetweenMulti(w.uh, ['sub-a'], a, b), truth = masterWalk(w.uh, ['sub-a'], a, b), fixed = w.UA.costBetweenMulti(w.uh, ['sub-a'], a, b);
-    ok(k0 >= 0 && !near(got, truth) && near(fixed, truth), `RED: the version ignoring the ledger's generation ⇒ a same-count rewrite (one row's tokens changed in place) serves $${got.total} for $${truth.total} — EQUALITY red (the fix: $${fixed.total})`, { got: got.total, truth: truth.total });
+    ok(k0 >= 0 && !near(got, truth) && verdictOf(near(fixed, truth)), `RED: the version ignoring the ledger's generation ⇒ a same-count rewrite (one row's tokens changed in place) serves $${got.total} for $${truth.total} — EQUALITY red (the fix: $${fixed.total})`, { got: got.total, truth: truth.total });
     rmWorld(w); }
   // a prime landing although the price table moved under it
   { const w = world(REPO, { seed: 15 }); const L = w.est.lines('email:a@x').filter((l) => l.prevFetchedAt), groups = [{ ids: ['sub-a'], intervals: L.map((l) => [l.prevFetchedAt, l.fetchedAt]) }];
@@ -444,7 +444,7 @@ let storeBlind = null, twoLoads = null, countBlind = null, boundFatal = null; //
     const sc2 = (W2, UA2) => { UA2.costBetweenMulti(W2.uh, ['sub-a'], a0, NOW); const r1 = W2.mkRow(NOW - DAY, { acct: 'sub-b', i: 900000 }), r2 = W2.mkRow(NOW - 3600e3, { acct: 'sub-a', i: 700000 }), r3 = W2.mkRow(NOW + 600e3, { acct: 'sub-a', i: 800000 });
       for (const r of [r1, r2, r3]) { delete r.host; r.atype = 'subscription'; } W2.append([r1, r2, r3]); return { got: UA2.costBetweenMulti(W2.uh, ['sub-a'], a0, NOW + 1200e3), truth: masterWalk(W2.uh, ['sub-a'], a0, NOW + 1200e3) }; };
     const m1 = sc2(w2, otherAcct), m2 = sc2(w3, pastEnd);
-    ok(near(fixed, tF) && !near(m1.got, m1.truth) && !near(m2.got, m2.truth), `RED: the log adding ANOTHER account's late row ($${m1.got.total} for $${m1.truth.total}) / the log taking a row PAST the old end too — counted twice with the extension ($${m2.got.total} for $${m2.truth.total}) — EQUALITY red (the fix: $${fixed.total} = $${tF.total})`, { m1: [m1.got.total, m1.truth.total], m2: [m2.got.total, m2.truth.total] });
+    ok(gateOf(near(fixed, tF)) && !near(m1.got, m1.truth) && !near(m2.got, m2.truth), `RED: the log adding ANOTHER account's late row ($${m1.got.total} for $${m1.truth.total}) / the log taking a row PAST the old end too — counted twice with the extension ($${m2.got.total} for $${m2.truth.total}) — EQUALITY red (the fix: $${fixed.total} = $${tF.total})`, { m1: [m1.got.total, m1.truth.total], m2: [m2.got.total, m2.truth.total] });
     for (const x of [w, w2, w3]) fs.rmSync(x.data, { recursive: true, force: true }); }
   // the cap back at 20 000: a working set past it misses
   { const w = world(REPO, { seed: 2, rows: 3000, pairs: [10, 10, 10, 10] }); const cyc = []; for (let k = 0; k < 26000; k++) { const a = NOW - 30 * DAY + k * 60000; cyc.push([a, a + 60000]); }
@@ -465,7 +465,7 @@ let storeBlind = null, twoLoads = null, countBlind = null, boundFatal = null; //
     rmWorld(w); }
   // the whole ring scanned per ask
   { const est = read('src/usage-estimator.js'), from = '    if (last && !(entry.ts >= last.ts)) this._liveOutOfOrder = true;';
-    ok(est.includes(from), 'the ring patch site exists');
+    ok(verdictOf(est.includes(from)), 'the ring patch site exists');
     const EM = require(M.write('src/usage-estimator.js', editAnchor(est, from, '    this._liveOutOfOrder = true;', "src/usage-estimator.js"), 'ring-scan'));
     const e = new EM.UsageEstimator({ anchorsDir: os.tmpdir(), usageHistory: { ledgerKnowsId: () => false }, resolveIdentity: () => null });
     for (let k = 0; k < 3000; k++) e.noteLive({ rid: 'm' + k, accountId: 'sub-a', model: 'claude-opus-5-5', usd: 0.01, ts: NOW - 3 * 3600e3 + k * 3000 });
@@ -502,7 +502,7 @@ console.log('§5 THE CENSUS (law 4) — every main-thread reader of the ledger\'
   const dead = ROWS.filter(([rf, needle]) => !read(rf).includes(needle));
   ok(undeclared.length === 0, `${sites.length} iterator sites, each a row with its cadence and bound (${ROWS.length} rows)`, undeclared);
   ok(dead.length === 0, 'every row names a live site', dead.map((r) => r[0] + ': ' + r[1]));
-  ok(/\.estimateFor\(id, snap, now\)/.test(read('src/usage-routes.js')) && /byVersion/.test(read('src/cli-caps.js')), 'GET /api/usage\'s other heavy reader in the named sample — cli-caps byVersion under cli-unmeasured-notice byFact — is NAMED here, not changed (another lane\'s)');
+  ok(gateOf(/\.estimateFor\(id, snap, now\)/.test(read('src/usage-routes.js'))) && verdictOf(/byVersion/.test(read('src/cli-caps.js'))), 'GET /api/usage\'s other heavy reader in the named sample — cli-caps byVersion under cli-unmeasured-notice byFact — is NAMED here, not changed (another lane\'s)');
 }
 
 console.log('§6 B2 — the dark-taint set from the (host, account) index: the walk\'s set, once per evaluation');
@@ -523,7 +523,7 @@ console.log('§6 B2 — the dark-taint set from the (host, account) index: the w
   for (let k = 0; k < 37; k++) w.uh.hostAccountsIn(['H1', 'H2'], NOW - 7 * DAY, NOW);
   w.uh._events = ev0;
   const eng = read('src/server/usage-pool-engine.js');
-  ok(walks === 0 && /function darkTaintedAccounts\(nowMs = Date\.now\(\)\) \{[\s\S]{0,700}if \(_darkTaintMemo\.key === key\) return _darkTaintMemo\.taint;/.test(eng) && (eng.match(/pessimism: darkTaintedAccounts\(now\)/g) || []).length === 10 && !/usageHistory\._events\(since, Date\.now\(\)\)/.test(eng),
+  ok(walks === 0 && gateOf(/function darkTaintedAccounts\(nowMs = Date\.now\(\)\) \{[\s\S]{0,700}if \(_darkTaintMemo\.key === key\) return _darkTaintMemo\.taint;/.test(eng)) && (eng.match(/pessimism: darkTaintedAccounts\(now\)/g) || []).length === 10 && !/usageHistory\._events\(since, Date\.now\(\)\)/.test(eng),
     'B2: 37 asks of one evaluation walk 0 rows; the pool engine asks with the evaluation\'s own instant at all 10 decisions and memoizes on (instant, dark hosts, the index\'s version) — once per evaluation; no 7-day walk left', walks);
   rmWorld(w);
 }
@@ -551,7 +551,7 @@ console.log('§7 B1 — THE ARRIVAL LOG: a late row costs its own addition to it
   delete atEnd.host; delete ahead.host; delete before.host; atEnd.atype = ahead.atype = before.atype = 'subscription';
   w.append([atEnd, ahead, before, { ...atEnd }]);
   const steps = [NOW, NOW + 1800e3, NOW + 3600e3, NOW + 7200e3], got = steps.map((t) => ask(t)), want = steps.map((t) => masterWalk(w.uh, ['sub-a'], a0, t));
-  ok(got.every((g, k) => near(g, want[k])) && got[0].requests === want[0].requests && got[3].requests === want[3].requests,
+  ok(gateOf(got.every((g, k) => near(g, want[k]))) && got[0].requests === want[0].requests && got[3].requests === want[3].requests,
     '(3) THE SPLIT BY ts IS EXACT AT ITS EDGE: a row at exactly the old end added once; a row stamped an hour AHEAD of the clock not counted until the window\'s end passes it, then once; a row before `from` nothing; the same row offered twice dropped in _take — every step the walk\'s (to $0.0001, the requests exact)', { got: got.map((x) => [x.total, x.requests]), want: want.map((x) => [x.total, x.requests]) });
   // (1) THE LOG HOLDS WHAT AN ADDITION NEEDS, NOT THE ROW: a backfill of old rows arriving cold leaves no row object in the log
   const L = w.uh._evCache.arr, entries = L ? Math.min(L.seq, L.cap) : 0, objects = L ? Object.values(L).filter((v) => Array.isArray(v) && v.some((x) => x && typeof x === 'object' && 'ts' in x)).length : -1;
@@ -569,10 +569,10 @@ console.log('§7 B1 — THE ARRIVAL LOG: a late row costs its own addition to it
   const burst = (n, t0) => { const rows = []; for (let k = 0; k < n; k++) { const r = w.mkRow(t0 + (k % 1000) * 7, { acct: k % 5 ? 'sub-b' : 'sub-a' }); delete r.host; r.atype = 'subscription'; rows.push(r); } w.append(rows); };
   burst(150000, NOW - 12 * 3600e3);
   const g1 = ask(), t1 = masterWalk(w.uh, ['sub-a'], a0, NOW + 10 * DAY);
-  ok(near(g1, t1) && g1.requests === t1.requests && Number.isFinite(g1.total) && g1.total > g0.total && g1.requests === g0.requests + 30000, `(2) 150 000 arrivals between two asks of one slot (its mark no longer in the 100 000-entry log; the slot's own 40 000+ rows keep the scan guard out — the log's start decides) ⇒ the walk's numbers ($${g1.total.toFixed(4)} / ${g1.requests} requests; before the burst $${g0.total.toFixed(4)} / ${g0.requests})`, { g0: g0.total, g1: g1.total, t1: t1.total, r0: g0.requests, r1: g1.requests });
+  ok(gateOf(near(g1, t1)) && g1.requests === t1.requests && gateOf(Number.isFinite(g1.total)) && g1.total > g0.total && g1.requests === g0.requests + 30000, `(2) 150 000 arrivals between two asks of one slot (its mark no longer in the 100 000-entry log; the slot's own 40 000+ rows keep the scan guard out — the log's start decides) ⇒ the walk's numbers ($${g1.total.toFixed(4)} / ${g1.requests} requests; before the burst $${g0.total.toFixed(4)} / ${g0.requests})`, { g0: g0.total, g1: g1.total, t1: t1.total, r0: g0.requests, r1: g1.requests });
   // a slot whose mark is EXACTLY the log's oldest entry: arrivals since it are all still held
   const L = w.uh._evCache.arr, oldest = L.seq - L.cap, held = w.uh.arrivalsSince(oldest), gone = w.uh.arrivalsSince(oldest - 1);
-  ok(Array.isArray(held) && held.length === L.cap && gone === null, `(2) the log answers from its oldest held sequence (${held && held.length} entries) and refuses one before it (null ⇒ the walk)`);
+  ok(gateOf(Array.isArray(held)) && held.length === L.cap && gone === null, `(2) the log answers from its oldest held sequence (${held && held.length} entries) and refuses one before it (null ⇒ the walk)`);
   rmWorld(w);
 }
 console.log('§8 B3 + the rest — the hour sums, the stepped plan, the relearn spread, rates.json on the store writer, the pool\'s verdicts');
@@ -583,11 +583,11 @@ console.log('§8 B3 + the rest — the hour sums, the stepped plan, the relearn 
   const a0 = NOW - 39 * DAY + 1234567, b0 = NOW - 2 * DAY + 7654321;
   w.zero(); const got = w.UA.costBetweenMulti(w.uh, ['sub-c', '__global__'], a0, b0); const rows = w.visits();
   const truth = masterWalk(w.uh, ['sub-c', '__global__'], a0, b0), whole = w.visits() - rows;
-  ok(!!w.uh._evCache.hours && near(got, truth) && got.requests === truth.requests && rows <= whole / 100, `B3: a 37-day gap (the sweep's costSince for a long-unread reading) from the HOUR SUMS: ${rows} rows walked (its two edges) of the ${whole} the walk visits — the walk's money to $0.0001 ($${got.total} / $${truth.total}), the requests exact`, { rows, whole, got: got.total, truth: truth.total });
+  ok(!!w.uh._evCache.hours && gateOf(near(got, truth)) && got.requests === truth.requests && rows <= whole / 100, `B3: a 37-day gap (the sweep's costSince for a long-unread reading) from the HOUR SUMS: ${rows} rows walked (its two edges) of the ${whole} the walk visits — the walk's money to $0.0001 ($${got.total} / $${truth.total}), the requests exact`, { rows, whole, got: got.total, truth: truth.total });
   // a row arriving after the install is kept by _take
   const r = w.mkRow(NOW - 20 * DAY + 999, { acct: 'sub-c', i: 500000 }); delete r.host; r.atype = 'subscription'; w.append([r]);
   const g2 = w.UA.costBetweenMulti(w.uh, ['sub-c'], a0 - 3 * DAY, b0 - 1), t2 = masterWalk(w.uh, ['sub-c'], a0 - 3 * DAY, b0 - 1);
-  ok(near(g2, t2), `B3: a row arriving after the sums were built is kept by _take — the next long interval holds it ($${g2.total} / $${t2.total})`, { g2: g2.total, t2: t2.total });
+  ok(verdictOf(near(g2, t2)), `B3: a row arriving after the sums were built is kept by _take — the next long interval holds it ($${g2.total} / $${t2.total})`, { g2: g2.total, t2: t2.total });
   // the hour sums' bytes at this shape (the census figure is the lane report's at the owner's shape)
   const H = w.uh._evCache.hours.cells;
   ok(H.blocks > 0 && H.bytes === H.blocks * w.UA.HOUR_BLOCK_BYTES && w.UA.HOUR_BLOCK_BYTES === 24 * 10 * 8 + 240, `B3 r2: ${H.blocks} (account, UTC day) blocks here — ${H.bytes} bytes (${w.UA.HOUR_BLOCK_BYTES} a block: 24 hours × 10 numbers + 240 of array and Map entry, measured) — the census row's own figure`, { blocks: H.blocks, bytes: H.bytes });
@@ -629,7 +629,7 @@ console.log('§8 B3 + the rest — the hour sums, the stepped plan, the relearn 
     return { ...n, onDisk, ids: w.IDS.length };
   };
   const r3 = b3(null);
-  ok(r3.reads === 0 && r3.writes === 0 && r3.builds === 0 && r3.dirty === r3.ids && r3.onDisk, `B3 ON THE STORE WRITER: a relearn of ${r3.ids} identities in one handler (${r3.ms.toFixed(1)} ms) — ${r3.reads} reads, ${r3.writes} writes, ${r3.builds} JSON builds of rates.json on the loop; ${r3.dirty} dirty marks; the writer's one write puts every identity on disk`, r3);
+  ok(r3.reads === 0 && r3.writes === 0 && r3.builds === 0 && r3.dirty === r3.ids && verdictOf(r3.onDisk), `B3 ON THE STORE WRITER: a relearn of ${r3.ids} identities in one handler (${r3.ms.toFixed(1)} ms) — ${r3.reads} reads, ${r3.writes} writes, ${r3.builds} JSON builds of rates.json on the loop; ${r3.dirty} dirty marks; the writer's one write puts every identity on disk`, r3);
   {
     // RED: master's road (a read + a JSON build + a write + a rename of the whole file on the loop, per identity)
     const M = mutantCopies('usage-ledger-walk-b3w', REPO), src = read('src/usage-estimator.js');
@@ -672,7 +672,7 @@ console.log('§8 B3 + the rest — the hour sums, the stepped plan, the relearn 
   w.est.ratesFor('email:a@x'); const r = w.mkRow(NOW - 60e3, { acct: 'sub-a', host: 'H1', atype: 'subscription' }); w.append([r]);
   const rows = w.uh.cacheCensus(), get = (n) => rows.find((x) => x.name === n);
   const names = ['usage arrival log', 'usage hour sums', 'usage dark-host index', 'usage cost memo'];
-  ok(names.every((n) => !!get(n)) && get('usage arrival log').ceiling === 100000 * 64 + 4 * 4096 * 128 && get('usage cost memo').ceiling === 200000 * 509 && get('usage hour sums').count > 0 && get('usage hour sums').ceiling === w.UA.HOURS_MAX_BYTES && get('usage hour sums').bytes === get('usage hour sums').count * w.UA.HOUR_BLOCK_BYTES && /kept 8 days/.test(get('usage dark-host index').basis || ''),
+  ok(gateOf(names.every((n) => !!get(n))) && get('usage arrival log').ceiling === 100000 * 64 + 4 * 4096 * 128 && get('usage cost memo').ceiling === 200000 * 509 && get('usage hour sums').count > 0 && get('usage hour sums').ceiling === w.UA.HOURS_MAX_BYTES && get('usage hour sums').bytes === get('usage hour sums').count * w.UA.HOUR_BLOCK_BYTES && verdictOf(/kept 8 days/.test(get('usage dark-host index').basis || '')),
     `CONDITION 3 (r2): the memory census names every index with its ceiling — ${names.map((n) => `${n} ${get(n) ? get(n).bytes : '?'} B of ${get(n) && get(n).ceiling ? get(n).ceiling + ' B' : get(n) ? '8 days' : '?'}`).join(' · ')} (the owner's shape: the lane report)`, rows.map((x) => [x.name, x.bytes, x.ceiling, x.basis]));
   rmWorld(w);
 }
@@ -706,11 +706,11 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   const res = [];
   for (const mode of ['pricing', 'swap']) for (const t of bounds) res.push({ mode, t, ...(await run(seedW.UA, mode, t)) });
   const wrongs = res.reduce((n, x) => n + x.wrong, 0), abandoned = res.filter((x) => x.r && x.r.abandoned).length;
-  ok(dry.S > 0 && bounds.length >= 5 && res.every((x) => x.fired) && wrongs === 0 && abandoned === res.length,
+  ok(dry.S > 0 && bounds.length >= 5 && gateOf(res.every((x) => x.fired)) && wrongs === 0 && abandoned === res.length,
     `MUST 1: the store at EVERY boundary (${bounds.length}: before each of its ${Math.ceil(IV.length / 40)} chunks of 40 and the hour sums) × a pricing edit / a same-count swap, a reader in the turn: ${res.length} primes, all abandoned, 0 of ${res.length * IV.length} intervals wrong against the walk`, res.filter((x) => x.wrong || !(x.r && x.r.abandoned)).slice(0, 3));
   const red = [];
   for (const mode of ['pricing', 'swap']) red.push({ mode, ...(await run(storeBlind, mode, dry.S + 1)) });
-  ok(red.every((x) => x.wrong > 0), `RED: a store blind to the epoch (the chunk's check removed) ⇒ ${red.map((x) => `${x.mode}: ${x.wrong} of ${IV.length} wrong (e.g. $${x.first && x.first.got[0]} / ${x.first && x.first.got[1]} served for $${x.first && x.first.truth[0]} / ${x.first && x.first.truth[1]})`).join('; ')}`, red.map((x) => x.wrong));
+  ok(verdictOf(red.every((x) => x.wrong > 0)), `RED: a store blind to the epoch (the chunk's check removed) ⇒ ${red.map((x) => `${x.mode}: ${x.wrong} of ${IV.length} wrong (e.g. $${x.first && x.first.got[0]} / ${x.first && x.first.got[1]} served for $${x.first && x.first.truth[0]} / ${x.first && x.first.truth[1]})`).join('; ')}`, red.map((x) => x.wrong));
   fs.rmSync(dA, { recursive: true, force: true }); fs.rmSync(dB, { recursive: true, force: true });
 }
 {
@@ -746,7 +746,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   const fix = await scene(require('../src/usage-anchors.js'), 32), mut = await scene(twoLoads, 32);
   const badOf = (x) => Object.fromEntries(Object.entries(x.roads).map(([k, v]) => [k, v.reduce((n, y) => n + y.bad, 0)]));
   const fb = badOf(fix), mb = badOf(mut);
-  ok(Object.values(fix.J).every((n) => n >= 3) && Object.values(fb).every((n) => n === 0),
+  ok(gateOf(Object.values(fix.J).every((n) => n >= 3)) && verdictOf(Object.values(fb).every((n) => n === 0)),
     `MUST 2: ONE LOAD PER ASK — another writer's rows taken in by a re-check forced at each later load call of an ask (the walk: ${fix.J.walk - 1}, the extension: ${fix.J.extension - 1}, the hour sums: ${fix.J.hours - 1} calls), three later asks each: every later ask equals the walk (0 / 0 / 0 wrong)`, { J: fix.J, fb });
   ok(mb.walk > 0 && mb.extension > 0 && mb.hours > 0, `RED: an ask that loads again (the pin removed) ⇒ later asks wrong — the walk ${mb.walk}, the extension ${mb.extension}, the hour sums ${mb.hours} (a row counted twice, for good: e.g. ${JSON.stringify((mut.roads.walk.find((x) => x.bad) || {}).out?.[0])} [served $, req, the walk's $, req])`, mb);
 }
@@ -789,10 +789,10 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   for (const mode of ['swap', 'pricing']) for (const t of countTurns) res.push(await run(base.UA, mode, t));
   for (const t of [countTurns[1], countTurns[countTurns.length - 2]]) res.push(await run(base.UA, 'rebuild', t)); // the real road at two count turns (a fold-worker rebuild each — the other kinds cover every count turn)
   const wrongs = res.reduce((k, x) => k + x.wrong + x.afterReprime, 0), aband = res.filter((x) => x.r && x.r.abandoned).length;
-  ok(dry.S >= 5 && res.every((x) => x.fired) && wrongs === 0 && aband === res.length,
+  ok(dry.S >= 5 && gateOf(res.every((x) => x.fired)) && wrongs === 0 && aband === res.length,
     `ROUND 3: an epoch change before EVERY turn of the prime (${dry.turns}: ${dry.S} before the store — the count steps, the finish, the sweep — and the store's) × a swap that drops rows; the count turns also × a same-count swap, a pricing edit and THE REAL REBUILD ROAD (a rewrite, reloadEvents, the fold worker, the swap); 2 late rows of X after: ${res.length} primes, all abandoned, 0 wrong of ${res.length * ASK.length * 2} asks (X, again, a 40-hour interval over X, a sample — and after a re-prime)`, res.filter((x) => x.wrong || x.afterReprime || !(x.r && x.r.abandoned)).slice(0, 3));
   const red = []; for (const t of countTurns.slice(1, 4)) red.push(await run(countBlind, 'drop', t));
-  ok(red.some((x) => x.wrong > 0 && x.afterReprime > 0), `RED: the count phase unjudged and the epoch stamped when it ENDS (09ec6e80d / 7ed96a26d) ⇒ a swap at a count turn: ${red.map((x) => `turn ${x.fireAt}: ${x.wrong} wrong, ${x.afterReprime} after a re-prime`).join('; ')} (e.g. $${red.find((x) => x.first)?.first?.[0]} / ${red.find((x) => x.first)?.first?.[1]} served for $${red.find((x) => x.first)?.first?.[2]} / ${red.find((x) => x.first)?.first?.[3]})`, red);
+  ok(verdictOf(red.some((x) => x.wrong > 0 && x.afterReprime > 0)), `RED: the count phase unjudged and the epoch stamped when it ENDS (09ec6e80d / 7ed96a26d) ⇒ a swap at a count turn: ${red.map((x) => `turn ${x.fireAt}: ${x.wrong} wrong, ${x.afterReprime} after a re-prime`).join('; ')} (e.g. $${red.find((x) => x.first)?.first?.[0]} / ${red.find((x) => x.first)?.first?.[1]} served for $${red.find((x) => x.first)?.first?.[2]} / ${red.find((x) => x.first)?.first?.[3]})`, red);
   fs.rmSync(base.data, { recursive: true, force: true });
 }
 {
@@ -815,14 +815,14 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   } finally { console.warn = realWarn; global.__vsEvent = realEv; }
   const once = (re) => said.filter((m) => re.test(m)).length;
   ok(once(/hour sums stood down/) === 1 && once(/dark-host index stood down/) === 1 && once(/arrival log restarted/) === 1 && restarts === 1
-    && events.includes('usage-hours-stood-down') && events.includes('usage-dark-index-stood-down') && events.includes('usage-arrival-log-restarted')
-    && /^STOOD DOWN at /.test(hoursBasis) && /^STOOD DOWN at /.test(darkBasis),
+    && gateOf(events.includes('usage-hours-stood-down')) && gateOf(events.includes('usage-dark-index-stood-down')) && gateOf(events.includes('usage-arrival-log-restarted'))
+    && gateOf(/^STOOD DOWN at /.test(hoursBasis)) && verdictOf(/^STOOD DOWN at /.test(darkBasis)),
     `ROUND 3: every stand-down is SAID once — the hour sums («${(said.find((m) => /hour sums/.test(m)) || '').slice(8, 90)}…»), the dark-host index, the log's names restart — an event each, and the census rows read «${hoursBasis.slice(0, 40)}…» / «${darkBasis.slice(0, 40)}…»`, { said, events, hoursBasis, darkBasis });
   // the owed rates: the stop path flushes them, the slot backfill reads after a flush
   const server = read('server.js'), sd = server.slice(server.indexOf('function shutdown'), server.indexOf("process.on('SIGTERM', shutdown)")), bf = read('src/ledger-slot-backfill.js');
   const bi = bf.indexOf('_readJson(ratesFp)');
   const est = read('src/usage-estimator.js');
-  ok(/storeWriter\(\)\.dirty\(fp, \{ name: 'usage-rates\.write'/.test(est) && /beginExit|exitFlush/.test(server) && !/flushRatesIn/.test(sd) && bi > 0 && /\n {8}est\.flushRates\(\);/.test(bf) && !/typeof est\.flushRates/.test(bf), 'ROUND 3 ON THE STORE WRITER: rates.json is a store of the writer — the stop path\'s exit flush writes what it owes (no flush of ours); the slot backfill\'s pass ends with its rates on disk (est.flushRates(), no typeof guard)');
+  ok(gateOf(/storeWriter\(\)\.dirty\(fp, \{ name: 'usage-rates\.write'/.test(est)) && gateOf(/beginExit|exitFlush/.test(server)) && !/flushRatesIn/.test(sd) && bi > 0 && gateOf(/\n {8}est\.flushRates\(\);/.test(bf)) && !/typeof est\.flushRates/.test(bf), 'ROUND 3 ON THE STORE WRITER: rates.json is a store of the writer — the stop path\'s exit flush writes what it owes (no flush of ours); the slot backfill\'s pass ends with its rates on disk (est.flushRates(), no typeof guard)');
   // a pinned ask whose load throws while the ledger is loading answers master's «partial»; a whole ledger's throw stays a throw
   const w = world(REPO, { seed: 42, rows: 2000 }), realLoad = w.uh._loadEvents, realLoading = w.uh.ledgerLoading;
   w.uh._loadEvents = () => { throw new Error('EIO injected'); };
@@ -830,7 +830,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   try { w.uh.ledgerLoading = () => ({ bytesLeft: 1 }); loadingAns = w.UA.costBetweenMulti(w.uh, ['sub-a'], NOW - DAY, NOW); } catch (e) { loadingAns = { threw: String(e.message) }; }
   try { w.uh.ledgerLoading = () => null; w.UA.costBetweenMulti(w.uh, ['sub-a'], NOW - DAY, NOW); } catch { wholeThrew = true; }
   w.uh._loadEvents = realLoad; w.uh.ledgerLoading = realLoading; rmWorld(w);
-  ok(loadingAns && loadingAns.partial === true && !loadingAns.threw && wholeThrew, `ROUND 3: a pinned ask whose load throws WHILE the ledger loads answers as master — partial (${JSON.stringify(loadingAns && { total: loadingAns.total, partial: loadingAns.partial, threw: loadingAns.threw })}); with the ledger whole it throws, as master`, loadingAns);
+  ok(gateOf(loadingAns) && loadingAns.partial === true && !loadingAns.threw && verdictOf(wholeThrew), `ROUND 3: a pinned ask whose load throws WHILE the ledger loads answers as master — partial (${JSON.stringify(loadingAns && { total: loadingAns.total, partial: loadingAns.partial, threw: loadingAns.threw })}); with the ledger whole it throws, as master`, loadingAns);
 }
 {
   // SMALLER 1 ON THE STORE WRITER — A REPAIR SEES WHAT THIS PROCESS LEARNED: a relearn's rates are owed to the writer;
@@ -866,14 +866,14 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
     && callersOf(roots[x.fn]).every((l) => l.startsWith('src/server/migrations.js:')) // the root: the migrations registry its only caller
     && (roots[x.fn] === x.fn || callersOf(x.fn).every((l) => l.startsWith(x.f + ':')))); // the drop site's own function: called inside its file only
   const wrap = srv.indexOf('usageEstimator.settleRates?.()'), mg = srv.indexOf("require('./src/server/migrations.js').create("), rl = srv.indexOf('usageEstimator.reloadRates?.()');
-  ok(rr.there && !rr.back && rr.other && sites.length >= 4 && called && wrap > 0 && wrap < mg && mg < rl, `SMALLER 1 ON THE STORE WRITER: the rates a relearn owed to the writer are on disk after settleRates (${rr.there}); the repair drops the file; after reloadRates another identity's persist writes ${rr.back ? 'the DROPPED rates back' : 'nothing dropped back'}; ${sites.length} drop sites (${sites.map((x) => x.fn).join(', ')}), each reached only from the boot's migrations, which server.js runs between settleRates and reloadRates`, { rr, sites });
+  ok(gateOf(rr.there) && !rr.back && gateOf(rr.other) && sites.length >= 4 && gateOf(called) && wrap > 0 && wrap < mg && mg < rl, `SMALLER 1 ON THE STORE WRITER: the rates a relearn owed to the writer are on disk after settleRates (${rr.there}); the repair drops the file; after reloadRates another identity's persist writes ${rr.back ? 'the DROPPED rates back' : 'nothing dropped back'}; ${sites.length} drop sites (${sites.map((x) => x.fn).join(', ')}), each reached only from the boot's migrations, which server.js runs between settleRates and reloadRates`, { rr, sites });
   {
     // RED: a reload that keeps the copy read before the migration — the dropped rates come back at the next persist
     const M = mutantCopies('usage-ledger-walk-r2w', REPO), src = read('src/usage-estimator.js');
     const from = '  reloadRates() { this._seeded = false; this._ratesAll = null;';
     const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '  reloadRates() { this._seeded = false;', "src/usage-estimator.js"), 'reload-keeps')) : null;
     const R = EM ? r1(EM) : null;
-    ok(!!R && R.back, `RED: a reload that keeps the copy ⇒ the dropped identity is written back (${R && R.back})`, R);
+    ok(!!R && verdictOf(R.back), `RED: a reload that keeps the copy ⇒ the dropped identity is written back (${R && R.back})`, R);
   }
   rmWorld(wR1);
 }
@@ -901,7 +901,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   const c = w.uh._evCache, a0 = NOW - 30 * DAY + 777, b0 = NOW - 3 * DAY;
   w.zero(); const g = w.UA.costBetweenMulti(w.uh, ['sub-c'], a0, b0), walked = w.visits(), t = masterWalk(w.uh, ['sub-c'], a0, b0);
   w.UA.primeCostsStepped(w.uh, [{ ids: ['sub-b'], intervals: [[NOW - 3 * DAY, NOW - 2 * DAY]] }], { syncMaxRows: 1e9, hoursMaxBytes: 5 * w.UA.HOUR_BLOCK_BYTES });
-  ok(!c.hours && !!c.hoursOver && c.hoursOver.blocks === 5 && near(g, t) && g.requests === t.requests && walked > 100, `SMALLER 3: the hour sums past their ceiling (here 5 blocks) are not installed — a 27-day gap walks (${walked} rows), the walk's money ($${g.total}) — and the ledger builds none again (the next prime: ${c.hours ? 'BUILT' : 'none'})`, { hours: !!c.hours, over: c.hoursOver, walked });
+  ok(!c.hours && !!c.hoursOver && c.hoursOver.blocks === 5 && gateOf(near(g, t)) && g.requests === t.requests && walked > 100, `SMALLER 3: the hour sums past their ceiling (here 5 blocks) are not installed — a 27-day gap walks (${walked} rows), the walk's money ($${g.total}) — and the ledger builds none again (the next prime: ${c.hours ? 'BUILT' : 'none'})`, { hours: !!c.hours, over: c.hoursOver, walked });
   // the dark-host index: kept 8 days behind the last ask; an ask before its floor walks; every answer the walk's
   const walkSet = (since, to) => { const s = new Set(); for (const ev of w.uh._events(since, to)) if (ev.host === 'H1' && ev.acct && ev.atype !== 'host') s.add(ev.acct); return [...s].sort().join(','); };
   const idx = (since, to) => { const r = w.uh.hostAccountsIn(['H1'], since, to); return { s: [...r.accts].sort().join(','), walked: !!r.walked }; };
@@ -909,7 +909,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   let held = 0, below = 0; for (const byA of (c.hostAcct || new Map()).values()) for (const l of byA.values()) { held += l.ts.length; below += l.ts.filter((x) => x < floor).length; }
   const qs = [[t1 - 7 * DAY, t1, q1], [NOW - 7 * DAY, NOW, idx(NOW - 7 * DAY, NOW)], [t1 - 12 * DAY, t1 - 5 * DAY, idx(t1 - 12 * DAY, t1 - 5 * DAY)]];
   const late = w.mkRow(t1 - 9 * DAY, { acct: 'sub-c' }); late.host = 'H1'; late.atype = 'subscription'; const v0 = w.uh.hostAccountsVersion(); w.append([late]);
-  ok(floor === t1 - 8 * DAY && below === 0 && held > 0 && qs.every(([a, b, q]) => q.s === walkSet(a, b)) && qs[2][2].walked && !qs[1][2].walked && w.uh.hostAccountsVersion() !== v0,
+  ok(floor === t1 - 8 * DAY && below === 0 && held > 0 && gateOf(qs.every(([a, b, q]) => q.s === walkSet(a, b))) && gateOf(qs[2][2].walked) && !qs[1][2].walked && w.uh.hostAccountsVersion() !== v0,
     `SMALLER 3: the dark-host index keeps 8 days behind its last ask (floor = that ask's since − 1 day; ${held} rows held, 0 below it); an ask from the index and an ask before its floor (walked) both equal the walk; a resolved row older than the floor is not held and still moves the version`, { floor, below, held, qs: qs.map(([a, b, q]) => [q.s, walkSet(a, b), q.walked]) });
   rmWorld(w);
 }
@@ -927,7 +927,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
     rmWorld(w); return out;
   };
   const kept = scene(80), down = scene(10);
-  ok(kept.held <= 80 && kept.floor === Math.min(kept.newest, Date.now()) - 8 * DAY && kept.eq && down.held === 0 && down.floor === Infinity && down.eq,
+  ok(kept.held <= 80 && kept.floor === Math.min(kept.newest, Date.now()) - 8 * DAY && gateOf(kept.eq) && down.held === 0 && down.floor === Infinity && verdictOf(down.eq),
     `SMALLER 3: the dark-host index's ROW CEILING — past it (here 80) it keeps the 8 days behind its newest row (${kept.held} rows held); a ceiling the 8 days alone pass (here 10) stands it down (0 held, every ask walks) — every answer the walk's`, { kept, down });
 }
 {
@@ -937,7 +937,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   w.UA.costBetweenMulti(w.uh, ['sub-a'], a0, NOW);
   w.append(Array.from({ length: 4200 }, (_, k) => { const r = w.mkRow(NOW - 3600e3 + k, { acct: k % 2 ? 'sub-a' : 'sub-b', model: 'claude-opus-5-5-n' + k }); delete r.host; r.atype = 'subscription'; return r; }));
   const L = w.uh._evCache.arr, g = w.UA.costBetweenMulti(w.uh, ['sub-a'], a0, NOW + 1000), t = masterWalk(w.uh, ['sub-a'], a0, NOW + 1000);
-  ok(L.restarts === 1 && L.names.model.length < 4096 && w.uh.arrivalsSince(L.start - 1) === null && Array.isArray(w.uh.arrivalsSince(L.start)) && near(g, t) && g.requests === t.requests,
+  ok(L.restarts === 1 && L.names.model.length < 4096 && w.uh.arrivalsSince(L.start - 1) === null && gateOf(Array.isArray(w.uh.arrivalsSince(L.start))) && gateOf(near(g, t)) && g.requests === t.requests,
     `SMALLER 3: 4 200 new model names ⇒ the log RESTARTED once at the 4 096-name ceiling (start = sequence ${L.start}); a mark before it is refused (the slot walks: $${g.total} / ${g.requests} = the walk's)`, { restarts: L.restarts, names: L.names.model.length });
   rmWorld(w);
 }
@@ -981,9 +981,9 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   const fx = [], rd = [];
   for (const pre of [2, 9, 21]) for (const mover of ['pricing', 'rebuild']) fx.push(await overlap(pre, mover, false));
   for (const mover of ['pricing', 'rebuild']) rd.push(await overlap(2, mover, true)); // the RED at the depth the gap lives (#2's anchor files)
-  ok(fx.every((x) => x.newPrime && x.turns > 4 && x.unheld === 0 && x.gateOpen === 0 && x.early === 0 && x.walked === 0 && x.landed && x.swept === 1 && x.onWhole >= 1 && x.eq),
+  ok(verdictOf(fx.every((x) => x.newPrime && x.turns > 4 && x.unheld === 0 && x.gateOpen === 0 && x.early === 0 && x.walked === 0 && x.landed && x.swept === 1 && x.onWhole >= 1 && x.eq)),
     `ROUND 4: A PRIME'S HOLD IS ITS OWN — prime #1 at three depths (its anchor files, its count, its sweep) × an epoch that moves (a pricing edit, a rebuild's swap): prime #2 runs ${fx.map((x) => x.turns).join(' / ')} turns, at EVERY one the ledger says loading, the gate holds, the sweep and onWhole wait (0 / 0 / 0) and an ask walks 0 rows; #2 lands, the sweep runs once, onWhole fires, the estimate is the walk's`, fx.filter((x) => x.unheld || x.gateOpen || x.early || x.walked || !x.landed || !x.eq));
-  ok(rd.some((x) => x.unheld > 0 && x.walked > 0), `RED: e477efede's one shared hold (put back verbatim) ⇒ the stale prime's end releases #2's hold — ${rd.map((x) => `${x.mover}@${x.pre}: ${x.unheld} unheld turns, gate open ${x.gateOpen}, an ask walking ${x.walked} rows`).join('; ')}`, rd);
+  ok(verdictOf(rd.some((x) => x.unheld > 0 && x.walked > 0)), `RED: e477efede's one shared hold (put back verbatim) ⇒ the stale prime's end releases #2's hold — ${rd.map((x) => `${x.mover}@${x.pre}: ${x.unheld} unheld turns, gate open ${x.gateOpen}, an ask walking ${x.walked} rows`).join('; ')}`, rd);
 }
 {
   // ROUND 4, SMALLER — SAID ONCE AN EPOCH: a loop that keeps stalling drops prime after prime: «slow» and «dropped» are said ONCE
@@ -1001,7 +1001,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   } finally { global.__vsEvent = realEv; }
   rmWorld(w);
   const n = (re) => said.filter((m) => re.test(m)).length, stop = said.find((m) => /stopped/.test(m)) || '';
-  ok(n(/made no step/) === 1 && n(/is slow/) === 1 && events.filter((e) => /^usage-prime-dropped/.test(e)).length === 3 && /the memo epoch's read threw: the token threw/.test(stop) && /not said again since: .*dropped ×2/.test(stop) && events.some((e) => /^usage-prime-failed:the memo epoch's read/.test(e)) && order.length >= 4 && order.every(Boolean),
+  ok(n(/made no step/) === 1 && n(/is slow/) === 1 && events.filter((e) => /^usage-prime-dropped/.test(e)).length === 3 && gateOf(/the memo epoch's read threw: the token threw/.test(stop)) && gateOf(/not said again since: .*dropped ×2/.test(stop)) && gateOf(events.some((e) => /^usage-prime-failed:the memo epoch's read/.test(e))) && order.length >= 4 && verdictOf(order.every(Boolean)),
     `ROUND 4: three primes dropped in one epoch ⇒ «dropped» and «slow» said ONCE, 3 usage-prime-dropped events, and the next line said carries the count («…${stop.slice(stop.indexOf('(not said'))}»); the throw names its step («${(stop.match(/\(([^)]*threw[^)]*)\)/) || [])[1] || '?'}») + usage-prime-failed; every hold released AFTER its verdict landed (${order.length} releases)`, { said, events, order });
 }
 {
@@ -1029,10 +1029,10 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
     return { slow: said.filter((m) => /is slow/.test(m)).length, stopped: said.filter((m) => /stopped|made no step/.test(m)).length, turns, maxTurn, during, res, relearnMax, relearnWalks, ratesEq, estEq };
   };
   const fx = await starved(require('../src/usage-anchors.js')), rd = await starved(boundFatal);
-  ok(fx.slow >= 1 && fx.stopped === 0 && fx.during === null && fx.res && !fx.res.abandoned && fx.res.intervals > 0 && fx.turns > 6 && fx.maxTurn <= 600 && fx.relearnMax === 0 && fx.relearnWalks === 0 && fx.ratesEq && fx.estEq,
+  ok(fx.slow >= 1 && fx.stopped === 0 && fx.during === null && gateOf(fx.res) && !fx.res.abandoned && fx.res.intervals > 0 && fx.turns > 6 && fx.maxTurn <= 600 && fx.relearnMax === 0 && fx.relearnWalks === 0 && gateOf(fx.ratesEq) && verdictOf(fx.estEq),
     `THE FIRST LEARN NEVER RUNS ON THE SYNCHRONOUS ROAD: a starved prime (each turn 10 ms late, the bound 30 ms) said «slow» and went on — ${fx.turns} turns, the longest walked ${fx.maxTurn} rows (a step's), the readers «still learning» meanwhile (no estimate), it landed (${fx.res && fx.res.intervals} intervals); a relearn of every identity then walks ${fx.relearnWalks} intervals / ${fx.relearnMax} rows; rates and estimate the walk's`, fx);
-  ok(rd.res && rd.res.abandoned && rd.relearnWalks >= 300, `RED: adbd03b3c's fatal bound (planted) ⇒ the prime ended at 30 ms («stopped»), and ONE relearn walks ${rd.relearnWalks} intervals pair by pair (${rd.relearnMax} rows here; 82 k pairs at the owner's shape) — the road the hotfix exists to remove`, rd);
+  ok(gateOf(rd.res) && gateOf(rd.res.abandoned) && rd.relearnWalks >= 300, `RED: adbd03b3c's fatal bound (planted) ⇒ the prime ended at 30 ms («stopped»), and ONE relearn walks ${rd.relearnWalks} intervals pair by pair (${rd.relearnMax} rows here; 82 k pairs at the owner's shape) — the road the hotfix exists to remove`, rd);
 }
 if (BASE) fs.rmSync(BASE, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

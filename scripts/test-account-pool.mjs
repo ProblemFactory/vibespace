@@ -14,7 +14,7 @@ waitEverySave(AccountManager);
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pool-'));
 let pass = 0, fail = 0;
-const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -36,8 +36,8 @@ const C = am.createSubscription({ name: 'Never logged in' }).id; // deliberately
 if (!am.poolSupported()) { console.log('SKIP — pooled accounts are unsupported on ' + process.platform); process.exit(0); }
 
 const { id: P } = am.createPool({ name: 'Pool' });
-ck('pool dir is a SYMLINK, never a real directory', fs.lstatSync(am.subDir(P)).isSymbolicLink());
-ck('pool resolves to a logged-in member', [A, B].includes(am.poolCurrent(P)));
+ck('pool dir is a SYMLINK, never a real directory', verdictOf(fs.lstatSync(am.subDir(P)).isSymbolicLink()));
+ck('pool resolves to a logged-in member', verdictOf([A, B].includes(am.poolCurrent(P))));
 ck('member options exclude the never-logged-in account', !am.poolMembers(P).some((m) => m.id === C));
 
 am.setPoolTarget(P, A);
@@ -50,7 +50,7 @@ const credThroughPool = path.join(am.subDir(P), '.credentials.json');
 const tmp = credThroughPool + '.tmp';
 fs.writeFileSync(tmp, JSON.stringify({ claudeAiOauth: { accessToken: 'rotated', refreshToken: 'r2', expiresAt: Date.now() + 36e5 } }));
 fs.renameSync(tmp, credThroughPool);
-ck('atomicWrite through the pool keeps it a symlink', fs.lstatSync(am.subDir(P)).isSymbolicLink());
+ck('atomicWrite through the pool keeps it a symlink', verdictOf(fs.lstatSync(am.subDir(P)).isSymbolicLink()));
 ck('the refresh landed in the CANONICAL account dir', JSON.parse(fs.readFileSync(am.subCredsPath(A), 'utf-8')).claudeAiOauth.accessToken === 'rotated');
 
 am.setPoolTarget(P, B);
@@ -63,16 +63,16 @@ am.updatePool(P, { members: [A] });
 ck('narrowing members away from the target re-points to a valid member', am.poolCurrent(P) === A);
 am.updatePool(P, { auto: true, hot: true });
 const shown = am.list().accounts.find((x) => x.id === P);
-ck('list() exposes pool state (current/members/auto/hot)', shown.pooled && shown.current === A && shown.auto && shown.hot && !!shown.currentName);
+ck('list() exposes pool state (current/members/auto/hot)', gateOf(shown.pooled) && shown.current === A && gateOf(shown.auto) && gateOf(shown.hot) && !!shown.currentName);
 
 // a real dir must never be replaced by a pool symlink
 fs.unlinkSync(am.subDir(P)); fs.mkdirSync(am.subDir(P));
 let refused = false; try { am.setPoolTarget(P, B); } catch { refused = true; }
-ck('refuses to replace a REAL directory with the pool symlink', refused);
+ck('refuses to replace a REAL directory with the pool symlink', verdictOf(refused));
 fs.rmSync(am.subDir(P), { recursive: true, force: true }); fs.symlinkSync(am.subDir(A), am.subDir(P));
 
 am.remove(P);
-ck('removing the pool leaves the real account dir intact', fs.existsSync(am.subCredsPath(A)));
+ck('removing the pool leaves the real account dir intact', verdictOf(fs.existsSync(am.subCredsPath(A))));
 ck('removing the pool removes the symlink', !fs.existsSync(am.subDir(P)));
 
 // ── Plan C: per-session links (2.315.0) ──────────────────────────────────────
@@ -116,7 +116,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   am.ensureSessionPoolLink(P2X, K1, B);
   am.remove(P2X);
   ck('pool removal clears links dir, member dirs intact',
-    !fs.existsSync(am.poolLinksDir(P2X)) && fs.existsSync(am.subDir(A)) && fs.existsSync(am.subDir(B)));
+    !fs.existsSync(am.poolLinksDir(P2X)) && gateOf(fs.existsSync(am.subDir(A))) && verdictOf(fs.existsSync(am.subDir(B))));
 }
 // ── the removed-member wall (2026-09-28): membership is the CONFIGURED list, and
 // the default re-point is the ENGINE's decision (list[0] only without one) ──
@@ -124,7 +124,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   const D2 = am.createSubscription({ name: 'Acct D' }).id; login(D2);
   const P3 = am.createPool({ name: 'P3' }).id;
   ck('poolMembership: an implicit pool lists EVERY same-backend subscription, signed in or not (C never finished its login)',
-    [A, B, C, D2].every((x) => am.poolMembership(P3).includes(x)));
+    verdictOf([A, B, C, D2].every((x) => am.poolMembership(P3).includes(x))));
   am.updatePool(P3, { members: [A, B, C] });
   ck('poolMembership: an explicit pool lists exactly its members — a signed-out one included (its wall is the login, not the membership)',
     JSON.stringify(am.poolMembership(P3).sort()) === JSON.stringify([A, B, C].sort()));
@@ -132,9 +132,9 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   am.setPoolTarget(P3, A);
   let asked = null;
   am.updatePool(P3, { members: [B, D2] }, { chooseMember: (from, list) => { asked = { from, list: list.map((m) => m.id) }; return D2; } });
-  ck('updatePool: dropping the default asks the chooser FROM the removed member, over the new candidates', asked && asked.from === A && JSON.stringify(asked.list) === JSON.stringify([B, D2]));
+  ck('updatePool: dropping the default asks the chooser FROM the removed member, over the new candidates', gateOf(asked) && asked.from === A && JSON.stringify(asked.list) === JSON.stringify([B, D2]));
   ck('updatePool: …and re-points to the chooser\'s decision (D), not list[0] (B)', am.poolCurrent(P3) === D2);
-  ck('updatePool: …recorded on the slot ledger as removed-from-pool', am.slotTransitions.all().some((r) => !r.sessionId && r.poolId === P3 && r.from === A && r.to === D2 && r.why === 'removed-from-pool'));
+  ck('updatePool: …recorded on the slot ledger as removed-from-pool', verdictOf(am.slotTransitions.all().some((r) => !r.sessionId && r.poolId === P3 && r.from === A && r.to === D2 && r.why === 'removed-from-pool')));
   am.setPoolTarget(P3, B);
   am.updatePool(P3, { members: [A, D2] }, { chooseMember: () => 'sub-not-a-member' });
   ck('updatePool: a chooser answer outside the list is refused — the no-engine fallback (list[0]) stands', am.poolCurrent(P3) === A);
@@ -148,9 +148,9 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   am.updatePool(P3, { priority: [B, A, B, C] });
   ck('priority: saved in order, deduped (a signed-out member may be listed — it is a member)', JSON.stringify(am.get(P3).priority) === JSON.stringify([B, A, C]));
   let bad = null; try { am.updatePool(P3, { priority: [A, 'sub-stranger'] }); } catch (e) { bad = e.message; }
-  ck('priority: a non-member id is refused by name — and nothing is saved', /not a member of this pool: sub-stranger/.test(bad || '') && JSON.stringify(am.get(P3).priority) === JSON.stringify([B, A, C]));
+  ck('priority: a non-member id is refused by name — and nothing is saved', gateOf(/not a member of this pool: sub-stranger/.test(bad || '')) && JSON.stringify(am.get(P3).priority) === JSON.stringify([B, A, C]));
   let bad2 = null; try { am.updatePool(P3, { priority: 'A' }); } catch (e) { bad2 = e.message; }
-  ck('priority: a non-list is refused', /priority must be a list/.test(bad2 || ''));
+  ck('priority: a non-list is refused', verdictOf(/priority must be a list/.test(bad2 || '')));
   am.updatePool(P3, { members: [A, C, D2] });
   ck('priority: narrowing the membership prunes the order (B is gone from it)', JSON.stringify(am.get(P3).priority) === JSON.stringify([A, C]));
   am.updatePool(P3, { auto: false });
@@ -172,7 +172,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   const cache = { fiveHour: { utilization: 0.1 }, sevenDay: { utilization: 0.4 }, scopedWeekly: [{ name: 'Fable', utilization: 1 }, { name: 'Opus', utilization: 0.2 }, { name: 'Mystery', utilization: 0.9 }] };
   const proj = projectCacheForFamily(cache, 'opus');
   ck('projection drops OTHER known families, keeps own + unknown + 5h/7d',
-    proj.scopedWeekly.length === 2 && proj.scopedWeekly.some((b) => b.name === 'Opus') && proj.scopedWeekly.some((b) => b.name === 'Mystery') && !!proj.fiveHour && !!proj.sevenDay);
+    proj.scopedWeekly.length === 2 && gateOf(proj.scopedWeekly.some((b) => b.name === 'Opus')) && gateOf(proj.scopedWeekly.some((b) => b.name === 'Mystery')) && !!proj.fiveHour && !!proj.sevenDay);
   ck('null family = no projection (conservative)', projectCacheForFamily(cache, null).scopedWeekly.length === 3);
   ck('projection hands back the caps it set aside as `spareScoped` (B-8a65: view-only, the pool orders on it) — the cache itself is untouched',
     proj.spareScoped.length === 1 && proj.spareScoped[0].name === 'Fable' && !('spareScoped' in cache));
@@ -195,39 +195,39 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('token slot: gate shut (no measured CLI) ⇒ the member stays out of the pool (today\'s escape)', !amT.poolMembers(PT).some((m) => m.id === T));
   amT.noteCliVersion('2.1.296 (Claude Code)');
   await amT.oatFileSettled();
-  ck('token slot: the measured CLI ⇒ the token is in its folder and it is a pool candidate', amT.readSubCreds(T).oatFile === true && amT.poolMembers(PT).some((m) => m.id === T));
+  ck('token slot: the measured CLI ⇒ the token is in its folder and it is a pool candidate', amT.readSubCreds(T).oatFile === true && verdictOf(amT.poolMembers(PT).some((m) => m.id === T)));
   amT.setPoolTarget(PT, T);
   ck('token slot: the pool dir re-points onto it and resolves through to its token file (no login in it)', amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
   amT.setPoolTarget(PT, X);
-  ck('token slot: …and back onto the login member — the ordinary re-point both ways', amT.poolCurrent(PT) === X && !amT.readSubCreds(PT).oatFile && amT.readSubCreds(PT).loggedIn);
+  ck('token slot: …and back onto the login member — the ordinary re-point both ways', amT.poolCurrent(PT) === X && !amT.readSubCreds(PT).oatFile && verdictOf(amT.readSubCreds(PT).loggedIn));
   // verify r1 F5: the hub's CLI moves to a KNOWN unmeasured version while a conversation's link names T
   const lk = amT.ensureSessionPoolLink(PT, 'sess-7-1791900000000', T, { why: 'spawn' });
   amT.noteCliVersion('2.1.300 (Claude Code)');
   await amT.oatFileSettled();
   ck('token slot (F5): an unmeasured CLI ⇒ T is no candidate for a NEW placement (poolMembers / isPoolMember agree) …', !amT.poolMembers(PT).some((m) => m.id === T) && !amT.isPoolMember(PT, T) && amT.resolveForSpawn(PT, 'claude', { sessionKey: 'sess-8-1791900000000' }).poolTarget === X);
-  ck('…while the conversation linked to it keeps its token file (the running process is the measured binary)', fs.existsSync(path.join(lk, '.credentials.json')) && amT.readSubCreds(T).oatFile === true);
+  ck('…while the conversation linked to it keeps its token file (the running process is the measured binary)', gateOf(fs.existsSync(path.join(lk, '.credentials.json'))) && amT.readSubCreds(T).oatFile === true);
   amT.dropSessionPoolLink(PT, 'sess-7-1791900000000'); amT.dropSessionPoolLink(PT, 'sess-8-1791900000000');
   await amT.syncOatFiles();
   // lane pool-silent-members R1 (inc-mvsjhna7): a CLI update never shrinks a pool in silence — the file STAYS, and the
   // pool's roster names T with the store's reason (90c995a3 took it back here and T read «not logged in»)
-  ck('…and the last link gone, the next sweep KEEPS the file (R1: never taken back for a version reason)', fs.existsSync(path.join(amT.subDir(T), '.credentials.json')) && amT.readSubCreds(T).oatFile === true);
+  ck('…and the last link gone, the next sweep KEEPS the file (R1: never taken back for a version reason)', gateOf(fs.existsSync(path.join(amT.subDir(T), '.credentials.json'))) && amT.readSubCreds(T).oatFile === true);
   const rosT = amT.poolRoster(PT);
   ck('…T is no candidate, but the pool\'s ROSTER lists every member: X placeable, T unplaceable WITH its reason (cli-unmeasured · CLI 2.1.300 · its file there)', JSON.stringify(rosT.map((r) => [r.name, r.placeable])) === JSON.stringify([['Login X', true], ['Token T', false]]) && rosT[1].why.code === 'cli-unmeasured' && rosT[1].why.cli === '2.1.300' && rosT[1].why.file === true, JSON.stringify(rosT));
   ck('…poolRoster and poolMembership name the same members, in the same order (the roster is the membership, never the candidate list)', JSON.stringify(rosT.map((r) => r.id)) === JSON.stringify(amT.poolMembership(PT)));
   // lane oat-in-file-2-1-306: 2.1.306 is measured too (2026-10-21, the verdicts 2.1.296 has) ⇒ no escape on it
   amT.noteCliVersion('2.1.306 (Claude Code)');
   await amT.oatFileSettled();
-  ck('token slot: the hub moves on to 2.1.306 (measured) ⇒ the token is back in T\'s folder and T is a pool candidate again — not escaped', amT.readSubCreds(T).oatFile === true && amT.poolMembers(PT).some((m) => m.id === T) && amT.isPoolMember(PT, T));
+  ck('token slot: the hub moves on to 2.1.306 (measured) ⇒ the token is back in T\'s folder and T is a pool candidate again — not escaped', amT.readSubCreds(T).oatFile === true && gateOf(amT.poolMembers(PT).some((m) => m.id === T)) && verdictOf(amT.isPoolMember(PT, T)));
   amT.setPoolTarget(PT, T);
   ck('…the pool dir re-points onto it and resolves through to its token file, as on 2.1.296', amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
   // lane cli-2-1-307-records: the hub's CLI AUTO-UPDATED to 2.1.307 (measured 2026-10-22, the verdicts 2.1.306 has) ⇒ still no escape
   amT.noteCliVersion('2.1.307 (Claude Code)');
   await amT.oatFileSettled();
-  ck('token slot: the hub auto-updates to 2.1.307 (measured) ⇒ T keeps its token file and stays a pool candidate, the pool dir still resolving through to it — not escaped', amT.readSubCreds(T).oatFile === true && amT.poolMembers(PT).some((m) => m.id === T) && amT.isPoolMember(PT, T) && amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
+  ck('token slot: the hub auto-updates to 2.1.307 (measured) ⇒ T keeps its token file and stays a pool candidate, the pool dir still resolving through to it — not escaped', amT.readSubCreds(T).oatFile === true && gateOf(amT.poolMembers(PT).some((m) => m.id === T)) && gateOf(amT.isPoolMember(PT, T)) && amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
   // lane cli-2-1-308-records: the hub's CLI AUTO-UPDATED again, to 2.1.308 (measured 2026-10-22, the verdicts 2.1.307 has) ⇒ still no escape
   amT.noteCliVersion('2.1.308 (Claude Code)');
   await amT.oatFileSettled();
-  ck('token slot: the hub auto-updates to 2.1.308 (measured) ⇒ T keeps its token file and stays a pool candidate, the pool dir still resolving through to it — not escaped', amT.readSubCreds(T).oatFile === true && amT.poolMembers(PT).some((m) => m.id === T) && amT.isPoolMember(PT, T) && amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
+  ck('token slot: the hub auto-updates to 2.1.308 (measured) ⇒ T keeps its token file and stays a pool candidate, the pool dir still resolving through to it — not escaped', amT.readSubCreds(T).oatFile === true && gateOf(amT.poolMembers(PT).some((m) => m.id === T)) && gateOf(amT.isPoolMember(PT, T)) && amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
 }
 {
   // RED CONTROL (lane oat-in-file-2-1-306, the base): over the one-version fixture (2.1.296 only) the same member on 2.1.306 is escaped
@@ -243,7 +243,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   amB.setOat(T, ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 'y'.repeat(40));
   amB.noteCliVersion('2.1.306 (Claude Code)');
   await amB.oatFileSettled();
-  ck('RED CONTROL (the base): over the one-version fixture (2.1.296 only) the same oat-only member on 2.1.306 stays out of the pool and its folder holds no token (today\'s escape)', !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && amB.poolMembers(PB).some((m) => m.id === X));
+  ck('RED CONTROL (the base): over the one-version fixture (2.1.296 only) the same oat-only member on 2.1.306 stays out of the pool and its folder holds no token (today\'s escape)', !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && verdictOf(amB.poolMembers(PB).some((m) => m.id === X)));
 }
 {
   // RED CONTROL (lane cli-2-1-307-records, the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same member on 2.1.307 is escaped
@@ -260,7 +260,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   amB.setOat(T, ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 'w'.repeat(40));
   amB.noteCliVersion('2.1.307 (Claude Code)');
   await amB.oatFileSettled();
-  ck('RED CONTROL (the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same oat-only member on 2.1.307 stays out of the pool and its folder holds no token — the escape the hub\'s auto-update brought', !!_measured307 && Object.keys(two).join() === '2.1.296,2.1.306' && !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && amB.poolMembers(PB).some((m) => m.id === X));
+  ck('RED CONTROL (the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same oat-only member on 2.1.307 stays out of the pool and its folder holds no token — the escape the hub\'s auto-update brought', !!_measured307 && Object.keys(two).join() === '2.1.296,2.1.306' && !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && verdictOf(amB.poolMembers(PB).some((m) => m.id === X)));
 }
 {
   // RED CONTROL (lane cli-2-1-308-records, the .341 base): over the three-version fixture (2.1.296 + 2.1.306 + 2.1.307) the same member on 2.1.308 is escaped
@@ -277,7 +277,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   amB.setOat(T, ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 'v'.repeat(40));
   amB.noteCliVersion('2.1.308 (Claude Code)');
   await amB.oatFileSettled();
-  ck('RED CONTROL (the .341 base): over the three-version fixture (2.1.296 + 2.1.306 + 2.1.307) the same oat-only member on 2.1.308 stays out of the pool and its folder holds no token — the escape the second auto-update brought', !!_measured308 && Object.keys(three).join() === '2.1.296,2.1.306,2.1.307' && !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && amB.poolMembers(PB).some((m) => m.id === X));
+  ck('RED CONTROL (the .341 base): over the three-version fixture (2.1.296 + 2.1.306 + 2.1.307) the same oat-only member on 2.1.308 stays out of the pool and its folder holds no token — the escape the second auto-update brought', !!_measured308 && Object.keys(three).join() === '2.1.296,2.1.306,2.1.307' && !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && verdictOf(amB.poolMembers(PB).some((m) => m.id === X)));
 }
 {
   // lane pool-silent-members R1: 2.1.312 measured 2026-10-28 (the loopback rung) ⇒ no escape on it; over the .360 base's
@@ -299,10 +299,10 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
     return { cand: amB.poolMembers(PB).some((m) => m.id === T), member: amB.isPoolMember(PB, T), file: amB.readSubCreds(T).oatFile === true, why };
   };
   const now = await run('now', null);
-  ck('token slot: the hub auto-updated to 2.1.312 (measured 2026-10-28) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', now.cand && now.member && now.file && now.why === null, JSON.stringify(now));
+  ck('token slot: the hub auto-updated to 2.1.312 (measured 2026-10-28) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', gateOf(now.cand) && gateOf(now.member) && gateOf(now.file) && now.why === null, JSON.stringify(now));
   const fourF = path.join(DATA, 'fx-to-2.1.308.json'); fs.writeFileSync(fourF, JSON.stringify({ versions: four }));
   const base = await run('base', fourF);
-  ck('RED CONTROL (the .360 base, 90c995a3): over the four-version fixture (2.1.296 – 2.1.308) the same member on 2.1.312 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.312 unmeasured)', !!measured312 && Object.keys(four).join() === '2.1.296,2.1.306,2.1.307,2.1.308' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.312' && base.why.file === false, JSON.stringify(base));
+  ck('RED CONTROL (the .360 base, 90c995a3): over the four-version fixture (2.1.296 – 2.1.308) the same member on 2.1.312 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.312 unmeasured)', !!measured312 && Object.keys(four).join() === '2.1.296,2.1.306,2.1.307,2.1.308' && !base.cand && !base.member && !base.file && gateOf(base.why) && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.312' && base.why.file === false, JSON.stringify(base));
 }
 {
   // lane oat-in-file-2-1-314: 2.1.314 measured 2026-10-30 (the same loopback rung) ⇒ no escape on it; over the .364 base's
@@ -324,10 +324,10 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
     return { cand: amB.poolMembers(PB).some((m) => m.id === T), member: amB.isPoolMember(PB, T), file: amB.readSubCreds(T).oatFile === true, why };
   };
   const now = await run('now', null);
-  ck('token slot: the hub auto-updated to 2.1.314 (measured 2026-10-30) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', now.cand && now.member && now.file && now.why === null, JSON.stringify(now));
+  ck('token slot: the hub auto-updated to 2.1.314 (measured 2026-10-30) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', gateOf(now.cand) && gateOf(now.member) && gateOf(now.file) && now.why === null, JSON.stringify(now));
   const fiveF = path.join(DATA, 'fx-to-2.1.312.json'); fs.writeFileSync(fiveF, JSON.stringify({ versions: five }));
   const base = await run('base', fiveF);
-  ck('RED CONTROL (the .364 base, 43d0f8d2d): over the five-version fixture (2.1.296 – 2.1.312) the same member on 2.1.314 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.314 unmeasured)', !!measured314 && Object.keys(five).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.314' && base.why.file === false, JSON.stringify(base));
+  ck('RED CONTROL (the .364 base, 43d0f8d2d): over the five-version fixture (2.1.296 – 2.1.312) the same member on 2.1.314 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.314 unmeasured)', !!measured314 && Object.keys(five).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312' && !base.cand && !base.member && !base.file && gateOf(base.why) && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.314' && base.why.file === false, JSON.stringify(base));
 }
 {
   // lane cli-2-1-319-records: the SWEEP'S VERDICT over a stub member set — 2.1.319 measured 2026-11-07 (the same loopback rung) ⇒ placed; over the .383
@@ -349,10 +349,10 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
     return { cand: amB.poolMembers(PB).some((m) => m.id === T), member: amB.isPoolMember(PB, T), file: amB.readSubCreds(T).oatFile === true, why };
   };
   const now = await run('now', null);
-  ck('token slot: the hub auto-updated to 2.1.319 (measured 2026-11-07) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', now.cand && now.member && now.file && now.why === null, JSON.stringify(now));
+  ck('token slot: the hub auto-updated to 2.1.319 (measured 2026-11-07) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', gateOf(now.cand) && gateOf(now.member) && gateOf(now.file) && now.why === null, JSON.stringify(now));
   const sixF = path.join(DATA, 'fx-to-2.1.314.json'); fs.writeFileSync(sixF, JSON.stringify({ versions: six }));
   const base = await run('base', sixF);
-  ck('RED CONTROL (the .383 base, 8b3fdb6ab): over the six-version fixture (2.1.296 – 2.1.314) the same member on 2.1.319 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.319 unmeasured)', !!measured319 && Object.keys(six).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312,2.1.314' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.319' && base.why.file === false, JSON.stringify(base));
+  ck('RED CONTROL (the .383 base, 8b3fdb6ab): over the six-version fixture (2.1.296 – 2.1.314) the same member on 2.1.319 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.319 unmeasured)', !!measured319 && Object.keys(six).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312,2.1.314' && !base.cand && !base.member && !base.file && gateOf(base.why) && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.319' && base.why.file === false, JSON.stringify(base));
 }
 {
   // lane fable-52-cli-321: the same verdict for 2.1.321 — measured 2026-11-09 (the same loopback rung) before the owner's install that day ⇒ placed; over the
@@ -374,10 +374,10 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
     return { cand: amB.poolMembers(PB).some((m) => m.id === T), member: amB.isPoolMember(PB, T), file: amB.readSubCreds(T).oatFile === true, why };
   };
   const now = await run('now', null);
-  ck('token slot: the hub updates to 2.1.321 (measured 2026-11-09) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', now.cand && now.member && now.file && now.why === null, JSON.stringify(now));
+  ck('token slot: the hub updates to 2.1.321 (measured 2026-11-09) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', gateOf(now.cand) && gateOf(now.member) && gateOf(now.file) && now.why === null, JSON.stringify(now));
   const sevenF = path.join(DATA, 'fx-to-2.1.319.json'); fs.writeFileSync(sevenF, JSON.stringify({ versions: seven }));
   const base = await run('base', sevenF);
-  ck('RED CONTROL (the .386 base, f5e087bb5): over the seven-version fixture (2.1.296 – 2.1.319) the same member on 2.1.321 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.321 unmeasured)', !!measured321 && Object.keys(seven).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312,2.1.314,2.1.319' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.321' && base.why.file === false, JSON.stringify(base));
+  ck('RED CONTROL (the .386 base, f5e087bb5): over the seven-version fixture (2.1.296 – 2.1.319) the same member on 2.1.321 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.321 unmeasured)', !!measured321 && Object.keys(seven).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312,2.1.314,2.1.319' && !base.cand && !base.member && !base.file && gateOf(base.why) && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.321' && base.why.file === false, JSON.stringify(base));
 }
 {
   // lane cli-2-1-319-records: THE 11 MEMBERS OF 11-06, through the REAL sweep (src/server/oat-file-sync.js, a stub --version): members placed on 2.1.314,
@@ -400,12 +400,12 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   members.forEach((id, i) => amA.setOat(id, ['sk', '-ant-oat01-'].join('') + 'SWEEPfake' + i + '_' + 'w'.repeat(40)));
   await amA.oatFileSettled();
   const on314 = state(amA);
-  ck('the 11-06 hub, three stub members: placed on 2.1.314 — candidates, each token in its folder, no reason', on314.every((m) => m.cand && m.file && m.why === null), JSON.stringify(on314.map((m) => [m.cand, m.file, m.why])));
+  ck('the 11-06 hub, three stub members: placed on 2.1.314 — candidates, each token in its folder, no reason', verdictOf(on314.every((m) => m.cand && m.file && m.why === null)), JSON.stringify(on314.map((m) => [m.cand, m.file, m.why])));
   const un = await sweep(amA, '2.1.319 (Claude Code)'), off = state(amA);
-  ck('the box updates to 2.1.319, the fixture without its row (the .383 base, 8b3fdb6ab) ⇒ the sweep says unmeasured: every token file KEPT byte for byte, none a candidate, each NAMED cli-unmeasured · 2.1.319', un.caps && un.caps.ok === false && un.caps.cli === '2.1.319' && off.every((m, i) => !m.cand && m.file && m.bytes === on314[i].bytes && m.why && m.why.code === 'cli-unmeasured' && m.why.cli === '2.1.319') && un.lines.some((l) => /claude CLI 2\.1\.319 — held — no PASS on record/.test(l)), JSON.stringify({ caps: un.caps, lines: un.lines, off: off.map((m) => [m.cand, m.file, m.why]) }));
+  ck('the box updates to 2.1.319, the fixture without its row (the .383 base, 8b3fdb6ab) ⇒ the sweep says unmeasured: every token file KEPT byte for byte, none a candidate, each NAMED cli-unmeasured · 2.1.319', gateOf(un.caps) && un.caps.ok === false && un.caps.cli === '2.1.319' && gateOf(off.every((m, i) => !m.cand && m.file && m.bytes === on314[i].bytes && m.why && m.why.code === 'cli-unmeasured' && m.why.cli === '2.1.319')) && verdictOf(un.lines.some((l) => /claude CLI 2\.1\.319 — held — no PASS on record/.test(l))), JSON.stringify({ caps: un.caps, lines: un.lines, off: off.map((m) => [m.cand, m.file, m.why]) }));
   const amB = new AccountManager({ dataDir: dir }); // the release: the committed fixture, over the same data dir
   const on = await sweep(amB, '2.1.319 (Claude Code)'), back = state(amB);
-  ck('the release that ships the row ⇒ the next tick places them: measured, every member a candidate again, no reason left, the same token bytes — no re-login, nothing pressed', !!rec319 && on.caps && on.caps.ok === true && on.caps.cli === '2.1.319' && back.every((m, i) => m.cand && m.file && m.why === null && m.bytes === on314[i].bytes) && on.lines.some((l) => /claude CLI 2\.1\.319 — measured/.test(l)), JSON.stringify({ caps: on.caps, lines: on.lines, back: back.map((m) => [m.cand, m.file, m.why]) }));
+  ck('the release that ships the row ⇒ the next tick places them: measured, every member a candidate again, no reason left, the same token bytes — no re-login, nothing pressed', !!rec319 && gateOf(on.caps) && on.caps.ok === true && on.caps.cli === '2.1.319' && gateOf(back.every((m, i) => m.cand && m.file && m.why === null && m.bytes === on314[i].bytes)) && verdictOf(on.lines.some((l) => /claude CLI 2\.1\.319 — measured/.test(l))), JSON.stringify({ caps: on.caps, lines: on.lines, back: back.map((m) => [m.cand, m.file, m.why]) }));
 }
 {
   // THE ONE ANSWER (R2): _unplaceableWhy is null EXACTLY when _placeable is true — over every shape a member can be in
@@ -423,7 +423,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ];
   await amW.oatFileSettled();
   const rows = ids.map((id) => ({ name: amW.get(id).name, placeable: amW._placeable('claude', id), why: amW._unplaceableWhy('claude', id) }));
-  ck('R2: _unplaceableWhy(id) is null ⇔ _placeable(id) — one answer over a live login, a wiped one, no file, a token with no file, a token over a wiped login, our token file', rows.every((r) => r.placeable === (r.why === null)) && rows[0].placeable === true && rows.slice(1).every((r) => r.why && typeof r.why.code === 'string'), JSON.stringify(rows));
+  ck('R2: _unplaceableWhy(id) is null ⇔ _placeable(id) — one answer over a live login, a wiped one, no file, a token with no file, a token over a wiped login, our token file', gateOf(rows.every((r) => r.placeable === (r.why === null))) && rows[0].placeable === true && verdictOf(rows.slice(1).every((r) => r.why && typeof r.why.code === 'string')), JSON.stringify(rows));
   ck('R2: …each refusal says its own fact (wiped ⇒ logged-out, no file ⇒ no-file, a token with no file on an unmeasured CLI ⇒ cli-unmeasured · file:false)', rows[1].why.code === 'logged-out' && rows[2].why.code === 'no-file' && rows[3].why.code === 'cli-unmeasured' && rows[3].why.file === false && rows[4].why.code === 'cli-unmeasured', JSON.stringify(rows.map((r) => [r.name, r.why && r.why.code])));
 }
 {
@@ -456,11 +456,11 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('r2 (b): a locked vault (the restart this deploy makes) ⇒ the token-only member\'s roster reason is the VAULT — {code: vault-locked}: «the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)»', !!r.locked && r.locked.code === 'vault-locked' && APA.unplaceableText(r.locked) === 'the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)' && r.file === false);
   ck('r2 (b): …and before the restarted hub\'s first sweep (no refusal known yet) it reads «not written to its folder yet» — never «re-login»', !!r.pending && r.pending.code === 'oat-not-in-folder' && r.pending.reason === 'pending' && !/re-login/.test(APA.unplaceableText(r.pending)));
   const file = path.resolve('src/accounts.js'), src = fs.readFileSync(file, 'utf8'), cut = "      if (f && f.code === 'vault_locked') return { code: 'vault-locked' };\n";
-  ck('RED CONTROL (b): the patch (the vault code dropped — 9d53db09\'s _unplaceableWhy) hits', src.includes(cut));
+  ck('RED CONTROL (b): the patch (the vault code dropped — 9d53db09\'s _unplaceableWhy) hits', verdictOf(src.includes(cut)));
   if (src.includes(cut)) {
     const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(editAnchor(src, cut, '', "src/accounts.js"), file);
     const rc = await run(m.exports.AccountManager, 'mut');
-    ck('RED CONTROL (b): without the vault code the same locked vault is told «… (key-unreadable) — re-login» — the wrong remedy', !!rc.locked && rc.locked.code === 'oat-not-in-folder' && /\(key-unreadable\) — re-login$/.test(APA.unplaceableText(rc.locked)));
+    ck('RED CONTROL (b): without the vault code the same locked vault is told «… (key-unreadable) — re-login» — the wrong remedy', !!rc.locked && rc.locked.code === 'oat-not-in-folder' && verdictOf(/\(key-unreadable\) — re-login$/.test(APA.unplaceableText(rc.locked))));
   }
 }
 // THE PROVIDER OF A POOL MEMBER (q-053 P0b): every member names its provider (a LABEL — readings stay the slot's); the
@@ -474,14 +474,14 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
     for (const x of [a1, a2]) fs.writeFileSync(path.join(amP.subDir(x), '.credentials.json'), CR(x), { mode: 0o600 });
     const pp = amP.createPool({ name: 'Prov' }).id;
     const ms = amP.poolMembers(pp);
-    ck('provider: every member names its provider — a claude subscription = the first-party subscription read off its harness\'s creds row — Claude subscription {id, kind, label}', ms.length === 2 && ms.every((m) => m.provider && m.provider.kind === 'subscription' && m.provider.label === 'Claude subscription' && m.provider.id === 'pv-claude-subscription'));
+    ck('provider: every member names its provider — a claude subscription = the first-party subscription read off its harness\'s creds row — Claude subscription {id, kind, label}', ms.length === 2 && verdictOf(ms.every((m) => m.provider && m.provider.kind === 'subscription' && m.provider.label === 'Claude subscription' && m.provider.id === 'pv-claude-subscription')));
     ck('provider: with no provider store wired every account answers its harness\'s own subscription — never null for a known account', amP.memberProviderOf(a2).label === 'Claude subscription' && amP.memberProviderOf('nope') === null);
     amP.setProviderLookup((acct) => (acct.id === a2 ? { id: 'pv-other', kind: 'openrouter', label: 'OpenRouter', models: [{ id: 'x/y' }] } : null));
     ck('provider: …with the provider store\'s lookup it is that record (models included — the decisions read them)', amP.memberProviderOf(a2).label === 'OpenRouter' && amP.memberProviderOf(a2).models.length === 1 && amP.poolMembers(pp).find((m) => m.id === a2).provider.label === 'OpenRouter');
     const cur = amP.poolCurrentFor(pp, null, { withProvider: true });
-    ck('provider: poolCurrentFor answers {memberId, provider} on ask; its plain answer is the id as before', cur && cur.memberId === amP.poolCurrent(pp) && cur.provider.label && amP.poolCurrentFor(pp, null) === amP.poolCurrent(pp));
+    ck('provider: poolCurrentFor answers {memberId, provider} on ask; its plain answer is the id as before', gateOf(cur) && cur.memberId === amP.poolCurrent(pp) && gateOf(cur.provider.label) && amP.poolCurrentFor(pp, null) === amP.poolCurrent(pp));
     const row0 = amP.list().accounts.find((x) => x.id === pp);
-    ck('provider: a pool lists crossProvider "never" by default (the owner\'s decision ①) and the current member\'s provider', row0.crossProvider === 'never' && row0.currentProvider && row0.currentProvider.kind);
+    ck('provider: a pool lists crossProvider "never" by default (the owner\'s decision ①) and the current member\'s provider', row0.crossProvider === 'never' && gateOf(row0.currentProvider) && verdictOf(row0.currentProvider.kind));
     amP.updatePool(pp, { crossProvider: 'allow' });
     ck('provider: updatePool sets it (allow) and the list says so', amP.list().accounts.find((x) => x.id === pp).crossProvider === 'allow' && amP.get(pp).crossProvider === 'allow');
     let err = null; try { amP.updatePool(pp, { crossProvider: true }); } catch (e) { err = e.message; }
@@ -525,8 +525,8 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
     ck('unplaced: the deleted member\'s provider and name are remembered (goneProviderOf / goneNameOf — the engine\'s verdicts name it)', m.goneProviderOf(one)?.label === 'DeepSeek' && m.goneNameOf(one) === 'One' && m.memberProviderOf(one) === null);
     quiet(() => m.remove(two, ww.engineSays(three)));
     const mark = m.unplacedOf(pp, 'sa');
-    ck('unplaced: the LAST DeepSeek member deleted ⇒ the conversation is UNPLACED — its link gone, it bills nobody (never the Claude default)', m.poolCurrentFor(pp, 'sa') === null && !fs.existsSync(m.sessionPoolLinkPath(pp, 'sa')) && mark && mark.member === two && mark.name === 'Two' && mark.provider.label === 'DeepSeek', JSON.stringify(mark));
-    ck('unplaced: …listed among the pools the delete route decides at once; the Claude conversation untouched', m.unplacedPools().includes(pp) && m.poolCurrentFor(pp, 'sb') === three);
+    ck('unplaced: the LAST DeepSeek member deleted ⇒ the conversation is UNPLACED — its link gone, it bills nobody (never the Claude default)', m.poolCurrentFor(pp, 'sa') === null && !fs.existsSync(m.sessionPoolLinkPath(pp, 'sa')) && gateOf(mark) && mark.member === two && mark.name === 'Two' && mark.provider.label === 'DeepSeek', JSON.stringify(mark));
+    ck('unplaced: …listed among the pools the delete route decides at once; the Claude conversation untouched', gateOf(m.unplacedPools().includes(pp)) && m.poolCurrentFor(pp, 'sb') === three);
     const re = new AccountManager({ dataDir: ww.D3 });
     ck('unplaced: the mark is PERSISTED — a restart reads the conversation unplaced, its provider and member (goneProviderOf from the mark)', re.unplacedOf(pp, 'sa')?.member === two && re.goneProviderOf(two)?.label === 'DeepSeek' && re.poolCurrentFor(pp, 'sa') === null);
     m.noteUnplacedAsked(pp, 'sa', 'ut-9');
@@ -557,11 +557,11 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
       quiet(() => { wm2.am.remove(wm2.two, {}); wm2.am.remove(wm2.one, {}); });
       ck('unplaced mutant RED: …and with no engine at all, onto the Claude DEFAULT', wm2.am.poolCurrentFor(wm2.pp, 'sa') === wm2.three);
     }
-    for (const r of copiesCensus(MU.files, MU.dir, path.resolve('.'), { minCopies: 1, label: 'unplaced: ' })) ck(r.name, r.pass);
+    for (const r of copiesCensus(MU.files, MU.dir, path.resolve('.'), { minCopies: 1, label: 'unplaced: ' })) ck(r.name, verdictOf(r.pass));
   }
   fs.rmSync(GONE, { recursive: true, force: true });
 }
 fs.rmSync(DATA, { recursive: true, force: true });
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

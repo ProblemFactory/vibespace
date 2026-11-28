@@ -32,12 +32,12 @@ const B = require('../src/browser-profiles.js');
 const S = require('../src/browser-stream.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } return !!c; };
 const J = (x) => JSON.stringify(x);
 
 function foldLegs(L, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   // six tabs of 150 px, the chip 46, the ▾+N 44 — shown = the RIGHTMOST, one running
   const rows = ['a', 'b', 'c', 'd', 'e', 'f'].map((ref) => ({ ref, label: ref, state: ref === 'c' ? 'running' : 'idle' }));
   const widths = Object.fromEntries(rows.map((r) => [r.ref, 150]));
@@ -101,7 +101,7 @@ const realFailed = foldLegs(L);
     for (const avail of [1400, 900, 600]) {
       const r = L.stripFold({ rows, widths, avail, shownRef: 'bk-0000000a.2' });
       const used = r.visible.reduce((a, ref) => a + widths[ref], 0) + L.CHIP_PX + (r.folded.length ? L.MORE_PX : 0);
-      ok(r.visible.includes('bk-0000000a.2') && (used <= avail || r.visible.length === 1) && r.visible.length + r.folded.length === 6 && (r.folded.length === 0 || !r.visible.slice(1).some((ref) => ref !== 'bk-0000000a.2' && rows.find((x) => x.ref === ref).state !== 'running' && r.folded.some((fr) => set.findIndex((s) => s[0] === fr) < set.findIndex((s) => s[0] === ref) && rows.find((x) => x.ref === fr).state !== 'running'))), `② ${lang} at ${avail} px: ${r.visible.length} shown / ${r.folded.length} folded, ${used} px used — the shown tab kept, it fits, quiet tabs fold from the right`, r);
+      ok(gateOf(r.visible.includes('bk-0000000a.2')) && (used <= avail || r.visible.length === 1) && r.visible.length + r.folded.length === 6 && (r.folded.length === 0 || !r.visible.slice(1).some((ref) => ref !== 'bk-0000000a.2' && rows.find((x) => x.ref === ref).state !== 'running' && r.folded.some((fr) => set.findIndex((s) => s[0] === fr) < set.findIndex((s) => s[0] === ref) && rows.find((x) => x.ref === fr).state !== 'running'))), `② ${lang} at ${avail} px: ${r.visible.length} shown / ${r.folded.length} folded, ${used} px used — the shown tab kept, it fits, quiet tabs fold from the right`, r);
     }
   }
 }
@@ -126,9 +126,9 @@ console.log('— ③ the own/cap chip + its list');
   const c1 = L.capChip({ rows: [R('idle'), R('released'), R('running')], cap: 3, machine: { used: 4, cap: 6 } });
   ok(c1.own === 2 && c1.text === '2/3' && !c1.full && !c1.machineFull, '2 live of 3 (a released one does not count) — not full');
   const c2 = L.capChip({ rows: [R('idle'), R('idle'), R('running'), R('ended')], cap: 3, machine: { used: 6, cap: 6 } });
-  ok(c2.text === '3/3' && c2.full && !c2.over && c2.machineFull && c2.machine.used === 6, 'AT the cap: red (full); the machine\'s own ceiling is a SEPARATE flag, never the number');
+  ok(c2.text === '3/3' && gateOf(c2.full) && !c2.over && gateOf(c2.machineFull) && c2.machine.used === 6, 'AT the cap: red (full); the machine\'s own ceiling is a SEPARATE flag, never the number');
   const c3 = L.capChip({ rows: [R('idle'), R('idle'), R('idle')], cap: 2 });
-  ok(c3.text === '3/2' && c3.full && c3.over, 'a cap lowered below what runs: 3/2, over (nothing is stopped for it — the next start is refused)');
+  ok(c3.text === '3/2' && gateOf(c3.full) && verdictOf(c3.over), 'a cap lowered below what runs: 3/2, over (nothing is stopped for it — the next start is refused)');
   ok(L.capChip({ rows: [], cap: 99 }).cap === 6 && L.capChip({ rows: [], cap: 0 }).cap === 3 && L.capChip({ rows: [], cap: 1 }).cap === 1, 'the chip\'s cap is clamped to 1..6 (junk ⇒ the default 3)');
   const list = L.stoppableRows([R('idle', { ref: 'mine' }), R('running', { ref: 'busy' }), R('idle', { ref: 'driven', driver: 'you' }), R('released', { ref: 'gone' }), R('idle', { ref: 'shared', kind: 'attachment', owners: 2 })]);
   ok(J(list.map((x) => x.ref)) === J(['mine', 'busy', 'shared']) && list.find((x) => x.ref === 'shared').shared === true && list.find((x) => x.ref === 'shared').owners === 2 && !list.find((x) => x.ref === 'mine').shared, 'the chip lists only live browsers NOT driven by you; a profile other conversations also hold says so (detach instead)');
@@ -142,7 +142,7 @@ console.log('— ③b a tab\'s state words (rowStateWords): a released own brows
 // is refused profile_required (two) — the released ephemeral is never restarted by it, so its tab must not say it would be
 function wordsLegs(Mod, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const W = typeof Mod.rowStateWords === 'function' ? Mod.rowStateWords : () => null;
   const eph = { ref: '~ephemeral', kind: 'ephemeral', state: 'released' };
   const att = { ref: 'bp-00000001', kind: 'attachment', state: 'idle' };
@@ -156,10 +156,10 @@ function wordsLegs(Mod, { quiet = false } = {}) {
 const wordsFailed = wordsLegs(L);
 {
   const WIN = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(/'released-attached': \(\) => t\('Released — used again only when no profile is attached'\)/.test(WIN) && /released: \(\) => t\('Released — the next command starts it again'\)/.test(WIN) && /rowStateWords\(r, st\.rows\)/.test(WIN), '③b the window draws the tab title (and the released status line) from rowStateWords, each code with its own sentence');
+  ok(gateOf(/'released-attached': \(\) => t\('Released — used again only when no profile is attached'\)/.test(WIN)) && gateOf(/released: \(\) => t\('Released — the next command starts it again'\)/.test(WIN)) && verdictOf(/rowStateWords\(r, st\.rows\)/.test(WIN)), '③b the window draws the tab title (and the released status line) from rowStateWords, each code with its own sentence');
   for (const lang of ['zh', 'ja']) {
     const D = fs.readFileSync(path.join(REPO, `src/lib/i18n-${lang}.js`), 'utf8');
-    ok(D.includes('"Released — used again only when no profile is attached":') && D.includes('"Not started yet — the next command starts it":'), `③b the new words have ${lang} entries`);
+    ok(gateOf(D.includes('"Released — used again only when no profile is attached":')) && verdictOf(D.includes('"Not started yet — the next command starts it":')), `③b the new words have ${lang} entries`);
   }
 }
 
@@ -172,10 +172,10 @@ console.log('— ④ the per-conversation cap verdict beside the machine ceiling
   const leases = [{ profileId: 'bp-00000001', browserKey: 'bk-0000000b' }, { profileId: 'bp-00000002', browserKey: 'bk-0000000c' }];
   const own = running.filter((r) => r.owner && B.parentKeyOf(r.owner) === K).length;
   const conv = B.conversationCapVerdict({ own, cap: 2 });
-  ok(conv && conv.scope === 'conversation' && conv.own === 2 && conv.cap === 2 && /2\/2 chip/.test(conv.remedy) && L.capChip({ rows: [{ state: 'idle' }, { state: 'idle' }], cap: 2 }).text === '2/2', 'AT its own cap (2/2): the CONVERSATION refuses first — its remedy names the very chip text the window shows (2/2)');
+  ok(gateOf(conv) && conv.scope === 'conversation' && conv.own === 2 && conv.cap === 2 && gateOf(/2\/2 chip/.test(conv.remedy)) && L.capChip({ rows: [{ state: 'idle' }, { state: 'idle' }], cap: 2 }).text === '2/2', 'AT its own cap (2/2): the CONVERSATION refuses first — its remedy names the very chip text the window shows (2/2)');
   ok(B.conversationCapVerdict({ own, cap: 3 }) === null, 'below its own cap (2/3): the conversation does not refuse…');
   const mach = B.ceilingVerdict(running, leases, { CONCURRENT_CAP: 6 }, { ephemeral: true, browserKey: K });
-  ok(mach && mach.scope === 'machine' && mach.code === 'browser_cap' && mach.holders.length === 2 && mach.others === 4 && /machine ceiling reached/.test(mach.error) && /4 are in other conversations or desktop apps/.test(mach.error), '…but the MACHINE is full (6/6): scope machine, its own two named, the other four COUNTED', mach.error);
+  ok(gateOf(mach) && mach.scope === 'machine' && mach.code === 'browser_cap' && mach.holders.length === 2 && mach.others === 4 && gateOf(/machine ceiling reached/.test(mach.error)) && verdictOf(/4 are in other conversations or desktop apps/.test(mach.error)), '…but the MACHINE is full (6/6): scope machine, its own two named, the other four COUNTED', mach.error);
   ok(!/Other conversation|Third|Shared Work|Someone else|bk-0000000[bc]|bp-0000000[12]|bp-000000e[34]/.test(JSON.stringify(mach)), '…and not one of the other four is named (label, profile id or lease key) anywhere in the refusal');
   ok(B.ceilingVerdict(running.slice(0, 5), leases, { CONCURRENT_CAP: 6 }, { ephemeral: true, browserKey: K }) === null, 'one below the machine ceiling: no machine refusal');
 }
@@ -188,23 +188,23 @@ const MUTANTS = [
 ];
 for (const m of MUTANTS) {
   const found = SRC.includes(m.find);
-  ok(found, `control ${m.tag}: the patched line exists in the model`);
+  ok(verdictOf(found), `control ${m.tag}: the patched line exists in the model`);
   if (!found) continue;
   const Mod = M.load(MODEL, SRC.replace(m.find, m.repl), m.tag);
   const f = foldLegs(Mod, { quiet: true });
-  ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its leg RED (${f.length} failed: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+  ok(verdictOf(f.some((n) => m.expect.test(n))), `control ${m.tag}: the patched copy turns its leg RED (${f.length} failed: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
 }
 {
   // lane P verify (finding 6): the pre-fix words — every released row says "the next command starts it again"
   const find = "  if (row.kind === 'ephemeral' && (rows || []).some((r) => r && r.kind === 'attachment')) return 'released-attached';\n";
   const found = SRC.includes(find);
-  ok(found, 'control released-words: the patched line exists in the model');
+  ok(verdictOf(found), 'control released-words: the patched line exists in the model');
   if (found) {
     const f = wordsLegs(M.load(MODEL, SRC.replace(find, '\n'), 'released-words'), { quiet: true });
-    ok(f.some((n) => /beside an attachment/.test(n)), `control released-words: the patched copy turns its leg RED (${f.length} failed)`);
+    ok(verdictOf(f.some((n) => /beside an attachment/.test(n))), `control released-words: the patched copy turns its leg RED (${f.length} failed)`);
   }
 }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length + 1 })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length + 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 
 console.log(fail || realFailed.length || wordsFailed.length ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail || realFailed.length || wordsFailed.length ? 1 : 0);
+process.exit(fail || realFailed.length || wordsFailed.length ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

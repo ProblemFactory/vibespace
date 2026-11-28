@@ -19,7 +19,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SN = require('../src/stop-nudge.js');
 let failed = 0, passed = 0;
-const ok = (name, cond, extra) => {
+const ok = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra !== undefined ? `\n    ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : ''}`);
 };
@@ -45,10 +45,10 @@ const ROWS = [
 ];
 const runTable = (verdict) => ROWS.map(([name, over, block, why]) => { const v = verdict({ ...base, ...over }); return { name, v, pass: v.block === block && v.why === why, want: { block, why } }; });
 const table = runTable(SN.stopNudgeVerdict);
-for (const r of table) ok(r.name, r.pass, { got: r.v, want: r.want });
+for (const r of table) ok(r.name, verdictOf(r.pass), { got: r.v, want: r.want });
 const seen = new Set(table.map((r) => r.v.why));
-ok(`the table drives EVERY why of the closed set (${SN.STOP_NUDGE_WHYS.join(', ')})`, SN.STOP_NUDGE_WHYS.every((w) => seen.has(w)) && seen.size === SN.STOP_NUDGE_WHYS.length, [...seen]);
-ok('block:true ⇔ why ∈ STOP_NUDGE_BLOCKING (stale, no-turn-start)', table.every((r) => r.v.block === SN.STOP_NUDGE_BLOCKING.includes(r.v.why)));
+ok(`the table drives EVERY why of the closed set (${SN.STOP_NUDGE_WHYS.join(', ')})`, gateOf(SN.STOP_NUDGE_WHYS.every((w) => seen.has(w))) && seen.size === SN.STOP_NUDGE_WHYS.length, [...seen]);
+ok('block:true ⇔ why ∈ STOP_NUDGE_BLOCKING (stale, no-turn-start)', verdictOf(table.every((r) => r.v.block === SN.STOP_NUDGE_BLOCKING.includes(r.v.why))));
 ok('turnStartOf: the later of _userInputAt / _machineInputAt; neither ⇒ null',
   SN.turnStartOf({}) === null && SN.turnStartOf({ _userInputAt: 5 }) === 5 && SN.turnStartOf({ _userInputAt: 5, _machineInputAt: 9 }) === 9
   && SN.turnStartOf({ _machineInputAt: 7, _userInputAt: 3 }) === 7 && SN.turnStartOf({ _machineInputAt: 'x' }) === null && SN.turnStartOf(null) === null);
@@ -61,7 +61,7 @@ ok('src/stop-nudge.js is PURE (no require / import)', !/\brequire\s*\(|^\s*impor
   const mutant = runTable(require(f).stopNudgeVerdict);
   const red = mutant.filter((r) => !r.pass).map((r) => r.name);
   ok('control: the patched copy (first rule cut) differs from the source by that one line', cut.split('\n').length === read('src/stop-nudge.js').split('\n').length - 1);
-  ok(`control: …and the table goes RED on it (${red.length} rows, incl. the FIRST-RULE rows)`, red.length >= 3 && red.some((n) => n.startsWith('FIRST RULE')), red);
+  ok(`control: …and the table goes RED on it (${red.length} rows, incl. the FIRST-RULE rows)`, red.length >= 3 && verdictOf(red.some((n) => n.startsWith('FIRST RULE'))), red);
 }
 
 // ── §2 THE ROUTE OVER A REAL EXPRESS APP ────────────────────────────────────
@@ -116,7 +116,7 @@ realStatus.setByAgent('codex:x1', { state: 'working' });
   fresh(C); const now = Date.now();
   C._userInputAt = now - 20 * MIN; C._bookkeptAt = now - 30 * MIN; statusAge.set('claude:c1', now - 30 * MIN);
   const a0 = asked, c0 = charged, r = await stop(C);
-  ok('bookkept BEFORE the turn started ⇒ the old rule: the stale board is nudged', r.block === true && /vibespace-status/.test(r.reason || ''), r);
+  ok('bookkept BEFORE the turn started ⇒ the old rule: the stale board is nudged', r.block === true && verdictOf(/vibespace-status/.test(r.reason || '')), r);
   ok('…through the spend authorizer and its charge, as before', asked === a0 + 1 && charged === c0 + 1);
   const r2 = await stop(C);
   ok('…and the cooldown then holds (the old rule, unchanged)', r2.block === false && r2.why === 'cooldown', r2);
@@ -148,7 +148,7 @@ for (const [name, m, p, body] of WRITES) {
   // shift the whole turn 35 min into the past: started 40 min ago, reported at minute 5, the status record stale
   C._userInputAt -= 40 * MIN; C._bookkeptAt -= 35 * MIN; statusAge.set('claude:c1', Date.now() - 35 * MIN);
   const a0 = asked, r = await stop(C);
-  ok(`${name} stamps the witness (route ${w.code}) ⇒ a 40-min turn that ran it at minute 5 stops free`, w.code === 200 && stamped && r.block === false && r.why === 'bookkept-this-turn' && asked === a0, { w, r });
+  ok(`${name} stamps the witness (route ${w.code}) ⇒ a 40-min turn that ran it at minute 5 stops free`, w.code === 200 && gateOf(stamped) && r.block === false && r.why === 'bookkept-this-turn' && asked === a0, { w, r });
 }
 { // the resolve half of vibespace-ask, and the reads that never stamp
   const item = (await call(C.agentToken, 'POST', '/api/agent/user-todo', { add: { text: 'to resolve' } })).out.item;
@@ -178,8 +178,8 @@ for (const [name, m, p, body] of WRITES) {
   ok('codex-shaped session that did not bookkeep ⇒ nudged', r2.block === true && !!r2.reason, r2);
   const wrapper = read('data/bin/codex-chat-wrapper.js'), hook = read('data/bin/vibespace-hook.mjs');
   ok('both callers read only block + reason (a free answer carries `why`, which neither starts a turn on)',
-    /fetch\(api \+ '\/api\/agent\/stop-check'/.test(wrapper) && /if \(!d \|\| !d\.block \|\| !d\.reason\) return;/.test(wrapper)
-    && /fetch\(api \+ '\/api\/agent\/stop-check'/.test(hook) && /if \(d && d\.block && d\.reason\)/.test(hook) && /if \(input\.stop_hook_active\) return process\.exit\(0\);/.test(hook));
+    gateOf(/fetch\(api \+ '\/api\/agent\/stop-check'/.test(wrapper)) && gateOf(/if \(!d \|\| !d\.block \|\| !d\.reason\) return;/.test(wrapper))
+    && gateOf(/fetch\(api \+ '\/api\/agent\/stop-check'/.test(hook)) && gateOf(/if \(d && d\.block && d\.reason\)/.test(hook)) && verdictOf(/if \(input\.stop_hook_active\) return process\.exit\(0\);/.test(hook)));
 }
 server.close();
 
@@ -213,11 +213,11 @@ const census = (texts) => {
 const texts = Object.fromEntries(FILES.map((f) => [f, read(f)]));
 const c = census(texts);
 const WANT = ['/api/agent/session-status', '/api/agent/task-progress', '/api/agent/task/progress-redact', '/api/agent/task-plan', '/api/agent/task-backlog', '/api/agent/user-todo'];
-ok(`the census finds every bookkeeping write route (${c.rows.length}: ${c.rows.map((r) => r.route).join(', ')})`, WANT.every((w) => c.rows.some((r) => r.route === w)), c.rows);
-ok('clearAsAgent (progress-redact / ask clear) stamps after a clear that took', c.clearStamps);
+ok(`the census finds every bookkeeping write route (${c.rows.length}: ${c.rows.map((r) => r.route).join(', ')})`, verdictOf(WANT.every((w) => c.rows.some((r) => r.route === w))), c.rows);
+ok('clearAsAgent (progress-redact / ask clear) stamps after a clear that took', verdictOf(c.clearStamps));
 for (const r of c.rows) {
   if (EXEMPT[r.route]) ok(`EXEMPT ${r.route} — ${EXEMPT[r.route]} (and it does not stamp)`, !r.stamps);
-  else ok(`${r.route} (${r.file}) stamps the witness`, r.stamps);
+  else ok(`${r.route} (${r.file}) stamps the witness`, verdictOf(r.stamps));
 }
 for (const [k, why] of Object.entries(READS)) {
   const [m, p] = k.split(' ');
@@ -236,9 +236,9 @@ for (const [k, why] of Object.entries(READS)) {
   const i = ar.indexOf("app.get('/api/agent/stop-check'"), j = ar.indexOf('\n});\n', i), body = ar.slice(i, j);
   const v = body.indexOf('stopNudgeVerdict({'), free = body.indexOf('if (!v.block) return res.json({ block: false, why: v.why });'), auth = body.indexOf("spendGuard.authorize({ reason: 'stop-nudge'");
   ok('stop-check: the verdict → a free answer → THEN the spend authorizer (the order a free stop charges nothing by)', v > 0 && free > v && auth > free, { v, free, auth });
-  ok('stop-check: the turn start and the witness are the verdict\'s inputs', /turnStartedAt: turnStartOf\(s\), bookkeptAt: s\._bookkeptAt/.test(body));
+  ok('stop-check: the turn start and the witness are the verdict\'s inputs', verdictOf(/turnStartedAt: turnStartOf\(s\), bookkeptAt: s\._bookkeptAt/.test(body)));
 }
 
 console.log(`\n${failed ? 'FAILED' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);
 fs.rmSync(tmp, { recursive: true, force: true });
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

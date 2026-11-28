@@ -34,7 +34,7 @@ const [PORT, ...CDP_PORTS] = await freePorts(1 + FACES.length);
 const wt = scratch('roster-badges-wt');
 const home = scratchHome('roster-badges-home', fs);
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 
@@ -88,10 +88,10 @@ const PAGE_CLOCK = `(() => { const RD = Date, t0 = RD.now(), seed = ${seedAt}; c
 
 try {
   bootServer();
-  check('worktree server boots', await waitServer());
+  check('worktree server boots', verdictOf(await waitServer()));
   const ids = [];
   for (const r of ROWS) { const a = await post('/api/accounts/subscription', { name: r.name }); ids.push(a?.id); }
-  check('four subscriptions minted', ids.every(Boolean), ids);
+  check('four subscriptions minted', verdictOf(ids.every(Boolean)), ids);
   const cacheDir = path.join(wt, 'data', 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
   ROWS.forEach((r, i) => {
     fs.writeFileSync(path.join(wt, 'data', 'subs', ids[i], '.credentials.json'), expiredCreds);
@@ -100,7 +100,7 @@ try {
       scopedWeekly: [{ name: 'Fable', utilization: r.uCap, resetsAt: sec(seedAt + r.reset), state: 'running' }], scopedFetchedAt: r.capRead }));
   });
   srv.kill('SIGKILL'); await sleep(400); bootServer();
-  check('the server reboots over the seeded readings', await waitServer());
+  check('the server reboots over the seeded readings', verdictOf(await waitServer()));
 
   const WebSocket = require('ws');
   const launch = async (face, cdpPort) => {
@@ -168,14 +168,14 @@ try {
         const mm = await P.ev(MEASURE);
         const said = mm.rows.map((r) => `row ${r.i + 1}: badge ${r.badges.map((b) => `«${b.text}» ${b.lines} line(s), ${b.overLabel} px² over its label, cut ${b.cutTop}/${b.cutBottom} px by ${b.clip}`).join(', ')}; counts ${r.counts.join(' ')}; age «${r.age ? r.age.text : ''}»${r.age && !r.age.whole ? ' (CUT)' : ''}`).join(' · ');
         const badges = mm.rows.flatMap((r) => r.badges);
-        check(`${P.face} ${lang} ${label} (list ${mm.listW} px): ① every badge ONE line, off its ring's label and every other ring — ${said}`, badges.length >= 4 && badges.every((b) => b.lines === 1 && b.overLabel === 0 && b.overOther === 0), said);
-        check(`${P.face} ${lang} ${label}: ② every badge INSIDE the box that clips its row — the first row at the list's top included`, badges.every((b) => b.cutTop === 0 && b.cutBottom === 0), badges.map((b) => `«${b.text}» cut ${b.cutTop}/${b.cutBottom} by ${b.clip}`).join(' · '));
+        check(`${P.face} ${lang} ${label} (list ${mm.listW} px): ① every badge ONE line, off its ring's label and every other ring — ${said}`, badges.length >= 4 && verdictOf(badges.every((b) => b.lines === 1 && b.overLabel === 0 && b.overOther === 0)), said);
+        check(`${P.face} ${lang} ${label}: ② every badge INSIDE the box that clips its row — the first row at the list's top included`, verdictOf(badges.every((b) => b.cutTop === 0 && b.cutBottom === 0)), badges.map((b) => `«${b.text}» cut ${b.cutTop}/${b.cutBottom} by ${b.clip}`).join(' · '));
         const byName = (r) => mm.rows.find((x) => x.name === r.name) || { badges: [], counts: [], age: null };   // the roster sorts by name
         const want4 = ROWS.map((r) => r.badge).join(' '), got4 = ROWS.map((r) => byName(r).badges[0]?.text).join(' ');
         check(`${P.face} ${lang} ${label}: ③ ONE UNIT STYLE — the badges (the reading's age) ${got4}, the counts under the rings (the time to the reset), the rows' own ages: m / h / d in every language; the tooltip keeps the sentence`,
-          got4 === want4 && mm.rows.every((r) => r.counts.every((c) => /^\d+[mhd]/.test(c)) && (!r.age || !r.age.text || MARK.test(r.age.text))) && badges.every((b) => MARK.test(b.text)) && (lang === 'en' || badges.every((b) => /[^\x00-\x7f]/.test(b.tip))),
+          got4 === want4 && gateOf(mm.rows.every((r) => r.counts.every((c) => /^\d+[mhd]/.test(c)) && (!r.age || !r.age.text || MARK.test(r.age.text)))) && gateOf(badges.every((b) => MARK.test(b.text))) && (lang === 'en' || verdictOf(badges.every((b) => /[^\x00-\x7f]/.test(b.tip)))),
           { want4, got4, counts: mm.rows.map((r) => r.counts), ages: mm.rows.map((r) => r.age && r.age.text), tips: badges.map((b) => b.tip.slice(-40)) });
-        check(`${P.face} ${lang} ${label}: ④ the rows' own ages are whole and say ${ROWS.map((r) => r.age || '—').join(' / ')}, the counts ${ROWS.map((r) => r.counts).join(' / ')} (${mm.rows.map((r) => r.age ? `«${r.age.text}»` : '—').join(' ')})`, mm.rows.every((r) => !r.age || r.age.whole) && ROWS.map((r) => (byName(r).age ? byName(r).age.text : '')).join(' ') === ROWS.map((r) => r.age).join(' ') && ROWS.every((r) => (byName(r).counts[0] || '') === r.counts), mm.rows.map((r) => ({ name: r.name, age: r.age, counts: r.counts })));
+        check(`${P.face} ${lang} ${label}: ④ the rows' own ages are whole and say ${ROWS.map((r) => r.age || '—').join(' / ')}, the counts ${ROWS.map((r) => r.counts).join(' / ')} (${mm.rows.map((r) => r.age ? `«${r.age.text}»` : '—').join(' ')})`, gateOf(mm.rows.every((r) => !r.age || r.age.whole)) && ROWS.map((r) => (byName(r).age ? byName(r).age.text : '')).join(' ') === ROWS.map((r) => r.age).join(' ') && verdictOf(ROWS.every((r) => (byName(r).counts[0] || '') === r.counts)), mm.rows.map((r) => ({ name: r.name, age: r.age, counts: r.counts })));
         const clip = await P.ev(`(() => { const s = document.querySelector('.agents-machine-sec[data-host=""] .acct-list'); const r = s.getBoundingClientRect(); return { x: Math.max(0, r.right - 300), y: Math.max(0, r.top - 6), width: Math.min(300, r.width), height: Math.min(420, r.height + 12) }; })()`);
         const s = await P.cdp('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: 2 } }); fs.writeFileSync(path.join(PNG, `${P.face}-${lang}-${label}.png`), Buffer.from(s.data, 'base64'));
       }
@@ -186,4 +186,4 @@ try {
 finally { for (const c of chromes) { try { c.kill('SIGKILL'); } catch { } } try { srv?.kill('SIGKILL'); } catch { } }
 console.log(`PNGs: ${PNG}`);
 console.log(`\ntest-roster-badges-chrome: ${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

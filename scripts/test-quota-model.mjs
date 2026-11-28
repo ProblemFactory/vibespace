@@ -44,7 +44,7 @@ const NULLQ = require(path.join(ROOT, 'src/harnesses/null-quota.js'));
 const { familyOfScopedBucket } = require(path.join(ROOT, 'src/model-family.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗', m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗', m); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -82,12 +82,12 @@ const sparkAt = (ms) => ({
 console.log('\n① the VALIDATOR refuses what the readers cannot read');
 {
   const good = QM.makeLimitSet({ identity: 'sub-x', fetchedAt: T0, source: 'test', limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '7d', usedPct: 40, resetsAt: 1789509325, measuredAt: T0 })] })] });
-  ok(QM.validateLimitSet(good).ok, 'a well-formed set validates');
+  ok(verdictOf(QM.validateLimitSet(good).ok), 'a well-formed set validates');
   ok(!QM.validateLimitSet(null).ok, 'null is not a set');
   ok(!QM.validateLimitSet({ limits: 'nope' }).ok, 'limits must be an array');
   const dup = { ...good, limits: [good.limits[0], good.limits[0]] };
   const vd = QM.validateLimitSet(dup);
-  ok(!vd.ok && /duplicate/.test(vd.errors.join(' ')), 'two records for one limitId is a duplicate, named');
+  ok(!vd.ok && verdictOf(/duplicate/.test(vd.errors.join(' '))), 'two records for one limitId is a duplicate, named');
   const badScope = { ...good, limits: [{ ...good.limits[0], scope: 'whatever' }] };
   ok(!QM.validateLimitSet(badScope).ok, 'an unknown scope is refused (the closed set is the contract)');
   const badPct = { ...good, limits: [{ ...good.limits[0], windows: [{ ...good.limits[0].windows[0], usedPct: 140 }] }] };
@@ -96,7 +96,7 @@ console.log('\n① the VALIDATOR refuses what the readers cannot read');
   ok(!QM.validateLimitSet(badState).ok, 'an unknown window state is refused');
   const dupKind = { ...good, limits: [{ ...good.limits[0], windows: [good.limits[0].windows[0], good.limits[0].windows[0]] }] };
   ok(!QM.validateLimitSet(dupKind).ok, 'two windows of one kind inside one limit is refused');
-  ok(QM.validateLimitSet(QM.makeLimitSet({})).ok, 'an EMPTY set is valid — "this harness has no limits" is a statement');
+  ok(verdictOf(QM.validateLimitSet(QM.makeLimitSet({})).ok), 'an EMPTY set is valid — "this harness has no limits" is a statement');
 }
 
 console.log('\n② windowState: an empty window is a sliding reset, not a deadline (B-8b12)');
@@ -154,7 +154,7 @@ console.log('\n④ mergeLimitSets merges PER limitId — the B-9213 fixture');
     set = QM.mergeLimitSets(set, CODEXQ.toLimitSet(raw, { identity: '__global_codex__', source: 'codex-rate-limits', fetchedAt: at }));
   }
   eq(set.limits.filter((l) => l.scope === 'plan' || l.scope === 'model').map((l) => l.limitId), ['premium', 'codex_bengalfox', 'codex'], 'THREE quota limits survive the sequence, in arrival order');
-  ok(set.limits.some((l) => l.limitId === 'credits' && l.scope === 'credits'), '…plus the credits limit every push carries (money, not quota — its own scope)');
+  ok(verdictOf(set.limits.some((l) => l.limitId === 'credits' && l.scope === 'credits')), '…plus the credits limit every push carries (money, not quota — its own scope)');
   ok(QM.limitFor(set, {}).limitId === 'codex', 'the plan limit is still the plan limit after 2 Spark pushes');
   eq(QM.windowOfKind(QM.limitFor(set, {}), '7d').usedPct, 5, 'the plan limit still reads 5 % — the Spark push was not news about it');
   ok(QM.limitState(set.limits[0]) === 'unknown', '`premium` reports no windows at all (27/27 measured pushes) and is kept as such');
@@ -179,7 +179,7 @@ console.log('\n⑤ remaining/deadline IGNORE empty windows');
     CODEXQ.toLimitSet(sparkAt(T0 + 1000), { identity: 'cx', source: 'codex-rate-limits', fetchedAt: T0 + 1000 }));
   const nowSec = Math.round(T0 / 1000);
   const r = QM.remaining(set, { nowSec });
-  ok(r.known && r.remaining === 95 && r.by === 'codex', 'remaining = the PLAN limit (95 %), never the empty Spark bucket');
+  ok(gateOf(r.known) && r.remaining === 95 && r.by === 'codex', 'remaining = the PLAN limit (95 %), never the empty Spark bucket');
   const d = QM.deadline(set, { nowSec });
   ok(d === 1789509325, 'the deadline is the plan window\'s pinned reset, NOT the Spark bucket\'s sliding one');
   const sparkLimit = set.limits.find((l) => l.limitId === 'codex_bengalfox');
@@ -189,11 +189,11 @@ console.log('\n⑤ remaining/deadline IGNORE empty windows');
     CODEXQ.toLimitSet(CODEX_PLAN_FULL, { identity: 'cx', source: 'codex-rate-limits', fetchedAt: T0 }),
     CODEXQ.toLimitSet(sparkAt(T0 + 1000), { identity: 'cx', source: 'codex-rate-limits', fetchedAt: T0 + 1000 }));
   const rd = QM.remaining(dead, { nowSec });
-  ok(rd.known && rd.remaining === 0, 'plan limit at 100 % + Spark at 0 % ⇒ 0 % remaining (a Spark bucket never grants headroom the plan lacks)');
+  ok(gateOf(rd.known) && rd.remaining === 0, 'plan limit at 100 % + Spark at 0 % ⇒ 0 % remaining (a Spark bucket never grants headroom the plan lacks)');
   ok(rd.by === 'codex', '…and it names WHICH limit is spent');
   const rep = QM.bucketReport(dead, { nowSec });
   const spark7 = rep.find((x) => x.limitId === 'codex_bengalfox' && x.kind === '7d');
-  ok(spark7 && spark7.state === 'empty' && spark7.counts === false && spark7.resetsAt === 0,
+  ok(gateOf(spark7) && spark7.state === 'empty' && spark7.counts === false && spark7.resetsAt === 0,
     'the report SHOWS the empty bucket (the panel must) but marks it counts:false with no reset to print');
   // the 5h window is a burst rate limiter, never a budget deadline
   const withBurst = QM.mergeLimitSets(set, CLAUDEQ.limitSetFromEvent({ kind: 'fiveHour', utilization: 0.9, resetsAt: nowSec + 600, status: 'allowed' }, { identity: 'cx', nowMs: T0 }));
@@ -212,7 +212,7 @@ console.log('\n⑥ the claude producers: three shapes, one typed set');
   eq(panel.limits.map((l) => l.limitId), ['plan', 'model:fable', 'overage'], 'the /usage panel becomes plan + one model limit + an overage limit');
   ok(panel.limits[1].family === 'fable', 'the scoped bucket carries its FAMILY (injected vocabulary, never guessed in the pure model)');
   ok(panel.limits[2].scope === 'overage' && panel.limits[2].flags.used === 12.5, 'extra usage is its OWN limit with real dollars on it (design §1.4: zero readers today)');
-  ok(panel.extra && panel.extra.orgUuid === 'REDACTED', 'the identity fields ride `extra` and are never lost');
+  ok(gateOf(panel.extra) && panel.extra.orgUuid === 'REDACTED', 'the identity fields ride `extra` and are never lost');
   // ONE rate_limit_event = ONE limit, ONE window
   const ev = CLAUDEQ.limitSetFromEvent({ kind: 'sevenDay', utilization: 0.5, resetsAt: 1789142400, status: 'allowed', overage: { inUse: false } }, { identity: 'sub-a', nowMs: T0 + 1000 });
   eq(ev.limits.map((l) => [l.limitId, l.windows.map((w) => w.kind)]), [['plan', ['7d']], ['overage', []]], 'a rate_limit_event carries exactly one bucket (plus its overage state)');
@@ -231,7 +231,7 @@ console.log('\n⑥ the claude producers: three shapes, one typed set');
 console.log('\n⑦ the null harness answers the same questions');
 {
   const set = NULLQ.NULL_QUOTA.toLimitSet({ identity: 'shell-1', source: 'none', fetchedAt: T0 });
-  ok(QM.validateLimitSet(set).ok, 'the null harness produces a VALID empty set (not null — every reader asks the same questions)');
+  ok(verdictOf(QM.validateLimitSet(set).ok), 'the null harness produces a VALID empty set (not null — every reader asks the same questions)');
   ok(QM.limitFor(set, {}) === null && QM.remaining(set, {}).known === false && QM.deadline(set, {}) === null, 'and every accessor answers "no claim"');
 }
 
@@ -243,15 +243,15 @@ console.log('\n⑧ the ONE write path: per-limit merge on disk, derived legacy v
   for (const [raw, at] of seq) {
     const set = CODEXQ.toLimitSet(raw, { identity: key, source: 'codex-rate-limits', fetchedAt: at });
     const r = W.writeReading({ cacheDir: dir, key, set, source: 'codex-rate-limits', backend: 'codex' });
-    ok(r.ok, `wrote ${raw.limitId} @${at - T0}ms`);
+    ok(verdictOf(r.ok), `wrote ${raw.limitId} @${at - T0}ms`);
   }
   const obj = W.readCacheObject(dir, key);
   eq(obj.limits.filter((l) => l.scope !== 'credits').map((l) => l.limitId), ['premium', 'codex_bengalfox', 'codex'], 'the FILE holds all three quota limits');
   eq(obj.sevenDay.usedPercent, 5, 'the DERIVED legacy view shows the PLAN limit — a legacy reader no longer flips to 0 %');
-  ok(obj.scopedWeekly && obj.scopedWeekly[0].name === 'GPT-5.3-Codex-Spark' && obj.scopedWeekly[0].state === 'empty',
+  ok(gateOf(obj.scopedWeekly) && obj.scopedWeekly[0].name === 'GPT-5.3-Codex-Spark' && obj.scopedWeekly[0].state === 'empty',
     'the Spark limit is projected as a model cap AND carries state:"empty" so no reader counts its sliding reset');
   ok(obj.source === 'codex-rate-limits', 'a producer WE SHIP names itself at the write');
-  ok(obj.limits.every((l) => l.source === 'codex-rate-limits' && l.fetchedAt), 'provenance is stamped PER LIMIT');
+  ok(verdictOf(obj.limits.every((l) => l.source === 'codex-rate-limits' && l.fetchedAt)), 'provenance is stamped PER LIMIT');
   // a re-read is a stable round trip
   const lifted = W.limitsOfCache(obj);
   eq(lifted.limits.filter((l) => l.scope !== 'credits').map((l) => l.limitId), ['premium', 'codex_bengalfox', 'codex'], 'lifting the file back gives the same three limits');
@@ -263,13 +263,13 @@ console.log('\n⑧ the ONE write path: per-limit merge on disk, derived legacy v
   let refused = null;
   const bad = QM.makeLimitSet({ identity: key, fetchedAt: T0, source: 'x', limits: [{ limitId: 'plan', scope: 'nonsense', windows: [] }] });
   const rb = W.writeReading({ cacheDir: dir, key, set: bad, source: 'x', onRefuse: (why) => { refused = why; } });
-  ok(!rb.ok && refused, 'a malformed set is REFUSED loudly (our own producer being wrong is a bug we do not persist)');
+  ok(!rb.ok && verdictOf(refused), 'a malformed set is REFUSED loudly (our own producer being wrong is a bug we do not persist)');
   ok(fs.readFileSync(W.cacheFileFor(dir, key), 'utf8') === before, '…and the stored file is byte-identical');
 
   // a CORRUPT file on disk must not block a new reading
   fs.writeFileSync(W.cacheFileFor(dir, 'corrupt'), JSON.stringify({ fetchedAt: T0, limits: [{ limitId: 'p', scope: 'bogus', windows: [] }] }));
   const rc = W.writeReading({ cacheDir: dir, key: 'corrupt', set: CODEXQ.toLimitSet(CODEX_PLAN, { identity: 'corrupt', source: 'codex-rate-limits', fetchedAt: T0 }), source: 'codex-rate-limits', backend: 'codex' });
-  ok(rc.ok, 'a corrupt file already on disk does not block a new reading (one bad write must never be permanent)');
+  ok(verdictOf(rc.ok), 'a corrupt file already on disk does not block a new reading (one bad write must never be permanent)');
   eq(W.readCacheObject(dir, 'corrupt').limits.map((l) => l.limitId), ['codex', 'credits'], '…and the canonical half is rebuilt from the reading');
 
   // legacy file (no `limits`) merges correctly
@@ -281,17 +281,17 @@ console.log('\n⑧ the ONE write path: per-limit merge on disk, derived legacy v
   }));
   const evSet = CLAUDEQ.limitSetFromEvent({ kind: 'fiveHour', utilization: 0.6, resetsAt: 1788925000, status: 'allowed' }, { identity: 'sub-legacy', nowMs: T0 + 5000 });
   const rl = W.writeReading({ cacheDir: dir, key: 'sub-legacy', set: evSet, extras: { orgUuid: 'REDACTED' }, source: 'rate-limit-event', backend: 'claude', familyOf: familyOfScopedBucket });
-  ok(rl.ok, 'a 5h-only event writes onto a pre-model legacy file');
+  ok(verdictOf(rl.ok), 'a 5h-only event writes onto a pre-model legacy file');
   const lo = W.readCacheObject(dir, 'sub-legacy');
   eq([lo.fiveHour.utilization, lo.sevenDay.utilization, lo.scopedWeekly[0].name], [0.6, 0.78, 'Fable'],
     'the 5h moved, the 7d and the Fable cap were carried forward — the lift + per-limit merge does what nine hand-written preserve lists were doing');
   ok(lo.orgUuid === 'REDACTED', 'the org identity survives');
 
   // the sidecar rule
-  ok(W.writeSidecar(dir, '.window-sub-legacy', { sevenDay: 1789318800 }), 'a sidecar writes beside the cache');
+  ok(verdictOf(W.writeSidecar(dir, '.window-sub-legacy', { sevenDay: 1789318800 })), 'a sidecar writes beside the cache');
   let threw = null; try { W.writeSidecar(dir, 'thing.json', {}); } catch (e) { threw = e.message; }
-  ok(threw && /\.json/.test(threw), 'a sidecar may never end in .json (every usage-cache scanner would pick it up)');
-  ok(!W.isCacheFileName('.window-sub-legacy') && W.isCacheFileName('sub-legacy.json'), 'isCacheFileName tells snapshots from sidecars');
+  ok(gateOf(threw) && verdictOf(/\.json/.test(threw)), 'a sidecar may never end in .json (every usage-cache scanner would pick it up)');
+  ok(!W.isCacheFileName('.window-sub-legacy') && verdictOf(W.isCacheFileName('sub-legacy.json')), 'isCacheFileName tells snapshots from sidecars');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -326,7 +326,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
     console.log('  ⚠ SKIP the write-path census —', skipWhy, '(no source listing; a worktree walk would read runtime products)');
   } else {
     const scope = tracked.filter((f) => (/^src\//.test(f) || /^data\/bin\//.test(f) || f === 'server.js') && !/^scripts\/test-/.test(f));
-    ok(scope.includes('src/usage-cache-write.js') && scope.includes('data/bin/vibespace-usage') && scope.includes('src/usage-routes.js') && scope.includes('server.js'),
+    ok(gateOf(scope.includes('src/usage-cache-write.js')) && gateOf(scope.includes('data/bin/vibespace-usage')) && gateOf(scope.includes('src/usage-routes.js')) && verdictOf(scope.includes('server.js')),
       `⑩ the census scope is non-vacuous (${scope.length} tracked files: src/ + data/bin/ + server.js)`);
     const WRITE = /writeFileSync|renameSync|writeJsonAtomic|appendFileSync/;
     const CACHEY = /USAGE_CACHE_DIR|USAGE_CACHE_FILE|usage-cache|cacheDir/;
@@ -380,14 +380,14 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
     ok(!dead.length, `⑩ no DEAD allowlist entry (an exception nobody prunes becomes a licence; dead: ${JSON.stringify(dead)})`);
     // the repair's named exception is structural, not a promise
     const rr = fs.readFileSync(path.join(ROOT, 'src/reading-repair.js'), 'utf8');
-    ok(/function _writeCacheAtomic\([\s\S]{0,400}writeCacheObject\(\{ cacheDir, key, obj, replace: true/.test(rr),
+    ok(verdictOf(/function _writeCacheAtomic\([\s\S]{0,400}writeCacheObject\(\{ cacheDir, key, obj, replace: true/.test(rr)),
       "⑩ …and the repair's exception is REPLACE mode through the write path, not a second writer");
     ok((rr.match(/_writeCacheAtomic\(/g) || []).length >= 4, '⑩ …used at every one of its cache write sites (definition + 3 calls)');
     // NEGATIVE CONTROL: a synthetic offender is caught by this exact rule
     const offender = "const f = require('path').join(USAGE_CACHE_DIR, 'x.json');\nrequire('fs').writeFileSync(f, '{}');\n";
     const innocent = "// nothing to do with quota\nrequire('fs').writeFileSync(outPath, '{}');\n";
     const detects = (txt) => CACHEY.test(txt) && txt.split('\n').some((L) => WRITE.test(L));
-    ok(detects(offender), '⑩ NEGATIVE CONTROL: a module writing USAGE_CACHE_DIR directly IS detected by this rule');
+    ok(verdictOf(detects(offender)), '⑩ NEGATIVE CONTROL: a module writing USAGE_CACHE_DIR directly IS detected by this rule');
     ok(!detects(innocent), '⑩ …and a module that writes somewhere else entirely is not (the rule is over-inclusive, not vacuous)');
   }
 }
@@ -483,7 +483,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
     ok(!unlisted.length, `⑪ every module touching the raw buckets is CLASSIFIED (unlisted: ${JSON.stringify(unlisted)})`);
     const deadRows = [...TABLE.keys()].filter((f) => !found.includes(f));
     ok(!deadRows.length, `⑪ no dead row (a class that no longer describes anything: ${JSON.stringify(deadRows)})`);
-    ok([...TABLE.values()].every(([c]) => CLASSES[c]), `⑪ every row names one of the ${Object.keys(CLASSES).length} classes`);
+    ok(verdictOf([...TABLE.values()].every(([c]) => CLASSES[c])), `⑪ every row names one of the ${Object.keys(CLASSES).length} classes`);
     const pending = [...TABLE.entries()].filter(([, [c]]) => c === 'pending').map(([f]) => f);
     // A METRIC, not a state: printed every run so the next change can see
     // whether it moved (the standing-sweep rule).
@@ -527,14 +527,14 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
   const A = W.readCacheObject(dir, 'cxs-A'), B = W.readCacheObject(dir, 'cxs-B');
 
   const remA = POOL.accountRemaining(A, nowSec);
-  ok(remA.known && remA.remaining === 0, `⑫ the SPENT account reads 0 % remaining — a Spark bucket at 0 % never grants headroom the plan bucket lacks (${JSON.stringify(remA)})`);
+  ok(gateOf(remA.known) && remA.remaining === 0, `⑫ the SPENT account reads 0 % remaining — a Spark bucket at 0 % never grants headroom the plan bucket lacks (${JSON.stringify(remA)})`);
   const remB = POOL.accountRemaining(B, nowSec);
-  ok(remB.known && remB.remaining === 95, `⑫ the healthy account reads its PLAN limit, not whichever limit pushed last (${JSON.stringify(remB)})`);
+  ok(gateOf(remB.known) && remB.remaining === 95, `⑫ the healthy account reads its PLAN limit, not whichever limit pushed last (${JSON.stringify(remB)})`);
 
   // the empty bucket is never the earliest deadline
   const dlA = POOL.weeklyDeadline(A, nowSec);
   ok(dlA === 1789356983, `⑫ the deadline is the plan window's PINNED reset (${dlA}), not the Spark bucket's sliding one`);
-  ok(A.scopedWeekly.every((s) => s.state === 'empty'), '⑫ …the panel still SEES that bucket (it is rendered, marked not-started) — this is a ranking rule, not a hiding rule');
+  ok(verdictOf(A.scopedWeekly.every((s) => s.state === 'empty')), '⑫ …the panel still SEES that bucket (it is rendered, marked not-started) — this is a ranking rule, not a hiding rule');
   // THE TRAP, on the account whose plan window is HEALTHY — which is where EDF
   // actually rank members. Both windows are ~7 days out, so the sliding one
   // wins the min() by the 40 seconds it slid: 1789504761 vs 1789509325. That
@@ -542,7 +542,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
   const dlB = POOL.weeklyDeadline(B, nowSec);
   const sparkResetB = B.scopedWeekly.find((s) => /Spark/i.test(s.name)).resetsAt;
   ok(dlB === 1789509325, `⑫ the healthy member's deadline is its PLAN window (${dlB})`);
-  ok(sparkResetB && sparkResetB < dlB, `⑫ …while the Spark bucket's sliding "reset" (${sparkResetB}) is NEARER, so EDF would have picked it every single evaluation`);
+  ok(gateOf(sparkResetB) && sparkResetB < dlB, `⑫ …while the Spark bucket's sliding "reset" (${sparkResetB}) is NEARER, so EDF would have picked it every single evaluation`);
 
   // bucketRems: every bucket that states a spend is REPORTED with what it has
   // left — including the untouched one, which is 100 % free (r4) — but only a
@@ -551,14 +551,14 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
   const rems = POOL.bucketRems(A, nowSec);
   const spentRow = rems.find((r) => r.label === '7d');
   const emptyRow = rems.find((r) => /Spark/i.test(r.label));
-  ok(rems.length === 2 && spentRow && spentRow.remaining === 0 && spentRow.resetsAt === 1789356983,
+  ok(rems.length === 2 && gateOf(spentRow) && spentRow.remaining === 0 && spentRow.resetsAt === 1789356983,
     `⑫ bucketRems reports the SPENT weekly bucket at 0 % with its pinned reset (${JSON.stringify(rems)})`);
-  ok(emptyRow && emptyRow.remaining === 100 && emptyRow.resetsAt === 0,
+  ok(gateOf(emptyRow) && emptyRow.remaining === 100 && emptyRow.resetsAt === 0,
     `⑫ …and the untouched one at 100 % free with NO reset — it is headroom, never a deadline (${JSON.stringify(emptyRow)})`);
 
   // the VERDICT the wall machine arms auto-resume from
   const vA = POOL.quotaVerdict(A, nowSec);
-  ok(vA.usable === false && vA.blockedUntil === (1789356983 + 60) * 1000 && vA.until && vA.until.resetsAt === 1789356983,
+  ok(vA.usable === false && vA.blockedUntil === (1789356983 + 60) * 1000 && gateOf(vA.until) && vA.until.resetsAt === 1789356983,
     `⑫ the verdict blocks until the PLAN window resets (+ the one-minute landing grace, 2.369.117; \`until\` names the stated instant) — auto-resume can never arm on a sliding reset (${JSON.stringify({ u: vA.usable, b: vA.blockedUntil, until: vA.until })})`);
 
   // NEGATIVE CONTROL: strip the state stamps (the pre-fix world) and the same
@@ -569,7 +569,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
   const remPre = POOL.accountRemaining(strip(A), nowSec);
   ok(remPre.remaining === 0, '⑫ NEGATIVE CONTROL: …the remaining is unchanged (an empty bucket is 100 % free, so it never HID an exhaustion) — the harm was always the deadline');
   const bucketsPre = POOL.bucketRems(strip(B), nowSec);
-  ok(bucketsPre.some((b) => b.resetsAt === sparkResetB), '⑫ NEGATIVE CONTROL: …and the honest "which bucket is spent" report counted it as a real bucket');
+  ok(verdictOf(bucketsPre.some((b) => b.resetsAt === sparkResetB)), '⑫ NEGATIVE CONTROL: …and the honest "which bucket is spent" report counted it as a real bucket');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -616,7 +616,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
   }));
   ok(QM.legacyWindowLimit(withPlan).limitId === 'codex' && QM.toLegacyView(withPlan).fiveHour.utilization === 0.55,
     '⑭ NEGATIVE CONTROL: once a plan limit exists it wins — the Spark bucket never displaces it again: ' + JSON.stringify(QM.toLegacyView(withPlan).fiveHour));
-  ok(QM.limitsOf(withPlan).length === 3 && QM.limitsOf(withPlan).some((l) => l.limitId === 'codex_bengalfox'),
+  ok(QM.limitsOf(withPlan).length === 3 && verdictOf(QM.limitsOf(withPlan).some((l) => l.limitId === 'codex_bengalfox')),
     '⑭ …and the Spark limit is still THERE, as its own limit (nothing was collapsed to make room): ' + QM.limitsOf(withPlan).map((l) => l.limitId).join(','));
 
   // NEVER INVENT: a set whose limits carry no plan-shaped window at all must
@@ -706,18 +706,18 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
   render(TOOL, A.dir);
   const after = JSON.parse(fs.readFileSync(A.f, 'utf8'));
 
-  ok(Array.isArray(after.limits), '⑮ one render of the SHIPPED tool leaves the canonical half in place');
+  ok(verdictOf(Array.isArray(after.limits)), '⑮ one render of the SHIPPED tool leaves the canonical half in place');
   const afterLimits = limitsOf(after);
-  ok(afterLimits.length === before.limits.length && ['plan', 'model:fable', 'overage'].every((id) => byId(afterLimits, id)),
+  ok(afterLimits.length === before.limits.length && verdictOf(['plan', 'model:fable', 'overage'].every((id) => byId(afterLimits, id))),
     `⑮ …with every limit the account holds (${afterLimits.map((l) => l.limitId).join(',')})`);
   const am = byId(after.limits, 'model:fable');
-  ok(am && beforeModel && am.source === beforeModel.source && am.fetchedAt === beforeModel.fetchedAt,
+  ok(gateOf(am) && gateOf(beforeModel) && am.source === beforeModel.source && am.fetchedAt === beforeModel.fetchedAt,
     '⑮ …and a limit this producer cannot measure keeps ITS OWN source and ITS OWN age (never re-stamped)');
-  ok(byId(after.limits, 'overage'), '⑮ …including the overage limit, which the pre-fix literal dropped entirely');
+  ok(verdictOf(byId(after.limits, 'overage')), '⑮ …including the overage limit, which the pre-fix literal dropped entirely');
   const ap = byId(afterLimits, 'plan');
-  ok(ap && ap.source === 'passive' && ap.fetchedAt >= before.fetchedAt,
+  ok(gateOf(ap) && ap.source === 'passive' && ap.fetchedAt >= before.fetchedAt,
     `⑮ …while the PLAN limit — the one it did measure — carries this producer's own name and clock (${ap && ap.source})`);
-  ok(ap && QM.windowOfKind(ap, '5h')?.usedPct === 12 && QM.windowOfKind(ap, '7d')?.usedPct === 46,
+  ok(gateOf(ap) && QM.windowOfKind(ap, '5h')?.usedPct === 12 && QM.windowOfKind(ap, '7d')?.usedPct === 46,
     '⑮ …and its numbers are the ones this render actually read');
   ok(after.scopedFetchedAt === before.scopedFetchedAt && !!after.overage && after.orgUuid === 'org-anon',
     '⑮ …every other field survives by construction, not by being remembered (spread, not a preserve list)');
@@ -756,7 +756,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
     render(TOOL, dir);
     const o = JSON.parse(fs.readFileSync(f, 'utf8'));
     ok(!('limits' in o), '⑮ on a NOT-YET-MIGRATED file the tool writes no `limits` at all (a producer that knows one limit may not author the list of all of them)');
-    ok(limitsOf(o).some((l) => l.limitId === 'model:fable'), '⑮ …so the scoped cap on that file is still reachable');
+    ok(verdictOf(limitsOf(o).some((l) => l.limitId === 'model:fable')), '⑮ …so the scoped cap on that file is still reachable');
   }
 
   // ── NEGATIVE CONTROL: round 1's enumerated literal, in a patched copy of the
@@ -774,7 +774,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
     ok(!Array.isArray(o.limits) && !o.overage,
       `⑮ NEGATIVE CONTROL: with the preserve list back, ONE render deletes the canonical half and the overage (keys: ${Object.keys(o).join(',')})`);
     const relifted = limitsOf(o);
-    ok(!relifted.some((l) => l.limitId === 'overage') && relifted.every((l) => l.source === 'passive'),
+    ok(!relifted.some((l) => l.limitId === 'overage') && verdictOf(relifted.every((l) => l.source === 'passive')),
       `⑮ NEGATIVE CONTROL: …and the re-lift stamps THIS producer's name on limits it never measured (${relifted.map((l) => l.limitId + '=' + l.source).join(',')})`);
   }
 }
@@ -819,7 +819,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     return { out, hits };
   };
   const load = (w, n) => require(w.out[n]);
-  const patchHit = (w, label) => ok(w.hits.length > 0 && w.hits.every(([, c]) => c === 1),
+  const patchHit = (w, label) => ok(w.hits.length > 0 && verdictOf(w.hits.every(([, c]) => c === 1)),
     `⑯ NEGATIVE CONTROL setup: ${label} — every patch anchor hit exactly once (${JSON.stringify(w.hits)})`);
 
   const POOL = require(path.join(ROOT, 'src/account-pool-auto.js'));
@@ -871,7 +871,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // and the panel is the on-demand ⟳ every member gets. So a member can be
     // 95 % through its burst window with no reset anywhere in the product.
     const panel = CLAUDEQ.parseCliUsageText('Current session: 95% used\nCurrent week (all models): 20% used · resets Jan 2, 3am (America/Los_Angeles)', NOW);
-    ok(panel && panel.fiveHour && panel.fiveHour.utilization === 0.95 && panel.fiveHour.resetsAt === undefined,
+    ok(gateOf(panel) && gateOf(panel.fiveHour) && panel.fiveHour.utilization === 0.95 && panel.fiveHour.resetsAt === undefined,
       `⑯a REACHABILITY: a real panel line without "· resets" parses to a SPENT bucket with NO reset (${JSON.stringify(panel.fiveHour)})`);
 
     // PRODUCT, end to end, through the one write path. Deliberately NO wall
@@ -891,13 +891,13 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
       };
     };
     const real = world({ W, CAP });
-    ok(real.rem.known && real.rem.remaining === 5,
+    ok(gateOf(real.rem.known) && real.rem.remaining === 5,
       `⑯a the member 95 % through its burst window reads 5 % remaining (${JSON.stringify(real.rem)})`);
-    ok(real.dec && real.dec.to === 'B',
+    ok(gateOf(real.dec) && real.dec.to === 'B',
       `⑯a …and the pool LEAVES it (${JSON.stringify({ to: real.dec && real.dec.to, why: real.dec && real.dec.reason })})`);
     ok(real.caches.A.fiveHour.state === undefined,
       `⑯a …because the reset-less bucket counts on the strength of its spend alone (${JSON.stringify(real.caches.A.fiveHour)})`);
-    ok(real.anchors.fiveHour && real.anchors.fiveHour.u === 0.95,
+    ok(gateOf(real.anchors.fiveHour) && real.anchors.fiveHour.u === 0.95,
       `⑯a …and the reading reaches the ANCHOR stream, which is what the estimator learns from (${JSON.stringify(real.anchors.fiveHour)})`);
 
     // NEGATIVE CONTROL: put the deadline test back in front of the spend test.
@@ -921,7 +921,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // window fingerprint identifies accounts from.
     ok(pre.anchors.fiveHour === null,
       `⑯a NEGATIVE CONTROL: …so the 95 % reading never becomes an ANCHOR — the estimator and the window guard never see it (${JSON.stringify(pre.anchors)})`);
-    ok(pre.rem.remaining === 5 && pre.dec && pre.dec.to === 'B',
+    ok(pre.rem.remaining === 5 && gateOf(pre.dec) && pre.dec.to === 'B',
       `⑯a NEGATIVE CONTROL: …while the pool is held by the OTHER belt, which is why this control may not claim the remaining (${JSON.stringify({ rem: pre.rem.remaining, to: pre.dec && pre.dec.to })})`);
 
     // ⑯a-x THE SECOND BELT, ALONE. Remove the r4 split and keep the r3 stamp
@@ -940,7 +940,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     const preX = world({ W: load(wax, WFILE), CAP: load(wax, CFILE), POOL: load(wax, PFILE) });
     ok(preX.rem.remaining === 80,
       `⑯a-x NEGATIVE CONTROL (both belts): the member reads ${preX.rem.remaining} % free on its 7d window alone — the burst window it is nearly through is invisible`);
-    ok(preX.dec === null || (preX.dec && preX.dec.to === null),
+    ok(preX.dec === null || (gateOf(preX.dec) && preX.dec.to === null),
       `⑯a-x NEGATIVE CONTROL (both belts): …and the pool stays on it (${JSON.stringify(preX.dec && preX.dec.reason)})`);
   }
 
@@ -1000,11 +1000,11 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     const r2 = b2({ W, CAP });
     ok(r2.seeded.sevenDay.state === 'empty' && r2.seeded.scopedWeekly[0].state === 'empty',
       '⑯b SETUP: at the weekly roll both budget windows are correctly stamped EMPTY (this stamp is right when it is written)');
-    ok(r2.rem.known && r2.rem.remaining === 0,
+    ok(gateOf(r2.rem.known) && r2.rem.remaining === 0,
       `⑯b …after three real readings climb them, the spent model cap is worth 0 % (${JSON.stringify(r2.rem)})`);
     ok(r2.dl === r2.weekOut, `⑯b …the account has its weekly deadline back (${r2.dl})`);
     ok(r2.rems.length === 3, `⑯b …and all three buckets are reported again (${JSON.stringify(r2.rems.map((x) => (x.label || x.kind) + ' ' + Math.round(x.remaining)))})`);
-    ok(r2.anchors.sevenDay && r2.anchors.sevenDay.u === 0.9 && r2.anchors.scopedWeekly.length === 1,
+    ok(gateOf(r2.anchors.sevenDay) && r2.anchors.sevenDay.u === 0.9 && r2.anchors.scopedWeekly.length === 1,
       `⑯b …and both climbed readings reach the ANCHOR stream (${JSON.stringify(r2.anchors)})`);
 
     // B3 — THE PRODUCER HALF'S OWN CASE, which the belt structurally cannot
@@ -1121,13 +1121,13 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     const view = QM.toLegacyView(set);
     const acc = QM.remaining(set, { nowSec: nowC });
     const viaPool = POOL.accountRemaining(view, nowC);
-    ok(acc.known && acc.remaining === 10 && acc.kind === '5h',
+    ok(gateOf(acc.known) && acc.remaining === 10 && acc.kind === '5h',
       `⑯c the ACCESSOR binds on the Spark burst window (${JSON.stringify(acc)})`);
-    ok(viaPool.known && viaPool.remaining === 10,
+    ok(gateOf(viaPool.known) && viaPool.remaining === 10,
       `⑯c …and the pool, which reads the VIEW, now agrees (${JSON.stringify(viaPool)})`);
-    ok(view.fiveHour && view.fiveHour.utilization === 0.9,
+    ok(gateOf(view.fiveHour) && view.fiveHour.utilization === 0.9,
       `⑯c …because fiveHour means THE BINDING BURST CONSTRAINT, not "the plan limit's" (${JSON.stringify(view.fiveHour)})`);
-    ok(view.scopedWeekly && view.scopedWeekly.length === 1 && view.scopedWeekly[0].utilization === 0.1,
+    ok(gateOf(view.scopedWeekly) && view.scopedWeekly.length === 1 && view.scopedWeekly[0].utilization === 0.1,
       '⑯c …and nothing was collapsed: the Spark WEEKLY window is still its own scoped row');
 
     // POSITIVE CONTROL: the plan limit still wins when it is the binding one —
@@ -1272,7 +1272,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // window of a set read long after it was measured ties at 100.
     const stale = mk(50, nowD - 600, 90, nowD - 120);
     const vStale = QM.toLegacyView(stale, { nowSec: nowD });
-    ok(vStale.fiveHour && vStale.fiveHour.utilization === 0.5,
+    ok(gateOf(vStale.fiveHour) && vStale.fiveHour.utilization === 0.5,
       `⑯d when every 5h window has rolled over they TIE at 100 %, and the plan's is the one emitted (${JSON.stringify(vStale.fiveHour)})`);
 
     // NEGATIVE CONTROL: rank by raw percentage again (⑯c's first spelling).
@@ -1292,7 +1292,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // class. A property is worth exactly the shapes it is driven over, so the
     // matrix earning its keep is itself an assertion.
     const violD = (propShapes || []).filter((s) => propOpt(QM.remaining(s, { nowSec: propNow }), POOL.accountRemaining(QMd.toLegacyView(s, { nowSec: propNow }), propNow)));
-    ok(propShapes && propShapes.length === 11 && violD.length > 0,
+    ok(gateOf(propShapes) && propShapes.length === 11 && violD.length > 0,
       `⑯d …and ⑯c's PROPERTY, once its matrix carries a rolled-over window, goes red on this mutant too (${violD.length} violations over ${propShapes ? propShapes.length : 0} shapes) — it could not before`);
   }
 
@@ -1327,7 +1327,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // brand-new account — which has no prior reset to carry forward either —
     // comes back with BOTH plan buckets at 0 % and no reset anywhere.
     const fresh = CLAUDEQ.parseCliUsageText('Current session:  0% used\nCurrent week (all models):  0% used', NOW);
-    ok(fresh && fresh.fiveHour.utilization === 0 && fresh.fiveHour.resetsAt === undefined
+    ok(gateOf(fresh) && fresh.fiveHour.utilization === 0 && fresh.fiveHour.resetsAt === undefined
       && fresh.sevenDay.utilization === 0 && fresh.sevenDay.resetsAt === undefined,
       `⑯e REACHABILITY: a real panel for an untouched account parses to two reset-less 0 % buckets (${JSON.stringify(fresh)})`);
 
@@ -1356,15 +1356,15 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     const e = eWorld({ W, CAP });
     ok(e.caches.NEW.fiveHour.state === 'unknown' && e.caches.NEW.sevenDay.state === 'unknown',
       `⑯e SETUP: both buckets land stamped 'unknown' — untouched and just-started are genuinely indistinguishable without a reset (${JSON.stringify(e.caches.NEW.fiveHour)})`);
-    ok(e.rem.known && e.rem.remaining === 100,
+    ok(gateOf(e.rem.known) && e.rem.remaining === 100,
       `⑯e the free member reads 100 % remaining, KNOWN (${JSON.stringify(e.rem)})`);
     ok(e.verdicts.find((x) => x.id === 'NEW').v.usable === true,
       `⑯e …its verdict is usable (${JSON.stringify(e.verdicts.find((x) => x.id === 'NEW').v.reason)})`);
-    ok(e.poolUsable && e.poolUsable.id === 'NEW',
+    ok(gateOf(e.poolUsable) && e.poolUsable.id === 'NEW',
       `⑯e …so the POOL has a usable member (${JSON.stringify(e.poolUsable && e.poolUsable.id)})`);
     ok((e.ranked.find((r) => r.id === 'NEW') || {}).eff === 100,
       `⑯e …it ranks on its real headroom, not on UNKNOWN_REMAINING_PCT (${JSON.stringify(e.ranked)})`);
-    ok(e.dec && e.dec.to === 'NEW' && e.dec.reason === 'exhausted',
+    ok(gateOf(e.dec) && e.dec.to === 'NEW' && e.dec.reason === 'exhausted',
       `⑯e …and the pool LEAVES the exhausted member for it (${JSON.stringify({ to: e.dec && e.dec.to, why: e.dec && e.dec.reason })})`);
 
     // POSITIVE CONTROLS — B-8b12 is not re-opened by any of that.
@@ -1372,7 +1372,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
       `⑯e POSITIVE CONTROL: the free member still has NO weekly deadline — a reset-less/sliding window may not be ranked on (${e.dl})`);
     ok(e.anchors.fiveHour === null && e.anchors.sevenDay === null,
       `⑯e POSITIVE CONTROL: …and neither bucket ANCHORS: the estimator learns from windows that ran, not from ones that never opened (${JSON.stringify(e.anchors)})`);
-    ok(e.rems.length === 2 && e.rems.every((r) => r.remaining === 100 && r.resetsAt === 0),
+    ok(e.rems.length === 2 && verdictOf(e.rems.every((r) => r.remaining === 100 && r.resetsAt === 0)),
       `⑯e POSITIVE CONTROL: …the report states the headroom and publishes NO reset, so nothing downstream can turn one into a blockedUntil (${JSON.stringify(e.rems)})`);
     // A bucket with NO number at all is still ignorance, not 100 %.
     {
@@ -1391,7 +1391,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // engine stops asking `usable === true`, the sentence above stops being
     // about the product.
     const engSrc = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8');
-    ok(engSrc.includes('const ok = verdicts.find((x) => x.v.usable === true);'),
+    ok(verdictOf(engSrc.includes('const ok = verdicts.find((x) => x.v.usable === true);')),
       '⑯e WIRING PIN: the pool gate really is `verdicts.find((x) => x.v.usable === true)` — a member reading `usable:null` can never satisfy it');
 
     // THE MIGRATION, on the shape this instance actually holds. `usage-cache/
@@ -1407,7 +1407,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
       const { backfillLimits } = require(path.join(ROOT, 'src/quota-model-migrate.js'));
       const res = backfillLimits({ cacheDir: dir, archiveDir: path.join(dir, 'archive'), id: 'test', log: () => { } });
       const after = rd(dir, '__global_codex__');
-      ok(res.stamped === 1 && Array.isArray(after.limits),
+      ok(res.stamped === 1 && verdictOf(Array.isArray(after.limits)),
         `⑯e MIGRATION: the backfill stamps the file (${JSON.stringify({ scanned: res.scanned, stamped: res.stamped, limits: res.limits })})`);
       ok(POOL.quotaVerdict(after, nowSec).usable === true && POOL.weeklyDeadline(after, nowSec) === null,
         `⑯e MIGRATION: …and the account it describes stays USABLE with no fabricated deadline (${JSON.stringify(POOL.quotaVerdict(after, nowSec).reason)})`);
@@ -1429,7 +1429,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
       `⑯e NEGATIVE CONTROL: …its verdict is ${JSON.stringify(preE.verdicts.find((x) => x.id === 'NEW').v.reason)}, so the POOL has no usable member at all`);
     ok((preE.ranked.find((r) => r.id === 'NEW') || {}).eff === POOLpre.UNKNOWN_REMAINING_PCT,
       `⑯e NEGATIVE CONTROL: …it ranks at UNKNOWN_REMAINING_PCT instead of 100 (${JSON.stringify(preE.ranked)})`);
-    ok(preE.dec && preE.dec.to === null && preE.dec.reason === 'no-settleable',
+    ok(gateOf(preE.dec) && preE.dec.to === null && preE.dec.reason === 'no-settleable',
       `⑯e NEGATIVE CONTROL: …and the pool STAYS on the exhausted member (${JSON.stringify({ to: preE.dec && preE.dec.to, why: preE.dec && preE.dec.reason, from: preE.dec && preE.dec.fromRemaining })})`);
     ok(POOLpre.quotaVerdict(migAfter, nowSec).usable === null,
       `⑯e NEGATIVE CONTROL: …and the migrated real-shape file goes dark too (${JSON.stringify(POOLpre.quotaVerdict(migAfter, nowSec).reason)})`);
@@ -1479,7 +1479,7 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
     return { out, hits };
   };
   const load17 = (w, n) => require(w.out[n]);
-  const hit17 = (w, label) => ok(w.hits.length > 0 && w.hits.every(([, c]) => c === 1),
+  const hit17 = (w, label) => ok(w.hits.length > 0 && verdictOf(w.hits.every(([, c]) => c === 1)),
     `⑰ NEGATIVE CONTROL setup: ${label} — every patch anchor hit exactly once (${JSON.stringify(w.hits)})`);
 
   const WF = 'src/usage-cache-write.js', QF = 'src/quota-model.js', CF = 'src/rate-limit-capture.js';
@@ -1526,19 +1526,19 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
   {
     const r = runEvent(W, CAP17);
     const b = { plan: limOf(r.before, 'plan'), fable: limOf(r.before, 'model:fable'), over: limOf(r.before, 'overage') };
-    ok(b.plan && b.fable && b.over && b.fable.source === 'on-demand' && b.fable.fetchedAt === CAPAT17,
+    ok(gateOf(b.plan) && gateOf(b.fable) && gateOf(b.over) && b.fable.source === 'on-demand' && b.fable.fetchedAt === CAPAT17,
       `⑰a the migrated real-shape file holds three limits, each with its own producer (${(r.before.limits || []).map((l) => `${l.limitId}:${l.source}@${l.fetchedAt}`).join(' | ')})`);
 
     const a = { plan: limOf(r.after, 'plan'), fable: limOf(r.after, 'model:fable'), over: limOf(r.after, 'overage') };
     ok(a.plan.source === 'rate-limit-event' && a.plan.fetchedAt === NOW17,
       `⑰a the PLAN limit — the one this event measured — is re-stamped with the producer and its clock (${a.plan.source}@${a.plan.fetchedAt})`);
     const w5 = QM.windowOfKind(a.plan, '5h');
-    ok(w5 && w5.usedPct === 88 && w5.measuredAt === NOW17,
+    ok(gateOf(w5) && w5.usedPct === 88 && w5.measuredAt === NOW17,
       `⑰a …and the reading LANDED (5h ${w5 && w5.usedPct}% measured at ${w5 && w5.measuredAt})`);
     ok(a.fable.source === 'on-demand' && a.fable.fetchedAt === CAPAT17,
       `⑰a the model-scoped cap — which this record says NOTHING about — keeps the producer that measured it (${a.fable.source}@${a.fable.fetchedAt})`);
     const wf = QM.windowOfKind(a.fable, '7d');
-    ok(wf && wf.measuredAt === CAPAT17 && wf.usedPct === 100,
+    ok(gateOf(wf) && wf.measuredAt === CAPAT17 && wf.usedPct === 100,
       `⑰a …down to the instant its window was measured (${wf && wf.measuredAt}, still ${wf && wf.usedPct}%)`);
     ok(a.over.source === 'on-demand' && a.over.fetchedAt === OVER_AT,
       `⑰a the overage limit likewise (${a.over.source}@${a.over.fetchedAt})`);
@@ -1546,13 +1546,13 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
     // event did measure: the limit is the producer's, the untouched window is
     // still the panel-read's.
     const w7 = QM.windowOfKind(a.plan, '7d');
-    ok(w7 && w7.usedPct === 83 && w7.measuredAt === T17,
+    ok(gateOf(w7) && w7.usedPct === 83 && w7.measuredAt === T17,
       `⑰a a window carried forward inside a MEASURED limit keeps its own measuredAt too (7d ${w7 && w7.usedPct}% @${w7 && w7.measuredAt})`);
 
     // THE USER-VISIBLE HALF: the panel rows this feature added.
     const rows = SRC.limitRows(QM, W.limitsOfCache(r.after, { identity: r.key }), { t: (s) => s });
     const rowF = rows.find((x) => x.limitId === 'model:fable');
-    ok(rowF && rowF.source === 'on-demand' && rowF.fetchedAt === CAPAT17,
+    ok(gateOf(rowF) && rowF.source === 'on-demand' && rowF.fetchedAt === CAPAT17,
       `⑰a …so the panel row says "via ${rowF && rowF.sourceLabel}" and dates it ${rowF && rowF.fetchedAt}, not "just now"`);
 
     // NEGATIVE CONTROL: the round-3 write path, which lifted the whole object.
@@ -1700,10 +1700,10 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
       && QM.windowClaimKey(w) !== QM.windowClaimKey({ ...w, status: 'limited' }),
       '⑰c …and any number the vendor stated moving makes it a different one');
     const L = (over) => QM.makeLimit({ limitId: 'overage', scope: 'overage', flags: { inUse: false, asOf: over }, windows: [] });
-    ok(QM.sameLimitClaim(L(1), L(1)) && !QM.sameLimitClaim(L(1), L(2)),
+    ok(gateOf(QM.sameLimitClaim(L(1), L(1))) && !QM.sameLimitClaim(L(1), L(2)),
       '⑰c a windowless limit is compared on its FLAGS (the overage limit states nothing else)');
-    ok(QM.sameLimitClaim(QM.makeLimit({ limitId: 'p', windows: [w, { ...w, kind: '5h' }] }),
-      QM.makeLimit({ limitId: 'p', windows: [{ ...w, kind: '5h' }, w] })),
+    ok(verdictOf(QM.sameLimitClaim(QM.makeLimit({ limitId: 'p', windows: [w, { ...w, kind: '5h' }] }),
+      QM.makeLimit({ limitId: 'p', windows: [{ ...w, kind: '5h' }, w] }))),
       '⑰c window order is not a claim');
   }
 }
@@ -1731,7 +1731,7 @@ console.log('\n⑱ only a parse that ENUMERATED may retire a limit (r6)');
     for (const [from, to] of patches) { hits.push(src.split(from).length - 1); src = src.split(from).join(to); }
     return { path: MUTC.write(rel, src, 'q18', { esm: false }), hits };
   };
-  const hit18 = (m, label) => ok(m.hits.length > 0 && m.hits.every((c) => c === 1),
+  const hit18 = (m, label) => ok(m.hits.length > 0 && verdictOf(m.hits.every((c) => c === 1)),
     `⑱ NEGATIVE CONTROL setup: ${label} — every patch anchor hit exactly once (${JSON.stringify(m.hits)})`);
 
   // ⑱0 (r6) used to ask git whether every in-tree mutant path was IGNORED. A
@@ -2017,7 +2017,7 @@ console.log('\n⑱ only a parse that ENUMERATED may retire a limit (r6)');
         measuredAt: Date.now() + 1000, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', authoritativeScopes: ['model'] });
     } finally { console.log = realLog; }
     const line = said.find((s) => s.includes('retiring')) || '';
-    ok(/model:oldmodel \(100% 7d, running\)/.test(line),
+    ok(verdictOf(/model:oldmodel \(100% 7d, running\)/.test(line)),
       `⑱e the retirement names the claim it drops, not just the id (${JSON.stringify(line)})`);
   }
 
@@ -2094,7 +2094,7 @@ console.log('\n⑱ only a parse that ENUMERATED may retire a limit (r6)');
       `⑱g NEGATIVE CONTROL: without carrying the set, the file holds the LOSER's 50 % beneath the WINNER's fetchedAt — the shape the freshness guard then protects for good (${planPct(f2)} @ ${f2 && f2.fetchedAt})`);
     const again = CODEXQ.toLimitSet(planAt(92), { identity: w2.cx, source: 'codex-rate-limits', fetchedAt: NEWER });
     const guardBlocks = (Number(f2.fetchedAt) || 0) >= (Number(again.fetchedAt) || 0);
-    ok(guardBlocks, '⑱g NEGATIVE CONTROL: a correct reading at that same instant is exactly what the write-through freshness guard refuses');
+    ok(verdictOf(guardBlocks), '⑱g NEGATIVE CONTROL: a correct reading at that same instant is exactly what the write-through freshness guard refuses');
   }
 }
 
@@ -2107,19 +2107,19 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
   const ph = (at, pct = 87, resetsAt = R) => QM.makeLimit({ limitId: QM.MODEL_CAP_PLACEHOLDER.limitId, name: QM.MODEL_CAP_PLACEHOLDER.name, scope: 'model', windows: [QM.makeWindow({ kind: '7d', usedPct: pct, resetsAt, measuredAt: at })], source: 'rate-limit-event', fetchedAt: at });
   // the rungs
   let v = QM.nameModelCapLane({ scoped: { fable: R }, resetsAt: R });
-  ok(v.named && v.limitId === 'model:fable' && v.name === 'Fable' && v.family === 'fable' && /established window/.test(v.why), '⑲ ① the sidecar\'s scoped window with this reset names the lane (fable → model:fable, name Fable)');
+  ok(gateOf(v.named) && v.limitId === 'model:fable' && v.name === 'Fable' && v.family === 'fable' && verdictOf(/established window/.test(v.why)), '⑲ ① the sidecar\'s scoped window with this reset names the lane (fable → model:fable, name Fable)');
   v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + 60 });
-  ok(v.named && v.limitId === 'model:fable' && /existing model limit/.test(v.why), '⑲ ② an existing scope:model limit with the same reset (±' + QM.WINDOW_JITTER_SEC + ' s) IS the lane');
+  ok(gateOf(v.named) && v.limitId === 'model:fable' && verdictOf(/existing model limit/.test(v.why)), '⑲ ② an existing scope:model limit with the same reset (±' + QM.WINDOW_JITTER_SEC + ' s) IS the lane');
   v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + QM.WINDOW_JITTER_SEC + 1 });
   ok(!v.named && v.limitId === 'model:cap', '⑲ ② …a reset one second past the jitter is NOT the same lane (the tolerance is the model\'s own WINDOW_JITTER_SEC, shared with reading-lag)');
   v = QM.nameModelCapLane({ scoped: { fable: R, opus: R }, resetsAt: R, hint: 'opus' });
-  ok(v.named && v.limitId === 'model:opus' && /session requests Opus/.test(v.why), '⑲ ③ two caps on one reset: the requesting session\'s family breaks the tie');
+  ok(gateOf(v.named) && v.limitId === 'model:opus' && verdictOf(/session requests Opus/.test(v.why)), '⑲ ③ two caps on one reset: the requesting session\'s family breaks the tie');
   v = QM.nameModelCapLane({ scoped: { fable: R, opus: R }, resetsAt: R });
-  ok(!v.named && v.limitId === 'model:cap' && v.family === null && /no request model/.test(v.why), '⑲ ③ …with no hint an ambiguous reset decides NOTHING — the placeholder, never a guess');
+  ok(!v.named && v.limitId === 'model:cap' && v.family === null && verdictOf(/no request model/.test(v.why)), '⑲ ③ …with no hint an ambiguous reset decides NOTHING — the placeholder, never a guess');
   v = QM.nameModelCapLane({ scoped: { fable: R, opus: R }, resetsAt: R, hint: 'sonnet' });
   ok(!v.named, '⑲ ③ …a hint that names none of the candidates decides nothing either');
   v = QM.nameModelCapLane({ scoped: { fable: R }, resetsAt: null, hint: 'fable' });
-  ok(v.named && v.limitId === 'model:fable' && /no reset stated/.test(v.why), '⑲ ④ a rejection with NO reset is named only through a hint matching a cap the account has SHOWN');
+  ok(gateOf(v.named) && v.limitId === 'model:fable' && verdictOf(/no reset stated/.test(v.why)), '⑲ ④ a rejection with NO reset is named only through a hint matching a cap the account has SHOWN');
   v = QM.nameModelCapLane({ scoped: { fable: R }, resetsAt: null, hint: 'opus' });
   ok(!v.named, '⑲ ④ …a hint for a family the account never showed names nothing (the vocabulary is the account\'s own)');
   v = QM.nameModelCapLane({ resetsAt: R });
@@ -2130,9 +2130,9 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
   // carry LAST week's reset — a rolled window is the SAME lane by PHASE, never by the instant
   const WEEK = QM.WEEK_SEC;
   v = QM.nameModelCapLane({ scoped: { fable: R }, resetsAt: R + WEEK });
-  ok(v.named && v.limitId === 'model:fable' && WEEK === 604800, '⑲ ROLL: the sidecar rung names a window ONE WEEK after the established reset (the shape after every weekly reset until the panel restamps)');
+  ok(gateOf(v.named) && v.limitId === 'model:fable' && WEEK === 604800, '⑲ ROLL: the sidecar rung names a window ONE WEEK after the established reset (the shape after every weekly reset until the panel restamps)');
   v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + WEEK + 60 });
-  ok(v.named && v.limitId === 'model:fable', '⑲ ROLL: …and the existing-limit rung, a week and a minute later');
+  ok(gateOf(v.named) && v.limitId === 'model:fable', '⑲ ROLL: …and the existing-limit rung, a week and a minute later');
   v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + WEEK + QM.WINDOW_JITTER_SEC + 1 });
   ok(!v.named, '⑲ ROLL: …a week plus one second past the jitter is still NOT the lane (the phase, not "any later week")');
   v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + 86400 });
@@ -2140,7 +2140,7 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
   {
     const readingLag = require(path.join(ROOT, 'src/reading-lag.js'));
     const table = [[R, R], [R, R + 60], [R, R + 120], [R, R + 121], [R, R + WEEK], [R, R + WEEK - 60], [R, R - WEEK + 120], [R, R + 3 * WEEK + 1], [R, R + 86400], [R, R + WEEK / 2], [R, R - 121], [0, R], [R, null]];
-    ok(table.every(([a, b]) => (QM.weeklyPhaseNear(a, b) === true) === (readingLag.weeklyNear(a, b) === true)), '⑲ ROLL: weeklyPhaseNear agrees with reading-lag.weeklyNear on every row of the table (the rule is spelled twice because quota-model imports nothing)');
+    ok(verdictOf(table.every(([a, b]) => (QM.weeklyPhaseNear(a, b) === true) === (readingLag.weeklyNear(a, b) === true))), '⑲ ROLL: weeklyPhaseNear agrees with reading-lag.weeklyNear on every row of the table (the rule is spelled twice because quota-model imports nothing)');
   }
   // the fold — the ONE permitted collapse, and only that one
   let m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [ph(200)] }), QM.makeLimitSet({ identity: 'k', limits: [fable(100, 86)] }));
@@ -2149,14 +2149,14 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
   m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100, 86)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(50)] }));
   ok(m.limits.length === 1 && m.limits[0].limitId === 'model:fable' && QM.windowOfKind(m.limits[0], '7d').usedPct === 86, '⑲ FOLD: …in either order (an OLDER placeholder folds and loses to the panel\'s newer number)');
   m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(200, 87, R + 86400)] }));
-  ok(m.limits.length === 2 && m.limits.some((l) => l.limitId === 'model:cap'), '⑲ FOLD: a placeholder on a DIFFERENT reset stays its own limit (never dropped)');
+  ok(m.limits.length === 2 && verdictOf(m.limits.some((l) => l.limitId === 'model:cap')), '⑲ FOLD: a placeholder on a DIFFERENT reset stays its own limit (never dropped)');
   m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100, 86)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(200, 30, R + WEEK)] }));
   ok(m.limits.length === 1 && m.limits[0].limitId === 'model:fable' && QM.windowOfKind(m.limits[0], '7d').usedPct === 30 && QM.windowOfKind(m.limits[0], '7d').resetsAt === R + WEEK,
     '⑲ FOLD ROLL (r2): a placeholder written after the week rolled folds into LAST week\'s named cap and carries the new week (30 @ R+week) — it no longer sits beside the stale Fable gating every family');
   m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(200, 87, null)] }));
   ok(m.limits.length === 2, '⑲ FOLD: a placeholder that states NO reset stays (a later panel enumerates and retires it)');
   m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100), opus(100)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(200)] }));
-  ok(m.limits.length === 3 && m.limits.some((l) => l.limitId === 'model:cap'), '⑲ FOLD: two named caps on the same reset ⇒ ambiguous ⇒ the placeholder stays honest');
+  ok(m.limits.length === 3 && verdictOf(m.limits.some((l) => l.limitId === 'model:cap')), '⑲ FOLD: two named caps on the same reset ⇒ ambiguous ⇒ the placeholder stays honest');
   m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100)] }), QM.makeLimitSet({ identity: 'k', limits: [opus(200)] }));
   ok(m.limits.length === 2 && m.limits.map((l) => l.limitId).join() === 'model:fable,model:opus', '⑲ FOLD CONTROL: two NAMED limits on one reset NEVER collapse (the 2026-09-09 law is untouched)');
   // the legacy round trip and the accessors
@@ -2168,7 +2168,7 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
   ok(QM.toLegacyView(lgPlan).scopedWeekly[0].name === 'Model cap' && QM.scopedLimitId('Model cap') === 'model:cap' && QM.scopedLimitId('Fable') === 'model:fable', '⑲ toLegacyView: …and projects back under the placeholder name — the id round-trips (scopedLimitId is the ONE spelling)');
   const both = QM.makeLimitSet({ identity: 'k', limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '7d', usedPct: 43, resetsAt: R, measuredAt: 1 })], fetchedAt: 1 }), fable(1), ph(2, 87, R + 604800)] });
   ok(QM.limitFor(both, { family: 'fable' }).limitId === 'model:fable' && QM.limitFor(both, { family: 'opus' }).limitId === 'plan', '⑲ limitFor: a family still finds ITS named lane; the placeholder governs no named request');
-  ok(QM.applicableLimits(both, {}).some((l) => l.limitId === 'model:cap') && !QM.applicableLimits(both, { family: 'opus' }).some((l) => l.limitId === 'model:cap'), '⑲ applicableLimits: the placeholder counts for the ACCOUNT-level min (conservative) and never for a named family');
+  ok(gateOf(QM.applicableLimits(both, {}).some((l) => l.limitId === 'model:cap')) && !QM.applicableLimits(both, { family: 'opus' }).some((l) => l.limitId === 'model:cap'), '⑲ applicableLimits: the placeholder counts for the ACCOUNT-level min (conservative) and never for a named family');
   // the lift rung: a model cap the statusline measured (2.1.274 model_scoped) is restored from the legacy entry
   {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qm19-')); tmpDirs.push(dir);
@@ -2181,8 +2181,8 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
     o.fetchedAt = 2000; o.source = 'passive';
     const set = W.limitsOfCache(o, { identity: KEY, backend: 'claude', familyOf: familyOfScopedBucket });
     const f = set.limits.find((l) => l.limitId === 'model:fable'), op = set.limits.find((l) => l.limitId === 'model:opus');
-    ok(f && QM.windowOfKind(f, '7d').usedPct === 86 && f.source === 'passive' && f.family === 'fable', '⑲ LIFT: a legacy scoped entry whose limit is ABSENT from `limits` is restored with the object\'s own provenance (the statusline\'s drop rule, for a model cap)');
-    ok(op && op.source === 'on-demand' && QM.windowOfKind(op, '7d').usedPct === 20 && set.limits.filter((l) => l.limitId === 'model:opus').length === 1, '⑲ LIFT: …a scoped entry whose limit IS present is neither duplicated nor re-stamped');
+    ok(gateOf(f) && QM.windowOfKind(f, '7d').usedPct === 86 && f.source === 'passive' && f.family === 'fable', '⑲ LIFT: a legacy scoped entry whose limit is ABSENT from `limits` is restored with the object\'s own provenance (the statusline\'s drop rule, for a model cap)');
+    ok(gateOf(op) && op.source === 'on-demand' && QM.windowOfKind(op, '7d').usedPct === 20 && set.limits.filter((l) => l.limitId === 'model:opus').length === 1, '⑲ LIFT: …a scoped entry whose limit IS present is neither duplicated nor re-stamped');
   }
   // THE REAL STATUSLINE TOOL with a 2.1.274 payload (the parity pin of the twin)
   {
@@ -2201,11 +2201,11 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
     const after = JSON.parse(fs.readFileSync(f, 'utf8'));
     const lifted = W.limitsOfCache(after, { identity: KEY, backend: 'claude', familyOf: familyOfScopedBucket }).limits;
     const fl = lifted.find((l) => l.limitId === 'model:fable'), ol = lifted.find((l) => l.limitId === 'model:opus'), pl = lifted.find((l) => l.limitId === 'plan');
-    ok(Math.abs(after.sevenDay.utilization - 0.46) < 1e-9 && pl && QM.windowOfKind(pl, '7d').usedPct === 46, '⑲ TOOL: the plan week reads the plan week (46) — never the bucket');
-    ok((after.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.86 && fl && QM.windowOfKind(fl, '7d').usedPct === 86 && fl.source === 'passive' && QM.windowOfKind(fl, '7d').resetsAt === RR,
+    ok(Math.abs(after.sevenDay.utilization - 0.46) < 1e-9 && gateOf(pl) && QM.windowOfKind(pl, '7d').usedPct === 46, '⑲ TOOL: the plan week reads the plan week (46) — never the bucket');
+    ok((after.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.86 && gateOf(fl) && QM.windowOfKind(fl, '7d').usedPct === 86 && fl.source === 'passive' && QM.windowOfKind(fl, '7d').resetsAt === RR,
       '⑲ TOOL: model_scoped Fable 86 (percent ÷ 100, ISO reset → unix) lands as the NAMED scoped bucket with this producer\'s provenance');
     const beforeOpus = before.limits.find((l) => l.limitId === 'model:opus');
-    ok(ol && ol.source === beforeOpus.source && ol.fetchedAt === beforeOpus.fetchedAt && QM.windowOfKind(ol, '7d').usedPct === 20, '⑲ TOOL: a cap the payload did NOT name (Opus) keeps its own source and age');
+    ok(gateOf(ol) && ol.source === beforeOpus.source && ol.fetchedAt === beforeOpus.fetchedAt && QM.windowOfKind(ol, '7d').usedPct === 20, '⑲ TOOL: a cap the payload did NOT name (Opus) keeps its own source and age');
     // an EMPTY list states nothing (the r5 rule)
     fs.utimesSync(f, old / 1000, old / 1000);
     render({ five_hour: { used_percentage: 13, resets_at: nowSec + 3600 }, seven_day: { used_percentage: 47, resets_at: RR }, model_scoped: [] });
@@ -2271,7 +2271,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
 
   // ── rule 1 + 4: the PARSE ────────────────────────────────────────────────
   const pNo = CQ.parseCliUsageText(PANEL_NO5H, Date.now());
-  ok(pNo && pNo.sevenDay && pNo.fiveHour == null, '㉑1a a panel with the week and NO «Current session» row is a complete reading — the week, no 5h bucket');
+  ok(gateOf(pNo) && gateOf(pNo.sevenDay) && pNo.fiveHour == null, '㉑1a a panel with the week and NO «Current session» row is a complete reading — the week, no 5h bucket');
   eq(AW(pNo), ['5h'], '㉑1a …and its parse SAYS it enumerated the plan and found no 5h window (absentWindowsOf)');
   eq(AW(CQ.parseCliUsageText(PANEL_WORD, Date.now())), ['5h'], '㉑1b a «Current session» row that prints a word of the closed list (Unlimited) says «no 5h limit» too');
   eq(AW(CQ.parseCliUsageText(PANEL_DRIFT, Date.now())), [], '㉑1b …any OTHER word in that row is format drift: the reading lands, the claim does not');
@@ -2282,29 +2282,29 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   const pHeader = CQ.parseCliUsageText('Your subscription powers your Claude Code usage.\n', Date.now());
   ok(pHeader === null && JSON.stringify(AW(pHeader)) === '[]', `㉑1a a HEADER-ONLY panel (a long-lived-token login, 2.1.314) is no reading at all — null, no «no 5h» claim — got ${JSON.stringify(pHeader)}`);
   const pIdle = CQ.parseCliUsageText(PANEL_IDLE, Date.now());
-  ok(pIdle && pIdle.fiveHour && pIdle.fiveHour.utilization === 0 && Array.isArray(AW(pIdle)) && AW(pIdle).length === 0, '㉑1c «Current session: 0% used» IS a 5h window (not started) — never «no 5h limit»');
+  ok(gateOf(pIdle) && gateOf(pIdle.fiveHour) && pIdle.fiveHour.utilization === 0 && gateOf(Array.isArray(AW(pIdle))) && AW(pIdle).length === 0, '㉑1c «Current session: 0% used» IS a 5h window (not started) — never «no 5h limit»');
   const sIdle = CQ.toLimitSet(pIdle, { nowMs: Date.now() }), sNo = CQ.toLimitSet(pNo, { nowMs: Date.now() });
   const w5Idle = QM.windowOfKind(QM.planLimit(sIdle), '5h');
-  ok(w5Idle && w5Idle.state !== 'running' && SINCE(QM.planLimit(sIdle), '5h') == null && QM.toLegacyView(sIdle).fiveHourAbsent == null,
+  ok(gateOf(w5Idle) && w5Idle.state !== 'running' && SINCE(QM.planLimit(sIdle), '5h') == null && QM.toLegacyView(sIdle).fiveHourAbsent == null,
     '㉑1c the typed set keeps the two apart: not-started = a 5h window whose state fences its sliding reset, no tombstone');
   ok(!QM.windowOfKind(QM.planLimit(sNo), '5h') && SINCE(QM.planLimit(sNo), '5h') > 0 && QM.toLegacyView(sNo).fiveHourAbsent > 0 && !QM.toLegacyView(sNo).fiveHour,
     '㉑1c …«no 5h limit» = NO 5h window + a dated tombstone the view says as `fiveHourAbsent` (no 0 % window pretending to exist)');
   const oNo = CQ.parseOAuthUsage({ seven_day: { utilization: 40, resets_at: new Date((nowSec + 3 * 86400) * 1000).toISOString() }, five_hour: null });
-  ok(oNo && oNo.fiveHour == null && Math.abs(oNo.sevenDay.utilization - 0.4) < 1e-9, `㉑1d an OAuth usage reply with five_hour null fabricates NO 5h window (base: {utilization 0, status unknown}) — got ${JSON.stringify(oNo && oNo.fiveHour)}`);
+  ok(gateOf(oNo) && oNo.fiveHour == null && Math.abs(oNo.sevenDay.utilization - 0.4) < 1e-9, `㉑1d an OAuth usage reply with five_hour null fabricates NO 5h window (base: {utilization 0, status unknown}) — got ${JSON.stringify(oNo && oNo.fiveHour)}`);
   eq(AW(oNo), ['5h'], '㉑1d …and claims «no 5h limit» (the reply enumerates the plan windows)');
   const o5 = CQ.parseOAuthUsage({ seven_day: { utilization: 40 }, five_hour: { utilization: 10 } });
-  ok(o5 && o5.fiveHour && Math.abs(o5.fiveHour.utilization - 0.1) < 1e-9 && JSON.stringify(AW(o5)) === '[]', '㉑1d …a reply WITH five_hour keeps it, claims nothing');
+  ok(gateOf(o5) && gateOf(o5.fiveHour) && Math.abs(o5.fiveHour.utilization - 0.1) < 1e-9 && JSON.stringify(AW(o5)) === '[]', '㉑1d …a reply WITH five_hour keeps it, claims nothing');
   const gNo = ADP.parseGetUsageResponse({ rate_limits: { seven_day: { used_percentage: 40, resets_at: nowSec + 3 * 86400 } } });
-  ok(gNo && gNo.fiveHour == null && Math.abs(gNo.sevenDay.utilization - 0.4) < 1e-9 && JSON.stringify(AW(gNo)) === '[]',
+  ok(gateOf(gNo) && gNo.fiveHour == null && Math.abs(gNo.sevenDay.utilization - 0.4) < 1e-9 && JSON.stringify(AW(gNo)) === '[]',
     `㉑1e the get_usage control payload without five_hour fabricates NO 0 % 'allowed' window — and claims nothing (r3: it is the CLI's own merged state, which drops a passed window) — got ${JSON.stringify(gNo && gNo.fiveHour)}`);
   const evNo = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: nowSec + 3 * 86400, unifiedWindows: { seven_day: { utilization: 0.4, resets_at: nowSec + 3 * 86400 } } } });
   eq(evNo && evNo.absentWindows, ['5h'], '㉑1f a rate_limit_event whose unifiedWindows names the week and NO five_hour enumerated the plan: «no 5h limit»');
   const evLegacy = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: nowSec + 3 * 86400 } });
   const evBoth = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, unifiedWindows: { seven_day: { utilization: 0.4 }, five_hour: { utilization: 0.2 } } } });
-  ok(evLegacy && Array.isArray(evLegacy.absentWindows) && !evLegacy.absentWindows.length && evBoth && Array.isArray(evBoth.absentWindows) && !evBoth.absentWindows.length,
+  ok(gateOf(evLegacy) && gateOf(Array.isArray(evLegacy.absentWindows)) && !evLegacy.absentWindows.length && gateOf(evBoth) && gateOf(Array.isArray(evBoth.absentWindows)) && !evBoth.absentWindows.length,
     '㉑1f …a record without unifiedWindows (it names ONE bucket) or with five_hour in it claims nothing');
   const setEv = CQ.limitSetFromEvent(evNo, { nowMs: Date.now() });
-  ok(setEv && !QM.windowOfKind(QM.planLimit(setEv), '5h') && SINCE(QM.planLimit(setEv), '5h') == null,
+  ok(gateOf(setEv) && !QM.windowOfKind(QM.planLimit(setEv), '5h') && SINCE(QM.planLimit(setEv), '5h') == null,
     '㉑1f …and its typed set is the week alone with NO tombstone — one passive answer is a witness, never proof (r3)');
 
   // ── rule 1: the MODEL — the newer claim wins, the view round-trips, the validator names the shape ─────────────
@@ -2314,15 +2314,15 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const mk = fnOf(QM, 'markWindowsAbsent');
     const plan = mk ? mk(QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [w7] }), ['5h'], T1) : QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [w7] });
     const set = QM.makeLimitSet({ limits: [plan] });
-    ok(QM.validateLimitSet(set).ok && QM.toLegacyView(set).fiveHourAbsent === T1, '㉑1g the view projects `fiveHourAbsent` = the instant it was first said');
+    ok(gateOf(QM.validateLimitSet(set).ok) && QM.toLegacyView(set).fiveHourAbsent === T1, '㉑1g the view projects `fiveHourAbsent` = the instant it was first said');
     ok(SINCE(QM.planLimit(QM.fromLegacy(QM.toLegacyView(set))), '5h') === T1, '㉑1g …and a spread copy of the view lifts back to the SAME dated tombstone (it can never outrank a newer window)');
     const back = QM.makeLimitSet({ limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '5h', usedPct: 10, resetsAt: nowSec + 3600, measuredAt: T1 + 1000 })] })] });
     const stale = QM.makeLimitSet({ limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '5h', usedPct: 90, resetsAt: nowSec + 3600, measuredAt: T1 - 1000 })] })] });
     const mBack = QM.planLimit(QM.mergeLimitSets(set, back)), mStale = QM.planLimit(QM.mergeLimitSets(stale, set));
-    ok(QM.windowOfKind(mBack, '5h') && SINCE(mBack, '5h') == null, '㉑1h a 5h window measured AFTER the removal is the window BACK (a newer account\'s temporary limit) — the tombstone goes');
+    ok(gateOf(QM.windowOfKind(mBack, '5h')) && SINCE(mBack, '5h') == null, '㉑1h a 5h window measured AFTER the removal is the window BACK (a newer account\'s temporary limit) — the tombstone goes');
     ok(!QM.windowOfKind(mStale, '5h') && SINCE(mStale, '5h') === T1, '㉑1h …one measured BEFORE it is gone — a stale window never survives the merge (base: mergeLimit kept it for ever)');
     const bad = QM.validateLimitSet(QM.makeLimitSet({ limits: [{ ...plan, flags: { absent: { '5h': -1 } } }] }));
-    ok(!bad.ok && bad.errors.some((e) => /flags\.absent/.test(e)), '㉑1g the validator names a malformed tombstone');
+    ok(!bad.ok && verdictOf(bad.errors.some((e) => /flags\.absent/.test(e))), '㉑1g the validator names a malformed tombstone');
   }
 
   // ── rule 1 + 2 + 4: the WRITE PATH — the removal, said once; the return, said once ──────────────────────────
@@ -2330,24 +2330,24 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   seed5h(dir, K);
   const r1 = panelWrite(dir, K, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
   const f1 = readJ(dir, K);
-  ok(r1.ok && f1.fiveHour === undefined && f1.fiveHourAbsent > 0 && !QM.windowOfKind(planOf(f1, K), '5h'),
+  ok(gateOf(r1.ok) && f1.fiveHour === undefined && f1.fiveHourAbsent > 0 && !QM.windowOfKind(planOf(f1, K), '5h'),
     `㉑2a a VERIFIED panel without the row retires the 5h window the file held (84 %) and lays the tombstone — base kept the stale window — file ${JSON.stringify({ fiveHour: f1.fiveHour, fiveHourAbsent: f1.fiveHourAbsent })}`);
-  ok(r1.windowChange && r1.windowChange.change === 'removed' && said.length === 1 && said[0].key === K && said[0].change === 'removed',
+  ok(gateOf(r1.windowChange) && r1.windowChange.change === 'removed' && said.length === 1 && said[0].key === K && said[0].change === 'removed',
     `㉑2b …and the change is REPORTED: removed, once, for that key — said ${JSON.stringify(said)}`);
   const r2 = panelWrite(dir, K, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
-  ok(r2.ok && !r2.windowChange && said.length === 1, '㉑2b …never per probe: the next identical panel reports nothing (the file already says it)');
+  ok(gateOf(r2.ok) && !r2.windowChange && said.length === 1, '㉑2b …never per probe: the next identical panel reports nothing (the file already says it)');
   const rem = POOL.accountRemaining(f1, nowSec), brs = POOL.bucketRems(f1, nowSec);
-  ok(rem.known && rem.remaining === 60 && !brs.some((b) => b.kind === 'fiveHour') && POOL.weeklyDeadline(f1, nowSec) === (f1.sevenDay.resetsAt || null),
+  ok(gateOf(rem.known) && rem.remaining === 60 && !brs.some((b) => b.kind === 'fiveHour') && POOL.weeklyDeadline(f1, nowSec) === (f1.sevenDay.resetsAt || null),
     `㉑1i the pool reads the week alone: remaining ${JSON.stringify(rem)}, rows ${JSON.stringify(brs.map((b) => b.label))}`);
   {
     const d4 = mkd('u'), K4 = 'sub-n5h-unverified';
     seed5h(d4, K4);
     const r4 = panelWrite(d4, K4, CQ.parseCliUsageText(PANEL_NO5H, Date.now()), { verified: false });
     const f4 = readJ(d4, K4);
-    ok(r4.ok && f4.fiveHour && f4.fiveHour.utilization === 0.84 && !f4.fiveHourAbsent && !r4.windowChange,
+    ok(gateOf(r4.ok) && gateOf(f4.fiveHour) && f4.fiveHour.utilization === 0.84 && !f4.fiveHourAbsent && !r4.windowChange,
       '㉑4a an UNVERIFIED panel writes its numbers and keeps every window the file holds — «no 5h» needs a panel that proved whose it is (B-855a c1)');
     const UR = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
-    ok(/absentWindows: idv && idv\.verified \? quotaModel\.absentWindowsOf\(cliPanel\) : null,\n\s+authoritativeScopes: authoritativeScopesOf\(cliPanel\) \}\);/.test(UR),
+    ok(verdictOf(/absentWindows: idv && idv\.verified \? quotaModel\.absentWindowsOf\(cliPanel\) : null,\n\s+authoritativeScopes: authoritativeScopesOf\(cliPanel\) \}\);/.test(UR)),
       '㉑4a …and refreshViaCliPanel hands the claim over only when `idv.verified`, from the PARSE (`cliPanel`, never the spread)');
     ok((UR.match(/absentWindows: quotaModel\.absentWindowsOf\(u\)/g) || []).length === 5,
       '㉑4b the token-ladder / device rungs (one OAuth reply each, the account\'s own token) hand over their parse\'s claim — 5 sites');
@@ -2357,7 +2357,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   const evBack = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.1, resetsAt: Math.floor(Date.now() / 1000) + 5 * 3600 + 60 } });
   const rb = CAP.captureRateLimitEvent({ cacheDir: dir, key: K, identityIds: [K], ev: evBack, now: Date.now() + 1000 });
   const fb = readJ(dir, K);
-  ok(rb.ok && fb.fiveHour && Math.abs(fb.fiveHour.utilization - 0.1) < 1e-9 && !fb.fiveHourAbsent && said.length === 2 && said[1].change === 'restored',
+  ok(gateOf(rb.ok) && gateOf(fb.fiveHour) && Math.abs(fb.fiveHour.utilization - 0.1) < 1e-9 && !fb.fiveHourAbsent && said.length === 2 && said[1].change === 'restored',
     `㉑2c a 5h window that BEGAN after the removal brings the window BACK and is said the same way (restored) — said ${JSON.stringify(said.map((x) => x.change))}`);
   // THE STREAM IS A PASSIVE ANSWER (r3, acceptance r2 BLOCKER): the CLI drops a passed window from `unifiedWindows`
   // (2.1.314 `xd`), so a week-only record counts as ONE witness, and only when the week MOVED since the previous reading.
@@ -2373,7 +2373,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const f1 = readJ(d3, K3);
     capture(d3, K3, evWeek(41));                       // the week MOVED, no five_hour: witness 1
     const f2 = readJ(d3, K3);
-    ok(f1.fiveHour && f1.fiveHour.utilization === 0.84 && !f1.fiveHourAbsent && maxN(f1) === 0 && f2.fiveHour && !f2.fiveHourAbsent && WN(f2, 'ev:qm21') === 1 && said.length === n0,
+    ok(gateOf(f1.fiveHour) && f1.fiveHour.utilization === 0.84 && !f1.fiveHourAbsent && maxN(f1) === 0 && gateOf(f2.fiveHour) && !f2.fiveHourAbsent && WN(f2, 'ev:qm21') === 1 && said.length === n0,
       `㉑2d a week-only stream record is NOT proof: the stored 5h window stays (unconfirmed), one MOVED answer is witness 1 — ${JSON.stringify({ f1: !!f1.fiveHour, w2: f2.fiveHourAbsentWitnesses })}`);
     capture(d3, K3, evWeek(42));                       // witness 2 — a second, distinct API answer
     const f3 = readJ(d3, K3);
@@ -2383,7 +2383,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     seed5h(d3b, K3b);
     capture(d3b, K3b, evWeek(40)); capture(d3b, K3b, evWeek(41)); capture(d3b, K3b, ev5(3)); capture(d3b, K3b, evWeek(45)); // ev5 reads the week at 44
     const fb3 = readJ(d3b, K3b);
-    ok(fb3.fiveHour && !fb3.fiveHourAbsent && WN(fb3, 'ev:qm21') === 1,
+    ok(gateOf(fb3.fiveHour) && !fb3.fiveHourAbsent && WN(fb3, 'ev:qm21') === 1,
       '㉑2d …a five_hour answer between two moved ones ENDS the count (witness 1 again, never 2 — no flap)');
     // THE SIBLING BASE: the capture spreads the identity group's FRESHEST file — a sibling may still hold the 5h window
     const SIB = 'sub-n5h-sib', n1 = said.length;
@@ -2430,18 +2430,18 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     return { key, r0, r1, r2, settled, again, back, backSettled, got };
   };
   const E2E = e2e([TOOL21]);
-  ok(E2E.r0.fiveHour && E2E.r0.fiveHour.utilization === 0.71 && !E2E.r0.fiveHourAbsent && E2E.r1.fiveHour && WN(E2E.r1, 'sl:sess-qm21') === 1 && !E2E.r1.fiveHourAbsent,
+  ok(gateOf(E2E.r0.fiveHour) && E2E.r0.fiveHour.utilization === 0.71 && !E2E.r0.fiveHourAbsent && gateOf(E2E.r1.fiveHour) && WN(E2E.r1, 'sl:sess-qm21') === 1 && !E2E.r1.fiveHourAbsent,
     `㉑1k the statusline keeps the file's last stated 5h window (never a fabricated 0 % 'unknown' one) through a render without five_hour; one MOVED render is witness 1, no tombstone — ${JSON.stringify({ r0: E2E.r0.fiveHour, w1: E2E.r1.fiveHourAbsentWitnesses })}`);
-  ok(E2E.r2.fiveHour === undefined && E2E.r2.fiveHourAbsent > 0 && E2E.r2.windowChangeUnsaid && E2E.r2.windowChangeUnsaid.change === 'removed' && SINCE(planOf(E2E.r2, E2E.key), '5h') > 0,
+  ok(E2E.r2.fiveHour === undefined && E2E.r2.fiveHourAbsent > 0 && gateOf(E2E.r2.windowChangeUnsaid) && E2E.r2.windowChangeUnsaid.change === 'removed' && SINCE(planOf(E2E.r2, E2E.key), '5h') > 0,
     '㉑1k …the SECOND moved render drops the 5h bucket, writes the dated tombstone the lift reads back, and leaves ONE unsaid marker');
   ok(E2E.got.filter((c) => c === 'removed').length === 1 && !E2E.settled.windowChangeUnsaid,
     `㉑2f the 30-s passive ingest's settle write says it ONCE and clears the marker — said ${JSON.stringify(E2E.got)}`);
   ok(!E2E.again.windowChangeUnsaid && E2E.again.fiveHourAbsent === E2E.r2.fiveHourAbsent,
     '㉑2f …never per render: the next render keeps the tombstone at the instant it was FIRST said, and leaves nothing to say');
-  ok(E2E.back.fiveHour && E2E.back.windowChangeUnsaid && E2E.back.windowChangeUnsaid.change === 'restored' && E2E.got[E2E.got.length - 1] === 'restored' && !E2E.backSettled.fiveHourAbsent && !E2E.backSettled.windowChangeUnsaid,
+  ok(gateOf(E2E.back.fiveHour) && gateOf(E2E.back.windowChangeUnsaid) && E2E.back.windowChangeUnsaid.change === 'restored' && E2E.got[E2E.got.length - 1] === 'restored' && !E2E.backSettled.fiveHourAbsent && !E2E.backSettled.windowChangeUnsaid,
     '㉑2f a render that states a 5h window NEWER than the removal brings the window BACK, said the same way (restored) once the ingest settles it');
   const UR21 = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
-  ok(/if \(u\.windowChangeUnsaid\) \{\n\s+try \{ const w = usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: u, familyOf: familyOfScopedBucket, backend: 'claude' \}\);/.test(UR21) && /setInterval\(ingestConfirmed, 30000\)/.test(UR21) && /const ingestConfirmed = \(\) => accounts\.signinFactsSettled\(\)[^\n]*usageFolder\.tick\(\)/.test(UR21) && /usageFolder\.onReply\(\(\) => ingestPassiveUsage\(\)\)/.test(UR21),   // B-360d: the 30 s pass runs after the sign-in facts' confirmation
+  ok(gateOf(/if \(u\.windowChangeUnsaid\) \{\n\s+try \{ const w = usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: u, familyOf: familyOfScopedBucket, backend: 'claude' \}\);/.test(UR21)) && gateOf(/setInterval\(ingestConfirmed, 30000\)/.test(UR21)) && gateOf(/const ingestConfirmed = \(\) => accounts\.signinFactsSettled\(\)[^\n]*usageFolder\.tick\(\)/.test(UR21)) && verdictOf(/usageFolder\.onReply\(\(\) => ingestPassiveUsage\(\)\)/.test(UR21)),   // B-360d: the 30 s pass runs after the sign-in facts' confirmation
     '㉑2f the hub\'s passive ingest (every 30 s: the pass after the sign-in facts\' confirmation asks the usage folder\'s refresh, whose reply runs it — B-360d U3) settles a file carrying the marker through the ONE write path');
   // ㉑3a–㉑3d: THE ACCEPTANCE r2 BLOCKER'S OWN SHAPES (the reviewer's names)
   const shapes = (toolArgs, wcm = W) => {
@@ -2478,15 +2478,15 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     return out;
   };
   const SH = shapes([TOOL21]);
-  ok(SH.a.r.fiveHour && SH.a.r.fiveHour.utilization === 0.37 && !SH.a.r.fiveHourAbsent && maxN(SH.a.r) === 0 && !SH.a.r2.fiveHourAbsent && !SH.a.got.length && SH.a.saidHere === 0,
+  ok(gateOf(SH.a.r.fiveHour) && SH.a.r.fiveHour.utilization === 0.37 && !SH.a.r.fiveHourAbsent && maxN(SH.a.r) === 0 && !SH.a.r2.fiveHourAbsent && !SH.a.got.length && SH.a.saidHere === 0,
     `㉑3a the RESET-TIME render (the week unchanged since the previous reading, no five_hour) lays NO tombstone, counts no witness and says nothing — the passed 5h window stays (unconfirmed) — ${JSON.stringify({ f: SH.a.r.fiveHour, abs: SH.a.r.fiveHourAbsent, w: SH.a.r.fiveHourAbsentWitnesses, got: SH.a.got })}`);
   ok(SH.b.f.fiveHour === undefined && SH.b.f.fiveHourAbsent > 0 && JSON.stringify(SH.b.got) === '["removed"]',
     `㉑3b TWO API-answered renders (the week moved twice) without five_hour ⇒ the tombstone + ONE notice — said ${JSON.stringify(SH.b.got)}`);
-  ok(SH.c.f.fiveHour && !SH.c.f.fiveHourAbsent && WN(SH.c.f, 'sl:sess-qm21') === 1 && !SH.c.got.length,
+  ok(gateOf(SH.c.f.fiveHour) && !SH.c.f.fiveHourAbsent && WN(SH.c.f, 'sl:sess-qm21') === 1 && !SH.c.got.length,
     `㉑3c one moved render then a five_hour render ⇒ nothing said, the count ENDS (one more moved render is witness 1 again — no flap) — said ${JSON.stringify(SH.c.got)}`);
   const oNone = CQ.parseOAuthUsage({ limits: [{ kind: 'weekly_scoped', percent: 30, scope: { model: { display_name: 'Fable' } } }] });
   const gNone = ADP.parseGetUsageResponse({ rate_limits: { model_scoped: [{ display_name: 'Fable', utilization: 30 }] } });
-  ok(SH.d.same && oNone && oNone.fiveHour == null && oNone.sevenDay == null && JSON.stringify(AW(oNone)) === '[]' && gNone && gNone.fiveHour == null && gNone.sevenDay == null,
+  ok(gateOf(SH.d.same) && gateOf(oNone) && oNone.fiveHour == null && oNone.sevenDay == null && JSON.stringify(AW(oNone)) === '[]' && gateOf(gNone) && gNone.fiveHour == null && gNone.sevenDay == null,
     `㉑3d a payload with NEITHER five_hour nor seven_day states NO window: the statusline writes nothing, the OAuth (limits[]-only) and get_usage (model_scoped-only) parses invent neither — got ${JSON.stringify({ o: oNone && oNone.fiveHour, g: gNone && gNone.fiveHour })}`);
   {
     const d = mkd('rd2'), key = 'sub-n5h-undo'; seed5h(d, key);
@@ -2498,7 +2498,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const oAfter = CQ.parseOAuthUsage({ limits: [{ kind: 'weekly_scoped', percent: 30, scope: { model: { display_name: 'Fable' } } }] });
     const r = W.writeCacheObject({ cacheDir: d, key, obj: { ...oAfter, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', absentWindows: AW(oAfter) });
     const f = readJ(d, key);
-    ok(pw.windowChange && pw.windowChange.change === 'removed' && f.fiveHour === undefined && f.fiveHourAbsent > 0 && !r.windowChange && said.length === n0,
+    ok(gateOf(pw.windowChange) && pw.windowChange.change === 'removed' && f.fiveHour === undefined && f.fiveHourAbsent > 0 && !r.windowChange && said.length === n0,
       '㉑3d …and that reply, written after a removal, no longer UNDOES it (no fake window, no false «back»)');
   }
 
@@ -2526,9 +2526,9 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   };
   {
     const A = apiPhaseRepair(RR), B = apiPhaseRepair(RR, { anchorAfter: true });
-    ok(A.row.cache === 'replaced' && A.f.fiveHour === undefined && A.f.fiveHourAbsent === A.T && A.f.sevenDay && A.f.sevenDay.utilization === 0.18,
+    ok(A.row.cache === 'replaced' && A.f.fiveHour === undefined && A.f.fiveHourAbsent === A.T && gateOf(A.f.sevenDay) && A.f.sevenDay.utilization === 0.18,
       `㉑7h the STANDING repair (repairSidecarsByApiPhase, boot + hourly) rebuilds a «no 5h» member from its own anchors read BEFORE the removal and keeps «no 5h limit» — the tombstone read from the TARGET file, never re-creating the 30 % window — ${JSON.stringify({ cache: A.row.cache, f5: A.f.fiveHour, abs: A.f.fiveHourAbsent === A.T })}`);
-    ok(B.row.cache === 'replaced' && B.f.fiveHour && Math.abs(B.f.fiveHour.utilization - 0.12) < 1e-9,
+    ok(B.row.cache === 'replaced' && gateOf(B.f.fiveHour) && Math.abs(B.f.fiveHour.utilization - 0.12) < 1e-9,
       `㉑3f' …an anchor read AFTER the removal that states a 5h window is the window BACK — ${JSON.stringify({ cache: B.row.cache, f5: B.f.fiveHour })}`);
   }
 
@@ -2564,17 +2564,17 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     return o;
   };
   const R4 = r4shapes([TOOL21]);
-  ok(R4.a.files.every((f) => !f.fiveHourAbsent) && maxN(R4.a.f) === 0 && !R4.a.got.length && R4.a.f.fiveHour,
+  ok(gateOf(R4.a.files.every((f) => !f.fiveHourAbsent)) && maxN(R4.a.f) === 0 && !R4.a.got.length && verdictOf(R4.a.f.fiveHour),
     `㉑7a THE TWO-SESSION FLAP: sessions A (week 40) and B (week 42) re-render their own stale states after the 5h reset, alternating — NO witness, NO tombstone, nothing said, and B's next answer with a 5h window says no «back» — said ${JSON.stringify(R4.a.got)}`);
-  ok(R4.b.got[0] === 'removed' && R4.b.atStale && R4.b.atStale.fiveHour === undefined && R4.b.atStale.fiveHourAbsent === R4.b.files[2].fiveHourAbsent && R4.b.got.length === 2 && R4.b.got[1] === 'restored',
+  ok(R4.b.got[0] === 'removed' && gateOf(R4.b.atStale) && R4.b.atStale.fiveHour === undefined && R4.b.atStale.fiveHourAbsent === R4.b.files[2].fiveHourAbsent && R4.b.got.length === 2 && R4.b.got[1] === 'restored',
     `㉑7b A STALE 5h WINDOW IS NO RETURN: after a real lift (A's two moved answers), an idle session C still holding a 5h window that BEGAN BEFORE the tombstone renders it twice — kept out, the tombstone stands at its instant, nothing said; a 5h window that began after it restores ONCE — said ${JSON.stringify(R4.b.got)}`);
   ok(R4.c.files[3].fiveHourAbsent === undefined && WN(R4.c.files[3], 'sl:A') === 1 && WN(R4.c.files[3], 'sl:B') === 1 && R4.c.f.fiveHourAbsent > 0 && JSON.stringify(R4.c.got) === '["removed"]',
     `㉑7c PER PRODUCER: one moved answer from A and one from B are two producers' FIRST witnesses — no tombstone; A's SECOND lays it and says «removed» once — ${JSON.stringify({ w: R4.c.files[3].fiveHourAbsentWitnesses, got: R4.c.got })}`);
-  ok(R4.d.files.every((f) => !f.fiveHourAbsent) && maxN(R4.d.f) === 0 && !R4.d.got.length,
+  ok(gateOf(R4.d.files.every((f) => !f.fiveHourAbsent)) && maxN(R4.d.f) === 0 && !R4.d.got.length,
     `㉑7d a NEW session's first render (its week differs from the file's last writer's) is never a witness — it only sets its own baseline — ${JSON.stringify(R4.d.f.fiveHourAbsentWitnesses)}`);
   ok(maxN(R4.e.files[2]) === 0 && WN(R4.e.f, 'sl:A') === 1 && !R4.e.f.fiveHourAbsent && WN(R4.e2.f, 'sl:A') === 1,
     `㉑7e MOVEMENT IS FORWARD ONLY: an older (40 after 42) or equal reading is never movement; a higher % of the same week is, and so is a NEW week at a lower % — ${JSON.stringify({ e: R4.e.files[2].fiveHourAbsentWitnesses, e2: R4.e2.f.fiveHourAbsentWitnesses })}`);
-  ok(R4.l.marker && R4.l.marker.change === 'removed' && !R4.l.got.length && R4.l.f.fiveHour && !R4.l.f.fiveHourAbsent && !R4.l.f.windowChangeUnsaid,
+  ok(gateOf(R4.l.marker) && R4.l.marker.change === 'removed' && !R4.l.got.length && gateOf(R4.l.f.fiveHour) && !R4.l.f.fiveHourAbsent && !R4.l.f.windowChangeUnsaid,
     `㉑7l A CHANGE UNDONE BEFORE IT WAS SAID (removed, then a newer 5h window, between two 30-s ingests) cancels its marker: the settle says nothing — said ${JSON.stringify(R4.l.got)}`);
   // the stream's twin: the capture counts for the session whose stream it is (`producer`)
   {
@@ -2584,7 +2584,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     capture(d, k, evWk5(42), [k], CAP, 'ev:B'); capture(d, k, evWk5(40), [k], CAP, 'ev:A');
     for (let i = 0; i < 3; i++) { capture(d, k, evWeek(40), [k], CAP, 'ev:A'); capture(d, k, evWeek(42), [k], CAP, 'ev:B'); }
     const f = readJ(d, k);
-    ok(f.fiveHour && !f.fiveHourAbsent && maxN(f) === 0 && !said.slice(n0).some((x) => x.key === k),
+    ok(gateOf(f.fiveHour) && !f.fiveHourAbsent && maxN(f) === 0 && !said.slice(n0).some((x) => x.key === k),
       `㉑7f the STREAM twin: two sessions' records alternating stale weeks (40 / 42) lay no tombstone and say nothing — ${JSON.stringify({ w: f.fiveHourAbsentWitnesses, abs: f.fiveHourAbsent })}`);
     capture(d, k, evWeek(41), [k], CAP, null); capture(d, k, evWeek(43), [k], CAP, null); capture(d, k, evWeek(44), [k], CAP, null);
     ok(!readJ(d, k).fiveHourAbsent, '㉑7f …and a record that names no producer (a replay, a re-drive) is never a witness');
@@ -2604,14 +2604,14 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   };
   {
     const S = sibMarker();
-    ok(S.gm && S.gm.change === 'restored' && !S.saidX.length && S.fx.fiveHour && !S.fx.windowChangeUnsaid,
+    ok(gateOf(S.gm) && S.gm.change === 'restored' && !S.saidX.length && gateOf(S.fx.fiveHour) && !S.fx.windowChangeUnsaid,
       `㉑7g a SIBLING's unsaid «back» (its own statusline's, on the fresher file) riding the capture's freshest-sibling spread is never said on a member that never changed — said on it ${JSON.stringify(S.saidX)}`);
     const d = mkd('st'), X = 'sub-n5h-x2', G2 = 'sub-n5h-g2', n0 = said.length;
     seed5h(d, X, { at: Date.now() - 300000 }); seed5h(d, G2, { at: Date.now() - 300000 });
     panelWrite(d, G2, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));       // the sibling's own «no 5h limit», laid now
     CAP.captureRateLimitEvent({ cacheDir: d, key: X, identityIds: [X, G2], ev: evWeek(41), now: Date.now() + 1000, producer: 'ev:x2' });
     const fx = readJ(d, X);
-    ok(fx.fiveHour && fx.fiveHour.utilization === 0.84 && !fx.fiveHourAbsent && !said.slice(n0).some((x) => x.key === X),
+    ok(gateOf(fx.fiveHour) && fx.fiveHour.utilization === 0.84 && !fx.fiveHourAbsent && !said.slice(n0).some((x) => x.key === X),
       `㉑7g …nor does a SIBLING's tombstone: a record on a member with its own 5h window keeps it (no false «lifted») — ${JSON.stringify({ f5: fx.fiveHour, abs: fx.fiveHourAbsent })}`);
   }
   // ── r4: the READ side — the identity group's freshest-file substitution keeps a member's own «no 5h limit» ──────
@@ -2625,7 +2625,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const ENG7 = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8'), UR7 = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
     ok(!!wo && r.fiveHour === undefined && r.fiveHourAbsent === T5 && r.sevenDay.utilization === 0.41 && !QM.windowOfKind(QM.planLimit({ limits: r.limits }), '5h') && SINCE(QM.planLimit({ limits: r.limits }), '5h') === T5 && wo(sib, null) === sib,
       `㉑7i a fresher SIBLING read in place of a «no 5h» member keeps the member's tombstone — its 5h window (legacy + typed) never outranks it — ${JSON.stringify({ f5: r.fiveHour, abs: r.fiveHourAbsent })}`);
-    ok((ENG7.match(/raw = quotaModel\.withOwnAbsence\(g\.cache, raw\); break;/g) || []).length === 1 && /_accountUsage\[gid\] = \{ \.\.\.quotaModel\.withOwnAbsence\(newest, a\),/.test(UR7) && /_rateLimitCache = quotaModel\.withOwnAbsence\(usage, g\);/.test(UR7),
+    ok((ENG7.match(/raw = quotaModel\.withOwnAbsence\(g\.cache, raw\); break;/g) || []).length === 1 && gateOf(/_accountUsage\[gid\] = \{ \.\.\.quotaModel\.withOwnAbsence\(newest, a\),/.test(UR7)) && verdictOf(/_rateLimitCache = quotaModel\.withOwnAbsence\(usage, g\);/.test(UR7)),
       '㉑7i …and every substitution reads through it: the pool\'s ONE reading door (poolReadReading — lane account-reset-door r2: the switch pass\'s own copy is gone) and the Usage popup\'s same-account merge');
   }
   // ── r4 (acceptance r3 minors): ONE item per member; the unknown window in words ─────────────────────────────────
@@ -2639,12 +2639,12 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const mine = () => m._state.items.filter((i) => i.sessionKey === 'webui:usage-window' && !i.clearedAt);
     if (fn) { fn({ key: 'sub-y', kind: '5h', change: 'removed', at: Date.now() }); fn({ key: 'sub-y', kind: '5h', change: 'restored', at: Date.now() }); }
     const one = mine();
-    ok(one.length === 1 && one[0].status === 'open' && /5-hour limit is back/.test(one[0].text),
+    ok(one.length === 1 && one[0].status === 'open' && verdictOf(/5-hour limit is back/.test(one[0].text)),
       `㉑7j ONE For-you item per member: «back» filed after «lifted» REPLACES its words — never two open contradictions — ${JSON.stringify(one.map((i) => [i.itemKey, i.status, i.text.slice(0, 40)]))}`);
     if (one[0]) m.setStatus(one[0].id, 'done');
     if (fn) fn({ key: 'sub-y', kind: '5h', change: 'removed', at: Date.now() });
     const two = mine();
-    ok(two.length === 1 && two[0].status === 'open' && /was lifted by Anthropic/.test(two[0].text),
+    ok(two.length === 1 && two[0].status === 'open' && verdictOf(/was lifted by Anthropic/.test(two[0].text)),
       `㉑7j …and a later change re-opens that SAME item with the current state — ${JSON.stringify(two.map((i) => [i.itemKey, i.status]))}`);
     try { m.stop(); } catch { }
   }
@@ -2656,10 +2656,10 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const ENGk = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8'), CSB = fs.readFileSync(path.join(ROOT, 'src/lib/chat-status-bar.js'), 'utf8');
     const zhK = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), jaK = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
     const KEY = '"{m}: its limit window is unknown (it has no 5-hour limit).": ';
-    ok(/限额窗口未知/.test(s) && !/window unknown/.test(s) && !/的 7d /.test(s),
+    ok(gateOf(/限额窗口未知/.test(s)) && !/window unknown/.test(s) && !/的 7d /.test(s),
       `㉑7k a guessed wall on a «no 5h» member says in the card's words that its limit window is UNKNOWN — never the raw token, never a window it cannot know — ${JSON.stringify(s)}`);
-    ok(!/\? 'window unknown' :/.test(ENGk) && /done\.push\(\{ label, until, \.\.\.\(unknownWindow \? \{ unknownWindow: true \} : \{\}\) \}\);/.test(ENGk) && /unknownWindow \? null : BUCKET_LABEL\[b\.kind\]/.test(ENGk) && /own && own\.unknownWindow \? \{ label: null, unknownWindow: true,/.test(ENGk)
-      && CSB.includes("t('{m}: its limit window is unknown (it has no 5-hour limit).', { m: r.name })") && zhK.includes(KEY) && jaK.includes(KEY),
+    ok(!/\? 'window unknown' :/.test(ENGk) && gateOf(/done\.push\(\{ label, until, \.\.\.\(unknownWindow \? \{ unknownWindow: true \} : \{\}\) \}\);/.test(ENGk)) && gateOf(/unknownWindow \? null : BUCKET_LABEL\[b\.kind\]/.test(ENGk)) && gateOf(/own && own\.unknownWindow \? \{ label: null, unknownWindow: true,/.test(ENGk))
+      && gateOf(CSB.includes("t('{m}: its limit window is unknown (it has no 5-hour limit).', { m: r.name })")) && gateOf(zhK.includes(KEY)) && verdictOf(jaK.includes(KEY)),
       '㉑7k …the wall names no label (`unknownWindow`), the cause carries it, and the status bar says it through t() — zh + ja');
   }
   // ── r4: ONE RULE, TWO SPELLINGS — the shipped statusline mirrors quota-model's witness block byte for byte ──────
@@ -2678,7 +2678,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     ];
     const same = !!fT && TAB.every((row) => JSON.stringify(fT.countPassiveAnswer(row)) === JSON.stringify(QM.countPassiveAnswer(row)));
     const out = fT ? TAB.map((row) => fT.countPassiveAnswer(row)) : [];
-    ok(same && out[1].lay && !out[2].moved && out[3].stale && out[4].restore && !Object.keys(out[5].witnesses).length,
+    ok(gateOf(same) && gateOf(out[1].lay) && !out[2].moved && gateOf(out[3].stale) && gateOf(out[4].restore) && !Object.keys(out[5].witnesses).length,
       `㉑7m …and the SHIPPED bytes decide like the model over one table (lay on a producer's second moved answer, backward is no movement, stale vs back, 24-h bound) — ${JSON.stringify(out.map((o) => [o.lay, o.moved, o.stale, o.restore]))}`);
   }
 
@@ -2784,31 +2784,31 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
 
   // ── rule 3: the WORDS (the banner guess; the popup / roster draw what the reading has) ───────────────────────
   const bGuess = ADP.parseLimitBanner("You've reached your usage limit · resets Nov 3");
-  ok(bGuess && bGuess.kind === 'fiveHour' && bGuess.guessed === true && !ADP.parseLimitBanner("You've hit your session limit · resets 3am").guessed,
+  ok(gateOf(bGuess) && bGuess.kind === 'fiveHour' && bGuess.guessed === true && !ADP.parseLimitBanner("You've hit your session limit · resets 3am").guessed,
     '㉑6a an unknown-wording limit banner is a GUESSED 5h wall — a named one is not');
   const ENG = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8');
-  ok(!/hit = \{ kind: 'sevenDay', guessed: true \}/.test(ENG) && /const hit = ClaudeCodeAdapter\.parseLimitBanner\(text\);/.test(ENG) && /if \(hit\.kind === 'fiveHour'\) \{ if \(!\(hit\.guessed && tomb5h\(own\)\)\) cache\.fiveHour = bump\(cache\.fiveHour, 5 \* 3600\); \}/.test(ENG),
+  ok(!/hit = \{ kind: 'sevenDay', guessed: true \}/.test(ENG) && gateOf(/const hit = ClaudeCodeAdapter\.parseLimitBanner\(text\);/.test(ENG)) && verdictOf(/if \(hit\.kind === 'fiveHour'\) \{ if \(!\(hit\.guessed && tomb5h\(own\)\)\) cache\.fiveHour = bump\(cache\.fiveHour, 5 \* 3600\); \}/.test(ENG)),
     '㉑6a …the engine keeps the base wall KIND for a guessed banner (never rewritten to the week — r3), and on a «no 5h» member it has no 5h window to mark (driven in test-fable-cap-pool-storm ㉑3e/㉑3f)');
   const UM = fs.readFileSync(path.join(ROOT, 'src/lib/usage-meter.js'), 'utf8');
   // lane usage-two-rings (owner 2026-11-05: «没有 5h 就显示 7d+fable») moved this pin: .367 drew a reading without a 5h window
   // as ONE ring (the 7d); the row now keeps two — the 7d + the model-scoped cap ring (capRing) — and still never a 0 % «5h»
   // arc (.367's law stands). The cap ring's three states are DRIVEN in test-usage-two-rings; this is the text half. (r3:
   // capRing reads every reading — `acctCap` — so the popup's scoped note can say its «none»; the ring draws it only without a 5h)
-  ok(/const acctCap = noData \? null : capRing\(quotaModel, rl, estSel, Date\.now\(\),/.test(UM) && /const cap = has5h \? null : acctCap;/.test(UM) && /rows\.push\(ring \? ringRow\('claude', NO5H_RINGS\.map\(\(k\) => ring\[k\]\)\) : renderRow\('claude', '5h', pct5h, '7d', pct7d, noData, \[p5, p7\], \[v5, v7\]\)\);/.test(UM) && !/primaryLabel == null/.test(UM),
+  ok(gateOf(/const acctCap = noData \? null : capRing\(quotaModel, rl, estSel, Date\.now\(\),/.test(UM)) && gateOf(/const cap = has5h \? null : acctCap;/.test(UM)) && gateOf(/rows\.push\(ring \? ringRow\('claude', NO5H_RINGS\.map\(\(k\) => ring\[k\]\)\) : renderRow\('claude', '5h', pct5h, '7d', pct7d, noData, \[p5, p7\], \[v5, v7\]\)\);/.test(UM)) && !/primaryLabel == null/.test(UM),
     '㉑6b the taskbar row draws a reading without a 5h window as 7d + the model-scoped cap ring — never a 0 % «5h» donut, never one ring');
-  ok(/\$\{has5h \? `<div class="usage-session">\n\s+<div class="usage-session-name">\$\{t\('5-hour limit'\)\}/.test(UM) && /t\('5-hour limit lifted \(\{when\}\)', \{ when: stampText\(no5hSince\) \}\)/.test(UM) && /const no5hSince = quotaModel\.fiveHourAbsent\(rl\);/.test(UM)
-    && /t\('No 5-hour limit on this account since \{when\} — weekly limits only\.', \{ when: stampText\(no5hSince\) \}\)/.test(UM) && !/Ultra|Max 20x|\$100/.test(UM),
+  ok(gateOf(/\$\{has5h \? `<div class="usage-session">\n\s+<div class="usage-session-name">\$\{t\('5-hour limit'\)\}/.test(UM)) && gateOf(/t\('5-hour limit lifted \(\{when\}\)', \{ when: stampText\(no5hSince\) \}\)/.test(UM)) && gateOf(/const no5hSince = quotaModel\.fiveHourAbsent\(rl\);/.test(UM))
+    && gateOf(/t\('No 5-hour limit on this account since \{when\} — weekly limits only\.', \{ when: stampText\(no5hSince\) \}\)/.test(UM)) && !/Ultra|Max 20x|\$100/.test(UM),
     '㉑6b the popup shows the 5h row only when the reading has one; a lifted one says «5-hour limit lifted (<time>)» + what was MEASURED («No 5-hour limit on this account since <time> — weekly limits only.»), never a tier, a name or a price');
   const MA = fs.readFileSync(path.join(ROOT, 'src/lib/manage-agents.js'), 'utf8');
   // (r4/r5: only a harness whose not-read cap only the ⟳ read can answer — the caps row, `scopedCapsReadOnDemand` — runs
   // capRing; any other reading without a 5h window keeps .367's week (+ the caps it carries, as the base drew them — a Codex
   // Spark limit): the `[...(has5h ? …` form below is it)
-  ok(/const acctCap = wins \|\| !scopedCapsReadOnDemand\(backend\) \? null : capRing\(quotaModel, u, est, now,/.test(MA) && /const cap = has5h \? null : acctCap;/.test(MA) && /: ring \? NO5H_RINGS\.flatMap\(\(k\) => ring\[k\]\) : \[\.\.\.\(has5h \? \[donut\('5h', u\.fiveHour, null, est\?\.fiveHour\)\] : \[\]\), donut\('7d'/.test(MA) && /\[\.\.\.\(has5h \? \[\['5h', u\.fiveHour, est\?\.fiveHour, 'fiveHour'\]\] : \[\]\), \['7d',/.test(MA) && (MA.match(/hostOwnReading\(/g) || []).length === 6,
+  ok(gateOf(/const acctCap = wins \|\| !scopedCapsReadOnDemand\(backend\) \? null : capRing\(quotaModel, u, est, now,/.test(MA)) && gateOf(/const cap = has5h \? null : acctCap;/.test(MA)) && gateOf(/: ring \? NO5H_RINGS\.flatMap\(\(k\) => ring\[k\]\) : \[\.\.\.\(has5h \? \[donut\('5h', u\.fiveHour, null, est\?\.fiveHour\)\] : \[\]\), donut\('7d'/.test(MA)) && gateOf(/\[\.\.\.\(has5h \? \[\['5h', u\.fiveHour, est\?\.fiveHour, 'fiveHour'\]\] : \[\]\), \['7d',/.test(MA)) && (MA.match(/hostOwnReading\(/g) || []).length === 6,
     '㉑6c the roster draws a reading without a 5h window as 7d + the cap ring (no 0 % 5h donut — lane usage-two-rings moved this from «the week alone»), no 5h figure in the narrow pill, and a weekly-only machine login is a reading (5 gates + the helper)');
-  ok(/creditsSlotHtml\(hostOwnReading\(this\._hostOwnUsage\?\.\[selectedHost\]\)\)/.test(MA) && !/_hostOwnUsage\?\.\[[^\]]+\]\?\.fiveHour \?/.test(MA),
+  ok(gateOf(/creditsSlotHtml\(hostOwnReading\(this\._hostOwnUsage\?\.\[selectedHost\]\)\)/.test(MA)) && !/_hostOwnUsage\?\.\[[^\]]+\]\?\.fiveHour \?/.test(MA),
     '㉑3g the FIFTH machine-login gate (the credits-slot chip on the same row) reads hostOwnReading too — no gate asks `fiveHour` alone');
   const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
-  ok(zh.includes('"5-hour limit lifted ({when})": "5 小时限额已取消（{when}）"') && ja.includes('"5-hour limit lifted ({when})": "5 時間制限は解除されました（{when}）"'),
+  ok(gateOf(zh.includes('"5-hour limit lifted ({when})": "5 小时限额已取消（{when}）"')) && verdictOf(ja.includes('"5-hour limit lifted ({when})": "5 時間制限は解除されました（{when}）"')),
     '㉑6d «5 小时限额已取消（<time>）» — zh + ja');
 
   // ── rule 2: the NOTICE — one per member and change, by its label, never an email ────────────────────────────
@@ -2830,9 +2830,9 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     N.fn({ key: 'host-1', kind: '5h', change: 'removed', at: Date.now() });
   }
   const [n1, n2] = N.filed;
-  ok(N.filed.length === 2 && n1.itemKey === '5h-window:sub-y' && n1.origin === 'pool' && n1.kind === 'notice' && /Pool 3's 5-hour limit was lifted by Anthropic/.test(n1.text) && n1.i18n.text.params.account === 'Pool 3',
+  ok(N.filed.length === 2 && n1.itemKey === '5h-window:sub-y' && n1.origin === 'pool' && n1.kind === 'notice' && gateOf(/Pool 3's 5-hour limit was lifted by Anthropic/.test(n1.text)) && n1.i18n.text.params.account === 'Pool 3',
     `㉑2e ONE For-you notice per member, naming its label (the itemKey is the MEMBER, its words the current state) — filed ${JSON.stringify(N.filed.map((x) => x.itemKey))}`);
-  ok(n2 && !/@/.test(n2.text) && n2.i18n.text.params.account === 'sub-x' && /5-hour limit is back/.test(n2.text), '㉑2e …a label that is an email is never printed (the id instead); a host-* file is not a member and files nothing');
+  ok(gateOf(n2) && !/@/.test(n2.text) && n2.i18n.text.params.account === 'sub-x' && verdictOf(/5-hour limit is back/.test(n2.text)), '㉑2e …a label that is an email is never printed (the id instead); a host-* file is not a member and files nothing');
 
   // ── the CENSUS: every reader of '5h' / fiveHour / five_hour, and how it handles ABSENCE (by name) ────────────
   {
@@ -2882,7 +2882,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
       ok(!unl.length, `㉑ every reader of '5h' / fiveHour / five_hour names how it handles an ABSENT 5h window (unlisted: ${JSON.stringify(unl)})`);
       const dead = [...ABSENCE.keys()].filter((f) => !found.includes(f));
       ok(!dead.length, `㉑ …no dead census row (${JSON.stringify(dead)})`);
-      ok(found.length >= 20 && ABSENCE.has('src/server/usage-pool-engine.js'), `㉑ …the census is non-vacuous (${found.length} files)`);
+      ok(found.length >= 20 && verdictOf(ABSENCE.has('src/server/usage-pool-engine.js')), `㉑ …the census is non-vacuous (${found.length} files)`);
     }
   }
 
@@ -2893,7 +2893,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     for (const [from, to] of patches) { hits.push(src.split(from).length - 1); src = src.split(from).join(to); }
     return { path: MUTC.write(rel, src, 'q21' + tag, { esm: false, name: `q21-${tag}-${path.basename(rel, '.js')}` }), hits };
   };
-  const hit21 = (m, label) => ok(m.hits.length > 0 && m.hits.every((c) => c === 1), `㉑ NEGATIVE CONTROL setup: ${label} — every patch anchor hit exactly once (${JSON.stringify(m.hits)})`);
+  const hit21 = (m, label) => ok(m.hits.length > 0 && verdictOf(m.hits.every((c) => c === 1)), `㉑ NEGATIVE CONTROL setup: ${label} — every patch anchor hit exactly once (${JSON.stringify(m.hits)})`);
   try { // (on a tree without the rules the anchors miss and a control can throw — said by name, never a crash)
   {
     const m = mut21('src/harnesses/claude-quota.js', [["printed === scopedWeekly.length, scopedWeekly.length), absent5h ? ['5h'] : []);", 'printed === scopedWeekly.length, scopedWeekly.length), []);']], 'p');
@@ -2904,13 +2904,13 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const m = mut21('src/harnesses/claude-quota.js', [['const fiveHour = stated(u.five_hour) ? toWin(u.five_hour) : undefined;', 'const fiveHour = toWin(u.five_hour);']], 'o');
     hit21(m, 'the OAuth parse fabricates again');
     const r = require(m.path).parseOAuthUsage({ seven_day: { utilization: 40 }, five_hour: null });
-    ok(r.fiveHour && r.fiveHour.utilization === 0 && r.fiveHour.status === 'unknown', '㉑ CONTROL rule 1: the base\'s toWin(undefined) fabricates the 0 % unknown window ㉑1d refuses');
+    ok(gateOf(r.fiveHour) && r.fiveHour.utilization === 0 && r.fiveHour.status === 'unknown', '㉑ CONTROL rule 1: the base\'s toWin(undefined) fabricates the 0 % unknown window ㉑1d refuses');
   }
   {
     const m = mut21('src/adapters/claude-code.js', [["const fiveHour = rl.five_hour && typeof rl.five_hour === 'object' ? toWin(rl.five_hour) : null;", 'const fiveHour = toWin(rl.five_hour);']], 'g');
     hit21(m, 'the get_usage parse fabricates again');
     const r = require(m.path).ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { seven_day: { used_percentage: 40 } } });
-    ok(r.fiveHour && r.fiveHour.utilization === 0 && r.fiveHour.status === 'allowed', '㉑ CONTROL rule 1: …and get_usage\'s toWin(null) the 0 % ALLOWED one ㉑1e refuses');
+    ok(gateOf(r.fiveHour) && r.fiveHour.utilization === 0 && r.fiveHour.status === 'allowed', '㉑ CONTROL rule 1: …and get_usage\'s toWin(null) the 0 % ALLOWED one ㉑1e refuses');
   }
   {
     const m = mut21('src/rate-limit-capture.js', [["const absentWindows = (windows && windows.sevenDay && !windows.fiveHour && kind !== 'fiveHour') ? ['5h'] : [];", 'const absentWindows = [];']], 'e');
@@ -2923,7 +2923,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const d = mkd('mw'), k = 'sub-n5h-mw'; seed5h(d, k);
     panelWrite(d, k, CQ.parseCliUsageText(PANEL_NO5H, Date.now()), { wcm: require(m.path) });
     const f = readJ(d, k);
-    ok(f.fiveHour && f.fiveHour.utilization === 0.84 && !f.fiveHourAbsent, '㉑ CONTROL rule 1: a write path that ignores `absentWindows` keeps the stale 84 % window ㉑2a retires');
+    ok(gateOf(f.fiveHour) && f.fiveHour.utilization === 0.84 && !f.fiveHourAbsent, '㉑ CONTROL rule 1: a write path that ignores `absentWindows` keeps the stale 84 % window ㉑2a retires');
   }
   {
     const m = mut21('src/usage-cache-write.js', [["  if (nowAbsent && had5 && !wasAbsent) return { kind: '5h', change: 'removed', at: nowAbsent };", "  if (nowAbsent) return { kind: '5h', change: 'removed', at: nowAbsent };"]], 'c');
@@ -2953,7 +2953,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     W.writeCacheObject({ cacheDir: d, key: sib, backend: 'claude', familyOf: familyOfScopedBucket, source: 'on-demand', measuredAt: Date.now() + 5000,
       obj: { fiveHour: { utilization: 0.5, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.4, resetsAt: nowSec + 3 * 86400 }, scopedWeekly: [], fetchedAt: Date.now() + 5000, source: 'on-demand' } });
     CAPm.captureRateLimitEvent({ cacheDir: d, key: k, identityIds: [k, sib], ev: evLegacy, now: Date.now() + 6000 });
-    ok(readJ(d, k).fiveHour && readJ(d, k).fiveHour.utilization === 0.5, '㉑ CONTROL rule 1: without the guard the sibling\'s 5h bucket lands on the «no 5h» file — ㉑1j RED there');
+    ok(gateOf(readJ(d, k).fiveHour) && readJ(d, k).fiveHour.utilization === 0.5, '㉑ CONTROL rule 1: without the guard the sibling\'s 5h bucket lands on the «no 5h» file — ㉑1j RED there');
   }
   {
     const m = mut21('src/adapters/claude-code.js', [["return { kind: 'fiveHour', guessed: true };", "return { kind: 'fiveHour' };"]], 'b');
@@ -2963,13 +2963,13 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   {
     const NM = buildNote(NSLICE.split("const label = name && !name.includes('@') ? name : key;").join('const label = name || key;'));
     if (NM.fn) NM.fn({ key: 'sub-x', kind: '5h', change: 'removed', at: Date.now() });
-    ok(NSLICE.includes("const label = name && !name.includes('@') ? name : key;") && NM.filed.length === 1 && /@/.test(NM.filed[0].text), '㉑ CONTROL rule 2: a notice that prints the account name verbatim leaks an email — ㉑2e RED there');
+    ok(gateOf(NSLICE.includes("const label = name && !name.includes('@') ? name : key;")) && NM.filed.length === 1 && verdictOf(/@/.test(NM.filed[0].text)), '㉑ CONTROL rule 2: a notice that prints the account name verbatim leaks an email — ㉑2e RED there');
   }
   {
     const m = mut21('data/bin/vibespace-usage', [['  const fiveHour = win(rl.five_hour);\n', "  const fiveHour = win(rl.five_hour) || { utilization: 0, status: 'unknown', resetsAt: 0 };\n"]], 't');
     hit21(m, 'the statusline fabricates again');
     const X = e2e([process.execPath, m.path]);
-    ok(X.r0.fiveHour && X.r0.fiveHour.utilization === 0 && X.r0.fiveHour.status === 'unknown' && !X.got.length, '㉑ CONTROL rule 1: the base statusline writes the 0 % unknown window ㉑1k refuses (the ("5h", 0, None) of an idle member, source passive) — and nothing is ever said');
+    ok(gateOf(X.r0.fiveHour) && X.r0.fiveHour.utilization === 0 && X.r0.fiveHour.status === 'unknown' && !X.got.length, '㉑ CONTROL rule 1: the base statusline writes the 0 % unknown window ㉑1k refuses (the ("5h", 0, None) of an idle member, source passive) — and nothing is ever said');
   }
   {
     const m = mut21('data/bin/vibespace-usage', [["    if (had) mark('removed', now);\n", '']], 'u');
@@ -2988,13 +2988,13 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const m = mut21('data/bin/vibespace-usage', [['  } else if (absent5h && !since && moved) {\n', '  } else if (absent5h && !since && p && sig) {\n'], ['    if (w[p].n >= PASSIVE_WITNESSES) { res.lay = true; endAll(); }\n', '    if (w[p].n >= 1) { res.lay = true; endAll(); }\n']], 'r2');
     hit21(m, 'the statusline believes one render');
     const X = shapes([process.execPath, m.path]);
-    ok(X.a.r.fiveHourAbsent > 0 && X.a.r.windowChangeUnsaid && X.a.got.includes('removed'), '㉑ CONTROL BLOCKER: r2\'s rule (one render without five_hour is proof) tombstones the RESET-TIME render and says «removed» — ㉑3a RED there');
+    ok(X.a.r.fiveHourAbsent > 0 && gateOf(X.a.r.windowChangeUnsaid) && verdictOf(X.a.got.includes('removed')), '㉑ CONTROL BLOCKER: r2\'s rule (one render without five_hour is proof) tombstones the RESET-TIME render and says «removed» — ㉑3a RED there');
   }
   {
     const m = mut21('data/bin/vibespace-usage', [['    if (p && sig) w[p].n = 0;\n    if (moved || res.restore) endAll();\n', '']], 'c5');
     hit21(m, 'a stated 5h window does not end the count');
     const X = shapes([process.execPath, m.path]);
-    ok(X.c.f.fiveHourAbsent > 0 && X.c.got.includes('removed'), '㉑ CONTROL rule 2: a count a five_hour answer does not end adds two witnesses across it and FLAPS — ㉑3c RED there');
+    ok(X.c.f.fiveHourAbsent > 0 && verdictOf(X.c.got.includes('removed')), '㉑ CONTROL rule 2: a count a five_hour answer does not end adds two witnesses across it and FLAPS — ㉑3c RED there');
   }
   {
     const mq = mut21('src/quota-model.js', [['const PASSIVE_WITNESSES = 2;', 'const PASSIVE_WITNESSES = 1;']], 'p1');
@@ -3013,13 +3013,13 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
       ['  if (b.reset - a.reset > SAME_WEEK_SEC) return true;\n  return Math.abs(b.reset - a.reset) <= SAME_WEEK_SEC && b.pct > a.pct;\n', '  return a.pct !== b.pct || a.reset !== b.reset;\n']], 'r3');
     hit21(m, 'the witness compares against the last writer');
     const X = play([process.execPath, m.path], FLAP);
-    ok(X.files.some((f) => !!f.fiveHourAbsent) && X.got.includes('removed'), `㉑ CONTROL BLOCKER r3: two sessions alternating stale weeks against the file's last writer lay the tombstone and say «removed» — ㉑7a RED there (${JSON.stringify(X.got)})`);
+    ok(gateOf(X.files.some((f) => !!f.fiveHourAbsent)) && verdictOf(X.got.includes('removed')), `㉑ CONTROL BLOCKER r3: two sessions alternating stale weeks against the file's last writer lay the tombstone and say «removed» — ㉑7a RED there (${JSON.stringify(X.got)})`);
   }
   {
     const m = mut21('data/bin/vibespace-usage', [['      else res.stale = true;\n', '      else res.restore = true;\n']], 'st');
     hit21(m, 'a stale 5h window restores');
     const X = play([process.execPath, m.path], STALE);
-    ok(X.got.includes('restored') && X.f.fiveHour, `㉑ CONTROL r4: a 5h window older than the tombstone read as a return files a false «back» — ㉑7b RED there (${JSON.stringify(X.got)})`);
+    ok(gateOf(X.got.includes('restored')) && verdictOf(X.f.fiveHour), `㉑ CONTROL r4: a 5h window older than the tombstone read as a return files a false «back» — ㉑7b RED there (${JSON.stringify(X.got)})`);
   }
   {
     const m = mut21('data/bin/vibespace-usage', [["    if (unsaid && unsaid.change !== change) delete out.windowChangeUnsaid;\n    else out.windowChangeUnsaid = { kind: '5h', change, at, key };\n", "    out.windowChangeUnsaid = { kind: '5h', change, at, key };\n"]], 'cx');
@@ -3034,19 +3034,19 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const mc = mut21('src/rate-limit-capture.js', [['    delete cache.windowChangeUnsaid; delete cache.fiveHourAbsentWitnesses;\n', ''], ["const usageWriteMod = () => require('./usage-cache-write.js');", `const usageWriteMod = () => require(${JSON.stringify(mw.path)});`]], 'mkc');
     hit21(mc, 'the capture spreads a sibling\'s marker');
     const S = sibMarker(require(mc.path), require(mw.path));
-    ok(S.saidX.includes('restored'), `㉑ CONTROL MAJOR 1: a marker taken from the spread base files «back» on a member that never changed — ㉑7g RED there (${JSON.stringify(S.saidX)})`);
+    ok(verdictOf(S.saidX.includes('restored')), `㉑ CONTROL MAJOR 1: a marker taken from the spread base files «back» on a member that never changed — ㉑7g RED there (${JSON.stringify(S.saidX)})`);
   }
   {
     const m = mut21('src/reading-repair.js', [['  _keepOwnAbsence(cacheDir, key, obj, ownTomb);\n', '']], 'rr');
     hit21(m, 'the repair write keeps no tombstone');
     const A = apiPhaseRepair(require(m.path));
-    ok(A.f.fiveHour && A.f.fiveHour.utilization === 0.3, '㉑ CONTROL MAJOR 2: a rebuild that ignores the target file\'s tombstone re-creates the removed 5h window — ㉑7h RED there');
+    ok(gateOf(A.f.fiveHour) && A.f.fiveHour.utilization === 0.3, '㉑ CONTROL MAJOR 2: a rebuild that ignores the target file\'s tombstone re-creates the removed 5h window — ㉑7h RED there');
   }
   {
     const m = mut21('src/harnesses/claude-quota.js', [['const sevenDay = stated(u.seven_day) ? toWin(u.seven_day) : undefined;', 'const sevenDay = toWin(u.seven_day);'], ['const fiveHour = stated(u.five_hour) ? toWin(u.five_hour) : undefined;', 'const fiveHour = toWin(u.five_hour);']], 'n');
     hit21(m, 'the OAuth parse invents windows for a reply that states none');
     const r = require(m.path).parseOAuthUsage({ limits: [{ kind: 'weekly_scoped', percent: 30, scope: { model: { display_name: 'Fable' } } }] });
-    ok(r.fiveHour && r.fiveHour.utilization === 0 && r.sevenDay, '㉑ CONTROL claim 2: the r2 parse invents a 0 % 5h window for a limits[]-only reply (the fake that undid a removal) — ㉑3d RED there');
+    ok(gateOf(r.fiveHour) && r.fiveHour.utilization === 0 && verdictOf(r.sevenDay), '㉑ CONTROL claim 2: the r2 parse invents a 0 % 5h window for a limits[]-only reply (the fake that undid a removal) — ㉑3d RED there');
   }
   {
     const m = mut21('src/usage-estimator.js', [['  return withOwnAbsence(out, rawCache);\n}', '  return out;\n}']], 'ov');
@@ -3090,7 +3090,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
 // whether they WERE ignored); any suite scanning src/ beside this one counted
 // them as product code.
 console.log("\n⑲' the patched copies never touch the tree");
-for (const r of copiesCensus(MUTC.files, MUTC.dir, ROOT, { minCopies: 20 })) ok(r.pass, "⑲' " + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTC.files, MUTC.dir, ROOT, { minCopies: 20 })) ok(verdictOf(r.pass), "⑲' " + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 // ── ⑳ B-9f4b: THE r6 VERIFIER'S TWO INFO FINDINGS, ON ITS OWN FIXTURES ──────
 //
@@ -3138,7 +3138,7 @@ console.log('\n⑳ B-9f4b: one limit is one row; only a NAMED model cap carries 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-qm20a-${process.pid}-`)); tmpDirs.push(dir);
     const wr = W.writeCacheObject({ cacheDir: dir, key: '__global_codex__', obj: { fetchedAt: at, source: 'codex-rate-limits' }, set: noPlan, measuredAt: at, source: 'codex-rate-limits', backend: 'codex' });
     const onDisk = W.readCacheObject(dir, '__global_codex__');
-    ok(wr.ok && onDisk && onDisk.scopedWeekly === undefined && onDisk.sevenDay && (onDisk.limits || []).some((l) => l.limitId === 'codex_bengalfox'),
+    ok(gateOf(wr.ok) && gateOf(onDisk) && onDisk.scopedWeekly === undefined && gateOf(onDisk.sevenDay) && verdictOf((onDisk.limits || []).some((l) => l.limitId === 'codex_bengalfox')),
       `⑳a …the file the write path persists carries it once too, and the typed limit is untouched (scopedWeekly ${JSON.stringify(onDisk && onDisk.scopedWeekly)})`);
     // THE MONEY SIDE: dropping the duplicate row changes no pool answer — it was a MIN over identical numbers.
     const spent = QM.mergeLimitSets(noPlan, CODEXQ.toLimitSet({ ...sparkAt(at + 1000), primary: { usedPercent: 90, windowDurationMins: 300, resetsAt: Math.round(at / 1000) + 3600 }, secondary: { usedPercent: 97, windowDurationMins: 10080, resetsAt: Math.round(at / 1000) + 200000 } }, { identity: '__global_codex__', source: 'codex-rate-limits', fetchedAt: at + 1000 }));
@@ -3153,7 +3153,7 @@ console.log('\n⑳ B-9f4b: one limit is one row; only a NAMED model cap carries 
     // CONTROLS: the skip is exactly the promoted limit, never "any model limit".
     const withPlan = QM.mergeLimitSets(noPlan, CODEXQ.toLimitSet(CODEX_PLAN, { identity: '__global_codex__', source: 'codex-rate-limits', fetchedAt: at + 2000 }));
     const vp = QM.toLegacyView(withPlan, { nowSec: Math.round(at / 1000) + 60 });
-    ok(QM.legacyWindowLimit(withPlan).limitId === 'codex' && (vp.scopedWeekly || []).some((e) => e.name === 'GPT-5.3-Codex-Spark'),
+    ok(QM.legacyWindowLimit(withPlan).limitId === 'codex' && verdictOf((vp.scopedWeekly || []).some((e) => e.name === 'GPT-5.3-Codex-Spark')),
       '⑳a CONTROL: once a plan limit exists the Spark limit is a model limit again and keeps its scopedWeekly row');
     const R = Math.round(at / 1000) + 400000;
     const twoModels = QM.makeLimitSet({ identity: 'k', fetchedAt: at, limits: [
@@ -3183,7 +3183,7 @@ console.log('\n⑳ B-9f4b: one limit is one row; only a NAMED model cap carries 
     fs.writeFileSync(path.join(mdir, 'quota-model.js'), editAnchor(src20, skip, '', "src/quota-model.js", 'join'));
     const QMpre20 = require(path.join(mdir, 'quota-model.js'));
     const vPre20 = QMpre20.toLegacyView(noPlan, { nowSec: Math.round(at / 1000) + 60 });
-    ok((vPre20.scopedWeekly || []).length === 1 && vPre20.scopedWeekly[0].name === 'GPT-5.3-Codex-Spark' && vPre20.sevenDay && vPre20.sevenDay.resetsAt === vPre20.scopedWeekly[0].resetsAt,
+    ok((vPre20.scopedWeekly || []).length === 1 && vPre20.scopedWeekly[0].name === 'GPT-5.3-Codex-Spark' && gateOf(vPre20.sevenDay) && vPre20.sevenDay.resetsAt === vPre20.scopedWeekly[0].resetsAt,
       `⑳a NEGATIVE CONTROL: without the skip the verifier's measurement comes back — the Spark limit is BOTH the sevenDay and a scopedWeekly row (${JSON.stringify(vPre20.scopedWeekly)})`);
   }
 
@@ -3201,7 +3201,7 @@ console.log('\n⑳ B-9f4b: one limit is one row; only a NAMED model cap carries 
     const CODENAME_ONLY = () => { const p = LIVE(); delete p.rate_limits.seven_day_sonnet; return p; };
     const gate = QM.authoritativeScopesOf;
     const cOnly = ADP20.parseGetUsageResponse(CODENAME_ONLY());
-    ok(QM.scopedEnumeration(cOnly) === true && cOnly.scopedWeekly.length === 1 && /nimbus/i.test(cOnly.scopedWeekly[0].name),
+    ok(QM.scopedEnumeration(cOnly) === true && cOnly.scopedWeekly.length === 1 && verdictOf(/nimbus/i.test(cOnly.scopedWeekly[0].name)),
       '⑳b fixture: the codename-only envelope enumerates (it dropped nothing) and its one scoped entry is the codename bucket (r6 kept it: a stated spend counts)');
     ok(gate(cOnly) === null,
       `⑳b …and it claims NO right to retire: the parse named no model cap, it inferred one from a sibling key (got ${JSON.stringify(gate(cOnly))})`);
@@ -3237,9 +3237,9 @@ console.log('\n⑳ B-9f4b: one limit is one row; only a NAMED model cap carries 
     };
     const ids = (o) => (o && o.limits || []).map((l) => l.limitId).sort();
     const r = run(gate);
-    ok(ids(r.mid).includes('model:fable') && POOL20.accountRemaining(r.mid, nowB).remaining === 0,
+    ok(gateOf(ids(r.mid).includes('model:fable')) && POOL20.accountRemaining(r.mid, nowB).remaining === 0,
       `⑳b the panel establishes a SPENT Fable cap (${JSON.stringify(ids(r.mid))}, ${JSON.stringify(POOL20.accountRemaining(r.mid, nowB))})`);
-    ok(ids(r.after).includes('model:fable'),
+    ok(verdictOf(ids(r.after).includes('model:fable')),
       `⑳b the codename-only probe does NOT retire it (${JSON.stringify(ids(r.after))})`);
     const rem = POOL20.accountRemaining(r.after, nowB);
     ok(rem.remaining === 0 && rem.known === true, `⑳b …so the pool still reads a spent account (${JSON.stringify(rem)})`);
@@ -3300,7 +3300,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
     const shownReset = WD(b, now * 1000).state === 'reset-unconfirmed', poolFull = POOL22.bucketRemaining(b, now) === 100;
     if (shownReset !== poolFull) { agree = false; firstOff = firstOff ?? d; }
   }
-  ok(agree, `㉒b ONE CLOCK: over ±3 min of a reset the display says «reset» exactly when the pool's bucketRemaining calls the bucket full again (first disagreement ${firstOff})`);
+  ok(verdictOf(agree), `㉒b ONE CLOCK: over ±3 min of a reset the display says «reset» exactly when the pool's bucketRemaining calls the bucket full again (first disagreement ${firstOff})`);
   // ㉒c a window that has not started never rolls (B-8b12): its reset slides with the clock
   const empty = QM.makeWindow({ kind: '5h', usedPct: 0, resetsAt: S - 9000 + 5 * 3600, measuredAt: (S - 9000) * 1000 });
   ok(empty.state === 'empty' && WD(empty, (S + 5 * 3600) * 1000).state === 'read' && WD({ utilization: 0, resetsAt: S - 60, state: 'empty' }).state === 'read',
@@ -3334,16 +3334,16 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   const SRC = fs.readFileSync(path.join(ROOT, 'src/quota-model.js'), 'utf8');
   const patched = (tag, from, to) => { const hit = SRC.split(from).length === 2; if (!hit) throw new Error(`ANCHOR GONE OR NOT UNIQUE (${SRC.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return { hit, mod: require(MUTC.write('src/quota-model.js', editAnchor(SRC, from, to, "src/quota-model.js"), tag, { esm: false })) }; };
   const noGrace = patched('q22grace', 'if (mayRoll && resetSec != null && resetLanded(resetSec, now / 1000))', 'if (mayRoll && resetSec != null && resetSec * 1000 <= now /* PATCHED: the bare instant */)');
-  ok(noGrace.hit && noGrace.mod.windowDisplay({ utilization: 0.9, resetsAt: R }, (R + 1) * 1000).state === 'reset-unconfirmed',
+  ok(gateOf(noGrace.hit) && noGrace.mod.windowDisplay({ utilization: 0.9, resetsAt: R }, (R + 1) * 1000).state === 'reset-unconfirmed',
     '㉒f RED: without the grace the display calls a bucket reset 1 s after a minute-precise instant — while the pool still counts it spent (the ㉒b leg goes red)');
   const allRoll = patched('q22roll', "const mayRoll = win.state === undefined || win.state === null || win.state === 'running';", 'const mayRoll = true; // PATCHED');
-  ok(allRoll.hit && allRoll.mod.windowDisplay({ utilization: 0, resetsAt: S - 60, state: 'empty' }, NOW).state === 'reset-unconfirmed',
+  ok(gateOf(allRoll.hit) && allRoll.mod.windowDisplay({ utilization: 0, resetsAt: S - 60, state: 'empty' }, NOW).state === 'reset-unconfirmed',
     '㉒f RED: letting an empty window roll prints a sliding «reset» as an instant (the ㉒c leg goes red)');
   const emptyCounts = patched('q22empty', "    if (w.state !== undefined && w.state !== null && w.state !== 'running') continue;\n", '');
-  ok(emptyCounts.hit && emptyCounts.mod.memberProofState(owner, NOW) === 'proven',
+  ok(gateOf(emptyCounts.hit) && emptyCounts.mod.memberProofState(owner, NOW) === 'proven',
     '㉒f RED: counting the idle 5h as evidence leaves the owner\'s 95 % member «proven» — no spawn would ever confirm it (the ㉒e leg goes red)');
   const base = patched('q22base', 'if (mayRoll && resetSec != null && resetLanded(resetSec, now / 1000)) return { state: \'reset-unconfirmed\'', 'if (false) return { state: \'reset-unconfirmed\'');
-  ok(base.hit && base.mod.windowDisplay({ utilization: 0.95, resetsAt: S - 3 * 86400 }, NOW).usedPct === 95,
+  ok(gateOf(base.hit) && base.mod.windowDisplay({ utilization: 0.95, resetsAt: S - 3 * 86400 }, NOW).usedPct === 95,
     '㉒f RED (the base): without the verdict the display hands back the stale 95 % — the owner\'s «no account available»');
   // ㉒g THE DISPLAY CENSUS over src/lib (r3, 主开发's acceptance: «THE CENSUS PIN DOES NOT EXIST»). Every client line that
   // names a bucket or draws a percentage either puts it through the display verdict ON THAT LINE (bucketView /
@@ -3454,15 +3454,15 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   // RED: the acceptance's bypass shape at each of its three sites (+ the codex pair) ⇒ the census names it
   const swap22 = (f, a, b) => ({ ...TEXTS22, [f]: TEXTS22[f].split(a).length === 2 ? TEXTS22[f].replace(a, b) : '/* the patched line is gone */' });
   const r1 = census22(swap22('usage-meter.js', 'const v5 = bucketView(quotaModel, rl?.fiveHour, estSel?.fiveHour, Date.now(), { readAt: rl?.fetchedAt });', 'const v5 = { reading: rl?.fiveHour, est: estSel?.fiveHour };'));
-  ok(r1.offenders.some((o) => /^usage-meter\.js:\d+: const v5 = \{ reading: rl\?\.fiveHour/.test(o)) && r1.short.length === 1, `㉒g RED: the usage popup's 5h read raw (the taskbar pie + the phone chip ride it) is NAMED: ${JSON.stringify(r1.offenders)}`);
+  ok(gateOf(r1.offenders.some((o) => /^usage-meter\.js:\d+: const v5 = \{ reading: rl\?\.fiveHour/.test(o))) && r1.short.length === 1, `㉒g RED: the usage popup's 5h read raw (the taskbar pie + the phone chip ride it) is NAMED: ${JSON.stringify(r1.offenders)}`);
   const r2 = census22(swap22('usage-meter.js', 'const vSc = bucketView(quotaModel, sc, scEst, Date.now(), { readAt: rl.scopedFetchedAt || rl.fetchedAt });', 'const vSc = { reading: sc, est: scEst };'));
-  ok(r2.short.some((x) => x.startsWith('usage-meter.js: 9 ')), `㉒g RED: the scoped (Fable) bar read raw drops usage-meter's count: ${JSON.stringify(r2.short)}`);
+  ok(verdictOf(r2.short.some((x) => x.startsWith('usage-meter.js: 9 '))), `㉒g RED: the scoped (Fable) bar read raw drops usage-meter's count: ${JSON.stringify(r2.short)}`);
   const r3 = census22(swap22('session-lifecycle.js', 'const v = bucketView(quotaModel, raw0, e0, Date.now(), { readAt: u.fetchedAt });', 'const v = { reading: raw0, est: e0 };'));
-  ok(r3.short.some((x) => x.startsWith('session-lifecycle.js: 0 ')), `㉒g RED: the billing switcher's eff read raw is NAMED: ${JSON.stringify(r3.short)}`);
+  ok(verdictOf(r3.short.some((x) => x.startsWith('session-lifecycle.js: 0 '))), `㉒g RED: the billing switcher's eff read raw is NAMED: ${JSON.stringify(r3.short)}`);
   const r4 = census22(swap22('manage-agents.js', 'const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt });', 'const v = { reading: x };'));
-  ok(r4.short.some((x) => x.startsWith('manage-agents.js: 2 ')), `㉒g RED: the host pill read raw is NAMED: ${JSON.stringify(r4.short)}`);
+  ok(verdictOf(r4.short.some((x) => x.startsWith('manage-agents.js: 2 '))), `㉒g RED: the host pill read raw is NAMED: ${JSON.stringify(r4.short)}`);
   const r5 = census22({ ...TEXTS22, 'usage-meter.js': TEXTS22['usage-meter.js'] + '\nconst late = `${Math.round(rl.sevenDay.utilization * 100)}% used`;\n' });
-  ok(r5.offenders.length === 1 && /usage-meter\.js:\d+: const late/.test(r5.offenders[0]), `㉒g RED: a NEW raw reader outside the allowlist is named by file:line: ${JSON.stringify(r5.offenders)}`);
+  ok(r5.offenders.length === 1 && verdictOf(/usage-meter\.js:\d+: const late/.test(r5.offenders[0])), `㉒g RED: a NEW raw reader outside the allowlist is named by file:line: ${JSON.stringify(r5.offenders)}`);
 }
 
 // ㉓ B-ff9d (lane bl-accounts): A READING ANOTHER MACHINE MADE IS NAMED AS SUCH — a host-HELD account's ⟳ (hid:aid: the device's quota
@@ -3482,14 +3482,14 @@ console.log('\n㉓ B-ff9d — a host-held account\'s reading is named as read on
   const heldSource = hsm ? new Function('return ' + hsm[0].replace(/^const heldSource = /, '').replace(/;$/, ''))() : null;
   const old = { source: 'on-demand', limits: [{ source: 'on-demand' }, { source: 'remote-statusline' }] };
   ok(!!heldSource && heldSource(old) === old && old.source === 'on-demand-held' && old.limits[0].source === 'on-demand-held' && old.limits[1].source === 'remote-statusline'
-    && /_hostAcctUsage\[ma\[1\] \+ ':' \+ ma\[2\]\] = heldSource\((?:JSON\.parse\(|usageWrite\.readCacheJson\()/.test(routes) && heldSource(null) === null,
+    && gateOf(/_hostAcctUsage\[ma\[1\] \+ ':' \+ ma\[2\]\] = heldSource\((?:JSON\.parse\(|usageWrite\.readCacheJson\()/.test(routes)) && heldSource(null) === null,
     "㉓ a host-held file written before the fix (stamped 'on-demand', at the top and on a limit) is read at boot as 'on-demand-held'; another source is untouched");
   const S = await import(path.join(ROOT, 'src/lib/usage-source.js'));
   const own = S.readingSource('on-demand'), hd = S.readingSource('on-demand-held'), rm = S.readingSource('on-demand-remote');
   ok(own.key === 'panel' && hd.key === 'remote-panel' && rm.key === 'remote-panel' && hd.label !== own.label && rm.label !== own.label && !/^on-demand/.test(hd.label) && !/^on-demand/.test(rm.label),
     `㉓ the words: «${own.label}» (this hub) · «${hd.label}» (a held account) · «${rm.label}» (that machine's own login) — none verbatim, none «own /usage panel»`);
   const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
-  ok([hd.label, hd.tip, rm.label, rm.tip].every((k) => zh.includes(`  ${JSON.stringify(k)}:`) && ja.includes(`  ${JSON.stringify(k)}:`)), '㉓ …each in zh and ja');
+  ok(verdictOf([hd.label, hd.tip, rm.label, rm.tip].every((k) => zh.includes(`  ${JSON.stringify(k)}:`) && ja.includes(`  ${JSON.stringify(k)}:`))), '㉓ …each in zh and ja');
   // the window tally: five held readings of one 7d phase establish the account's window; RED: the tally as before the stamp moved
   const RR = require(path.join(ROOT, 'src/reading-repair.js'));
   const T = 1789318800, rowsOf = (source) => [{ name: 'anchors-acct-h.ndjson', rows: Array.from({ length: 6 }, (_, i) => ({ accountId: 'acct-h', source, fetchedAt: (T - 86400 * 3 + i * 3600) * 1000, buckets: { sevenDay: { resetsAt: T } } })) }];
@@ -3526,7 +3526,7 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   let r = null; try { r = W.writeCacheObject({ cacheDir: dir, key: KEY, obj: next, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' }); } finally { pl.undo(); }
   const after = fs.readFileSync(f);
   const lanesOf = (buf) => { try { return QM.lanesOfReading(JSON.parse(buf.toString('utf8'))).map((l) => l.lane || l.id || l.limitId).filter(Boolean).sort().join(','); } catch { return 'unparsable'; } };
-  ok(pl.used() === 1 && !!r && r.ok === false && after.equals(before),
+  ok(pl.used() === 1 && !!r && r.ok === false && verdictOf(after.equals(before)),
     `r3136 (1) A READ THAT FAILED IS NEVER «NOTHING STORED»: the stored file's read refused (placed EIO) — the five-hour-only reading is NOT merged over nothing; the file stays byte for byte, its cap and overage lanes kept (placed ${pl.used()}, ok ${r && r.ok}, lanes before ${lanesOf(before)} / after ${lanesOf(after)})`);
   // torn bytes: kept aside ONCE per content before anything is written at that name; then the reading is written
   const torn = Buffer.from('{"limits":[{"limitId":"plan","windows":[{"kind":"5h","util');
@@ -3537,7 +3537,7 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   const copies = fs.readdirSync(dir).filter((n) => n.startsWith(path.basename(f) + '.corrupt-'));
   const kept = copies.filter((n) => fs.readFileSync(path.join(dir, n)).equals(torn));
   let parses = false; try { JSON.parse(fs.readFileSync(f, 'utf8')); parses = true; } catch { parses = false; }
-  ok(!!r2 && r2.ok === true && !!r3 && r3.ok === true && copies.length === 1 && kept.length === 1 && parses,
+  ok(!!r2 && r2.ok === true && !!r3 && r3.ok === true && copies.length === 1 && kept.length === 1 && verdictOf(parses),
     `r3136 (3) TORN BYTES ARE KEPT ASIDE ONCE before the name is written: the torn file met twice leaves ONE copy of those bytes beside it (${copies.length} copies, ${kept.length} byte for byte), and the reading is written (the file parses)`);
   // (r3146 (2)) AFTER TORN BYTES THE FILE IS NOT A WHOLE READING: the five-hour-only reading started it again — every gating fact
   // it did not state reads UNKNOWN (restartUnknowns) until a reading states it; an enumerating reading with overage makes it whole
@@ -3547,7 +3547,7 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   QM.markScopedEnumeration(whole, true, 1);   // the panel's own parse: it enumerated its caps and named one
   W.writeCacheObject({ cacheDir: dir, key: KEY, obj: whole, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', authoritativeScopes: QM.authoritativeScopesOf(whole) });
   const rb = JSON.parse(fs.readFileSync(f, 'utf8'));
-  ok(!!ra.startedAgain && ra.startedAgain.setAside === copies[0] && Array.isArray(unk) && ['plan:7d', 'model:*', 'overage'].every((x) => unk.includes(x)) && !unk.includes('plan:5h') && !rb.startedAgain && Array.isArray(RUK(rb)) && RUK(rb).length === 0,
+  ok(!!ra.startedAgain && ra.startedAgain.setAside === copies[0] && gateOf(Array.isArray(unk)) && gateOf(['plan:7d', 'model:*', 'overage'].every((x) => unk.includes(x))) && !unk.includes('plan:5h') && !rb.startedAgain && gateOf(Array.isArray(RUK(rb))) && RUK(rb).length === 0,
     'r3146 (2) AFTER TORN BYTES each gating fact the first reading did not state reads UNKNOWN (the weekly window, the caps, overage — the five-hour window it stated is known), the copy named; an enumerating reading with overage makes the file whole again', { startedAgain: ra.startedAgain, unknowns: unk, after: rb.startedAgain || null });
 }
 {
@@ -3558,7 +3558,7 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   const door0 = RD(f, KEY);
   const r = W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.1, resetsAt: nowSec + 3600 }, fetchedAt: Date.now(), source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' });
   const o = JSON.parse(fs.readFileSync(f, 'utf8'));
-  ok(door0 === null && !!r && r.ok === true && !o.startedAgain && RU(KEY) === null && fs.readdirSync(dir).every((n) => !n.includes('.corrupt-')),
+  ok(door0 === null && !!r && r.ok === true && !o.startedAgain && RU(KEY) === null && verdictOf(fs.readdirSync(dir).every((n) => !n.includes('.corrupt-'))),
     'r3146 (1) «NEVER READ» IS NOT «UNREAD»: a new account\'s file NOT THERE reads «no reading» (the door: null, no mark) and its first reading starts the file as before — nothing kept aside, no «started again»', { door0, ok: r && r.ok, startedAgain: o.startedAgain || null });
 }
 {
@@ -3585,9 +3585,9 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   const o = JSON.parse(fs.readFileSync(f, 'utf8'));
   const five = QM.lanesOfReading(o).find((l) => l.lane === 'plan:5h');
   const lines = warned.filter((l) => /\[usage-write\]/.test(l) && /could not be read/.test(l));
-  ok(rw && rw.ok === false && rw2 && rw2.ok === false && doorHeld === UNREAD && !!markWhile && markWhile.owed === 2 && !!doorStill && doorStill !== UNREAD && !!fiveAtRead && fiveAtRead.usedPct >= 100 && rw3 && rw3.ok === true && !!five && five.usedPct >= 100 && RU(KEY) === null,
+  ok(gateOf(rw) && rw.ok === false && gateOf(rw2) && rw2.ok === false && doorHeld === UNREAD && !!markWhile && markWhile.owed === 2 && !!doorStill && doorStill !== UNREAD && !!fiveAtRead && fiveAtRead.usedPct >= 100 && gateOf(rw3) && rw3.ok === true && !!five && five.usedPct >= 100 && RU(KEY) === null,
     'r3136 (1) THE REFUSED READING WAITS IN MEMORY: two writes refused while the file\'s read fails (the door answers the unread mark, two owed); the first read that answers WRITES them first (r3200: no write needed) — the wall at 100 % is on file though the last reading did not state it, and stays there through the next write; then the mark clears', { rw: rw && rw.ok, rw2: rw2 && rw2.ok, owed: markWhile && markWhile.owed, five: five && five.usedPct });
-  ok(lines.length === 1 && /account sub-r3136wall/.test(lines[0]) && !/@|org-|[0-9a-f]{8}-[0-9a-f]{4}/i.test(lines[0]),
+  ok(lines.length === 1 && gateOf(/account sub-r3136wall/.test(lines[0])) && !/@|org-|[0-9a-f]{8}-[0-9a-f]{4}/i.test(lines[0]),
     'r3136 (1) SAID ONCE AN EPISODE, by the account\'s kind and an opaque id — never an address, an organisation id or a name holding either', lines);
 }
 {
@@ -3613,8 +3613,8 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   try { render(); } catch { }
   const copies = fs.readdirSync(dir).filter((n) => n.startsWith(KEY + '.json.corrupt-'));
   let o = null; try { o = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { o = null; }
-  ok(b1.equals(b0), 'r3136 THE STATUSLINE TOOL: its read of the stored file refused (placed, in its own process) — it writes NOTHING over the file (byte for byte; the next render states its reading again)');
-  ok(copies.length === 1 && fs.readFileSync(path.join(dir, copies[0])).equals(torn) && !!o && !!o.startedAgain && o.startedAgain.setAside === copies[0],
+  ok(verdictOf(b1.equals(b0)), 'r3136 THE STATUSLINE TOOL: its read of the stored file refused (placed, in its own process) — it writes NOTHING over the file (byte for byte; the next render states its reading again)');
+  ok(copies.length === 1 && gateOf(fs.readFileSync(path.join(dir, copies[0])).equals(torn)) && !!o && !!o.startedAgain && o.startedAgain.setAside === copies[0],
     `r3136 THE STATUSLINE TOOL: torn bytes met twice are kept aside ONCE (${copies.length} copies), then the render starts the file again marked «started again» (its copy named)`, o && o.startedAgain);
 }
 
@@ -3667,7 +3667,7 @@ console.log('㉔b r3200: the waiting readings keep a wall, replay at the read, t
       for (let i = 0; i < 2; i++) { fs.writeFileSync(f, torn); W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.2, resetsAt: nowSec + 3600 }, fetchedAt: Date.now() + i, source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' }); }
     } finally { console.warn = w0; }
     const lines = said.filter((l) => /\[usage-write\]/.test(l) && /did not parse/.test(l));
-    ok(lines.length === 1 && !/\.corrupt-|h3200|r3200torn/.test(lines[0]) && /an account/.test(lines[0]),
+    ok(lines.length === 1 && !/\.corrupt-|h3200|r3200torn/.test(lines[0]) && verdictOf(/an account/.test(lines[0])),
       'r3200 THE TORN LINE: said ONCE for the same torn bytes met twice, by the opaque word — never the copy\'s file name (it carries the account\'s own key and a machine\'s id)', lines);
   }
   // (4) CODEX, after torn bytes: spend control is stated by TRUE or FALSE only — a reading that sends null says nothing
@@ -3685,9 +3685,9 @@ console.log('㉔b r3200: the waiting readings keep a wall, replay at the read, t
     } finally { console.warn = w0; }
     const cx1 = Array.isArray(u1) && u1.includes('resetCredits') && !u1.includes('overage'), cx2 = Array.isArray(u1) && u1.includes('spendControl'), cx3 = Array.isArray(u2) && !u2.includes('spendControl') && u2.includes('resetCredits');
     if (!(cx1 && cx2 && cx3)) { let keys = null; try { keys = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8'))); } catch { keys = 'unparsable'; } console.log('    r3200 codex detail:', JSON.stringify({ u1, u2, keys })); }
-    ok(cx1, 'r3200 CODEX AFTER TORN BYTES: the file that started again reads by the HARNESS\'s own fact — its reset credits unknown, never overage');
-    ok(cx2, 'r3200 CODEX AFTER TORN BYTES: a reading whose spend control is null leaves it UNKNOWN (null says nothing)');
-    ok(cx3, 'r3200 CODEX AFTER TORN BYTES: a reading that says false states the spend control (the credits still unknown)');
+    ok(verdictOf(cx1), 'r3200 CODEX AFTER TORN BYTES: the file that started again reads by the HARNESS\'s own fact — its reset credits unknown, never overage');
+    ok(verdictOf(cx2), 'r3200 CODEX AFTER TORN BYTES: a reading whose spend control is null leaves it UNKNOWN (null says nothing)');
+    ok(verdictOf(cx3), 'r3200 CODEX AFTER TORN BYTES: a reading that says false states the spend control (the credits still unknown)');
   }
   // (5) OVERAGE is stated only by the producer's OWN fields: an object spread from a sibling's older copy states nothing
   {
@@ -3704,7 +3704,7 @@ console.log('㉔b r3200: the waiting readings keep a wall, replay at the read, t
       u2 = RUK(JSON.parse(fs.readFileSync(f, 'utf8')));
     } finally { console.warn = w0; }
     const cap = fs.readFileSync(path.join(ROOT, 'src/rate-limit-capture.js'), 'utf8');
-    ok(Array.isArray(u1) && u1.includes('overage') && Array.isArray(u2) && !u2.includes('overage') && /const overageStated = !!\(ev\.overage && Object\.values\(ev\.overage\)\.some\(\(v\) => v !== undefined\)\);/.test(cap) && (cap.match(/refusalMarks, overageStated/g) || []).length === 2,
+    ok(gateOf(Array.isArray(u1)) && gateOf(u1.includes('overage')) && gateOf(Array.isArray(u2)) && !u2.includes('overage') && gateOf(/const overageStated = !!\(ev\.overage && Object\.values\(ev\.overage\)\.some\(\(v\) => v !== undefined\)\);/.test(cap)) && (cap.match(/refusalMarks, overageStated/g) || []).length === 2,
       'r3200 OVERAGE AFTER TORN BYTES is stated by the event\'s OWN fields only: a reading carrying a sibling\'s older copy (overageStated false) leaves it UNKNOWN; the event that states it does — and the stream capture says which, at both its writes', { u1, u2 });
   }
 }
@@ -3748,7 +3748,7 @@ console.log('㉔c r3285: a typed wall is kept ahead, the unknown ends at the fir
     if (road === 'panel') { if (QM.markScopedEnumeration) QM.markScopedEnumeration(whole, true, 0); }
     quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: whole, measuredAt: at + 2, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', ...(road === 'wholeStatement' ? { wholeStatement: true } : { authoritativeScopes: QM.authoritativeScopesOf(whole), stated: whole }) }));
     const o3 = JSON.parse(fs.readFileSync(f, 'utf8')), u3 = RUK(o3);
-    ok(Array.isArray(u1) && u1.includes('overage') && Array.isArray(u2) && u2.includes('overage') && Array.isArray(u3) && u3.length === 0 && !o3.startedAgain,
+    ok(gateOf(Array.isArray(u1)) && gateOf(u1.includes('overage')) && gateOf(Array.isArray(u2)) && gateOf(u2.includes('overage')) && gateOf(Array.isArray(u3)) && u3.length === 0 && !o3.startedAgain,
       `r3285 (2) THE LAW (${road === 'panel' ? 'the panel\'s enumerating reading' : 'a producer\'s own whole statement'}): after torn bytes a reading that says nothing of overage leaves it UNKNOWN (held); the first ENUMERATING reading that says nothing of it ends the unknown — «never stated», as for a new account`, { u1, u2, u3 });
   }
   // (4) A PRESS WHOSE LAST RENAME AND PUT-BACK BOTH FAIL: the words say so, and the account stays HELD while no file is there
@@ -3766,7 +3766,7 @@ console.log('㉔c r3285: a typed wall is kept ahead, the unknown ends at the fir
     const door2 = W.readReading(f, KEY), mark = W.readingUnread(KEY);
     quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.31, resetsAt: nowSec + 3600 }, fetchedAt: Date.now(), source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' }));
     let o = null; try { o = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { o = null; }
-    ok(!!r && r.ok === false && /could not be put back/.test(r.why || '') && !/was put back/.test(r.why || '') && gone && aside.length === 1 && door === W.UNREAD_READING && door2 === W.UNREAD_READING && !!mark,
+    ok(!!r && r.ok === false && gateOf(/could not be put back/.test(r.why || '')) && !/was put back/.test(r.why || '') && gateOf(gone) && aside.length === 1 && door === W.UNREAD_READING && door2 === W.UNREAD_READING && !!mark,
       'r3285 (4) BOTH RENAMES FAILED: the reply says the old file could NOT be put back (never «it was put back»); no file is there, and the account reads HELD (the door\'s mark, never «no reading» as for a new account)', { r, gone, aside, door: door === W.UNREAD_READING, mark });
     ok(!!o && !!o.startedAgain && o.startedAgain.setAside === aside[0] && W.readingUnread(KEY) === null,
       'r3285 (4) …the next reading starts the file again «started again» from the copy kept aside, and the hold lifts', o && o.startedAgain);
@@ -3774,4 +3774,4 @@ console.log('㉔c r3285: a typed wall is kept ahead, the unknown ends at the fir
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

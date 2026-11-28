@@ -27,7 +27,7 @@ const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '
 const chromeDir = scratch('win-reveal-desk-chrome');
 const chromeRun = fs.mkdtempSync(path.join(os.tmpdir(), 'wrd-xdg-'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 
@@ -46,7 +46,7 @@ const cleanup = () => {
 };
 process.on('exit', cleanup);
 const up = await hub.ready();
-ok(up, 'the worktree server booted');
+ok(verdictOf(up), 'the worktree server booted');
 const WebSocket = require(path.join(repo, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 async function newPage(w, h, mobile) {
@@ -100,26 +100,26 @@ const leg = (type, { neuter = false } = {}) => `(async () => { ${HELP}
 const good = (r) => r && r.after && r.after.active === r.d1 && r.after.desk === r.d1 && r.after.isActive && r.after.onScreen && r.after.display !== 'none' && r.after.vis === 'visible';
 
 const p1 = await newPage(1400, 1000, false);
-ok(p1.ready, 'client 1 (1400×1000) loaded');
+ok(verdictOf(p1.ready), 'client 1 (1400×1000) loaded');
 const p2 = await newPage(1400, 1000, false);
-ok(p2.ready, 'client 2 (a second desktop page) loaded');
+ok(verdictOf(p2.ready), 'client 2 (a second desktop page) loaded');
 for (const type of ['channel-outbox', 'inbox', 'channels']) {
   const r = await p1.ev(leg(type));
   const p2Before = await p2.ev('app.desktopManager.activeDesktopId');
-  ok(r && r.away && r.away.active === r.d2 && !(r.away.onScreen && r.away.vis === 'visible') && good(r),
+  ok(gateOf(r) && gateOf(r.away) && r.away.active === r.d2 && !(r.away.onScreen && r.away.vis === 'visible') && verdictOf(good(r)),
     `${type}: open on desktop 1, go to desktop 2, ${type === 'channel-outbox' ? 'PRESS 发件箱' : 'name it again'} ⇒ desktop 1 shown, the window active + visible on screen`, J(r));
   await sleep(600);
   ok((await p2.ev('app.desktopManager.activeDesktopId')) === p2Before, `${type}: client 2 stays on its own desktop (no broadcast switch)`);
 }
 {
   const c = await p1.ev(leg('channel-outbox', { neuter: true }));
-  ok(c && c.after && c.after.active === c.d2 && !good(c), 'CONTROL: the door without the desktop switch leaves the user on desktop 2 with the Outbox hidden (the incident)', J(c));
+  ok(gateOf(c) && gateOf(c.after) && c.after.active === c.d2 && !good(c), 'CONTROL: the door without the desktop switch leaves the user on desktop 2 with the Outbox hidden (the incident)', J(c));
 }
 const ph = await newPage(390, 844, true);
-ok(ph.ready, 'the 390 px phone loaded');
+ok(verdictOf(ph.ready), 'the 390 px phone loaded');
 {
   const r = await ph.ev(leg('channel-outbox'));
-  ok(r && r.away && r.away.active === r.d2 && good(r), 'phone 390 px: the Outbox on desktop 1, the phone on desktop 2, the 发件箱 handler ⇒ desktop 1 shown, the Outbox the shown window', J(r));
+  ok(gateOf(r) && gateOf(r.away) && r.away.active === r.d2 && verdictOf(good(r)), 'phone 390 px: the Outbox on desktop 1, the phone on desktop 2, the 发件箱 handler ⇒ desktop 1 shown, the Outbox the shown window', J(r));
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

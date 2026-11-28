@@ -20,7 +20,7 @@ import { scratch, scratchHome, endDaemonsOf } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : '')); } };
 const RA = require(path.join(REPO, 'src/remoteapp.js'));
 const MD = require(path.join(REPO, 'src/machine-desktop-model.js'));
 const ACC = require(path.join(REPO, 'src/server/desktop-access.js'));
@@ -44,18 +44,18 @@ const hostsFor = (map) => ({ get: (h) => (map[h] ? { id: h, name: 'Lab PC' } : n
 const bundleText = fs.existsSync(BUNDLE) ? fs.readFileSync(BUNDLE, 'utf8') : '';
 const CAP_LIST = /capabilities: \[([^\]]*)\]/;
 const capsOf = (txt) => { const m = CAP_LIST.exec(txt); return m ? m[1].split(',').map((x) => x.trim()).filter(Boolean) : null; };
-ok(capsOf(bundleText) && capsOf(bundleText).includes(`"${RA.FACTS_CAPABILITY}"`) && /remoteapp-facts-result/.test(bundleText) && /function readRemoteappFacts\(/.test(bundleText), 'data/bin/vibespace-agentd.js names the capability, answers `remoteapp-facts-result` and bundles THE shared runner (run `npm run build:agentd` after a change)');
+ok(gateOf(capsOf(bundleText)) && gateOf(capsOf(bundleText).includes(`"${RA.FACTS_CAPABILITY}"`)) && gateOf(/remoteapp-facts-result/.test(bundleText)) && verdictOf(/function readRemoteappFacts\(/.test(bundleText)), 'data/bin/vibespace-agentd.js names the capability, answers `remoteapp-facts-result` and bundles THE shared runner (run `npm run build:agentd` after a change)');
 if (!bundleText) { console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
 
 console.log('§1 the real daemon on this Linux box');
 {
   const dm = deviceOn(home);
   const conn = await dm.connect();
-  ok(conn.info && conn.info.capabilities.includes('remoteapp-facts') && conn.info.platform === 'linux', 'the hello-ack names remoteapp-facts (the client asks only such a daemon)');
+  ok(gateOf(conn.info) && gateOf(conn.info.capabilities.includes('remoteapp-facts')) && conn.info.platform === 'linux', 'the hello-ack names remoteapp-facts (the client asks only such a daemon)');
   const r = await dm.remoteappFacts();
-  ok(r && r.ok === false && r.code === 'remoteapp_not_windows' && /Windows machine/.test(r.error), 'the op answers (the reply carries its op — an op-less reply would time out the request) remoteapp_not_windows by name on Linux', r);
+  ok(gateOf(r) && r.ok === false && r.code === 'remoteapp_not_windows' && verdictOf(/Windows machine/.test(r.error)), 'the op answers (the reply carries its op — an op-less reply would time out the request) remoteapp_not_windows by name on Linux', r);
   const agentdSrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  ok(/if \(msg\.op === 'remoteapp-facts'\) \{[\s\S]{0,300}require\('\.\/\.\.\/remoteapp-facts\.js'\)\.readRemoteappFacts\(\{ platform: process\.platform[\s\S]{0,300}op: 'remoteapp-facts-result', id: msg\.id/.test(agentdSrc), 'the handler runs THE shared runner with this machine\'s platform and replies via mux.control with the op');
+  ok(verdictOf(/if \(msg\.op === 'remoteapp-facts'\) \{[\s\S]{0,300}require\('\.\/\.\.\/remoteapp-facts\.js'\)\.readRemoteappFacts\(\{ platform: process\.platform[\s\S]{0,300}op: 'remoteapp-facts-result', id: msg\.id/.test(agentdSrc)), 'the handler runs THE shared runner with this machine\'s platform and replies via mux.control with the op');
   dm.stop(); endDaemonsOf(rootOf(home));
 }
 
@@ -72,10 +72,10 @@ const line = (o) => JSON.stringify({ t: 'remoteapp-facts', edition: 'Professiona
 {
   const dm = deviceOn(homeWin, winBundle);
   const conn = await dm.connect();
-  ok(conn.info.platform === 'win32' && conn.info.capabilities.includes('remoteapp-facts'), 'the copy\'s hello-ack: win32, with the capability');
+  ok(conn.info.platform === 'win32' && verdictOf(conn.info.capabilities.includes('remoteapp-facts')), 'the copy\'s hello-ack: win32, with the capability');
   fs.writeFileSync(answerFile, 'WARNING: some noise first\r\n' + line({}) + '\r\n');
   const r = await dm.remoteappFacts();
-  ok(r && r.ok === true && r.platform === 'win32' && r.edition.kind === 'pro' && r.rdpOn === true && r.listening === true && r.allowList === true && r.gpuPolicy === null, 'a ready Pro machine: the stub\'s line parsed through the daemon\'s real runner', r);
+  ok(gateOf(r) && r.ok === true && r.platform === 'win32' && r.edition.kind === 'pro' && r.rdpOn === true && r.listening === true && r.allowList === true && r.gpuPolicy === null, 'a ready Pro machine: the stub\'s line parsed through the daemon\'s real runner', r);
   const args = fs.readFileSync(argsFile, 'utf8').trim().split('\n');
   const enc = args[args.indexOf('-EncodedCommand') + 1];
   const decoded = Buffer.from(enc || '', 'base64').toString('utf16le');
@@ -83,16 +83,16 @@ const line = (o) => JSON.stringify({ t: 'remoteapp-facts', edition: 'Professiona
   // the hub's access layer over this daemon
   const acc = ACC.create({ hosts: hostsFor({ 'dev-win': dm }), install: false, log: { log() { }, warn() { } } });
   const a = await acc.remoteappFacts('dev-win');
-  ok(a.ok && a.ready === true && JSON.stringify(a.rows.map((x) => [x.key, x.met])) === '[["edition",true],["rdp",true],["allowlist",true],["gpu",false]]', 'the access layer: the card\'s rows (the GPU policy unmet but optional) and ready', a.rows);
+  ok(gateOf(a.ok) && a.ready === true && JSON.stringify(a.rows.map((x) => [x.key, x.met])) === '[["edition",true],["rdp",true],["allowlist",true],["gpu",false]]', 'the access layer: the card\'s rows (the GPU policy unmet but optional) and ready', a.rows);
   fs.writeFileSync(answerFile, line({ edition: 'Core', product: 'Windows 11 Home', deny: '1', listening: 0, allowList: null }) + '\n');
   const h = await acc.remoteappFacts('dev-win');
-  ok(h.ok && h.ready === false && JSON.stringify(h.rows.map((x) => x.code)) === '["edition_home","rdp_off","allowlist_off","gpu_off"]', 'a Home machine with Remote Desktop off: every row unmet with its sentence code, NOT ready', h.rows);
+  ok(gateOf(h.ok) && h.ready === false && JSON.stringify(h.rows.map((x) => x.code)) === '["edition_home","rdp_off","allowlist_off","gpu_off"]', 'a Home machine with Remote Desktop off: every row unmet with its sentence code, NOT ready', h.rows);
   fs.writeFileSync(answerFile, 'nothing useful\n');
   const n = await dm.remoteappFacts();
-  ok(n && n.ok === false && n.code === 'bad_output', 'a machine that printed no line of ours ⇒ bad_output by name', n);
+  ok(gateOf(n) && n.ok === false && n.code === 'bad_output', 'a machine that printed no line of ours ⇒ bad_output by name', n);
   const acM = ACC.create({ hosts: hostsFor({ 'dev-mac': { status: () => ({ connected: true, info: { platform: 'darwin' } }), desktopServe: async () => ({}) } }), install: false, log: { log() { }, warn() { } } });
   const mac = await acM.remoteappFacts('dev-mac').then(() => null, (e) => e);
-  ok(mac && mac.code === 'remoteapp_not_windows', 'a Mac is refused by the access layer before any op (remoteapp_not_windows)');
+  ok(gateOf(mac) && mac.code === 'remoteapp_not_windows', 'a Mac is refused by the access layer before any op (remoteapp_not_windows)');
   dm.stop(); endDaemonsOf(rootOf(homeWin));
 }
 
@@ -100,7 +100,7 @@ console.log('§3 the capability gate — an older agent is never asked');
 {
   const oldText = bundleText.replace(CAP_LIST, (all, inner) => `capabilities: [${inner.split(',').map((x) => x.trim()).filter((x) => x && x !== '"remoteapp-facts"').join(', ')}]`);
   const caps = capsOf(oldText), capsNow = capsOf(bundleText);
-  ok(caps && !caps.includes('"remoteapp-facts"') && caps.length === capsNow.length - 1, 'the old-daemon copy\'s list lacks remoteapp-facts and keeps every other capability (dropped by content, never by the list\'s tail)');
+  ok(gateOf(caps) && !caps.includes('"remoteapp-facts"') && caps.length === capsNow.length - 1, 'the old-daemon copy\'s list lacks remoteapp-facts and keeps every other capability (dropped by content, never by the list\'s tail)');
   const oldBundle = path.join(copyDir, 'old', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(oldBundle), { recursive: true });
   fs.writeFileSync(oldBundle, oldText.replace("if (msg.op === \"remoteapp-facts\") {", 'if (false) {'));
   const dm = deviceOn(homeOld, oldBundle);
@@ -111,15 +111,15 @@ console.log('§3 the capability gate — an older agent is never asked');
   const send0 = dm._request.bind(dm);
   dm._request = (msg) => { sent.push(msg && msg.op); return send0(msg); };
   const e = await dm.remoteappFacts().then(() => null, (x) => x);
-  ok(e && e.code === 'host_needs_daemon' && e.daemonVersion === conn.info.daemonVersion && sent.length === 0, 'the client refuses it by the capability: host_needs_daemon carrying the agent\'s version, and NO request went to the agent (never asked — never a hang)', e && { code: e.code, v: e.daemonVersion, sent });
+  ok(gateOf(e) && e.code === 'host_needs_daemon' && e.daemonVersion === conn.info.daemonVersion && sent.length === 0, 'the client refuses it by the capability: host_needs_daemon carrying the agent\'s version, and NO request went to the agent (never asked — never a hang)', e && { code: e.code, v: e.daemonVersion, sent });
   const acc = ACC.create({ hosts: hostsFor({ 'dev-old': { ...dm, status: () => ({ connected: true, info: { platform: 'win32' } }), desktopServe: async () => ({}), remoteappFacts: (...x) => dm.remoteappFacts(...x) } }), install: false, log: { log() { }, warn() { } } });
   const a = await acc.remoteappFacts('dev-old');
-  ok(a.ok === false && a.code === 'agent_too_old' && a.have === conn.info.daemonVersion && a.need === require(path.join(REPO, 'package.json')).version && /needs version/.test(a.error), 'the access layer answers agent_too_old naming the version it has and the one it needs (this hub\'s) — the card says it, never guesses', a);
+  ok(a.ok === false && a.code === 'agent_too_old' && a.have === conn.info.daemonVersion && a.need === require(path.join(REPO, 'package.json')).version && verdictOf(/needs version/.test(a.error)), 'the access layer answers agent_too_old naming the version it has and the one it needs (this hub\'s) — the card says it, never guesses', a);
   // CONTROL — why the gate exists: asked anyway, the old daemon answers nothing
   const raw = await send0({ op: 'remoteapp-facts', timeoutMs: 1500 }).then((r) => ({ answered: r }), (x) => ({ error: String(x && x.message) }));
-  ok(!raw.answered && /time(?:d)? ?out/i.test(raw.error || ''), 'CONTROL: the same old daemon asked past the gate answers NOTHING — the request ends on its own timeout (an unknown op hangs: the 2.300.0 rule)', raw);
+  ok(!raw.answered && verdictOf(/time(?:d)? ?out/i.test(raw.error || '')), 'CONTROL: the same old daemon asked past the gate answers NOTHING — the request ends on its own timeout (an unknown op hangs: the 2.300.0 rule)', raw);
   dm.stop(); endDaemonsOf(rootOf(homeOld));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

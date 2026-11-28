@@ -22,7 +22,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 900) : '')); } };
 
 const home = scratch('usage-pivots-home');
 const dataDir = scratch('usage-pivots-data');
@@ -60,12 +60,12 @@ ok(so.length === SHAPE.sessions && cells(so) === SHAPE.sessions + SHAPE.multiOri
   `the crosses too: session×origin ${cells(so)} cells over ${so.length} sessions, project×origin ${cells(po)} over ${po.length} projects`, { so: so.length, soCells: cells(so), po: po.length, poCells: cells(po) });
 
 console.log('② no pivot asked ⇒ none answered (the first paint)');
-ok(all.body && !('pivots' in all.body) && Array.isArray(all.body.groups?.session), 'GET /api/usage-stats with no `pivot` answers totals + groups and NO pivots key', Object.keys(all.body || {}));
+ok(gateOf(all.body) && !('pivots' in all.body) && verdictOf(Array.isArray(all.body.groups?.session)), 'GET /api/usage-stats with no `pivot` answers totals + groups and NO pivots key', Object.keys(all.body || {}));
 
 console.log('③ only=pivots answers the asked cross alone');
 const sOnly = await ask({ pivot: 'session:origin', only: 'pivots' });
 const keys = Object.keys(sOnly.body || {}).sort();
-ok(sOnly.code === 200 && keys.every((k) => ['asOf', 'partial', 'pivots'].includes(k)) && keys.includes('pivots') && Object.keys(sOnly.body.pivots).join() === 'session:origin',
+ok(sOnly.code === 200 && gateOf(keys.every((k) => ['asOf', 'partial', 'pivots'].includes(k))) && gateOf(keys.includes('pivots')) && Object.keys(sOnly.body.pivots).join() === 'session:origin',
   `only=pivots&pivot=session:origin ⇒ keys ${keys.join(', ')} — the one cross, no totals / groups / series / pricing`, keys);
 ok(JSON.stringify(sOnly.body.pivots['session:origin']) === JSON.stringify(so), 'the cross is the SAME as the full answer\'s (same fold, same order)');
 const pOnly = await ask({ pivot: 'project:origin', only: 'pivots', from: String(NOW - 30 * DAY) });
@@ -73,7 +73,7 @@ const p30 = await ask({ pivot: 'project:origin', from: String(NOW - 30 * DAY) })
 ok(JSON.stringify(pOnly.body?.pivots) === JSON.stringify(p30.body?.pivots) && !('groups' in (pOnly.body || {})),
   'with a filter (30 days) the only=pivots cross equals the full answer\'s for the same slice', { only: pOnly.bytes, full: p30.bytes });
 const none = await ask({ only: 'pivots' });
-ok(none.code === 200 && JSON.stringify(none.body) !== undefined && none.body.pivots && !Object.keys(none.body.pivots).length && !('groups' in none.body),
+ok(none.code === 200 && JSON.stringify(none.body) !== undefined && gateOf(none.body.pivots) && !Object.keys(none.body.pivots).length && !('groups' in none.body),
   'only=pivots with nothing asked ⇒ {pivots: {}} (never the whole answer)', none.body && Object.keys(none.body));
 
 console.log('④ the bytes: base (both crosses with every load) vs now');
@@ -116,4 +116,4 @@ const red = judge(planted, dash);
 ok(planted !== win && red.length >= 2, `CONTROL: the base's unconditional fetch planted back into the load ⇒ RED (${red.join(' | ')})`, red);
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

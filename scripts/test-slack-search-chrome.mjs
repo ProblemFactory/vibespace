@@ -30,7 +30,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const WebSocket = require('ws');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 15000) => { const end = Date.now() + ms; for (;;) { let v; try { v = await fn(); } catch { v = null; } if (v || Date.now() > end) return v; await sleep(150); } };
 
@@ -74,7 +74,7 @@ process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 
 const api = async (method, p, body) => { const r = await fetch(BASE + p, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); let json = null; try { json = await r.json(); } catch {} return { status: r.status, json }; };
-ok(await until(async () => (await fetch(`${BASE}/api/home`)).ok, 40000), 'the scratch server booted (vendor stub preloaded)');
+ok(verdictOf(await until(async () => (await fetch(`${BASE}/api/home`)).ok, 40000)), 'the scratch server booted (vendor stub preloaded)');
 
 // THE ACCOUNT: a Slack account through the product's own paste-back — the recorded scopes header (no search:read)
 const connect = async () => {
@@ -85,7 +85,7 @@ const connect = async () => {
 };
 const c1 = await connect();
 const ACC = c1.id;
-ok(c1.ok, `a Slack account is connected through the paste-back (stub vendor) — ${ACC}`, c1);
+ok(verdictOf(c1.ok), `a Slack account is connected through the paste-back (stub vendor) — ${ACC}`, c1);
 const known = await until(async () => { const d = await api('GET', '/api/channels'); return ((d.json && d.json.conversations) || []).some((c) => c.adapterId === ACC && c.id === 'C0GENERAL') ? d.json : null; }, 40000);
 ok(!!known, 'the first read listed the account\'s conversations (#general known)');
 const view = async () => (await api('GET', `/api/channels/adapters/${encodeURIComponent(ACC)}/view`)).json || {};
@@ -94,7 +94,7 @@ const scopesOf = (v) => (v.auth && v.auth.scopes) || (v.adapter && v.adapter.aut
 // ── ① the sign-in without search:read ──
 console.log('① a sign-in without search:read');
 const r1 = await api('GET', `/api/channels/search/full?adapter=${encodeURIComponent(ACC)}&q=${encodeURIComponent('launch plan')}`);
-ok(r1.json && r1.json.ok === false && r1.json.code === 'needs-scope' && /search:read/.test(r1.json.error) && searches() === 0, 'the press is refused by NAME (needs-scope: search:read) — Slack is asked nothing', r1.json);
+ok(gateOf(r1.json) && r1.json.ok === false && r1.json.code === 'needs-scope' && gateOf(/search:read/.test(r1.json.error)) && searches() === 0, 'the press is refused by NAME (needs-scope: search:read) — Slack is asked nothing', r1.json);
 
 const CDP = async (lang, width, height) => {
   const t = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
@@ -170,9 +170,9 @@ const AROUND = (vid) => `(async () => {
 let V_GENERAL = null, V_THREAD = null;
 
 const pr = await CDP('en', 1100, 900);
-ok(pr.loaded, 'page (en, 1100 px) loaded the app');
+ok(verdictOf(pr.loaded), 'page (en, 1100 px) loaded the app');
 const d1 = await pr.evaljs(PRESS('launch plan'));
-ok(d1 && !d1.fail && d1.hits.length === 0 && d1.vstat.some((s) => s.startsWith('Slack: This account has no search permission — available after Re-authorize')) && d1.reauth && searches() === 0,
+ok(gateOf(d1) && !d1.fail && d1.hits.length === 0 && gateOf(d1.vstat.some((s) => s.startsWith('Slack: This account has no search permission — available after Re-authorize'))) && gateOf(d1.reauth) && searches() === 0,
   'the dialog says this account cannot search Slack until Re-authorize (the existing words + the button) — no request', d1);
 await pr.shot('refused.png', '#chan-search-dialog');
 
@@ -180,47 +180,47 @@ await pr.shot('refused.png', '#chan-search-dialog');
 console.log('② re-authorized with search:read');
 setMode({ slackScopes: `${SV.FX.scopesHeader},search:read` });
 const c2 = await connect();
-ok(c2.ok && c2.id === ACC, 'Re-authorize (the same paste-back) keeps the account', { id: c2.id, ACC });
+ok(gateOf(c2.ok) && c2.id === ACC, 'Re-authorize (the same paste-back) keeps the account', { id: c2.id, ACC });
 const held = await until(async () => scopesOf(await view()).includes('search:read'), 20000);
-ok(held, 'the account now holds search:read', scopesOf(await view()));
+ok(verdictOf(held), 'the account now holds search:read', scopesOf(await view()));
 const before = searches();
 const d2 = await pr.evaljs(PRESS('launch plan'));
 const asked = searches() - before;
-ok(d2 && !d2.fail && asked === 2, `a press asks Slack's search exactly its 2 pages (${asked} requests)`, d2);
-ok(d2 && d2.heads.includes("Not saved here — from Slack's search") && d2.vstat.some((s) => s.startsWith("Slack: Asked Slack's whole history: 3 not saved here — may be related")) && !d2.vstat.some((s) => /found|mailbox/.test(s)),
+ok(gateOf(d2) && !d2.fail && asked === 2, `a press asks Slack's search exactly its 2 pages (${asked} requests)`, d2);
+ok(gateOf(d2) && gateOf(d2.heads.includes("Not saved here — from Slack's search")) && gateOf(d2.vstat.some((s) => s.startsWith("Slack: Asked Slack's whole history: 3 not saved here — may be related"))) && !d2.vstat.some((s) => /found|mailbox/.test(s)),
   'section two is Slack\'s: "Not saved here — from Slack\'s search"; the status says "may be related" (never "found", never a mailbox)', d2 && { heads: d2.heads, vstat: d2.vstat });
 const hGeneral = d2 && d2.hits.find((h) => /^launch plan draft/.test(h.text)), hThread = d2 && d2.hits.find((h) => /v2 is ready/.test(h.text)), hDm = d2 && d2.hits.find((h) => /can you share/.test(h.text));
 V_GENERAL = hGeneral && hGeneral.vid; V_THREAD = hThread && hThread.vid;
-ok(V_GENERAL && /\.000050$/.test(V_GENERAL) && V_THREAD && /\.000300$/.test(V_THREAD) && hDm && /\.000070$/.test(hDm.vid), 'each hit row carries its Slack ts (the message id the sheet reads)', d2 && d2.hits.map((h) => h.vid));
-ok(d2 && d2.hits.length === 3 && d2.hits.every((h) => h.chip === 'Not saved here' && h.text), 'three Slack hits, each with its snippet and the "Not saved here" chip', d2 && d2.hits);
-ok(hGeneral && hGeneral.head === '#general' && hGeneral.text === 'launch plan draft — see the plan (https://x.test/plan) & comment' && hGeneral.marks.join('|').toLowerCase().includes('launch'),
+ok(gateOf(V_GENERAL) && gateOf(/\.000050$/.test(V_GENERAL)) && gateOf(V_THREAD) && gateOf(/\.000300$/.test(V_THREAD)) && gateOf(hDm) && verdictOf(/\.000070$/.test(hDm.vid)), 'each hit row carries its Slack ts (the message id the sheet reads)', d2 && d2.hits.map((h) => h.vid));
+ok(gateOf(d2) && d2.hits.length === 3 && verdictOf(d2.hits.every((h) => h.chip === 'Not saved here' && h.text)), 'three Slack hits, each with its snippet and the "Not saved here" chip', d2 && d2.hits);
+ok(gateOf(hGeneral) && hGeneral.head === '#general' && hGeneral.text === 'launch plan draft — see the plan (https://x.test/plan) & comment' && verdictOf(hGeneral.marks.join('|').toLowerCase().includes('launch')),
   'a #general hit: its conversation named, the snippet read from Slack\'s mrkdwn (the link as words, the entity decoded), the words marked', hGeneral);
-ok(hThread && /not yet synced/.test(hThread.head) && hThread.text.includes('launch plan') && hDm && hDm.text === 'can you share the launch plan?', 'a reply in a channel never joined ("A conversation not yet synced") and the DM hit', { hThread, hDm });
+ok(gateOf(hThread) && gateOf(/not yet synced/.test(hThread.head)) && gateOf(hThread.text.includes('launch plan')) && gateOf(hDm) && hDm.text === 'can you share the launch plan?', 'a reply in a channel never joined ("A conversation not yet synced") and the DM hit', { hThread, hDm });
 await pr.shot('desk.png', '#chan-search-dialog');
 
 // ── ③ in context, nothing stored ──
 console.log('③ a hit in context');
 const stored0 = (await api('GET', `/api/channels/${encodeURIComponent(ACC)}/C0GENERAL/messages?limit=200`)).json;
 const a1 = await pr.evaljs(AROUND(V_GENERAL));
-ok(a1 && !a1.fail && a1.rows.length === 5 && a1.rows.filter((r) => r.found).map((r) => r.vid).join() === V_GENERAL && a1.rows.findIndex((r) => r.found) === 2 && a1.open && /Slack's history/.test(a1.note),
+ok(gateOf(a1) && !a1.fail && a1.rows.length === 5 && a1.rows.filter((r) => r.found).map((r) => r.vid).join() === V_GENERAL && a1.rows.findIndex((r) => r.found) === 2 && gateOf(a1.open) && verdictOf(/Slack's history/.test(a1.note)),
   'the #general hit opens AROUND it: 2 messages before, the found one, 2 after; "Open the conversation"; the note says it is Slack\'s history', a1);
 await pr.shot('desk-around.png', '#chan-around-sheet');
 const a2 = await pr.evaljs(AROUND(V_THREAD));
-ok(a2 && !a2.fail && a2.rows.length === 3 && a2.rows[0].text.includes('Launch thread') && a2.rows[2].found && !a2.open,
+ok(gateOf(a2) && !a2.fail && a2.rows.length === 3 && gateOf(a2.rows[0].text.includes('Launch thread')) && gateOf(a2.rows[2].found) && !a2.open,
   'the thread reply opens IN ITS THREAD: the root first, the found reply last; no "Open the conversation" (never synced)', a2);
 await pr.shot('desk-thread.png', '#chan-around-sheet');
 const stored1 = (await api('GET', `/api/channels/${encodeURIComponent(ACC)}/C0GENERAL/messages?limit=200`)).json;
 const ids = (x) => ((x && x.records) || []).map((r) => r.vendorId).sort().join();
-ok(stored0 && stored1 && ids(stored0) === ids(stored1) && !ids(stored1).includes(V_GENERAL), 'NOTHING was stored: #general\'s saved records are the same before and after (the hit is not among them)', { before: ids(stored0).length, after: ids(stored1).length });
+ok(gateOf(stored0) && gateOf(stored1) && ids(stored0) === ids(stored1) && !ids(stored1).includes(V_GENERAL), 'NOTHING was stored: #general\'s saved records are the same before and after (the hit is not among them)', { before: ids(stored0).length, after: ids(stored1).length });
 
 // ── ⑤ 390 px ──
 console.log('⑤ the phone');
 const pp = await CDP('zh', 390, 844);
-ok(pp.loaded, 'page (zh, 390 px) loaded the app');
+ok(verdictOf(pp.loaded), 'page (zh, 390 px) loaded the app');
 const d5 = await pp.evaljs(PRESS('launch plan'));
 const fit = await pp.evaljs(`(() => { const d = document.getElementById('chan-search-dialog'); if (!d) return null; const r = d.getBoundingClientRect(); const rows = [...d.querySelectorAll('.chan-search-vhit')].map((h) => h.getBoundingClientRect()); return { left: r.left, right: r.right, vw: innerWidth, rows: rows.length, rowsIn: rows.every((x) => x.left >= r.left - 1 && x.right <= r.right + 1), sx: d.querySelector('.chan-search-results').scrollWidth <= d.querySelector('.chan-search-results').clientWidth + 1 }; })()`);
-ok(d5 && !d5.fail && d5.hits.length === 3 && d5.heads.some((h) => /Slack/.test(h)) && d5.hits.every((h) => h.chip && h.text), 'zh: the same three Slack hits with their chip and snippet (the memo answers the repeat press)', d5);
-ok(fit && fit.left >= 0 && fit.right <= fit.vw + 1 && fit.rows === 3 && fit.rowsIn && fit.sx, 'the dialog fits 390 px: inside the screen, every hit row inside it, no sideways scroll', fit);
+ok(gateOf(d5) && !d5.fail && d5.hits.length === 3 && gateOf(d5.heads.some((h) => /Slack/.test(h))) && verdictOf(d5.hits.every((h) => h.chip && h.text)), 'zh: the same three Slack hits with their chip and snippet (the memo answers the repeat press)', d5);
+ok(gateOf(fit) && fit.left >= 0 && fit.right <= fit.vw + 1 && fit.rows === 3 && gateOf(fit.rowsIn) && verdictOf(fit.sx), 'the dialog fits 390 px: inside the screen, every hit row inside it, no sideways scroll', fit);
 await pp.shot('phone.png');
 pp.close();
 pr.close();
@@ -230,13 +230,13 @@ setMode({ slackScopes: `${SV.FX.scopesHeader},search:read`, slack429: { 'search.
 await sleep(2200);   // past the owner's 2 s press floor
 const b4 = searches();
 const r4 = await api('GET', `/api/channels/search/full?adapter=${encodeURIComponent(ACC)}&q=${encodeURIComponent('launch plan')}&again=1`);
-ok(r4.json && r4.json.ok === false && r4.json.code === 'backoff' && r4.json.retryAfterSec >= 25 && searches() - b4 === 1, `a 429 with Retry-After 30: ONE request, then "limiting its search — try again in ${r4.json && r4.json.retryAfterSec} s"`, r4.json);
+ok(gateOf(r4.json) && r4.json.ok === false && r4.json.code === 'backoff' && r4.json.retryAfterSec >= 25 && searches() - b4 === 1, `a 429 with Retry-After 30: ONE request, then "limiting its search — try again in ${r4.json && r4.json.retryAfterSec} s"`, r4.json);
 const r4b = await api('GET', `/api/channels/search/full?adapter=${encodeURIComponent(ACC)}&q=${encodeURIComponent('launch word')}`);
-ok(r4b.json && r4b.json.ok === false && searches() - b4 === 1, 'asked again inside the wait: refused here, Slack asked nothing more', r4b.json);
+ok(gateOf(r4b.json) && r4b.json.ok === false && searches() - b4 === 1, 'asked again inside the wait: refused here, Slack asked nothing more', r4b.json);
 setMode({ slackScopes: `${SV.FX.scopesHeader},search:read` });
 
-ok(calls().every((c) => c.host === 'slack.com'), 'every intercepted vendor call went to the stub (slack.com only)');
+ok(verdictOf(calls().every((c) => c.host === 'slack.com')), 'every intercepted vendor call went to the stub (slack.com only)');
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
 if (fail && process.env.SLACK_SEARCH_DEBUG) console.error(srvLog.join('').slice(-3000));
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -133,7 +133,7 @@ const stubMode = (m) => fs.writeFileSync(path.join(stubDir, 'mode.json'), JSON.s
 stubMode({ email: 'ada@example.test', refresh: 'ok', expiresIn: 3600 });
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const R = require(path.join(repo, 'src/integration-registry.js'));
@@ -205,7 +205,7 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { clean
 const base = `http://127.0.0.1:${PORT}`;
 const waitServer = async () => { for (let i = 0; i < 120; i++) { try { await fetch(`${base}/api/home`); return true; } catch { await sleep(250); } } return false; };
 const waitDown = async () => { for (let i = 0; i < 80; i++) { try { await fetch(`${base}/api/home`); await sleep(100); } catch { return true; } } return false; };
-ok(await waitServer(), 'the worktree server booted (with the vendor stub preloaded)');
+ok(verdictOf(await waitServer()), 'the worktree server booted (with the vendor stub preloaded)');
 const api = async (method, p, body, headers = {}) => {
   // a request that races a boot's last socket reset is retried (never a request the server answered)
   for (let i = 0; ; i++) {
@@ -300,7 +300,7 @@ async function newPage() {
     const img = decodePng(Buffer.from(shot.result.data, 'base64'));
     const inside = rect.x >= -1 && rect.x + rect.w <= rect.vw + 1;
     const v = painted(img, { x: rect.x, y: Math.max(0, rect.y), w: rect.w, h: Math.min(rect.h, img.h - Math.max(0, rect.y)) }, textual);
-    ok(inside && v.ok, `PIXELS ${label}: inside the 375px viewport and painted (${v.why}${inside ? '' : `, x=${Math.round(rect.x)} w=${Math.round(rect.w)}`})`);
+    ok(gateOf(inside) && verdictOf(v.ok), `PIXELS ${label}: inside the 375px viewport and painted (${v.why}${inside ? '' : `, x=${Math.round(rect.x)} w=${Math.round(rect.w)}`})`);
   };
   return { key: tgt.id, bring, cdp, evaljs, load, probe, close: () => { try { ws.close(); } catch {} } };
 }
@@ -328,24 +328,24 @@ const chipOf = (p, id) => p.evaljs(`(${CARD(id)}.querySelector('.integ-chip') ||
 const BB = 'cloud:browserbase', BL = 'cloud:browserless';
 
 const p1 = await newPage();
-ok(await p1.load(), 'page 1 loaded the app at 375×667');
+ok(verdictOf(await p1.load()), 'page 1 loaded the app at 375×667');
 
 // ── ⓪ the window keeps ONLY the registry's census (every row bound neither per account nor per machine) ──
 {
   const g = await api('GET', '/api/integrations');
   const ids = ((g.json && g.json.integrations) || []).map((x) => x.id).sort();
-  ok(BROWSER_ROWS.every((id) => WINDOW_ROWS.includes(id)) && WINDOW_ROWS.length > 0 && R.rowIds().some((id) => R.bindsPerAccount(id) && !WINDOW_ROWS.includes(id)) && R.rowIds().some((id) => R.bindsPerMachine(id) && !WINDOW_ROWS.includes(id)), `the census (${WINDOW_ROWS.join(', ')}) holds every browser row the legs below drive and leaves the account-bound and per-machine rows out`);
-  ok(sameSet(ids, WINDOW_ROWS), `GET /api/integrations lists exactly the registry's census (${ids.join(', ')})`);
-  ok(await p1.evaljs(OPEN(BB)), 'app.openIntegration(<a browser row>) opened the window');
+  ok(gateOf(BROWSER_ROWS.every((id) => WINDOW_ROWS.includes(id))) && WINDOW_ROWS.length > 0 && gateOf(R.rowIds().some((id) => R.bindsPerAccount(id) && !WINDOW_ROWS.includes(id))) && verdictOf(R.rowIds().some((id) => R.bindsPerMachine(id) && !WINDOW_ROWS.includes(id))), `the census (${WINDOW_ROWS.join(', ')}) holds every browser row the legs below drive and leaves the account-bound and per-machine rows out`);
+  ok(verdictOf(sameSet(ids, WINDOW_ROWS)), `GET /api/integrations lists exactly the registry's census (${ids.join(', ')})`);
+  ok(verdictOf(await p1.evaljs(OPEN(BB))), 'app.openIntegration(<a browser row>) opened the window');
   const cards = await p1.evaljs(`[...document.querySelectorAll('.integ-card')].map((c) => c.dataset.integ).sort()`);
-  ok(sameSet(cards, WINDOW_ROWS), `the window draws exactly the census's cards — no Lark / Gmail / fake card (${cards.join(', ')})`);
+  ok(verdictOf(sameSet(cards, WINDOW_ROWS)), `the window draws exactly the census's cards — no Lark / Gmail / fake card (${cards.join(', ')})`);
   ok(!sameSet([...cards, 'lark'], WINDOW_ROWS) && !sameSet([...cards, 'remoteapp'], WINDOW_ROWS) && !sameSet(cards.slice(0, -1), WINDOW_ROWS), 'CONTROL: the card check is not vacuous — a leaked account-bound card (lark), a leaked per-machine card (remoteapp) and one registry row missing each fail it');
-  ok(await p1.evaljs(`!document.querySelector('.integ-card[data-integ="lark"], .integ-card[data-integ="gmail"], .integ-card[data-integ="fake"]')`), 'no retired OAuth-client card anywhere on the page');
+  ok(verdictOf(await p1.evaljs(`!document.querySelector('.integ-card[data-integ="lark"], .integ-card[data-integ="gmail"], .integ-card[data-integ="fake"]')`)), 'no retired OAuth-client card anywhere on the page');
   // lane dropline-connect-door: the cards drawing a CONNECT BLOCK (a row's OAuth tier) = exactly the rows declaring `connect`
   // (by shape, never by id); on this plain-http server the block is never dead — it says the sentence the hub picked
   const CONNECT_ROWS = WINDOW_ROWS.filter((id) => R.rowById(id).connect);
   const blocks = await p1.evaljs(`(async () => { for (let i = 0; i < 60 && document.querySelectorAll('.integ-card .integ-connect .oauth-connect-btn').length < ${CONNECT_ROWS.length}; i++) await new Promise((r) => setTimeout(r, 100)); return [...document.querySelectorAll('.integ-card')].filter((c) => c.querySelector('.integ-connect .oauth-connect-btn')).map((c) => c.dataset.integ).sort(); })()`);
-  ok(CONNECT_ROWS.length > 0 && sameSet(blocks, CONNECT_ROWS), `the window draws a Connect block on exactly the rows declaring connect (${blocks.join(', ')} vs ${CONNECT_ROWS.join(', ')})`);
+  ok(CONNECT_ROWS.length > 0 && verdictOf(sameSet(blocks, CONNECT_ROWS)), `the window draws a Connect block on exactly the rows declaring connect (${blocks.join(', ')} vs ${CONNECT_ROWS.join(', ')})`);
   ok(!sameSet(blocks.slice(1), CONNECT_ROWS) && !sameSet([...blocks, BB], CONNECT_ROWS), 'CONTROL: the block census is not vacuous — a lost block and a block on a key-only row each fail it');
   // the WORDS LINE (ckpt61 hosted cure — the line grew a door on purpose: lane ui-needs-a-button pick 2 + its reader follow-up #14,
   // src/lib/oauth-connect-row.js sayWhy): it STARTS with the exact sentence the hub picked for its reason; a `self-hosted` why
@@ -368,7 +368,7 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
     const sent = R.rowById(id).connect.whys[st.connectWhy];
     const L = await p1.evaljs(`(() => { const w = document.querySelector('.integ-card[data-integ="${id}"] .oauth-connect-words'); if (!w) return null; const f = w.firstChild; return { text: w.textContent, first: f && f.nodeType === 3 ? f.textContent : null, doors: [...w.querySelectorAll('button')].map((b) => ({ label: b.textContent, door: b.dataset.door || '', need: b.classList.contains('need-door') })), mode: (() => { try { return window.app.settings.get('server.https'); } catch { return null; } })() }; })()`);
     const bad = judgeWords(L, sent, st.connectWhy);
-    ok(st.connectVia === null && !!st.connectWhy && bad === null && (L.doors || []).every((d) => d.need), `${id}: no https here (connectVia null) ⇒ the words line starts with the hub's sentence for connectWhy=${st.connectWhy}${st.connectWhy === 'self-hosted' ? `, then (server.https ${L && L.mode}) ${L && L.mode === 'auto' ? 'the Tailscale also-line and ' : ''}ONE door to the https row` : ''} (${bad || (L && L.text)})`);
+    ok(st.connectVia === null && !!st.connectWhy && bad === null && verdictOf((L.doors || []).every((d) => d.need)), `${id}: no https here (connectVia null) ⇒ the words line starts with the hub's sentence for connectWhy=${st.connectWhy}${st.connectWhy === 'self-hosted' ? `, then (server.https ${L && L.mode}) ${L && L.mode === 'auto' ? 'the Tailscale also-line and ' : ''}ONE door to the https row` : ''} (${bad || (L && L.text)})`);
     if (st.connectWhy === 'self-hosted' && L && bad === null) {
       // RED CONTROLS (the judge on the line as drawn, one planted fault each): a doubled door, a missing door, another
       // sentence first, the also-line dropped on 'auto', the door labelled for the other mode — each red by name
@@ -378,7 +378,7 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
       const noAlso = L.mode === 'auto' ? { ...L, text: L.text.replace(` ${HTTPS_ALSO}`, '') } : null;
       const wrongLabel = { ...L, doors: [{ ...L.doors[0], label: L.mode === 'auto' ? 'Turn on HTTPS…' : 'Use my own certificate files…' }] };
       const reds = [two, none, other, noAlso, wrongLabel].filter(Boolean).map((x) => judgeWords(x, sent, st.connectWhy));
-      ok(reds.length >= 4 && reds.every((r) => typeof r === 'string' && r), `CONTROL: the words-line judge goes red on a doubled door, a missing door, another sentence first, the also-line dropped and the door labelled for the other mode (${reds.join(' · ')})`);
+      ok(reds.length >= 4 && verdictOf(reds.every((r) => typeof r === 'string' && r)), `CONTROL: the words-line judge goes red on a doubled door, a missing door, another sentence first, the also-line dropped and the door labelled for the other mode (${reds.join(' · ')})`);
     }
   }
 }
@@ -387,10 +387,10 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
 {
   const r = await api('GET', `/api/integrations/${encodeURIComponent(BB)}`);
   ok(r.json.integration.source === 'none', 'fresh instance: the Browserbase row is none (route)');
-  ok(await p1.evaljs(`${CARD(BB)}.classList.contains('integ-focus')`), 'the deep-linked card is highlighted');
+  ok(verdictOf(await p1.evaljs(`${CARD(BB)}.classList.contains('integ-focus')`)), 'the deep-linked card is highlighted');
   ok((await chipOf(p1, BB)) === 'Not configured', 'chip: Not configured');
-  ok(await p1.evaljs(`/no default/.test((${CARD(BB)}.querySelector('.integ-why') || {}).textContent || '')`), 'and the card says WHY (no cluster default)');
-  ok(await p1.evaljs(`${CARD(BB)}.querySelector('.integ-missing') !== null`), 'the required-missing field is marked');
+  ok(verdictOf(await p1.evaljs(`/no default/.test((${CARD(BB)}.querySelector('.integ-why') || {}).textContent || '')`)), 'and the card says WHY (no cluster default)');
+  ok(verdictOf(await p1.evaljs(`${CARD(BB)}.querySelector('.integ-missing') !== null`)), 'the required-missing field is marked');
 }
 
 // ── ③ Replace never reveals ──
@@ -416,7 +416,7 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
   ok(!(await p1.evaljs(`document.body.innerText.includes(${JSON.stringify(SECRET40)}) || document.body.innerHTML.includes(${JSON.stringify(SECRET40)})`)), 'THE PLAINTEXT IS NOWHERE ON THE PAGE (text or markup)');
   const g = await api('GET', '/api/integrations');
   ok(!g.text.includes(SECRET40), 'nor in the GET body');
-  ok(await p1.evaljs(`${CARD(BB)}.querySelector('.integ-field[data-field="apiKey"] .integ-replace').textContent === 'Replace'`), 'the button now says Replace — there is no Reveal');
+  ok(verdictOf(await p1.evaljs(`${CARD(BB)}.querySelector('.integ-field[data-field="apiKey"] .integ-replace').textContent === 'Replace'`)), 'the button now says Replace — there is no Reveal');
   const empty = await p1.evaljs(`(() => { const row = ${CARD(BB)}.querySelector('.integ-field[data-field="apiKey"]'); row.querySelector('.integ-replace').click(); const i = row.querySelector('input[type="password"]'); const v = i ? i.value : null; row.querySelector('.mounts-btn:not(.mounts-btn-primary)').click(); return v; })()`);
   ok(empty === '', 'Replace opens an EMPTY password input (never pre-filled with the value)');
   const stored = fs.readFileSync(path.join(wt, 'data/integrations.json'), 'utf-8');
@@ -428,9 +428,9 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
 // ── ⑧ Test: wording by kind; verdict never without the caveat; failure words (zero-network Tests only) ──
 {
   const words = await p1.evaljs(`${JSON.stringify(BROWSER_ROWS)}.map((id) => { const c = document.querySelector('.integ-card[data-integ="' + id + '"]'); return c ? c.querySelector('.integ-test').textContent : null; })`);
-  ok(words.every((w) => w === 'Test connection'), `every browser row's Test is a credential exchange and says "Test connection" (never clicked with a key — it would reach a vendor): ${JSON.stringify(words)}`);
+  ok(verdictOf(words.every((w) => w === 'Test connection')), `every browser row's Test is a credential exchange and says "Test connection" (never clicked with a key — it would reach a vendor): ${JSON.stringify(words)}`);
   const t2 = await p1.evaljs(`(async () => { ${CARD('cloud:browseruse')}.querySelector('.integ-test').click(); for (let i = 0; i < 60; i++) { const r = ${CARD('cloud:browseruse')}.querySelector('.integ-test-result'); const v = r && r.querySelector('.integ-verdict'); if (v && v.textContent === 'Failed') return { err: (r.querySelector('.integ-test-error') || {}).textContent || '', caveat: !!r.querySelector('.integ-caveat') }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(t2 && /no key resolved/.test(t2.err) && t2.caveat, `a failing Test (a keyless cloud row — refused before any request) draws the words on the card, beside the caveat (${JSON.stringify(t2)})`);
+  ok(gateOf(t2) && gateOf(/no key resolved/.test(t2.err)) && verdictOf(t2.caveat), `a failing Test (a keyless cloud row — refused before any request) draws the words on the card, beside the caveat (${JSON.stringify(t2)})`);
 }
 
 // ── ⑤ a PUT failure toasts ──
@@ -443,7 +443,7 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
     for (let i = 0; i < 60; i++) { const t = document.querySelector('.global-toast-error .global-toast-body'); if (t) return t.textContent; await new Promise((r) => setTimeout(r, 100)); }
     return null;
   })()`);
-  ok(toast && /apiUrl/.test(toast) && /http\(s\) URL/.test(toast), `a refused PUT is a TOAST naming the field and the rule (${JSON.stringify(toast)})`);
+  ok(gateOf(toast) && gateOf(/apiUrl/.test(toast)) && verdictOf(/http\(s\) URL/.test(toast)), `a refused PUT is a TOAST naming the field and the rule (${JSON.stringify(toast)})`);
   await p1.evaljs(`(() => { const row = ${CARD(BL)}.querySelector('.integ-field[data-field="apiUrl"]'); const b = row && row.querySelector('.mounts-btn:not(.mounts-btn-primary)'); if (b) b.click(); return 1; })()`);
 }
 
@@ -451,8 +451,8 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
 {
   await p1.evaljs(`window.app.openIntegration('cloud:kernel'); 1`);
   await sleep(200);
-  ok(await p1.evaljs(`${CARD('cloud:kernel')}.classList.contains('integ-focus')`), 'openIntegration("cloud:kernel") on the open window highlights THAT card');
-  ok(await p1.evaljs(`[...window.app.wm.windows.values()].filter((w) => w.type === 'integrations').length === 1`), 'the window is a singleton (a second open focused the first)');
+  ok(verdictOf(await p1.evaljs(`${CARD('cloud:kernel')}.classList.contains('integ-focus')`)), 'openIntegration("cloud:kernel") on the open window highlights THAT card');
+  ok(verdictOf(await p1.evaljs(`[...window.app.wm.windows.values()].filter((w) => w.type === 'integrations').length === 1`)), 'the window is a singleton (a second open focused the first)');
   const gone = await p1.evaljs(`(() => {
     const focused = () => [...document.querySelectorAll('.integ-focus')].map((c) => c.dataset.integ).join(',');
     const before = focused();
@@ -477,13 +477,13 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
     return { bad, cards, n: document.querySelectorAll('.integ-card').length };
   })()`);
   ok(out.n === WINDOW_ROWS.length && !out.bad.length, `375×667: all ${out.n} cards, every control inside the viewport (offenders: ${out.bad.join(', ') || 'none'}; card widths ${out.cards.join('/')})`);
-  ok(out.cards.every((w) => w <= 375), 'single column — no card wider than the viewport');
+  ok(verdictOf(out.cards.every((w) => w <= 375)), 'single column — no card wider than the viewport');
 }
 
 // ── ⑦ two clients see one change ──
 const p2 = await newPage();
 {
-  ok(await p2.load() && await p2.evaljs(OPEN(BL)), 'page 2 loaded and opened the window');
+  ok(gateOf(await p2.load()) && verdictOf(await p2.evaljs(OPEN(BL))), 'page 2 loaded and opened the window');
   const set = await p1.evaljs(`(async () => {
     const row = ${CARD(BL)}.querySelector('.integ-field[data-field="apiUrl"]');
     row.querySelector('.integ-replace').click();
@@ -491,18 +491,18 @@ const p2 = await newPage();
     row.querySelector('.mounts-btn-primary').click();
     return true;
   })()`);
-  ok(set, 'page 1 saved apiUrl through the card');
-  ok(await p2.evaljs(WAIT_CARD(BL, `(c) => (c.querySelector('.integ-field[data-field="apiUrl"] .integ-plain') || {}).textContent === 'https://eu.browserless.example'`)), 'page 2 repainted the row from the integrations-updated broadcast (no reload, no click)');
+  ok(verdictOf(set), 'page 1 saved apiUrl through the card');
+  ok(verdictOf(await p2.evaljs(WAIT_CARD(BL, `(c) => (c.querySelector('.integ-field[data-field="apiUrl"] .integ-plain') || {}).textContent === 'https://eu.browserless.example'`))), 'page 2 repainted the row from the integrations-updated broadcast (no reload, no click)');
 }
 
 // ── ① continued: cluster default (env injected + use cluster) → none WITH A REASON (env removed, restart) ──
 {
   srv.kill('SIGKILL'); await waitDown();
   srv = bootServer({ VIBESPACE_INTEGRATIONS: CLUSTER_BB });
-  ok(await waitServer(), 'rebooted WITH a cluster default for the Browserbase row');
-  ok(await p1.load() && await p1.evaljs(OPEN(BB)), 'page 1 reloaded and reopened the window');
+  ok(verdictOf(await waitServer()), 'rebooted WITH a cluster default for the Browserbase row');
+  ok(gateOf(await p1.load()) && verdictOf(await p1.evaljs(OPEN(BB))), 'page 1 reloaded and reopened the window');
   ok((await chipOf(p1, BB)) === 'Your own', 'USER > CLUSTER: the user\'s own key survives the injected default (chip still Your own)');
-  ok(await p1.evaljs(`!${CARD(BB)}.querySelector('input[value="cluster"]').disabled`), 'the "Use cluster default" radio is now enabled');
+  ok(verdictOf(await p1.evaljs(`!${CARD(BB)}.querySelector('input[value="cluster"]').disabled`)), 'the "Use cluster default" radio is now enabled');
   const cleared = await p1.evaljs(`(async () => {
     ${CARD(BB)}.querySelector('.integ-clear').click();
     for (let i = 0; i < 40; i++) { const b = [...document.querySelectorAll('.dialog-overlay .dialog-footer .btn-create')].pop(); if (b) { b.click(); break; } await new Promise((r) => setTimeout(r, 50)); }
@@ -510,19 +510,19 @@ const p2 = await newPage();
     return null;
   })()`);
   ok(cleared === 'Cluster default · Cluster Browserbase', `"Clear my keys" lands on the CLUSTER default, chip = Cluster default · <label> (${JSON.stringify(cleared)})`);
-  ok(await p1.evaljs(`${CARD(BB)}.querySelector('input[value="cluster"]').checked`), 'the cluster radio is checked');
-  ok(await p1.evaljs(`/Provided by the cluster/.test(${CARD(BB)}.querySelector('.integ-fields').textContent)`), 'and the fields read "Provided by the cluster" — nothing to type');
+  ok(verdictOf(await p1.evaljs(`${CARD(BB)}.querySelector('input[value="cluster"]').checked`)), 'the cluster radio is checked');
+  ok(verdictOf(await p1.evaljs(`/Provided by the cluster/.test(${CARD(BB)}.querySelector('.integ-fields').textContent)`)), 'and the fields read "Provided by the cluster" — nothing to type');
   const use = await api('PUT', `/api/integrations/${encodeURIComponent(BB)}`, { use: 'cluster' });
   ok(use.status === 200 && use.json.integration.source === 'cluster', "PUT {use:'cluster'} confirms the choice");
   ok(!fs.readFileSync(path.join(wt, 'data/integrations.json'), 'utf-8').includes('cluster-bb-key'), 'the cluster value was never written to disk');
   srv.kill('SIGKILL'); await waitDown();
   srv = bootServer();
-  ok(await waitServer(), 'rebooted WITHOUT the cluster default');
+  ok(verdictOf(await waitServer()), 'rebooted WITHOUT the cluster default');
   const r = await api('GET', `/api/integrations/${encodeURIComponent(BB)}`);
-  ok(r.json.integration.source === 'none' && /no longer provided/.test(r.json.integration.why) && r.json.integration.set.apiKey === false, `INJECT-THEN-REMOVE: none WITH A REASON on the route (${r.json.integration.why})`);
-  ok(await p1.load() && await p1.evaljs(OPEN(BB)), 'page 1 reloaded');
+  ok(r.json.integration.source === 'none' && gateOf(/no longer provided/.test(r.json.integration.why)) && r.json.integration.set.apiKey === false, `INJECT-THEN-REMOVE: none WITH A REASON on the route (${r.json.integration.why})`);
+  ok(gateOf(await p1.load()) && verdictOf(await p1.evaljs(OPEN(BB))), 'page 1 reloaded');
   ok((await chipOf(p1, BB)) === 'Not configured', 'chip: Not configured');
-  ok(await p1.evaljs(`/no longer provided/.test((${CARD(BB)}.querySelector('.integ-why') || {}).textContent || '')`), 'and the card says the cluster default this row used is no longer provided');
+  ok(verdictOf(await p1.evaljs(`/no longer provided/.test((${CARD(BB)}.querySelector('.integ-why') || {}).textContent || '')`)), 'and the card says the cluster default this row used is no longer provided');
   await p1.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'integrations')) window.app.wm.closeWindow(w.id); return 1; })()`);
 }
 
@@ -548,16 +548,16 @@ const p2 = await newPage();
   const consentUrlIn = (sel) => `(async () => { for (let i = 0; i < 80; i++) { const i2 = document.querySelector(${JSON.stringify(sel)}); if (i2 && i2.value) return i2.value; await new Promise((r) => setTimeout(r, 100)); } return null; })()`;
 
   // (a) ONE entry
-  ok(await p1.evaljs(panelWait(`() => !!document.querySelector('.rail-panel-channels [data-connect-account]')`)), 'the Channels panel (its window on a phone) draws the ONE `Connect an account` entry');
+  ok(verdictOf(await p1.evaljs(panelWait(`() => !!document.querySelector('.rail-panel-channels [data-connect-account]')`))), 'the Channels panel (its window on a phone) draws the ONE `Connect an account` entry');
   const entry = await p1.evaljs(`(() => ({ text: document.querySelector('.rail-panel-channels [data-connect-account]').textContent, perKind: document.querySelectorAll('.rail-panel-channels [data-connect-kind]').length }))()`);
-  ok(/^Connect an account \((?:Lark \/ 飞书|Gmail|Slack)(?:, (?:Lark \/ 飞书|Gmail|Slack)){2}\)$/.test(entry.text) && entry.perKind === 0, `the entry names the types and the per-kind buttons are retired (${JSON.stringify(entry)})`);
+  ok(gateOf(/^Connect an account \((?:Lark \/ 飞书|Gmail|Slack)(?:, (?:Lark \/ 飞书|Gmail|Slack)){2}\)$/.test(entry.text)) && entry.perKind === 0, `the entry names the types and the per-kind buttons are retired (${JSON.stringify(entry)})`);
   ok((await accounts()).length === 0, 'FIXTURE: no account exists yet');
 
   // (b) type-first; Gmail's preset preselected
   await p1.evaljs(`document.querySelector('.rail-panel-channels [data-connect-account]').click(); 1`);
-  ok(await p1.evaljs(WAIT_DLG('connect')), 'the entry opens the account dialog');
+  ok(verdictOf(await p1.evaljs(WAIT_DLG('connect'))), 'the entry opens the account dialog');
   const d0 = await p1.evaljs(`(() => { const d = ${DLG('connect')}; const first = d.querySelector(':scope > label'); const sel = d.querySelector(':scope > select'); return { title: d.closest('.dialog').querySelector('.dialog-header h3').textContent, firstLabel: first && first.textContent, firstIsType: first && first.nextElementSibling === sel, types: [...sel.options].map((o) => o.value) }; })()`);
-  ok(d0.title === 'Connect an account' && d0.firstLabel === 'Type' && d0.firstIsType && d0.types.includes('gmail') && d0.types.includes('lark'), `TYPE-FIRST: the dialog's first field is Type (${JSON.stringify(d0)})`);
+  ok(d0.title === 'Connect an account' && d0.firstLabel === 'Type' && gateOf(d0.firstIsType) && gateOf(d0.types.includes('gmail')) && verdictOf(d0.types.includes('lark')), `TYPE-FIRST: the dialog's first field is Type (${JSON.stringify(d0)})`);
   await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'gmail'; s.dispatchEvent(new Event('change')); return 1; })()`);
   const gm = await p1.evaljs(`(() => {
     const d = ${DLG('connect')};
@@ -597,9 +597,9 @@ const p2 = await newPage();
   })()`);
   ok(lk.clientValue === 'custom' && JSON.stringify(lk.options) === JSON.stringify(['Custom (own client id/secret)']), `Lark with no preset preselects Custom — the only entry (${JSON.stringify(lk.options)})`);
   ok(JSON.stringify(lk.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Custom App ID', 'Custom App Secret', 'Callback URL (register it on your app first)', 'Lark authorization', 'Brand']), `Custom unfolds IN PLACE: Custom App ID / Custom App Secret (the registry's labels), the callback row, the authorization block, the type's own field (${JSON.stringify(lk.labels)})`);
-  ok(lk.cb === LARK_CB && lk.cbReadOnly === true && lk.copyBtn === 'Copy' && lk.secretIsPassword, `the callback URL is the oauthLinkRow-shaped READ-ONLY row + Copy with EXACTLY ${LARK_CB}; the secret input is a password field`);
+  ok(lk.cb === LARK_CB && lk.cbReadOnly === true && lk.copyBtn === 'Copy' && verdictOf(lk.secretIsPassword), `the callback URL is the oauthLinkRow-shaped READ-ONLY row + Copy with EXACTLY ${LARK_CB}; the secret input is a password field`);
   const larkRow = R.rowById('lark');
-  ok(lk.hints.length === 4 && lk.hints[0] === larkRow.setup.callbackNote && larkRow.setup.prerequisites.every((p, i) => lk.hints[i + 1] === p) && lk.prereqHead === 'Before you start, check:', `the console note, then «Before you start, check:» over the three prerequisites as a LIST (${JSON.stringify(lk.hints)})`);
+  ok(lk.hints.length === 4 && lk.hints[0] === larkRow.setup.callbackNote && gateOf(larkRow.setup.prerequisites.every((p, i) => lk.hints[i + 1] === p)) && lk.prereqHead === 'Before you start, check:', `the console note, then «Before you start, check:» over the three prerequisites as a LIST (${JSON.stringify(lk.hints)})`);
   ok(lk.block === 'Connect Lark', 'the Lark authorization block');
   const copied = await p1.evaljs(`(async () => {
     window.__copied = null;
@@ -615,7 +615,7 @@ const p2 = await newPage();
   // (d) Connect before the sign-in: refused IN the dialog, nothing created
   await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'gmail'; s.dispatchEvent(new Event('change')); return 1; })()`);
   const early = await p1.evaljs(`(async () => { const d = ${DLG('connect')}; d.querySelector('.dialog-actions .btn-create').click(); for (let i = 0; i < 40; i++) { const e = d.querySelector('.cfg-err'); if (e && e.textContent) return e.textContent; await new Promise((r) => setTimeout(r, 50)); } return null; })()`);
-  ok(/Sign in first/.test(early || '') && /Connect Google/.test(early || ''), `Connect before signing in is refused in the dialog's .cfg-err (${JSON.stringify(early)})`);
+  ok(gateOf(/Sign in first/.test(early || '')) && verdictOf(/Connect Google/.test(early || '')), `Connect before signing in is refused in the dialog's .cfg-err (${JSON.stringify(early)})`);
   ok((await accounts()).length === 0, 'and NOTHING was created');
 
   // (e) the consent IN the dialog
@@ -623,12 +623,12 @@ const p2 = await newPage();
   const url1 = await p1.evaljs(consentUrlIn('[id^="chan-account-"] .mounts-drive-connect .mounts-oauth-link input'));
   ok(!!url1 && new URL(url1).searchParams.get('client_id') === 'org1.apps.googleusercontent.com', `the consent starts IN the dialog under the preselected preset (client_id org1) and the cross-browser link row carries its URL (${String(url1).slice(0, 80)}…)`);
   const flowUi = await p1.evaljs(`(() => { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); return { paste: !!b.querySelector('input[placeholder^="http://127.0.0.1"]'), status: b.querySelector('.mounts-field-hint').textContent, opened: (window.__opened || []).length }; })()`);
-  ok(flowUi.paste && /Google sign-in page opened/.test(flowUi.status) && flowUi.opened === 1, `the storage block: the status sentence names Google, the paste-back box is drawn, and window.open was asked (and stubbed) once (${JSON.stringify(flowUi)})`);
+  ok(gateOf(flowUi.paste) && gateOf(/Google sign-in page opened/.test(flowUi.status)) && flowUi.opened === 1, `the storage block: the status sentence names Google, the paste-back box is drawn, and window.open was asked (and stubbed) once (${JSON.stringify(flowUi)})`);
   await p1.probe('the consent block in flight', `[id^="chan-account-"] .mounts-drive-connect .mounts-oauth-link`);
   ok((await accounts()).length === 0, 'a running sign-in creates nothing either');
   ok((await followConsent(url1)) === 200, 'the redirect lands on the product\'s own loopback (the stub answers the token exchange)');
   const signed = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const s = b && b.querySelector('.mounts-field-hint').textContent; if (/Connected/.test(s || '')) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/✓ Connected as ada@example\.test — finish with the “Connect” button below\./.test(signed || ''), `the block says the sign-in finished and NAMES who signed in (slack-landing-nologin: the consent may land in another browser profile) (${JSON.stringify(signed)})`);
+  ok(verdictOf(/✓ Connected as ada@example\.test — finish with the “Connect” button below\./.test(signed || '')), `the block says the sign-in finished and NAMES who signed in (slack-landing-nologin: the consent may land in another browser profile) (${JSON.stringify(signed)})`);
   ok((await accounts()).length === 0, 'STILL nothing created — the record waits for Connect');
 
   // (f) Connect creates the record
@@ -636,22 +636,22 @@ const p2 = await newPage();
   let accts = [];
   for (let i = 0; i < 60 && !accts.length; i++) { accts = await accounts(); if (!accts.length) await sleep(100); }
   const A = accts[0];
-  ok(accts.length === 1 && A.kind === 'gmail' && A.credentialKey === 'cluster:org1' && A.auth.tokenHeld && A.auth.user === 'ada@example.test', `Connect CREATED the account under the chosen preset, signed in as the stub's user (${JSON.stringify(accts.map((a) => ({ id: a.id, key: a.credentialKey, user: a.auth.user })))})`);
-  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (!document.querySelector('[id^="chan-account-"]')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'and closed the dialog');
+  ok(accts.length === 1 && A.kind === 'gmail' && A.credentialKey === 'cluster:org1' && gateOf(A.auth.tokenHeld) && A.auth.user === 'ada@example.test', `Connect CREATED the account under the chosen preset, signed in as the stub's user (${JSON.stringify(accts.map((a) => ({ id: a.id, key: a.credentialKey, user: a.auth.user })))})`);
+  ok(verdictOf(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (!document.querySelector('[id^="chan-account-"]')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`)), 'and closed the dialog');
 
   // lane channels-fold-default: a section with nothing that needs the person starts folded (and Accounts with it) — the person opened it
   await api('PATCH', '/api/user-state', { channelsPanelFolds: { [`acct:${A.id}`]: false } });
   // (g) the credential-first card (2026-09-26, the aggregated IM: a linked account IS its conversations)
-  ok(await p1.evaljs(panelWait(`() => { const c = ${card(A.id)}; return !!(c && c.querySelector('.chan-sec-health') && /last sync/.test(c.querySelector('.chan-sec-health').textContent) && c.querySelectorAll('.chan-row').length === 3); }`)), 'the account card is drawn with its health line and its conversations after its first pass');
+  ok(verdictOf(await p1.evaljs(panelWait(`() => { const c = ${card(A.id)}; return !!(c && c.querySelector('.chan-sec-health') && /last sync/.test(c.querySelector('.chan-sec-health').textContent) && c.querySelectorAll('.chan-row').length === 3); }`))), 'the account card is drawn with its health line and its conversations after its first pass');
   const c0 = await p1.evaljs(`(() => { const c = ${card(A.id)}; const h = c.querySelector('.chan-sec-head'); return { name: h.querySelector('.chan-sec-name').textContent, chip: (h.querySelector('.chan-cred-chip') || {}).textContent, dot: h.querySelector('.chan-dot').dataset.state, edit: !!h.querySelector('.mounts-icon-btn'), more: !!h.querySelector('.chan-sec-more'), tag: c.querySelector('.chan-sec-health .mounts-typetag').textContent, health: c.querySelector('.chan-sec-health-text').textContent, empty: !!c.querySelector('.chan-sec-empty'), rows: c.querySelectorAll('.chan-row').length }; })()`);
-  ok(c0.name === 'Gmail · ada@example.test' && c0.chip === 'Preset: Org 1' && c0.edit && c0.more, `the head: name + login, the client chip "Preset: Org 1", ✎ and ⋯ (${JSON.stringify(c0)})`);
-  ok(c0.tag === 'Gmail' && /^Connected · Inbox · polling · 3 conversations( · \d+ unread)? · last sync /.test(c0.health), `the HEALTH line in the storage detail-line grammar: [Gmail] Connected · Inbox · polling · 3 conversations · last sync … (${c0.health})`);
+  ok(c0.name === 'Gmail · ada@example.test' && c0.chip === 'Preset: Org 1' && gateOf(c0.edit) && verdictOf(c0.more), `the head: name + login, the client chip "Preset: Org 1", ✎ and ⋯ (${JSON.stringify(c0)})`);
+  ok(c0.tag === 'Gmail' && verdictOf(/^Connected · Inbox · polling · 3 conversations( · \d+ unread)? · last sync /.test(c0.health)), `the HEALTH line in the storage detail-line grammar: [Gmail] Connected · Inbox · polling · 3 conversations · last sync … (${c0.health})`);
   ok(!c0.empty && c0.rows === 3 && c0.dot === 'ok', `no track step: every conversation of the account is a row at once, no login-only note, an ok dot (${JSON.stringify({ rows: c0.rows, dot: c0.dot })})`);
   await p1.probe('the card head', `.rail-panel-channels .chan-account[data-adapter="${A.id}"] .chan-sec-head`);
   await p1.probe('the health line', `.rail-panel-channels .chan-account[data-adapter="${A.id}"] .chan-sec-health`);
 
   // (o) page 2 watches the accounts IN PLACE from here on
-  ok(await p2.load() && await p2.evaljs(panelWait(`() => !!${card(A.id)}`)), 'page 2 opened the panel and sees the account');
+  ok(gateOf(await p2.load()) && verdictOf(await p2.evaljs(panelWait(`() => !!${card(A.id)}`))), 'page 2 opened the panel and sees the account');
   await p2.evaljs(`(() => { window.__marker = 'p2-alive'; window.__chanFetches = 0; const of = window.fetch; window.fetch = function (u, ...r) { if (/^\\/api\\/channels(\\?|$)/.test(String(u))) window.__chanFetches++; return of.call(this, u, ...r); }; return 1; })()`);
 
   // (h) every conversation is a ↳ CHILD row; a refresh override repaints page 2 in place
@@ -665,7 +665,7 @@ const p2 = await newPage();
   ok(ov.status === 200, `FIXTURE: one conversation's refresh is paused (${ov.status})`);
   const p2rows = await p2.evaljs(panelWait(`() => { const v = ${chipOfConv}; return !!v && v !== ${JSON.stringify(chipBefore)}; }`));
   const p2state = await p2.evaljs(`({ marker: window.__marker, fetches: window.__chanFetches })`);
-  ok(p2rows && p2state.marker === 'p2-alive' && p2state.fetches === 0, `page 2 repainted the row's freshness pill IN PLACE from the broadcast — no reload, no /api/channels fetch (${JSON.stringify(p2state)})`);
+  ok(gateOf(p2rows) && p2state.marker === 'p2-alive' && p2state.fetches === 0, `page 2 repainted the row's freshness pill IN PLACE from the broadcast — no reload, no /api/channels fetch (${JSON.stringify(p2state)})`);
   await api('PUT', `/api/channels/${encodeURIComponent(A.id)}/${encodeURIComponent(firstConv.id)}/refresh`, { every: null });
 
   // (i) the ⋯ order = D6
@@ -677,14 +677,14 @@ const p2 = await newPage();
 
   // (j) Edit: prefilled, the four buttons in order, switching the client ⇒ Save opens Re-authorize
   await p1.evaljs(`${card(A.id)}.querySelector('.chan-sec-head .mounts-icon-btn').click(); 1`);
-  ok(await p1.evaljs(WAIT_DLG('edit')), '✎ opens the Edit dialog');
+  ok(verdictOf(await p1.evaljs(WAIT_DLG('edit'))), '✎ opens the Edit dialog');
   const ed = await p1.evaljs(`(() => { const d = ${DLG('edit')}; const sels = [...d.querySelectorAll(':scope > select')]; return { title: d.closest('.dialog').querySelector('.dialog-header h3').textContent, name: d.querySelector(':scope > input').value, client: sels[0].value, labels: ${visibleLabels('edit')}, buttons: [...d.querySelectorAll('.dialog-actions button')].map((b) => b.textContent), query: [...d.querySelectorAll(':scope > input')].map((i) => i.value).includes('label:INBOX') }; })()`);
-  ok(ed.title === 'Edit "Gmail · ada@example.test"' && ed.name === 'Gmail' && ed.client === 'org1' && ed.query, `every parameter prefilled — name, the client (org1), the query (${JSON.stringify(ed)})`);
+  ok(ed.title === 'Edit "Gmail · ada@example.test"' && ed.name === 'Gmail' && ed.client === 'org1' && verdictOf(ed.query), `every parameter prefilled — name, the client (org1), the query (${JSON.stringify(ed)})`);
   // (lane ui-language, the walk's machines-16: every form of the shared mounts dialog names its Cancel — the ✕'s own door)
   ok(JSON.stringify(ed.buttons) === JSON.stringify(['Re-authorize Gmail…', 'Duplicate…', 'Remove…', 'Cancel', 'Save']), `the buttons: Re-authorize Gmail… · Duplicate… · Remove… · Cancel · Save (${JSON.stringify(ed.buttons)})`);
-  ok(ed.labels.includes('Sign-in') && ed.labels.includes('OAuth client'), 'the OAuth client field and the sign-in fact are drawn');
+  ok(gateOf(ed.labels.includes('Sign-in')) && verdictOf(ed.labels.includes('OAuth client')), 'the OAuth client field and the sign-in fact are drawn');
   await p1.evaljs(`(() => { const d = ${DLG('edit')}; const s = d.querySelector(':scope > select'); s.value = 'channels'; s.dispatchEvent(new Event('change')); [...d.querySelectorAll('.dialog-actions button')].pop().click(); return 1; })()`);
-  ok(await p1.evaljs(WAIT_DLG('reauth')), 'switching the client and pressing Save OPENS Re-authorize (a token is bound to its client)');
+  ok(verdictOf(await p1.evaljs(WAIT_DLG('reauth'))), 'switching the client and pressing Save OPENS Re-authorize (a token is bound to its client)');
   const re0 = await p1.evaljs(`(() => { const d = ${DLG('reauth')}; return { client: d.querySelector(':scope > select').value, title: d.closest('.dialog').querySelector('.dialog-header h3').textContent, btn: d.querySelector(':scope > .mounts-btn-primary').textContent }; })()`);
   ok(re0.client === 'channels' && re0.title === 'Re-authorize "Gmail · ada@example.test"' && re0.btn === 'Sign in with Google', `…with the NEW client preselected (${JSON.stringify(re0)})`);
   ok(((await accounts()).find((a) => a.id === A.id) || {}).credentialKey === 'cluster:org1', 'and the account was NOT re-pointed by the Save');
@@ -701,10 +701,10 @@ const p2 = await newPage();
 
   // (k) Duplicate: settings copied, token not, its own consent; switched to a custom client
   await p1.evaljs(`(async () => { ${card(A.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === 'Duplicate…').click(); return 1; })()`);
-  ok(await p1.evaljs(WAIT_DLG('duplicate')), '⋯ Duplicate… opens the Duplicate dialog');
+  ok(verdictOf(await p1.evaljs(WAIT_DLG('duplicate'))), '⋯ Duplicate… opens the Duplicate dialog');
   const du = await p1.evaljs(`(() => { const d = ${DLG('duplicate')}; const inputs = [...d.querySelectorAll(':scope > input')]; const sels = [...d.querySelectorAll(':scope > select')]; return { title: d.closest('.dialog').querySelector('.dialog-header h3').textContent, name: inputs[0].value, type: inputs[1].value, typeRO: inputs[1].readOnly, client: sels[0].value, query: inputs.some((i) => i.value === 'label:INBOX'), push: sels.some((s) => [...s.options].some((o) => o.value === 'exclusive')), note: (d.querySelector(':scope > .mounts-note') || {}).textContent || '', block: d.querySelector('.mounts-drive-connect button').textContent, submit: d.querySelector('.dialog-actions .btn-create').textContent }; })()`);
-  ok(du.title === 'Duplicate "Gmail · ada@example.test"' && du.name === 'Gmail (copy)' && du.type === 'Gmail' && du.typeRO && du.client === 'org1' && du.query && du.push, `name "{name} (copy)", the type READ-ONLY, the client / query / push claim copied (${JSON.stringify(du)})`);
-  ok(/^Copied: the type, the OAuth client/.test(du.note) && /NOT copied: the token/.test(du.note) && du.block === 'Connect Google' && du.submit === 'Create & connect', 'the copied / not-copied paragraph, its OWN consent block and "Create & connect"');
+  ok(du.title === 'Duplicate "Gmail · ada@example.test"' && du.name === 'Gmail (copy)' && du.type === 'Gmail' && gateOf(du.typeRO) && du.client === 'org1' && gateOf(du.query) && verdictOf(du.push), `name "{name} (copy)", the type READ-ONLY, the client / query / push claim copied (${JSON.stringify(du)})`);
+  ok(gateOf(/^Copied: the type, the OAuth client/.test(du.note)) && gateOf(/NOT copied: the token/.test(du.note)) && du.block === 'Connect Google' && du.submit === 'Create & connect', 'the copied / not-copied paragraph, its OWN consent block and "Create & connect"');
   await p1.probe('the duplicate dialog', '[id^="chan-account-"] .dialog');
   // switch the copy to a custom client; its first refresh will be refused (the stub's invalid_grant) — the dead-sign-in leg below
   await p1.evaljs(`(() => { const d = ${DLG('duplicate')}; const s = d.querySelector(':scope > select'); s.value = 'custom'; s.dispatchEvent(new Event('change')); const vis = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none' && !i.readOnly); const id = vis.find((i) => i.placeholder && /googleusercontent/.test(i.placeholder)); const sec = d.querySelector(':scope > input[type="password"]'); id.value = ${JSON.stringify(CUSTOM_ID)}; sec.value = ${JSON.stringify(CUSTOM_SECRET)}; id.dispatchEvent(new Event('input')); sec.dispatchEvent(new Event('input')); return 1; })()`);
@@ -714,34 +714,34 @@ const p2 = await newPage();
   const copyRec = (await accounts()).find((a) => a.id !== A.id);
   ok(!!copyRec && copyRec.auth.tokenHeld === false && copyRec.label === 'Gmail (copy)' && copyRec.options.query === A.options.query, `the COPY exists unauthorized — the token is NOT copied, the settings are (${JSON.stringify(copyRec && { id: copyRec.id, tokenHeld: copyRec.auth.tokenHeld, query: copyRec.options.query })})`);
   const idx = (await api('GET', '/api/channels')).json.conversations.filter((c) => c.adapterId === (copyRec && copyRec.id));
-  ok(idx.every((c) => !c.assignment), 'nothing assigned on the copy');
+  ok(verdictOf(idx.every((c) => !c.assignment)), 'nothing assigned on the copy');
   ok(!!url2 && new URL(url2).searchParams.get('client_id') === CUSTOM_ID, `its OWN consent runs under the custom client it was switched to (client_id ${url2 && new URL(url2).searchParams.get('client_id')})`);
   ok((await followConsent(url2)) === 200, 'the copy\'s redirect lands on the loopback');
   const dupSigned = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const s = ${DLG('duplicate')}.querySelector('.mounts-drive-connect .mounts-field-hint').textContent; if (/Connected/.test(s)) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/Create & connect/.test(dupSigned || ''), `the block says the copy signed in (${JSON.stringify(dupSigned)})`);
+  ok(verdictOf(/Create & connect/.test(dupSigned || '')), `the block says the copy signed in (${JSON.stringify(dupSigned)})`);
   await p1.evaljs(`${DLG('duplicate')}.querySelector('.dialog-actions .btn-create').click(); 1`);
   const B = copyRec;
   await api('PATCH', '/api/user-state', { channelsPanelFolds: { [`acct:${A.id}`]: false, [`acct:${B.id}`]: false } });   // lane channels-fold-default: opened by the person
-  ok(await p1.evaljs(panelWait(`() => !!${card(B.id)} && !document.querySelector('[id^="chan-account-"]')`)), 'Create & connect closed the dialog; the SIBLING card appears');
+  ok(verdictOf(await p1.evaljs(panelWait(`() => !!${card(B.id)} && !document.querySelector('[id^="chan-account-"]')`))), 'Create & connect closed the dialog; the SIBLING card appears');
 
   // (l) the dead sign-in: the red line + Reconnect under the account (lane channel-reauth-visible — the owner 2026-10-23:
   // 「进来之后账号行下方显示登录失效需要 reauth」; it replaces D8's «Couldn't connect: …» sentence for a sign-in that died:
   // ONE sentence, one verb), and the dialog heals it
-  ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && c.querySelector('.chan-sec-reauth')); }`)), 'the copy\'s first refresh was refused (invalid_grant) ⇒ its card draws the dead sign-in\'s red line');
+  ok(verdictOf(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && c.querySelector('.chan-sec-reauth')); }`))), 'the copy\'s first refresh was refused (invalid_grant) ⇒ its card draws the dead sign-in\'s red line');
   const bad = await p1.evaljs(`(() => { const c = ${card(B.id)}; const e = c.querySelector('.chan-sec-reauth'); const b = e.querySelector('.chan-sec-reauth-btn'); return { text: e.querySelector('.chan-sec-reauth-text').textContent, errline: !!c.querySelector('.mounts-errline'), btn: b && b.textContent, btnCls: b && b.className, chip: c.querySelector('.chan-cred-chip').textContent, dot: c.querySelector('.chan-sec-head .chan-dot').dataset.state }; })()`);
   const whyB = (((await accounts()).find((a) => a.id === B.id) || {}).auth || {}).why;
   // (lane ui-language: «since» is page-time's clock — on an en page the device's own form, «5:49 PM» on an en-US browser; zh / ja «17:49»)
-  ok(/^(refresh-refused|last-pass-refused)$/.test(whyB || '') && /^Sign-in expired — re-authorize · the vendor refused the refresh token · since \d{1,2}:\d\d(\s?[AP]M)?$/.test(bad.text) && !bad.errline, `the red line says what, why (Google's invalid_grant) and since when — and no second «Couldn't connect» sentence beside it (lane channel-reauth-visible; was D8's mounts' sentence + the why code in brackets (${JSON.stringify(bad.text)})`);
+  ok(gateOf(/^(refresh-refused|last-pass-refused)$/.test(whyB || '')) && gateOf(/^Sign-in expired — re-authorize · the vendor refused the refresh token · since \d{1,2}:\d\d(\s?[AP]M)?$/.test(bad.text)) && !bad.errline, `the red line says what, why (Google's invalid_grant) and since when — and no second «Couldn't connect» sentence beside it (lane channel-reauth-visible; was D8's mounts' sentence + the why code in brackets (${JSON.stringify(bad.text)})`);
   ok(bad.btn === 'Reconnect' && bad.btnCls === 'mounts-btn mounts-btn-primary chan-sec-reauth-btn' && bad.chip === 'Custom client' && bad.dot === 'bad', `the primary Reconnect button inline (the storage button class), the "Custom client" chip, a bad dot (${JSON.stringify(bad)})`);
   await p1.probe('the red line + Reconnect button', `.rail-panel-channels .chan-account[data-adapter="${B.id}"] .chan-sec-reauth`);
   await p1.evaljs(`${card(B.id)}.querySelector('.chan-sec-reauth-btn').click(); 1`);
-  ok(await p1.evaljs(WAIT_DLG('reauth')), 'the button opens Re-authorize');
+  ok(verdictOf(await p1.evaljs(WAIT_DLG('reauth'))), 'the button opens Re-authorize');
   const re1 = await p1.evaljs(`(() => { const d = ${DLG('reauth')}; const kids = [...d.children].filter((e) => e.style.display !== 'none').map((e) => e.tagName === 'LABEL' ? 'label:' + e.textContent : e.tagName === 'SELECT' ? 'select' : e.tagName === 'BUTTON' ? 'button:' + e.textContent : e.tagName === 'INPUT' ? 'input' : e.className); const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none'); return { order: kids, client: d.querySelector(':scope > select').value, hint: d.firstElementChild.textContent, id: inputs.map((i) => i.value)[0], secret: inputs.map((i) => i.value)[1], held: (d.querySelector('.mounts-held .mounts-held-state') || {}).textContent || null, leak: d.innerHTML.includes(${JSON.stringify(CUSTOM_SECRET)}) }; })()`);
   // THE WRITE-ONLY LAW (the owner's word, 2026-11-13 — it replaces July's «the edit form pre-fills the real secrets»): the
   // account's OWN client is in place — «custom», its client ID shown — and its secret is HELD («Saved» + «Replace…»), its bytes
   // nowhere in the dialog; Sign in with the box left empty uses the stored secret (the consent below runs under this client)
   ok(re1.client === 'custom' && re1.id === CUSTOM_ID && re1.secret === undefined && re1.held === 'Saved' && !re1.leak, `the OAuth client select on top carries the account's OWN custom client — its ID shown, its secret held, never its bytes (${JSON.stringify({ client: re1.client, id: re1.id, held: re1.held, leak: re1.leak })})`);
-  ok(/^Google reported the saved sign-in as expired or revoked/.test(re1.hint) && re1.order[0] === 'mounts-field-hint' && re1.order[1] === 'label:OAuth client' && re1.order.includes('button:Sign in with Google'), `the storage shape: who reported the death → the client select → Sign in with Google (${JSON.stringify(re1.order)})`);
+  ok(gateOf(/^Google reported the saved sign-in as expired or revoked/.test(re1.hint)) && re1.order[0] === 'mounts-field-hint' && re1.order[1] === 'label:OAuth client' && verdictOf(re1.order.includes('button:Sign in with Google')), `the storage shape: who reported the death → the client select → Sign in with Google (${JSON.stringify(re1.order)})`);
   await p1.probe('the re-authorize dialog', '#chan-reauth-dialog .dialog');
   // lane lark-signin-dialog (the owner 2026-10-26: his dialog finished 77 s after the consent landed — it waited for the pass
   // after the landing): the stub HOLDS that pass's mailbox reads (`gmailHold`) until the dialog is judged; the account is the
@@ -750,17 +750,17 @@ const p2 = await newPage();
   ok(!!lp0 && lp0.ok === false && lp0.code === 'auth-expired', `setup: the dead account's last pass is the refusal (${JSON.stringify(lp0 && { ok: lp0.ok, code: lp0.code })}) — the record the owner's landing carried`);
   // lane lark-refresh-stall R5: a SECOND tab shows the same dead row before the press — its panel open, so the heal can reach it
   // only by the broadcast (never a fetch of its own, never a reload)
-  ok(await p2.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && c.querySelector('.chan-sec-reauth')); }`)), 'R5 setup: a second tab, its Channels panel open, draws the same red line');
+  ok(verdictOf(await p2.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && c.querySelector('.chan-sec-reauth')); }`))), 'R5 setup: a second tab, its Channels panel open, draws the same red line');
   stubMode({ email: 'ben@example.test', refresh: 'ok', expiresIn: 3600, gmailHold: true });
   await p1.evaljs(`${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary').click(); 1`);
   const url3 = await p1.evaljs(consentUrlIn('#chan-reauth-dialog .mounts-oauth-link input'));
   ok(!!url3 && new URL(url3).searchParams.get('client_id') === CUSTOM_ID, 'the re-authorize consent runs under the account\'s own client, with the cross-browser link row');
-  ok(await p1.evaljs(`!!document.querySelector('#chan-reauth-dialog input[placeholder^="http://127.0.0.1"]')`), 'and the paste-back box');
+  ok(verdictOf(await p1.evaljs(`!!document.querySelector('#chan-reauth-dialog input[placeholder^="http://127.0.0.1"]')`)), 'and the paste-back box');
   // lane lark-refresh-stall r2 (acceptance r1: the dialog's watcher listened to broadcasts only — a landing broadcast sent
   // while its socket was DOWN never arrived, and the dialog waited for the next channels-updated): THIS tab's socket drops
   // across the landing (its reconnect held), the second tab's stays up
   await p1.evaljs(`(() => { app.ws.__heldConnect = app.ws.connect; app.ws.connect = () => {}; app.ws.ws.close(); return 1; })()`);
-  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 100; i++) { if (app.ws.ws && app.ws.ws.readyState === 3) return true; await new Promise((r) => setTimeout(r, 20)); } return false; })()`), 'r2 setup: the initiating tab\'s socket is DOWN (its reconnect held) while the consent lands');
+  ok(verdictOf(await p1.evaljs(`(async () => { for (let i = 0; i < 100; i++) { if (app.ws.ws && app.ws.ws.readyState === 3) return true; await new Promise((r) => setTimeout(r, 20)); } return false; })()`)), 'r2 setup: the initiating tab\'s socket is DOWN (its reconnect held) while the consent lands');
   ok((await followConsent(url3)) === 200, 'the redirect lands on the loopback');
   let landed = null;
   for (let i = 0; i < 80 && !landed; i++) { const a = (await accounts()).find((x) => x.id === B.id) || {}; if (a.authState === 'ok') landed = a; else await sleep(100); }
@@ -771,7 +771,7 @@ const p2 = await newPage();
   const verifying = (pg) => pg.evaljs(`(async () => { const t0 = performance.now(); for (let i = 0; i < 20; i++) { const c = ${card(B.id)}; const v = c && c.querySelector('[data-chan-verifying]'); if (c && !c.querySelector('.chan-sec-reauth') && v && v.textContent === 'Signed in — verifying with its first request…') return Math.round(performance.now() - t0); await new Promise((r) => setTimeout(r, 100)); } return -1; })()`);
   const g2 = await verifying(p2);
   ok(g2 >= 0, `R5: the dead row leaves WITH the landing — a second tab says «Signed in — verifying with its first request…» in ${g2} ms (≤ 2 s, no reload; r1 said nothing until the pass)`);
-  ok(await p1.evaljs(`!!document.querySelector('#chan-reauth-dialog')`), 'r2: …while the initiating tab (its socket down) has not heard it — its dialog is still open');
+  ok(verdictOf(await p1.evaljs(`!!document.querySelector('#chan-reauth-dialog')`)), 'r2: …while the initiating tab (its socket down) has not heard it — its dialog is still open');
   const back = Date.now();
   // the socket comes back, and its channels-updated frames are held for 6 s (no broadcast after the reconnect reaches this
   // tab — whatever the hub sends next): only the dialog's own re-read on the reconnect can end it
@@ -784,15 +784,15 @@ const p2 = await newPage();
   const st5 = (await accounts()).find((a) => a.id === B.id) || {};
   ok(g1 >= 0 && st5.authState === 'ok' && st5.authVerifying === true && !(st5.lastPass && st5.lastPass.ok === true), `R5: this tab too (its panel re-read on the reconnect) — «Signed in — verifying…» ${g1} ms after the dialog closed, the account still verifying (lastPass ${JSON.stringify(st5.lastPass || null)}), ${Date.now() - back} ms after the socket came back`);
   stubMode({ email: 'ben@example.test', refresh: 'ok', expiresIn: 3600 });   // the held pass goes on
-  ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && !c.querySelector('.mounts-errline') && !c.querySelector('.chan-sec-reauth') && !c.querySelector('[data-chan-verifying]') && c.querySelector('.chan-sec-health')); }`)), 'the card heals (lane channel-reauth-visible: the red line too — the good pass after the consent retracts it; r2: and the verifying word goes with the first pass that answered): the error line is gone, the health line is back');
+  ok(verdictOf(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && !c.querySelector('.mounts-errline') && !c.querySelector('.chan-sec-reauth') && !c.querySelector('[data-chan-verifying]') && c.querySelector('.chan-sec-health')); }`))), 'the card heals (lane channel-reauth-visible: the red line too — the good pass after the consent retracts it; r2: and the verifying word goes with the first pass that answered): the error line is gone, the health line is back');
 
   // (m) Edit on the custom account prefills the SECRET (D3)
   await p1.evaljs(`${card(B.id)}.querySelector('.chan-sec-head .mounts-icon-btn').click(); 1`);
-  ok(await p1.evaljs(WAIT_DLG('edit')), 'Edit on the custom account');
+  ok(verdictOf(await p1.evaljs(WAIT_DLG('edit'))), 'Edit on the custom account');
   const ec = await p1.evaljs(`(() => { const d = ${DLG('edit')}; const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none'); return { client: d.querySelector(':scope > select').value, values: inputs.map((i) => i.value), labels: ${visibleLabels('edit')}, held: (d.querySelector('.mounts-held .mounts-held-state') || {}).textContent || null, leak: d.innerHTML.includes(${JSON.stringify(CUSTOM_SECRET)}) }; })()`);
   // THE WRITE-ONLY LAW (the owner's word, 2026-11-13; July's D3 «prefilled with their real values» is replaced): the client ID
   // is shown (not a secret), the secret is HELD — «Saved» + «Replace…» — and its bytes are nowhere in the dialog
-  ok(ec.client === 'custom' && ec.values.includes(CUSTOM_ID) && !ec.values.includes(CUSTOM_SECRET) && ec.held === 'Saved' && !ec.leak && ec.labels.includes('Custom OAuth client ID') && ec.labels.includes('Custom OAuth client secret'), `D3: the custom client's ID is shown, its secret HELD («Saved» + «Replace…»), never its bytes (${JSON.stringify({ labels: ec.labels, held: ec.held, leak: ec.leak })})`);
+  ok(ec.client === 'custom' && gateOf(ec.values.includes(CUSTOM_ID)) && !ec.values.includes(CUSTOM_SECRET) && ec.held === 'Saved' && !ec.leak && gateOf(ec.labels.includes('Custom OAuth client ID')) && verdictOf(ec.labels.includes('Custom OAuth client secret')), `D3: the custom client's ID is shown, its secret HELD («Saved» + «Replace…»), never its bytes (${JSON.stringify({ labels: ec.labels, held: ec.held, leak: ec.leak })})`);
   // D3b — SAVE WITHOUT TOUCHING THE SECRET KEEPS IT (主开发 11:58Z, measured on the store): only the name changes; the account
   // keeps ITS OWN client (credentialKey custom, the same client ID) and the SAME stored secret (never emptied, never a placeholder)
   const storeOf = (id) => { const { secretBox } = require(path.join(wt, 'src/secret-box.js')); const box = secretBox(path.join(wt, 'data', '.channels-key'));
@@ -814,28 +814,28 @@ const p2 = await newPage();
   ok(asg.status === 200, 'FIXTURE: one conversation of the first account is assigned to an agent');
   const confirmNewest = `(async () => { for (let i = 0; i < 40; i++) { const b = [...document.querySelectorAll('.dialog-overlay .dialog-footer .btn-create')].pop(); if (b) { b.click(); return true; } await new Promise((r) => setTimeout(r, 50)); } return false; })()`;
   await p1.evaljs(`(async () => { ${card(A.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === 'Remove…').click(); return 1; })()`);
-  ok(await p1.evaljs(confirmNewest), 'Remove… asks first (the confirm dialog)');
-  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (document.querySelector('#chan-remove-refused')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'a referenced account is REFUSED — the "Cannot remove" dialog');
+  ok(verdictOf(await p1.evaljs(confirmNewest)), 'Remove… asks first (the confirm dialog)');
+  ok(verdictOf(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (document.querySelector('#chan-remove-refused')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`)), 'a referenced account is REFUSED — the "Cannot remove" dialog');
   const rf = await p1.evaljs(`(() => { const d = document.querySelector('#chan-remove-refused'); return { title: d.querySelector('.dialog-header h3').textContent, lead: d.querySelector('.chan-flow-refusal').textContent, refs: [...d.querySelectorAll('[data-ref-kind]')].map((e) => e.dataset.refKind + '|' + e.textContent), tail: [...d.querySelectorAll('p.dialog-hint')].map((p) => p.textContent).join(' ') }; })()`);
-  ok(rf.title === 'Cannot remove "Gmail · ada@example.test"' && /still referenced/.test(rf.lead), `titled by the account's name (${rf.title})`);
+  ok(rf.title === 'Cannot remove "Gmail · ada@example.test"' && verdictOf(/still referenced/.test(rf.lead)), `titled by the account's name (${rf.title})`);
   // R4 (2026-09-27): the compatibility write = one ACCESS row (+ its notification) — the reference is the access row
-  ok(rf.refs.length === 1 && rf.refs[0].startsWith('access|') && rf.refs[0].includes(conv.title) && rf.refs[0].includes('Procurement agent'), `each reference NAMED: the access row, its conversation and its principal (${JSON.stringify(rf.refs)})`);
-  ok(/^Disconnect only drops the token and keeps these/.test(rf.tail), 'and the Disconnect sentence');
+  ok(rf.refs.length === 1 && gateOf(rf.refs[0].startsWith('access|')) && gateOf(rf.refs[0].includes(conv.title)) && verdictOf(rf.refs[0].includes('Procurement agent')), `each reference NAMED: the access row, its conversation and its principal (${JSON.stringify(rf.refs)})`);
+  ok(verdictOf(/^Disconnect only drops the token and keeps these/.test(rf.tail)), 'and the Disconnect sentence');
   await p1.probe('the remove-refused dialog', '#chan-remove-refused .dialog');
-  ok((await accounts()).some((a) => a.id === A.id), 'the referenced account is still there');
+  ok(verdictOf((await accounts()).some((a) => a.id === A.id)), 'the referenced account is still there');
   await p1.evaljs(`document.querySelector('#chan-remove-refused .dialog-close').click(); 1`);
   await p1.evaljs(`(async () => { ${card(B.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === 'Remove…').click(); return 1; })()`);
-  ok(await p1.evaljs(confirmNewest), 'Remove… on the unreferenced copy, confirmed');
+  ok(verdictOf(await p1.evaljs(confirmNewest)), 'Remove… on the unreferenced copy, confirmed');
   let goneB = false;
   for (let i = 0; i < 60 && !goneB; i++) { goneB = !(await accounts()).some((a) => a.id === B.id); if (!goneB) await sleep(100); }
-  ok(goneB && await p1.evaljs(panelWait(`() => !${card(B.id)}`)), 'an unreferenced account is removed — its card goes');
-  ok(await p2.evaljs(panelWait(`() => !${card(B.id)}`)), 'and page 2 dropped it too');
+  ok(gateOf(goneB) && verdictOf(await p1.evaljs(panelWait(`() => !${card(B.id)}`))), 'an unreferenced account is removed — its card goes');
+  ok(verdictOf(await p2.evaljs(panelWait(`() => !${card(B.id)}`))), 'and page 2 dropped it too');
 
   // (r) FROM STORAGE (design §2.7): the storage mount's own client, borrowed without anyone seeing its secret
   console.log('  (r) from storage');
   const beforeR = (await accounts()).map((a) => a.id);
   await p1.evaljs(`document.querySelector('.rail-panel-channels [data-connect-account]').click(); 1`);
-  ok(await p1.evaljs(WAIT_DLG('connect')), '(r) Connect an account opens');
+  ok(verdictOf(await p1.evaljs(WAIT_DLG('connect'))), '(r) Connect an account opens');
   await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'gmail'; s.dispatchEvent(new Event('change')); return 1; })()`);
   const clientSel = `[...${DLG('connect')}.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom'))`;
   const pick = await p1.evaljs(`(() => { const c = ${clientSel}; const o = [...c.options].find((x) => x.textContent === ${JSON.stringify(MOUNT_OPTION)}); if (!o) return null; c.value = o.value; c.dispatchEvent(new Event('change')); return o.value; })()`);
@@ -845,7 +845,7 @@ const p2 = await newPage();
     const note = [...d.querySelectorAll(':scope > .mounts-note')].find((e) => e.style.display !== 'none');
     return { labels: ${visibleLabels('connect')}, note: note ? note.textContent : null, block: ([...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none') || { querySelector: () => ({}) }).querySelector('button').textContent };
   })()`);
-  ok(JSON.stringify(rs.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox', 'OAuth client type']) && /^The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page\./.test(rs.note || '') && rs.block === 'Connect Google',
+  ok(JSON.stringify(rs.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox', 'OAuth client type']) && gateOf(/^The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page\./.test(rs.note || '')) && rs.block === 'Connect Google',
     `(r) chosen: no custom id / secret inputs, the note says the server copies the secret, the Google authorization block stays (${JSON.stringify(rs)})`);
   stubMode({ email: MOUNT_EMAIL, refresh: 'ok', expiresIn: 3600 });
   await p1.evaljs(`(() => { const d = ${DLG('connect')}; d.querySelector('.mounts-drive-connect .mounts-oauth-link')?.remove(); [...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none').querySelector('button').click(); return 1; })()`);
@@ -854,17 +854,17 @@ const p2 = await newPage();
   ok(!(await p1.evaljs(`document.documentElement.outerHTML.includes(${JSON.stringify(MOUNT_CSEC)})`)), '(r) the mount\'s secret is nowhere in the page');
   ok((await followConsent(urlR)) === 200, '(r) the redirect lands on the loopback');
   const signedR = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const s = b && b.querySelector('.mounts-field-hint').textContent; if (/Connected/.test(s || '')) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/Connected/.test(signedR || ''), `(r) signed in under the storage client (${JSON.stringify(signedR)})`);
+  ok(verdictOf(/Connected/.test(signedR || '')), `(r) signed in under the storage client (${JSON.stringify(signedR)})`);
   await p1.evaljs(`${DLG('connect')}.querySelector('.dialog-actions .btn-create').click(); 1`);
   let C = null;
   for (let i = 0; i < 60 && !C; i++) { C = (await accounts()).find((a) => !beforeR.includes(a.id)) || null; if (!C) await sleep(100); }
-  ok(!!C && C.credentialKey === 'custom' && C.customClient && C.customClient.appId === MOUNT_CID && C.auth.tokenHeld && C.auth.user === MOUNT_EMAIL, `(r) Connect created a Custom-client account holding the MOUNT's client id, signed in (${JSON.stringify(C && { key: C.credentialKey, appId: C.customClient && C.customClient.appId, user: C.auth.user })})`);
-  ok(!!C && await p1.evaljs(panelWait(`() => { const c = ${card(C ? C.id : '')}; return !!(c && c.querySelector('.chan-cred-chip') && c.querySelector('.chan-cred-chip').textContent === 'Custom client'); }`)), '(r) its card wears the Custom client chip');
+  ok(!!C && C.credentialKey === 'custom' && gateOf(C.customClient) && C.customClient.appId === MOUNT_CID && gateOf(C.auth.tokenHeld) && C.auth.user === MOUNT_EMAIL, `(r) Connect created a Custom-client account holding the MOUNT's client id, signed in (${JSON.stringify(C && { key: C.credentialKey, appId: C.customClient && C.customClient.appId, user: C.auth.user })})`);
+  ok(!!C && verdictOf(await p1.evaljs(panelWait(`() => { const c = ${card(C ? C.id : '')}; return !!(c && c.querySelector('.chan-cred-chip') && c.querySelector('.chan-cred-chip').textContent === 'Custom client'); }`))), '(r) its card wears the Custom client chip');
   // its Re-authorize offers the same storage option
   await p1.evaljs(`(async () => { ${card(C.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => /^(Re-authorize|Connect)$/.test(e.textContent.trim())); if (it) it.click(); return !!it; })()`);
-  ok(await p1.evaljs(WAIT_DLG('reauth')), '(r) Re-authorize on the new account opens');
+  ok(verdictOf(await p1.evaljs(WAIT_DLG('reauth'))), '(r) Re-authorize on the new account opens');
   const reR = await p1.evaljs(`(() => { const s = ${DLG('reauth')}.querySelector(':scope > select'); return { value: s.value, options: [...s.options].map((o) => o.textContent) }; })()`);
-  ok(reR.value === 'custom' && reR.options.includes(MOUNT_OPTION) && reR.options[reR.options.length - 1] === 'Custom (own client id/secret)', `(r) the Re-authorize select offers the storage option too (the account's own custom client selected) (${JSON.stringify(reR)})`);
+  ok(reR.value === 'custom' && gateOf(reR.options.includes(MOUNT_OPTION)) && reR.options[reR.options.length - 1] === 'Custom (own client id/secret)', `(r) the Re-authorize select offers the storage option too (the account's own custom client selected) (${JSON.stringify(reR)})`);
   // lane lark-refresh-stall r3 (acceptance r2, the listener-lifecycle law): a dialog closed by ✕ WHILE its sign-in runs takes
   // its watcher's socket listeners with it (r2's reconnect listener read the accounts on every reconnect for each dismissed
   // dialog until the consent's own end; while a consent runs the ⋯ offers no second Re-authorize)
@@ -883,14 +883,14 @@ const p2 = await newPage();
   await sleep(1200);   // the POST answers; the start goes on after the close
   const lb2 = await p1.evaljs(wsCounts);
   const pagesB = await p1.evaljs(`(() => { const n = window.__pages; window.open = window.__o0; delete window.__o0; delete window.__heldPost; return n; })()`);
-  ok(prep.held && prep.status === 'Preparing authorization…' && !lb1.open && lb1.state === lc0.state && lb1.global === lc0.global && lb2.state === lc0.state && lb2.global === lc0.global && pagesB === 0,
+  ok(gateOf(prep.held) && prep.status === 'Preparing authorization…' && !lb1.open && lb1.state === lc0.state && lb1.global === lc0.global && lb2.state === lc0.state && lb2.global === lc0.global && pagesB === 0,
     `r4: a re-authorize closed by ✕ WHILE its POST waits («${prep.status}») leaves NONE of its watcher's listeners after the POST answers, and opens no consent page (state/global: before ${lc0.state}/${lc0.global}, at the ✕ ${lb1.state}/${lb1.global}, after the answer ${lb2.state}/${lb2.global}; consent pages ${pagesB}; c79d74b0: +1/+1 and a page)`);
   // …and the consent that start began has no page to finish on: cancelled — the ⋯ offers Re-authorize again at once
   let freed = false;
   for (let i = 0; i < 40 && !freed; i++) { const x = (await accounts()).find((y) => y.id === C.id) || {}; freed = !(x.flow && x.flow.running); if (!freed) await sleep(100); }
   await sleep(300);
   const again = freed && await p1.evaljs(`(async () => { ${card(C.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => /^(Re-authorize|Connect)$/.test(e.textContent.trim())); if (it) it.click(); return !!it; })()`);
-  ok(freed && again && await p1.evaljs(WAIT_DLG('reauth')), `r4: the consent the closed dialog started is cancelled — the account runs none (${freed}) and its ⋯ opens Re-authorize again (${again})`);
+  ok(gateOf(freed) && gateOf(again) && verdictOf(await p1.evaljs(WAIT_DLG('reauth'))), `r4: the consent the closed dialog started is cancelled — the account runs none (${freed}) and its ⋯ opens Re-authorize again (${again})`);
   // r3's order: ✕ while the consent RUNS (its link shown)
   const lc0b = await p1.evaljs(wsCounts);
   if (again) await p1.evaljs(`${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary').click(); 1`);
@@ -902,10 +902,10 @@ const p2 = await newPage();
   ok(!!lcUrl && lc0b.state === lc0.state && lc0b.global === lc0.global && lc1.state === lc0.state + 1 && lc1.global === lc0.global + 1 && !lc2.open && lc2.state === lc0.state && lc2.global === lc0.global,
     `r3: a re-authorize closed by ✕ while its sign-in runs leaves NONE of its watcher's listeners (state/global: before ${lc0.state}/${lc0.global}, running ${lc1.state}/${lc1.global}, closed ${lc2.state}/${lc2.global}; 9221575b kept both)`);
   const cfgR = await api('GET', '/api/channels/oauth/mount-clients?kind=gmail');
-  ok(cfgR.status === 200 && cfgR.json.clients.some((x) => x.mountId === MOUNT_ID) && !cfgR.text.includes(MOUNT_CSEC) && !cfgR.text.includes(MOUNT_CID), '(r) the list route answers the mount without its secret or its whole id');
+  ok(cfgR.status === 200 && gateOf(cfgR.json.clients.some((x) => x.mountId === MOUNT_ID)) && !cfgR.text.includes(MOUNT_CSEC) && !cfgR.text.includes(MOUNT_CID), '(r) the list route answers the mount without its secret or its whole id');
   ok(!(await api('GET', '/api/channels')).text.includes(MOUNT_CSEC) && !(await p2.evaljs(`document.body.innerHTML.includes(${JSON.stringify(MOUNT_CSEC)})`)), '(r) nor does the digest or the other client');
   await api('DELETE', `/api/channels/adapters/${encodeURIComponent(C.id)}`);
-  ok(await p1.evaljs(panelWait(`() => !${card(C.id)}`)), '(r) FIXTURE: the borrowed-client account is removed again (the later legs see the accounts they made)');
+  ok(verdictOf(await p1.evaljs(panelWait(`() => !${card(C.id)}`))), '(r) FIXTURE: the borrowed-client account is removed again (the later legs see the accounts they made)');
 
   // (p) 375 px: no horizontal overflow on the panel and the dialogs
   const over = async (label) => {
@@ -930,11 +930,11 @@ const p2 = await newPage();
   const FX_ = require(path.join(repo, 'scripts/fixtures/slack-vendor.cjs'));
   const SLACK_TOKEN = FX_.TOKEN, SETUP = FX_.CONFIG_TOKEN;
   await p1.evaljs(`localStorage.setItem('vibespace.lang', 'zh'); localStorage.removeItem('vs-paste-app:slack'); 1`);
-  ok(await p1.load(), 'the page reloads in 中文');
+  ok(verdictOf(await p1.load()), 'the page reloads in 中文');
   const openSlack = async () => {
-    ok(await p1.evaljs(panelWait(`() => !!document.querySelector('.rail-panel-channels [data-connect-account]')`)), 'the Channels panel draws its Connect entry (zh)');
+    ok(verdictOf(await p1.evaljs(panelWait(`() => !!document.querySelector('.rail-panel-channels [data-connect-account]')`))), 'the Channels panel draws its Connect entry (zh)');
     await p1.evaljs(`document.querySelector('.rail-panel-channels [data-connect-account]').click(); 1`);
-    ok(await p1.evaljs(WAIT_DLG('connect')), 'the connect dialog opens');
+    ok(verdictOf(await p1.evaljs(WAIT_DLG('connect'))), 'the connect dialog opens');
     await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'slack'; s.dispatchEvent(new Event('change')); return 1; })()`);
   };
   const STEPS = `[...${DLG('connect')}.querySelectorAll('.chan-paste-steps')].find((x) => x.style.display !== 'none')`;
@@ -956,16 +956,16 @@ const p2 = await newPage();
       boxes: [...w.querySelectorAll('input.chan-paste-input')].map((i) => ({ type: i.type, auto: i.autocomplete, ph: i.placeholder, shown: vis(i) })),
     };
   })()`);
-  const fit = (g, label) => ok(g.steps && g.greyed === 0 && !g.small.length && g.outside === 0 && !g.overflow, `${label}: no greyed control, every button ≥ 36 px, nothing outside the dialog (${JSON.stringify({ greyed: g.greyed, small: g.small, outside: g.outside, overflow: g.overflow })})`);
+  const fit = (g, label) => ok(gateOf(g.steps) && g.greyed === 0 && !g.small.length && g.outside === 0 && !g.overflow, `${label}: no greyed control, every button ≥ 36 px, nothing outside the dialog (${JSON.stringify({ greyed: g.greyed, small: g.small, outside: g.outside, overflow: g.overflow })})`);
   const press = (step, label) => p1.evaljs(`(() => { const b = [...${STEPS}.querySelectorAll('.chan-paste-step[data-step="${step}"] button, .chan-paste-fallback button')].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return false; b.click(); return true; })()`);
   const fill = (step, v) => p1.evaljs(`(() => { const i = ${STEPS}.querySelector('.chan-paste-step[data-step="${step}"] input.chan-paste-input'); i.value = ${JSON.stringify(v)}; return 1; })()`);
   const statusOf = (step) => p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { const t = (${STEPS}.querySelector('.chan-paste-step[data-step="${step}"] .chan-paste-status') || {}).textContent || ''; if (t && !/正在/.test(t)) return t; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
   await openSlack();
   const g0 = await look();
-  ok(g0.client && g0.clientValue === 'paste' && g0.notes === 0 && g0.steps === 'open,folded,folded' && g0.titles.join('|') === '拿一个一次性的设置令牌|装进工作区|粘贴令牌，连接', `design 018: no preset ⇒ the Slack app field opens at "Another way" — three numbered steps, ① open, ② ③ FOLDED, in 中文 (${JSON.stringify({ client: g0.clientValue, steps: g0.steps, titles: g0.titles })})`);
+  ok(gateOf(g0.client) && g0.clientValue === 'paste' && g0.notes === 0 && g0.steps === 'open,folded,folded' && g0.titles.join('|') === '拿一个一次性的设置令牌|装进工作区|粘贴令牌，连接', `design 018: no preset ⇒ the Slack app field opens at "Another way" — three numbered steps, ① open, ② ③ FOLDED, in 中文 (${JSON.stringify({ client: g0.clientValue, steps: g0.steps, titles: g0.titles })})`);
   const sw = await p1.evaljs(`(async () => { const d = ${DLG('connect')}; const s = [...d.querySelectorAll(':scope > select')].find((x) => [...x.options].some((o) => o.value === 'paste')); const vis = (e) => !!e && e.style.display !== 'none' && !e.hidden && e.getClientRects().length > 0; const set = async (v) => { s.value = v; s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })); await new Promise((r) => setTimeout(r, 200)); }; await set('custom'); const out = { steps: vis(${STEPS}), cid: [...d.querySelectorAll('input')].some((i) => vis(i) && /^[0-9]/.test(i.placeholder || '')), btn: [...d.querySelectorAll('.mounts-drive-connect button')].some(vis), opts: [...s.options].map((o) => o.value).join() }; await set('paste'); out.back = vis(${STEPS}); return out; })()`);
-  ok(sw && !sw.steps && sw.cid && sw.btn && sw.opts === 'custom,paste' && sw.back, `design 018: "Your workspace app" swaps the steps for Client ID / Secret and the Connect button; "Another way" brings the steps back (${JSON.stringify(sw)})`);
-  ok(/Slack Tooling Tokens Vendor/.test(g0.text) && /12 小时/.test(g0.text) && g0.boxes[0].type === 'password' && g0.boxes[0].auto === 'off' && g0.boxes[0].ph === 'xoxe.xoxp-…' && g0.boxes[0].shown, 'step ① says what Generate Token adds and that the token expires in 12 hours; its box is a SECRET field');
+  ok(gateOf(sw) && !sw.steps && gateOf(sw.cid) && gateOf(sw.btn) && sw.opts === 'custom,paste' && verdictOf(sw.back), `design 018: "Your workspace app" swaps the steps for Client ID / Secret and the Connect button; "Another way" brings the steps back (${JSON.stringify(sw)})`);
+  ok(gateOf(/Slack Tooling Tokens Vendor/.test(g0.text)) && gateOf(/12 小时/.test(g0.text)) && g0.boxes[0].type === 'password' && g0.boxes[0].auto === 'off' && g0.boxes[0].ph === 'xoxe.xoxp-…' && verdictOf(g0.boxes[0].shown), 'step ① says what Generate Token adds and that the token expires in 12 hours; its box is a SECRET field');
   fit(g0, 'at 375 px');
   await p1.probe('Slack connect dialog (zh) — step 1 at 375 px', '[id^="chan-account-"] .dialog');
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 860, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -974,29 +974,29 @@ const p2 = await newPage();
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 1, mobile: true });
   await sleep(150);
   const before = await p1.evaljs(`(window.__opened || []).length`);
-  ok(await press(1, '打开 Slack 的应用页面') && (await p1.evaljs(`(window.__opened || []).slice(-1)[0]`)) === 'https://api.slack.com/apps' && (await p1.evaljs(`(window.__opened || []).length`)) === before + 1, 'step ①\'s button opens Slack\'s app page (the stubbed window.open got it)');
+  ok(gateOf(await press(1, '打开 Slack 的应用页面')) && (await p1.evaljs(`(window.__opened || []).slice(-1)[0]`)) === 'https://api.slack.com/apps' && (await p1.evaljs(`(window.__opened || []).length`)) === before + 1, 'step ①\'s button opens Slack\'s app page (the stubbed window.open got it)');
   await fill(1, SLACK_TOKEN);
   await press(1, '创建应用');
   const wrongBox = await statusOf(1);
-  ok(/第 3 步/.test(wrongBox || '') && !(wrongBox || '').includes(SLACK_TOKEN.slice(5, 20)), `a User OAuth Token pasted into step ① is refused IN the dialog by name, the value never echoed (${wrongBox})`);
+  ok(gateOf(/第 3 步/.test(wrongBox || '')) && !(wrongBox || '').includes(SLACK_TOKEN.slice(5, 20)), `a User OAuth Token pasted into step ① is refused IN the dialog by name, the value never echoed (${wrongBox})`);
   await fill(1, SETUP);
   await press(1, '创建应用');
   let g1 = null;
   for (let i = 0; i < 60; i++) { g1 = await look(); if (g1.made) break; await sleep(100); }
-  ok(g1.made && /VibeSpace/.test(g1.made) && g1.steps === 'folded,open,open' && (await p1.evaljs(`${STEPS}.querySelector('.chan-paste-step[data-step="1"] input').value`)) === '', `the setup token makes the app over the stub: ① folds to "${g1 && g1.made}", ② and ③ open, the box emptied`);
+  ok(gateOf(g1.made) && gateOf(/VibeSpace/.test(g1.made)) && g1.steps === 'folded,open,open' && (await p1.evaljs(`${STEPS}.querySelector('.chan-paste-step[data-step="1"] input').value`)) === '', `the setup token makes the app over the stub: ① folds to "${g1 && g1.made}", ② and ③ open, the box emptied`);
   const kept = await p1.evaljs(`localStorage.getItem('vs-paste-app:slack')`);
-  ok(kept && JSON.parse(kept).appId === 'A0VIBEAPP1' && !kept.includes('xox'), `the browser remembers the made app — its id and name, never a token (${kept})`);
+  ok(gateOf(kept) && JSON.parse(kept).appId === 'A0VIBEAPP1' && !kept.includes('xox'), `the browser remembers the made app — its id and name, never a token (${kept})`);
   fit(g1, 'step ② at 375 px');
   await p1.probe('Slack connect dialog (zh) — steps 2 and 3', '[id^="chan-account-"] .dialog');
-  ok(await press(2, '打开安装页面') && (await p1.evaljs(`(window.__opened || []).slice(-1)[0]`)) === 'https://api.slack.com/apps/A0VIBEAPP1/oauth', 'step ② opens the made app\'s own install page by its id');
+  ok(gateOf(await press(2, '打开安装页面')) && (await p1.evaljs(`(window.__opened || []).slice(-1)[0]`)) === 'https://api.slack.com/apps/A0VIBEAPP1/oauth', 'step ② opens the made app\'s own install page by its id');
   await p1.evaljs(`document.querySelector('[id^="chan-account-"] .dialog-close').click(); 1`);
   await openSlack();
   const g2 = await look();
-  ok(g2.steps === 'folded,open,open' && /VibeSpace/.test(g2.made || ''), `a dialog closed after step ① and opened again RESUMES at ② with the same app (${g2.steps}, ${g2.made})`);
+  ok(g2.steps === 'folded,open,open' && verdictOf(/VibeSpace/.test(g2.made || '')), `a dialog closed after step ① and opened again RESUMES at ② with the same app (${g2.steps}, ${g2.made})`);
   await fill(3, SETUP);
   await p1.evaljs(`${DLG('connect')}.querySelector('.dialog-actions .btn-create').click(); 1`);
   const wrong3 = await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { const t = (${DLG('connect')}.querySelector('.cfg-err') || {}).textContent || ''; if (t) return t; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/第 1 步/.test(wrong3 || '') && !(wrong3 || '').includes(SETUP.slice(10, 30)), `the setup token pasted into step ③ is refused by Connect, by name (${wrong3})`);
+  ok(gateOf(/第 1 步/.test(wrong3 || '')) && !(wrong3 || '').includes(SETUP.slice(10, 30)), `the setup token pasted into step ③ is refused by Connect, by name (${wrong3})`);
   // the fallback fold: the link and "Copy app setup" carry the same JSON
   await p1.evaljs(`(() => { window.__copied = null; if (navigator.clipboard) navigator.clipboard.writeText = (t) => { window.__copied = String(t); return Promise.resolve(); }; ${STEPS}.querySelector('.chan-paste-fallback').open = true; return 1; })()`);
   await press(0, '打开创建链接');
@@ -1006,13 +1006,13 @@ const p2 = await newPage();
   let copied = null;
   for (let i = 0; i < 30 && !copied; i++) { copied = await p1.evaljs(`window.__copied`); if (!copied) await sleep(100); }
   const linkJson = link && link.includes('manifest_json=') ? JSON.parse(decodeURIComponent(link.split('manifest_json=')[1])) : null;
-  ok(linkJson && copied && JSON.stringify(JSON.parse(copied)) === JSON.stringify(linkJson) && !linkJson.oauth_config.scopes.bot, 'the fallback fold: "复制应用配置" copies exactly the JSON the create link carries (user scopes only)');
+  ok(gateOf(linkJson) && gateOf(copied) && JSON.stringify(JSON.parse(copied)) === JSON.stringify(linkJson) && !linkJson.oauth_config.scopes.bot, 'the fallback fold: "复制应用配置" copies exactly the JSON the create link carries (user scopes only)');
   await fill(3, SLACK_TOKEN);
   await p1.evaljs(`${DLG('connect')}.querySelector('.dialog-actions .btn-create').click(); 1`);
   const slackAcct = async () => (((await api('GET', '/api/channels')).json || {}).adapters || []).find((a) => a.kind === 'slack') || null;
   let acct = null;
   for (let i = 0; i < 60 && !acct; i++) { acct = await slackAcct(); if (!acct) await sleep(200); }
-  ok(acct && acct.auth && acct.auth.state === 'connected' && acct.retention === 'purge-on-remove' && JSON.stringify(acct.policyModes) === '["review"]', `step ③ + Connect created the Slack account (connected, purge-on-remove, review only) — ${JSON.stringify(acct && { id: acct.id, state: acct.auth && acct.auth.state })}`);
+  ok(gateOf(acct) && gateOf(acct.auth) && acct.auth.state === 'connected' && acct.retention === 'purge-on-remove' && JSON.stringify(acct.policyModes) === '["review"]', `step ③ + Connect created the Slack account (connected, purge-on-remove, review only) — ${JSON.stringify(acct && { id: acct.id, state: acct.auth && acct.auth.state })}`);
   // the forget is the DIALOG's, after the connect's reply lands (src/lib/channel-account-dialogs.js: post → steps.connected →
   // memory.forget): the account on the server is no proof it ran yet — read the PAGE's own state, within a bound (ckpt61
   // hosted cure: one read raced the handler on try 1); red only if the remembered app survives the bound
@@ -1020,10 +1020,10 @@ const p2 = await newPage();
   const keptAfter = await p1.evaljs(`window.__vsGoneWithin('vs-paste-app:slack', 60, 100)`);
   ok(keptAfter === null, `connected: the remembered app is forgotten — read on the page's own state within 6 s (${keptAfter === null ? 'gone' : 'still kept: ' + String(keptAfter).slice(0, 60)})`);
   const ctl = await p1.evaljs(`(async () => { localStorage.setItem('vs-paste-app:ckpt61-control', '{"appId":"A0CONTROL"}'); const v = await window.__vsGoneWithin('vs-paste-app:ckpt61-control', 5, 20); localStorage.removeItem('vs-paste-app:ckpt61-control'); return v; })()`);
-  ok(typeof ctl === 'string' && ctl.includes('A0CONTROL'), 'CONTROL: the same bounded read stays RED on a remembered app nothing forgets (a planted key, removed after)');
+  ok(typeof ctl === 'string' && verdictOf(ctl.includes('A0CONTROL')), 'CONTROL: the same bounded read stays RED on a remembered app nothing forgets (a planted key, removed after)');
   const cardText = await p1.evaljs(`(async () => { for (let i = 0; i < 100; i++) { const c = document.querySelector('.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]'); if (c && /免费版/.test(c.textContent)) return c.textContent; await new Promise((r) => setTimeout(r, 150)); } const c = document.querySelector('.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]'); return c ? c.textContent : null; })()`);
-  ok(/保存在这台服务器上/.test(cardText || '') && /Anthropic/.test(cardText || ''), 'the account card says where the copy lives and that agents\' reads go to the model provider (owner Q2), in 中文');
-  ok(/免费版/.test(cardText || ''), 'and the setup report\'s free-plan fact (is_limited) — Slack hides older messages');
+  ok(gateOf(/保存在这台服务器上/.test(cardText || '')) && verdictOf(/Anthropic/.test(cardText || '')), 'the account card says where the copy lives and that agents\' reads go to the model provider (owner Q2), in 中文');
+  ok(verdictOf(/免费版/.test(cardText || '')), 'and the setup report\'s free-plan fact (is_limited) — Slack hides older messages');
   await p1.probe('Slack account card (zh)', `.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]`);
   const page = JSON.stringify(await p1.evaljs(`document.body.innerText + document.body.innerHTML`));
   ok(!page.includes(SLACK_TOKEN.slice(5, 20)) && !page.includes(SETUP.slice(10, 30)), 'neither token is drawn or kept ANYWHERE on the page');
@@ -1033,9 +1033,9 @@ const p2 = await newPage();
   // nothing the page ever opened pointed at a vendor, and every intercepted call was the stub's
   const opened = await p1.evaljs(`window.__opened || []`);
   const targets = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json();
-  ok(targets.every((t) => !VENDOR_HOSTS.test(t.url || '')), `no chrome target ever loaded a vendor page (${targets.map((t) => t.url).join(', ').slice(0, 200)}) — the ${opened.length} consent URLs went to the stubbed window.open`);
+  ok(verdictOf(targets.every((t) => !VENDOR_HOSTS.test(t.url || ''))), `no chrome target ever loaded a vendor page (${targets.map((t) => t.url).join(', ').slice(0, 200)}) — the ${opened.length} consent URLs went to the stubbed window.open`);
   const calls = fs.readFileSync(path.join(stubDir, 'calls.ndjson'), 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  ok(calls.length > 0 && calls.some((c) => c.path === '/token') && calls.some((c) => c.host === 'gmail.googleapis.com'), `the vendor stub answered the token exchanges and the mailbox reads (${calls.length} calls)`);
+  ok(calls.length > 0 && gateOf(calls.some((c) => c.path === '/token')) && verdictOf(calls.some((c) => c.host === 'gmail.googleapis.com')), `the vendor stub answered the token exchanges and the mailbox reads (${calls.length} calls)`);
 }
 
 // ── ⑪ lane pod-oauth-callback (study 2 B2 — a pod's Connect dead-ended on the pod's own 127.0.0.1; the form said feishu
@@ -1046,12 +1046,12 @@ const p2 = await newPage();
   const POD = 'https://pod-road.example.test';
   srv.kill('SIGKILL'); await waitDown();
   srv = bootServer({ VIBESPACE_PUBLIC_URL: POD, VIBESPACE_GDRIVE_CLIENTS: JSON.stringify([...JSON.parse(PRESETS), { key: 'relayco', label: 'Relay Co', clientId: 'relayco.apps.googleusercontent.com', clientSecret: 'dummy-relayco-secret-0000', relayUrl: 'https://relay.company.example.test/relay/' }]), VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } }, { id: 'slack', key: 'ws', label: 'Company Slack app', values: { clientId: '1234567890.1234567890', clientSecret: 'dummy-slack-wall-secret-1' } }]) });   // lane gmail-connect-wall r2: + a Slack company app that neither relays nor lists (E1)
-  ok(await waitServer(), 'rebooted as a pod: an https address + a company Lark preset that names its brand (lark)');
+  ok(verdictOf(await waitServer()), 'rebooted as a pod: an https address + a company Lark preset that names its brand (lark)');
   // the page on a NAME (mapped to this server): the browser is NOT on the instance's loopback, as a person's is on a pod
-  ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 reloaded on the pod\'s name (not the loopback)');
+  ok(verdictOf(await p1.load(`http://pod-road.example.test:${PORT}/`)), 'page 1 reloaded on the pod\'s name (not the loopback)');
   const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
   const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('[id^="chan-account-"]')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
-  ok(await openOn('lark'), 'the chat\'s door (app.openChannelConnect) opens Connect an account on Lark');
+  ok(verdictOf(await openOn('lark')), 'the chat\'s door (app.openChannelConnect) opens Connect an account on Lark');
   const f = await p1.evaljs(`(() => { const d = ${DLGC}; const sel = (k) => d.querySelector('[data-field="' + k + '"]') || [...d.querySelectorAll('select')].find((s) => s.dataset.key === k); const type = d.querySelector('select'); const brand = [...d.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'feishu') && [...s.options].some((o) => o.value === 'lark') && s.style.display !== 'none'); const client = [...d.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'co')); return { type: type && type.value, brand: brand ? brand.value : null, client: client ? client.value : null }; })()`);
   ok(f.type === 'lark' && f.client === 'co' && f.brand === 'lark', `the form shows the company app AND its brand: lark, not feishu (${JSON.stringify(f)})`);
   // CONTROL: the same dialog over a digest whose preset names no brand (the pre-lane wire) says feishu — the check above can go red
@@ -1065,7 +1065,7 @@ const p2 = await newPage();
   // the pod's own route (redirect_uri_mismatch), grey the button for the flow's 10 minutes and fold every way on
   const GLOOP = require(path.join(wt, 'src/channels/gmail/manifest.js')).GMAIL_LOOPBACK_URL;
   const visibleLabelsC = `[...${DLGC}.querySelectorAll(':scope > label')].filter((l) => l.style.display !== 'none').map((l) => l.textContent)`;
-  ok(await openOn('gmail'), 'Connect an account on Gmail');
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail');
   const BLK = `[...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none')`;
   const stateOf = () => p1.evaljs(`(() => { const d = ${DLGC}; const b = ${BLK}; const vis = (e) => !!e && e.offsetParent !== null; const box = b && b.querySelector('.mounts-oauth-live');
     return { button: b && b.querySelector('button.mounts-btn-primary').textContent, disabled: !!(b && b.querySelector('button.mounts-btn-primary').disabled), status: b ? b.querySelector(':scope > .mounts-field-hint').textContent : '',
@@ -1075,7 +1075,7 @@ const p2 = await newPage();
       claim: !!b && [...b.querySelectorAll('*')].some((e) => e.childElementCount === 0 && /The client is a Desktop app client/.test(e.textContent)) }; })()`);   // the consent block (a person's own client's setup card, folded for Custom, keeps its sentence)
   // STATE A (law 1, 3, 4): BEFORE the press the dialog says what will happen — no promise of the own-address road, no type asked
   const sA = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; return { notes: [...d.querySelectorAll(':scope > .mounts-note')].filter((e) => vis(e) && /^(prn|pwl|pwr|pwn)\\d+\\.gmail$/.test(e.dataset.field)).map((e) => [e.dataset.field.replace(/\\d.*/, ''), e.textContent]), labels: ${visibleLabelsC} }; })()`);
-  ok(sA.notes.length === 1 && sA.notes[0][0] === 'pwl' && /^With this company app the sign-in’s last page will not load — it points to 127\.0\.0\.1\./.test(sA.notes[0][1]) && !sA.labels.includes('OAuth client type'),
+  ok(sA.notes.length === 1 && sA.notes[0][0] === 'pwl' && gateOf(/^With this company app the sign-in’s last page will not load — it points to 127\.0\.0\.1\./.test(sA.notes[0][1])) && !sA.labels.includes('OAuth client type'),
     `STATE A: before the press the company preset says its last page is pasted back (never «comes back to this VibeSpace’s own address»), and the client's kind is not asked (${JSON.stringify(sA)})`);
   await p1.probe('STATE A: the company preset\'s road, said before the press', `[id^="chan-account-"] .dialog-body > .mounts-note[data-field="pwl0.gmail"]`);   // the type-first dialog holds every type's notes: Gmail's own
   const pressMain = async () => {
@@ -1089,10 +1089,10 @@ const p2 = await newPage();
   const r1 = await pressMain();
   const sB = await stateOf();
   const f1 = await flowOf();
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(r1 || '') && r1 !== `${POD}/api/channels/oauth/cb/gmail`, `LAW 1: Connect Google from another computer under a silent company preset asks Google for 127.0.0.1 on a free port, NO path (the documented Desktop form) — never the pod's own address no company app lists (${r1})`);
-  ok(sB.disabled === false && sB.button === 'Open the Google sign-in again' && /^A Google sign-in page opened\. After you approve, Google’s last page will not load/.test(sB.status) && sB.pasteOpen && sB.cancel && sB.other === 'Google refused this address? Sign in again at the fixed address' && !sB.otherInFold,
+  ok(gateOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(r1 || '')) && r1 !== `${POD}/api/channels/oauth/cb/gmail`, `LAW 1: Connect Google from another computer under a silent company preset asks Google for 127.0.0.1 on a free port, NO path (the documented Desktop form) — never the pod's own address no company app lists (${r1})`);
+  ok(sB.disabled === false && sB.button === 'Open the Google sign-in again' && gateOf(/^A Google sign-in page opened\. After you approve, Google’s last page will not load/.test(sB.status)) && gateOf(sB.pasteOpen) && gateOf(sB.cancel) && sB.other === 'Google refused this address? Sign in again at the fixed address' && !sB.otherInFold,
     `LAW 2, STATE B: the button is never greyed (it opens the sign-in again), the status names the road while the person is at Google, the paste box is OPEN, Cancel and the other road are visible buttons — not inside a fold (${JSON.stringify(sB).slice(0, 500)})`);
-  ok(/Desktop app client takes 127\.0\.0\.1 on any port; a Web application client takes only the addresses it lists/.test(sB.otherWhy || '') && !sB.claim && sB.admin && sB.admin.open === false && /^For your admin:/.test(sB.admin.summary) && sB.admin.notes.some((n) => /^What this company preset does not say/.test(n)) && sB.admin.notes.some((n) => /"clientType": "web"/.test(n)) && sB.admin.notes.some((n) => /VIBESPACE_GDRIVE_CLIENTS/.test(n)),
+  ok(gateOf(/Desktop app client takes 127\.0\.0\.1 on any port; a Web application client takes only the addresses it lists/.test(sB.otherWhy || '')) && !sB.claim && gateOf(sB.admin) && sB.admin.open === false && gateOf(/^For your admin:/.test(sB.admin.summary)) && gateOf(sB.admin.notes.some((n) => /^What this company preset does not say/.test(n))) && gateOf(sB.admin.notes.some((n) => /"clientType": "web"/.test(n))) && verdictOf(sB.admin.notes.some((n) => /VIBESPACE_GDRIVE_CLIENTS/.test(n))),
     `LAW 3 + 5: the other road's line names BOTH kinds of client and claims neither; no «it is a Desktop app client» sentence anywhere; the admin's part is a fold titled for the admin — what the preset does not say and where it is stated (${JSON.stringify({ why: sB.otherWhy, admin: sB.admin }).slice(0, 600)})`);
   await p1.probe('STATE B: the live block (road line, open paste box, Cancel, the other road)', `[id^="chan-account-"] .mounts-oauth-live`);
   // the other road: the fixed address (a Web client lists that one); the earlier sign-in is replaced, said once
@@ -1102,12 +1102,12 @@ const p2 = await newPage();
   await sleep(150);
   const sD = await stateOf();
   const f1after = (await api('GET', `/api/channels/oauth/status?flowId=${f1.flowId}`)).json || {};
-  ok(o2 && new URL(o2).searchParams.get('redirect_uri') === GLOOP && /^The earlier sign-in was ended — this is a new one\./.test(sD.status) && sD.other === 'Google refused this address? Sign in again at 127.0.0.1 on any port' && f1after.running === false,
+  ok(gateOf(o2) && new URL(o2).searchParams.get('redirect_uri') === GLOOP && gateOf(/^The earlier sign-in was ended — this is a new one\./.test(sD.status)) && sD.other === 'Google refused this address? Sign in again at 127.0.0.1 on any port' && f1after.running === false,
     `the other road: the FIXED address ${GLOOP}; the earlier sign-in ended on the hub (never left running beside it) and said once; the way back offered (${JSON.stringify({ r: o2 && new URL(o2).searchParams.get('redirect_uri'), status: sD.status.slice(0, 80), other: sD.other, earlier: f1after.running })})`);
   // the main button again: a fresh sign-in, the earlier one replaced
   const r3 = await pressMain();
   const sE = await stateOf();
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(r3 || '') && /^The earlier sign-in was ended — this is a new one\./.test(sE.status), `«Open the Google sign-in again»: a fresh sign-in, the earlier one ended and said once (${r3})`);
+  ok(gateOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(r3 || '')) && verdictOf(/^The earlier sign-in was ended — this is a new one\./.test(sE.status)), `«Open the Google sign-in again»: a fresh sign-in, the earlier one ended and said once (${r3})`);
   // Cancel: one press
   await p1.evaljs(`(() => { ${BLK}.querySelector('.mounts-oauth-cancel').click(); return 1; })()`);
   await sleep(400);
@@ -1124,14 +1124,14 @@ const p2 = await newPage();
   await sleep(2600);
   const seenB = await p1.evaljs(`(() => { window.__mo.disconnect(); window.__slowStart = false; return window.__seen; })()`);
   const sB2 = await stateOf();
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(rB || '') && seenB.length >= 1 && /Preparing authorization/.test(seenB[0][0]) && seenB.every(([t, dis]) => dis || /The earlier sign-in was ended/.test(t)) && !seenB.some(([t]) => /superseded|not running|was cancelled|press the button to start again/i.test(t)) && sB2.pasteOpen && /^The earlier sign-in was ended — this is a new one\./.test(sB2.status),
+  ok(gateOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(rB || '')) && seenB.length >= 1 && gateOf(/Preparing authorization/.test(seenB[0][0])) && gateOf(seenB.every(([t, dis]) => dis || /The earlier sign-in was ended/.test(t))) && !seenB.some(([t]) => /superseded|not running|was cancelled|press the button to start again/i.test(t)) && gateOf(sB2.pasteOpen) && verdictOf(/^The earlier sign-in was ended — this is a new one\./.test(sB2.status)),
     `r2 LAW B: a press whose answer takes 2 s — the earlier watch ended at the press: no answer of the replaced sign-in reached the screen, the button stayed busy, then the new block (${JSON.stringify(seenB).slice(0, 300)})`);
   // LAW C: a press that fails says what is true — the sign-in still running (shown again), or none and how to start
   await p1.evaljs(`window.__failStart = true; 1`);
   await p1.evaljs(`(() => { ${BLK}.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
   await sleep(800);
   const sC1 = await stateOf();
-  ok(/^This press did not start a sign-in: .*The Google sign-in you started earlier is still waiting\./.test(sC1.status) && sC1.pasteOpen && sC1.cancel && sC1.button === 'Open the Google sign-in again' && (await flowOf()).running === true,
+  ok(gateOf(/^This press did not start a sign-in: .*The Google sign-in you started earlier is still waiting\./.test(sC1.status)) && gateOf(sC1.pasteOpen) && gateOf(sC1.cancel) && sC1.button === 'Open the Google sign-in again' && (await flowOf()).running === true,
     `r2 LAW C: a press that FAILED with a sign-in still running — said, and that sign-in is shown again with its box, Cancel and its watch (${JSON.stringify(sC1).slice(0, 300)})`);
   await p1.evaljs(`(() => { window.__failStart = false; ${BLK}.querySelector('.mounts-oauth-cancel').click(); return 1; })()`);
   await sleep(400);
@@ -1140,7 +1140,7 @@ const p2 = await newPage();
   await sleep(800);
   const sC2 = await stateOf();
   await p1.evaljs(`window.__failStart = false; 1`);
-  ok(/^This press did not start a sign-in: .* No sign-in is running — press the button to start again\.$/.test(sC2.status) && sC2.button === 'Connect Google' && !sC2.pasteOpen && sC2.disabled === false,
+  ok(gateOf(/^This press did not start a sign-in: .* No sign-in is running — press the button to start again\.$/.test(sC2.status)) && sC2.button === 'Connect Google' && !sC2.pasteOpen && sC2.disabled === false,
     `r2 LAW C: a press that FAILED with nothing running — said, and how to start (${JSON.stringify(sC2).slice(0, 300)})`);
   // LAW E2: a long address never runs past the dialog's edge — an unbroken 300-character line in the live block wraps
   await pressMain();
@@ -1174,20 +1174,20 @@ const p2 = await newPage();
     return { coarse: matchMedia('(pointer: coarse)').matches, settle, close: box(dlg.querySelector('.dialog-close')), targets, texts }; })()`);
   console.log('    B-081b, the facts judged: ' + JSON.stringify(whole));
   const smallT = (whole.targets || []).filter((x) => x.h < 44), smallF = [...(whole.texts || []), ...(whole.targets || [])].filter((x) => x.f < 16);   // a box's own text too (a select's, an input's value)
-  ok(whole.coarse && whole.settle && whole.settle.stable && whole.close.h >= 44 && whole.close.w >= 44 && whole.targets.length >= 4 && whole.texts.length >= 4 && !smallT.length && !smallF.length,
+  ok(gateOf(whole.coarse) && gateOf(whole.settle) && gateOf(whole.settle.stable) && whole.close.h >= 44 && whole.close.w >= 44 && whole.targets.length >= 4 && whole.texts.length >= 4 && !smallT.length && !smallF.length,
     `B-081b THE PHONE, the whole dialog: on a finger device the account dialog's ✕ (${whole.close && whole.close.w}×${whole.close && whole.close.h}), its ${(whole.targets || []).length} boxes / lists / buttons / folds are ≥ 44 px with 16 px text of their own, and its ${(whole.texts || []).length} texts ≥ 16 px (measured once the sizes read the same twice: ${whole.settle && whole.settle.stable ? `after ${whole.settle.ms} ms` : 'they did NOT settle in 2 s'}; ${whole.settle ? whole.settle.own.length + ' animation(s) of the measured elements and ' + whole.settle.others.length + ' other(s) printed' : '?'})${smallT.length || smallF.length ? ' — UNDER: ' + JSON.stringify({ smallT, smallF }) : ''}`);
   // RED CONTROL: the stylesheet's rule lifted (through the page's own CSSOM, put back) — the ✕ falls under 44 px; each size read once
   // the ✕'s size reads the same twice (the same bounded wait)
   const lifted = await p1.evaljs(`(async () => { for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch { continue; } for (let i = 0; i < rules.length; i++) { const r = rules[i]; if (r.type === 4 && r.cssText.includes('#chan-account-connect') && r.cssText.includes('.dialog-close')) { const txt = r.cssText; const dlg = ${DLGC}.closest('.dialog'), x = dlg.querySelector('.dialog-close'); sh.deleteRule(i); const s1 = await (${SETTLE})(dlg, [x]); const h = Math.round(x.getBoundingClientRect().height); sh.insertRule(txt, i); const s2 = await (${SETTLE})(dlg, [x]); const back = Math.round(x.getBoundingClientRect().height); return { found: true, h, back, settled: s1.stable && s2.stable, waits: [s1.ms, s2.ms], own: [s1.own, s2.own] }; } } } return { found: false }; })()`);
   console.log('    B-081b control, the facts judged: ' + JSON.stringify(lifted));
-  ok(lifted.found && lifted.settled && lifted.h < 44 && lifted.back >= 44, `CONTROL B-081b: the rule lifted, the ✕ is ${lifted.h} px (under 44 — the leg reads the rule), put back ${lifted.back} px`);
+  ok(gateOf(lifted.found) && gateOf(lifted.settled) && lifted.h < 44 && lifted.back >= 44, `CONTROL B-081b: the rule lifted, the ✕ is ${lifted.h} px (under 44 — the leg reads the rule), put back ${lifted.back} px`);
   await p1.cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
-  ok(touch.coarse && ['main', 'other', 'cancel', 'box'].every((k) => touch[k] && touch[k].h >= 44 && touch[k].f >= 16), `THE PHONE: on a finger device the live block's button, the other road, Cancel and the paste box are ≥ 44 px tall with 16 px text (${JSON.stringify(touch)})`);
+  ok(gateOf(touch.coarse) && verdictOf(['main', 'other', 'cancel', 'box'].every((k) => touch[k] && touch[k].h >= 44 && touch[k].f >= 16)), `THE PHONE: on a finger device the live block's button, the other road, Cancel and the paste box are ≥ 44 px tall with 16 px text (${JSON.stringify(touch)})`);
   // LAW E1: Slack, a company app that neither relays nor lists this address — one truth: no «press Connect, then Allow»
-  ok(await openOn('slack'), 'Connect an account on Slack');
+  ok(verdictOf(await openOn('slack')), 'Connect an account on Slack');
   const sl = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => !!e && e.style.display !== 'none'; return { pwn: [...d.querySelectorAll(':scope > .mounts-note')].filter((e) => vis(e) && /^pwn\\d+\\.slack$/.test(e.dataset.field)).map((e) => e.textContent), wp: vis(d.querySelector(':scope > [data-field="wpnote.slack"]')) }; })()`);
-  ok(sl.pwn.length === 1 && /cannot come back here/.test(sl.pwn[0]) && sl.wp === false, `r2 LAW E1: a Slack company app with no way back says so and NOT «press Connect, then Allow — nothing to copy» (${JSON.stringify(sl)})`);
-  ok(await openOn('gmail'), 'Connect an account on Gmail again');
+  ok(sl.pwn.length === 1 && gateOf(/cannot come back here/.test(sl.pwn[0])) && sl.wp === false, `r2 LAW E1: a Slack company app with no way back says so and NOT «press Connect, then Allow — nothing to copy» (${JSON.stringify(sl)})`);
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail again');
   // ── r3 (the acceptance of b849e86dc) ──
   // ITEM 2: Cancel while a press is IN FLIGHT ends what the hub runs — the shown sign-in AND the one the press is starting
   await pressMain();
@@ -1198,7 +1198,7 @@ const p2 = await newPage();
   await sleep(3200);
   await p1.evaljs(`window.__slowStart = false; 1`);
   const s2c = await stateOf(), f2c = await flowOf();
-  ok(f2c.running === false && /^The sign-in was cancelled\./.test(s2c.status) && !s2c.pasteOpen, `r3 ITEM 2: Cancel pressed while a press is in flight (its answer held 2 s) — the hub runs NO sign-in of this kind afterwards, and the dialog says «cancelled» only then (${JSON.stringify({ running: f2c.running, status: s2c.status.slice(0, 80) })})`);
+  ok(f2c.running === false && gateOf(/^The sign-in was cancelled\./.test(s2c.status)) && !s2c.pasteOpen, `r3 ITEM 2: Cancel pressed while a press is in flight (its answer held 2 s) — the hub runs NO sign-in of this kind afterwards, and the dialog says «cancelled» only then (${JSON.stringify({ running: f2c.running, status: s2c.status.slice(0, 80) })})`);
   // ITEM 3: the LATE answer of the old sign-in — a status request of sign-in A sent AFTER the press that replaced it (A is then
   // superseded on the hub) and answered after the new block is drawn changes nothing on screen
   await pressMain();
@@ -1209,7 +1209,7 @@ const p2 = await newPage();
   await sleep(3200);   // A's request goes out (A is superseded now) and its answer lands after B is drawn
   const s3 = await stateOf();
   await p1.evaljs(`window.__lateId = null; 1`);
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(rB3 || '') && s3.pasteOpen && s3.cancel && /^The earlier sign-in was ended — this is a new one\./.test(s3.status) && s3.button === 'Open the Google sign-in again', `r3 ITEM 3: the replaced sign-in's late answer (its «superseded») landed after the new block was drawn and changed nothing — the new block keeps its box, Cancel and its line (${JSON.stringify(s3).slice(0, 300)})`);
+  ok(gateOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(rB3 || '')) && gateOf(s3.pasteOpen) && gateOf(s3.cancel) && gateOf(/^The earlier sign-in was ended — this is a new one\./.test(s3.status)) && s3.button === 'Open the Google sign-in again', `r3 ITEM 3: the replaced sign-in's late answer (its «superseded») landed after the new block was drawn and changed nothing — the new block keeps its box, Cancel and its line (${JSON.stringify(s3).slice(0, 300)})`);
   // ITEM 6: E2 as the law said it — the road line with a 241-character host and an unbroken 300-character line, at 1280 px and 390 px
   const wrapAt = async (width) => {
     await p1.cdp('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -1225,25 +1225,25 @@ const p2 = await newPage();
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 1, mobile: true });
   await sleep(300);
   const fits = (m) => m.bodyOver <= 1 && m.dlgOver <= 1 && m.statusW <= m.bodyW + 1;
-  ok(w1280.host241.hostLen === 241 && w1280.unbroken300.len === 300 && [w1280.host241, w1280.unbroken300, w390.host241, w390.unbroken300].every(fits), `r3 ITEM 6 (E2): the road line with a 241-character host and an unbroken 300-character line wrap inside the dialog at 1280 px AND 390 px — no horizontal scroll (${JSON.stringify({ w1280, w390 })})`);
+  ok(w1280.host241.hostLen === 241 && w1280.unbroken300.len === 300 && verdictOf([w1280.host241, w1280.unbroken300, w390.host241, w390.unbroken300].every(fits)), `r3 ITEM 6 (E2): the road line with a 241-character host and an unbroken 300-character line wrap inside the dialog at 1280 px AND 390 px — no horizontal scroll (${JSON.stringify({ w1280, w390 })})`);
   // ITEM 1b CONTROL: a person's OWN client on an https road DOES draw the «it is a Desktop app client» claim — the pin in ⑫ can see it
-  ok(await openOn('gmail'), 'Connect an account on Gmail (a person\'s own client)');
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail (a person\'s own client)');
   await p1.evaljs(`(() => { const d = ${DLGC}; const c = [...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom')); c.value = 'custom'; c.dispatchEvent(new Event('change')); const vis = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none' && !i.readOnly); const id = vis.find((i) => i.placeholder && /googleusercontent/.test(i.placeholder)); const sec = vis.find((i) => i.type === 'password'); id.value = ${JSON.stringify(CUSTOM_ID)}; sec.value = ${JSON.stringify(CUSTOM_SECRET)}; return 1; })()`);
   const rOwn = await pressMain();
   const ownNotes = await p1.evaljs(`[...${BLK}.querySelectorAll('.mounts-oauth-admin-note')].map((n) => n.textContent)`);
-  ok(rOwn === `${POD}/api/channels/oauth/cb/gmail` && ownNotes.some((n) => /The client is a Desktop app client, which cannot take one/.test(n)), `CONTROL (r3 PIN, law 3): a person's OWN client on the https route draws the claim sentence — the preset leg in ⑫ would see it (${JSON.stringify(ownNotes).slice(0, 300)})`);
+  ok(rOwn === `${POD}/api/channels/oauth/cb/gmail` && verdictOf(ownNotes.some((n) => /The client is a Desktop app client, which cannot take one/.test(n))), `CONTROL (r3 PIN, law 3): a person's OWN client on the https route draws the claim sentence — the preset leg in ⑫ would see it (${JSON.stringify(ownNotes).slice(0, 300)})`);
   // ITEM 7: THE PAGE'S ORIGIN — a page under ANOTHER name than the instance's: a preset with its own relay page cannot come back to
   // it (its relay sends only the instance's own host back), so state A says the paste road; computed from the instance's origin
   // it would say nothing (the relay) — the cell where the two differ
-  ok(await p1.load(`http://other-name.example.test:${PORT}/`), 'page 1 under ANOTHER name (other-name.example.test)');
-  ok(await openOn('gmail'), 'Connect an account on Gmail (under the other name)');
+  ok(verdictOf(await p1.load(`http://other-name.example.test:${PORT}/`)), 'page 1 under ANOTHER name (other-name.example.test)');
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail (under the other name)');
   await p1.evaljs(`(() => { const d = ${DLGC}; const c = [...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'relayco')); c.value = 'relayco'; c.dispatchEvent(new Event('change')); return 1; })()`);
   await sleep(200);
   const s7 = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; return [...d.querySelectorAll(':scope > .mounts-note')].filter((e) => vis(e) && /^(pwl|pwr|pwn)\\d+\\.gmail$/.test(e.dataset.field)).map((e) => e.dataset.field.replace(/\\d.*/, '')); })()`);
   const r7 = await pressMain();
-  ok(JSON.stringify(s7) === JSON.stringify(['pwl']) && /^http:\/\/127\.0\.0\.1:\d+$/.test(r7 || ''), `r3 ITEM 7: under another name, a preset whose own relay page cannot bring this page back — state A says the PASTE road (from the page's origin) and the start takes it (${JSON.stringify({ stateA: s7, redirect: r7 })})`);
-  ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 back on the pod\'s name');
-  ok(await openOn('gmail'), 'Connect an account on Gmail again');
+  ok(JSON.stringify(s7) === JSON.stringify(['pwl']) && verdictOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(r7 || '')), `r3 ITEM 7: under another name, a preset whose own relay page cannot bring this page back — state A says the PASTE road (from the page's origin) and the start takes it (${JSON.stringify({ stateA: s7, redirect: r7 })})`);
+  ok(verdictOf(await p1.load(`http://pod-road.example.test:${PORT}/`)), 'page 1 back on the pod\'s name');
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail again');
   // R5: closing the dialog ends a sign-in that cannot finish without it (the paste box is here) — said once; a reopen is clean
   await pressMain();
   const fG = await flowOf();
@@ -1251,18 +1251,18 @@ const p2 = await newPage();
   const toast = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const t = [...document.querySelectorAll('.global-toast-body')].map((x) => x.textContent).find((x) => /needed this dialog/.test(x)); if (t) return t; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
   const fH = (await api('GET', `/api/channels/oauth/status?flowId=${fG.flowId}`)).json || {};
   ok(fG.running === true && fH.running === false && toast === 'The Google sign-in was ended: it needed this dialog to finish.', `R5: closing the dialog ENDS a sign-in that needs it (a loopback from another computer) and says so once (${JSON.stringify({ before: fG.running, after: fH.running, toast })})`);
-  ok(await openOn('gmail'), 'reopened');
+  ok(verdictOf(await openOn('gmail')), 'reopened');
   const sI = await stateOf();
   ok(sI.button === 'Connect Google' && sI.status === '' && !sI.pasteOpen && !sI.cancel, `…and a reopened dialog is clean — nothing stranded (${JSON.stringify(sI).slice(0, 200)})`);
   await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
   // CONTROL: the same page on the instance's own loopback IS a browser on this machine — its Connect keeps the loopback
   // (the local hub's road, as before) — so the route check above is about where the browser is
-  ok(await p1.load(), 'page 1 back on 127.0.0.1');
+  ok(verdictOf(await p1.load()), 'page 1 back on 127.0.0.1');
   await openOn('gmail');
   const before3 = await p1.evaljs(`(window.__opened || []).length`);
   await p1.evaljs(`(() => { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); b.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
   const opened3 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before3}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(opened3 ? new URL(opened3).searchParams.get('redirect_uri') : ''), `CONTROL: a browser on the instance's own loopback keeps the loopback road (a local hub) — the route above is the pod's (${opened3 && new URL(opened3).searchParams.get('redirect_uri')})`);
+  ok(verdictOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(opened3 ? new URL(opened3).searchParams.get('redirect_uri') : '')), `CONTROL: a browser on the instance's own loopback keeps the loopback road (a local hub) — the route above is the pod's (${opened3 && new URL(opened3).searchParams.get('redirect_uri')})`);
   await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
 }
 
@@ -1274,11 +1274,11 @@ const p2 = await newPage();
   srv.kill('SIGKILL'); await waitDown();
   fs.writeFileSync(SETTINGS_FILE, '{}');
   srv = bootServer({ VIBESPACE_OAUTH_RELAY_URL: ADMIN });
-  ok(await waitServer(), 'rebooted with the relay pages at their defaults and a fleet relay page (VIBESPACE_OAUTH_RELAY_URL)');
-  ok(await p1.load(), 'page 1 on 127.0.0.1 — a private address, which every relay page sends back');
+  ok(verdictOf(await waitServer()), 'rebooted with the relay pages at their defaults and a fleet relay page (VIBESPACE_OAUTH_RELAY_URL)');
+  ok(verdictOf(await p1.load()), 'page 1 on 127.0.0.1 — a private address, which every relay page sends back');
   const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
   const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('[id^="chan-account-"]')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
-  ok(await openOn('lark'), 'Connect an account on Lark (no company app here: Custom)');
+  ok(verdictOf(await openOn('lark')), 'Connect an account on Lark (no company app here: Custom)');
   const lk = await p1.evaljs(`(() => {
     const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none';
     const rows = [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter(vis);
@@ -1288,21 +1288,21 @@ const p2 = await newPage();
     { let n = last; while (n && !(n.matches && n.matches('ul.integ-prereq'))) n = n.nextElementSibling; if (n) hints.push(...[...n.querySelectorAll('li')].map((li) => li.textContent)); }   // the checklist (lane ui-controls-and-bugs)
     return { rows: rows.map((r) => ({ label: labelOf(r), value: r.querySelector('input').value, field: r.dataset.field })), hints };
   })()`);
-  ok(JSON.stringify(lk.rows.map((r) => r.value)) === JSON.stringify([ADMIN, PUBLIC]) && /^Redirect URL for this fleet’s VibeSpaces/.test(lk.rows[0].label || '') && lk.rows[1].label === 'A public relay page you may register if this VibeSpace has no https address' && !lk.rows.some((r) => /127\.0\.0\.1/.test(r.value)),
+  ok(JSON.stringify(lk.rows.map((r) => r.value)) === JSON.stringify([ADMIN, PUBLIC]) && gateOf(/^Redirect URL for this fleet’s VibeSpaces/.test(lk.rows[0].label || '')) && lk.rows[1].label === 'A public relay page you may register if this VibeSpace has no https address' && !lk.rows.some((r) => /127\.0\.0\.1/.test(r.value)),
     `a custom Lark app's setup lists the relay pages (the fleet's; the public one — addendum 1: «you may register if this VibeSpace has no https address») — no per-instance callback row (${JSON.stringify(lk.rows)})`);
   ok(lk.hints[0] === R.rowById('lark').setup.callbackNote && lk.hints.length === 4, `…with the console note and the prerequisites under the last (${JSON.stringify(lk.hints).slice(0, 200)})`);
   await p1.probe('a custom Lark app\'s relay rows', `[id^="chan-account-"] .dialog-body > .mounts-oauth-link[data-field="rp1.lark"]`);
   // a page NO relay sends back (a public http name, no https address here): the setup shows the road it really takes
-  ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 reloaded on a public http name (no relay page sends it back)');
-  ok(await openOn('lark'), 'Connect an account on Lark again');
+  ok(verdictOf(await p1.load(`http://pod-road.example.test:${PORT}/`)), 'page 1 reloaded on a public http name (no relay page sends it back)');
+  ok(verdictOf(await openOn('lark')), 'Connect an account on Lark again');
   const lk2 = await p1.evaljs(`(() => { const d = ${DLGC}; return [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter((e) => e.style.display !== 'none').map((r) => r.querySelector('input').value); })()`);
   ok(JSON.stringify(lk2) === JSON.stringify([R.rowById('lark').setup.callbackUrl]), `…its custom setup shows the road its sign-in takes (the loopback callback), not relay rows it would never ride (${JSON.stringify(lk2)})`);
-  ok(await p1.load(), 'page 1 back on 127.0.0.1');
+  ok(verdictOf(await p1.load()), 'page 1 back on 127.0.0.1');
   // Gmail under the drive preset: the relay road
-  ok(await openOn('gmail'), 'Connect an account on Gmail');
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail');
   // addendum 1: the company preset (no page of its own) shows ONLY its relay page — the fleet's — never the public one
   const pre = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; const labelOf = (row) => { let l = row.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return l ? l.textContent : null; }; return [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter(vis).map((r) => ({ field: r.dataset.field, label: labelOf(r), value: r.querySelector('input').value })); })()`);
-  ok(pre.length === 1 && /^prp\d+\.gmail$/.test(pre[0].field) && pre[0].value === ADMIN && pre[0].label === 'This company app’s redirect URL — its relay page, registered once by your admin' && !pre.some((r) => r.value === PUBLIC),
+  ok(pre.length === 1 && gateOf(/^prp\d+\.gmail$/.test(pre[0].field)) && pre[0].value === ADMIN && pre[0].label === 'This company app’s redirect URL — its relay page, registered once by your admin' && !pre.some((r) => r.value === PUBLIC),
     `addendum 1: a company preset's setup shows ONLY its own relay page (the fleet's here) — the public page never (${JSON.stringify(pre)})`);
   await p1.probe('Connect Google under the company preset: its relay page only', `[id^="chan-account-"] .dialog-body > .mounts-oauth-link[data-field^="prp"]`);
   const n0 = (((await api('GET', '/api/channels')).json || {}).adapters || []).filter((a) => a.kind === 'gmail').length;
@@ -1316,11 +1316,11 @@ const p2 = await newPage();
   const BLK12 = `[...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none')`;
   const live = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { if (${BLK12}.querySelector('.mounts-oauth-live')) break; await new Promise((r) => setTimeout(r, 100)); } const b = ${BLK12}; const fold = b.querySelector('details.mounts-oauth-paste'); const af = b.querySelector('details.mounts-oauth-admin-fold'); if (af) af.open = true; const admin = af && af.querySelector('.mounts-oauth-admin');
     return { status: b.querySelector(':scope > .mounts-field-hint').textContent, button: b.querySelector('button.mounts-btn-primary').textContent, disabled: b.querySelector('button.mounts-btn-primary').disabled, summary: fold && fold.querySelector('summary').textContent, foldOpen: !!(fold && fold.open), admin: admin && admin.textContent, value: admin && admin.nextElementSibling && admin.nextElementSibling.querySelector('input') && admin.nextElementSibling.querySelector('input').value, other: (b.querySelector('.mounts-oauth-actions .mounts-oauth-other') || {}).textContent || null, cancel: !!b.querySelector('.mounts-oauth-actions .mounts-oauth-cancel') }; })()`);
-  ok(live && /It comes back through the relay page admin\.fleet\.example\.test and finishes by itself/.test(live.status) && live.summary === 'The sign-in did not come back here by itself?' && live.foldOpen === false && live.disabled === false && live.button === 'Open the Google sign-in again',
+  ok(gateOf(live) && gateOf(/It comes back through the relay page admin\.fleet\.example\.test and finishes by itself/.test(live.status)) && live.summary === 'The sign-in did not come back here by itself?' && live.foldOpen === false && live.disabled === false && live.button === 'Open the Google sign-in again',
     `the status line says the ROAD in a person's words; the paste-back stays folded (this road comes back by itself); the button opens the sign-in again (${JSON.stringify(live).slice(0, 400)})`);
   const notes12 = await p1.evaljs(`[...${BLK12}.querySelectorAll('.mounts-oauth-admin-note')].map((n) => n.textContent)`);
-  ok(notes12.some((n) => /^If Google says “Error 400: redirect_uri_mismatch”/.test(n)) && !notes12.some((n) => /The client is a Desktop app client, which cannot take one/.test(n)), `r2 PIN (law 3): the admin's fold of a COMPANY preset's https road DRAWS Google's refusal lines and never «the client is a Desktop app client» (${JSON.stringify(notes12).slice(0, 300)})`);
-  ok(live && /^It is the relay page — add it ONCE to the app’s redirect URLs/.test(live.admin || '') && live.value === ADMIN && /^Sign in the other way/.test(live.other || '') && live.cancel,
+  ok(gateOf(notes12.some((n) => /^If Google says “Error 400: redirect_uri_mismatch”/.test(n))) && !notes12.some((n) => /The client is a Desktop app client, which cannot take one/.test(n)), `r2 PIN (law 3): the admin's fold of a COMPANY preset's https road DRAWS Google's refusal lines and never «the client is a Desktop app client» (${JSON.stringify(notes12).slice(0, 300)})`);
+  ok(gateOf(live) && gateOf(/^It is the relay page — add it ONCE to the app’s redirect URLs/.test(live.admin || '')) && live.value === ADMIN && gateOf(/^Sign in the other way/.test(live.other || '')) && verdictOf(live.cancel),
     `a refused sign-in: the admin's fold names the ONE address missing (the relay page) with Copy; the other road and Cancel are visible buttons (${JSON.stringify(live).slice(0, 300)})`);
   await p1.probe('Connect Google through the relay page: the live block', `[id^="chan-account-"] .mounts-oauth-live`);
   // R5: a sign-in that comes back BY ITSELF keeps running after the dialog closes, and a reopened dialog SHOWS it (state B) —
@@ -1329,9 +1329,9 @@ const p2 = await newPage();
   await sleep(500);
   const still = (await api('GET', '/api/channels/oauth/status?kind=gmail')).json || {};
   const opensBefore = await p1.evaljs(`(window.__opened || []).length`);
-  ok(await openOn('gmail'), 'Connect an account on Gmail again (the relay sign-in still running)');
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail again (the relay sign-in still running)');
   const re = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const b = ${BLK12}; if (b && b.querySelector('.mounts-oauth-live')) return { status: b.querySelector(':scope > .mounts-field-hint').textContent, cancel: !!b.querySelector('.mounts-oauth-cancel'), link: (b.querySelector('.mounts-oauth-link input') || {}).value || null }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(still.running === true && re && /^The Google sign-in you started earlier is still waiting\. It comes back through the relay page/.test(re.status) && re.cancel && re.link === opened && await p1.evaljs(`(window.__opened || []).length`) === opensBefore,
+  ok(still.running === true && gateOf(re) && gateOf(/^The Google sign-in you started earlier is still waiting\. It comes back through the relay page/.test(re.status)) && gateOf(re.cancel) && re.link === opened && await p1.evaljs(`(window.__opened || []).length`) === opensBefore,
     `R5: closing kept the relay sign-in running; the reopened dialog SHOWS it (its road, its link, Cancel) and opens nothing new (${JSON.stringify({ running: still.running, re }).slice(0, 400)})`);
   // the relay page, as shipped, with the admin copy's data-allow — the vendor sends the browser there with the stub's code
   const vm = await import('node:vm');
@@ -1339,16 +1339,16 @@ const p2 = await newPage();
   vm.runInContext(fs.readFileSync(path.join(repo, 'docs/slack-relay/relay.js'), 'utf8'), rctx);   // the working tree's page (the overlay copies src / public only)
   const st = new URL(opened).searchParams.get('state');
   const d = rctx.VibeSpaceRelay.decide(`?code=stub-relay-code-12&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify&state=${encodeURIComponent(st)}`, ['fleet.example.test']);
-  ok(d.act === 'redirect' && d.to.startsWith(`${base}/api/channels/oauth/cb/gmail?code=stub-relay-code-12&scope=`), `the relay page sends the browser to THIS instance's landing route with the query verbatim (${JSON.stringify(d).slice(0, 200)})`);
+  ok(d.act === 'redirect' && verdictOf(d.to.startsWith(`${base}/api/channels/oauth/cb/gmail?code=stub-relay-code-12&scope=`)), `the relay page sends the browser to THIS instance's landing route with the query verbatim (${JSON.stringify(d).slice(0, 200)})`);
   // r2 PIN: the sign-in lands WHILE the dialog is closed (a relay sign-in keeps running after a close) — the reopened dialog says it
   await p1.evaljs(`(() => { document.querySelector('[id^="chan-account-"] .dialog-close').click(); return 1; })()`);
   await sleep(300);
   const land = d.act === 'redirect' ? await fetch(d.to) : null;
   const page = land ? await land.text() : '';
-  ok(land && land.status === 200 && /data-landing="ok"/.test(page), `the landing page says connected (${land && land.status}) — the dialog was CLOSED when it landed`);
-  ok(await openOn('gmail'), 'Connect an account on Gmail reopened after the landing');
+  ok(gateOf(land) && land.status === 200 && verdictOf(/data-landing="ok"/.test(page)), `the landing page says connected (${land && land.status}) — the dialog was CLOSED when it landed`);
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail reopened after the landing');
   const signed = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const s = b && b.querySelector('.mounts-field-hint').textContent; if (/Connected/.test(s || '')) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/✓ Connected as \S+@example\.test — finish with the “Connect” button below\./.test(signed || ''), `r2 PIN: the reopened dialog reads the sign-in that landed through the relay WHILE it was closed — «✓ Connected as …, finish with Connect» (${JSON.stringify(signed)})`);
+  ok(verdictOf(/✓ Connected as \S+@example\.test — finish with the “Connect” button below\./.test(signed || '')), `r2 PIN: the reopened dialog reads the sign-in that landed through the relay WHILE it was closed — «✓ Connected as …, finish with Connect» (${JSON.stringify(signed)})`);
   await p1.evaljs(`${DLGC}.querySelector('.dialog-actions .btn-create').click(); 1`);
   let n1 = n0;
   for (let i = 0; i < 60 && n1 === n0; i++) { n1 = (((await api('GET', '/api/channels')).json || {}).adapters || []).filter((a) => a.kind === 'gmail').length; if (n1 === n0) await sleep(100); }
@@ -1367,18 +1367,18 @@ const p2 = await newPage();
   srv.kill('SIGKILL'); await waitDown();
   fs.writeFileSync(SETTINGS_FILE, '{}');
   srv = bootServer({});
-  ok(await waitServer(), 'rebooted as a local hub: the relay settings at their default (the public page), no fleet relay');
-  ok(await p1.load(), 'page 1 on 127.0.0.1 (the browser on the VibeSpace machine)');
+  ok(verdictOf(await waitServer()), 'rebooted as a local hub: the relay settings at their default (the public page), no fleet relay');
+  ok(verdictOf(await p1.load()), 'page 1 on 127.0.0.1 (the browser on the VibeSpace machine)');
   // the boot splash (#loading-screen) covers the page until boot is done — a PICTURE (the pixel probes, the shots) waits for it
-  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 150; i++) { const s = document.getElementById('loading-screen'); if (!s || getComputedStyle(s).display === 'none' || getComputedStyle(s).opacity === '0' || s.style.visibility === 'hidden') return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the boot splash is gone (a picture shows the page, not the splash)');
+  ok(verdictOf(await p1.evaljs(`(async () => { for (let i = 0; i < 150; i++) { const s = document.getElementById('loading-screen'); if (!s || getComputedStyle(s).display === 'none' || getComputedStyle(s).opacity === '0' || s.style.visibility === 'hidden') return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`)), 'the boot splash is gone (a picture shows the page, not the splash)');
   await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
-  ok(await p1.evaljs(OPEN(BB)), 'the Integrations window opened');
+  ok(verdictOf(await p1.evaljs(OPEN(BB))), 'the Integrations window opened');
   const SETUP = (k) => `document.querySelector('.integ-setup-card[data-integ-setup="${k}"]')`;
   const sc = await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (document.querySelectorAll('.integ-setup-card').length >= 3) break; await new Promise((r) => setTimeout(r, 100)); }
     const cards = [...document.querySelectorAll('.integ-setup-card')];
     return { kinds: cards.map((c) => c.dataset.integSetup), groups: [...new Set(cards.map((c) => c.closest('.integ-group') && c.closest('.integ-group').dataset.group))], first: (document.querySelector('.integ-group') || {}).dataset?.group || null, integCards: document.querySelectorAll('.integ-card').length, head: (document.querySelector('.integ-group[data-group="communication"] .integ-group-head') || {}).textContent || null };
   })()`);
-  ok(sameSet(sc.kinds, ['lark', 'gmail', 'slack']) && JSON.stringify(sc.groups) === JSON.stringify(['communication']) && sc.first === 'communication' && sc.head === 'Communication' && sc.integCards === WINDOW_ROWS.length,
+  ok(gateOf(sameSet(sc.kinds, ['lark', 'gmail', 'slack'])) && JSON.stringify(sc.groups) === JSON.stringify(['communication']) && sc.first === 'communication' && sc.head === 'Communication' && sc.integCards === WINDOW_ROWS.length,
     `⚙ → Integrations: a Communication group FIRST with one setup card per OAuth account type (Lark, Gmail, Slack) — no key card added to the census (${JSON.stringify(sc)})`);
   const g = await p1.evaljs(`(() => {
     const c = ${SETUP('gmail')}; const fold = c.querySelector('details.oauth-setup-fold[data-who="custom"]'); const closed = !fold.open; fold.open = true;
@@ -1388,22 +1388,22 @@ const p2 = await newPage();
       links: [...fold.querySelectorAll('a.oauth-setup-console')].map((a) => [a.textContent, a.href, a.target, a.rel]), where: tx('.oauth-setup-where'), refusal: tx('.oauth-setup-refusal'), desktop: tx('.oauth-setup-refusal-desktop'), last: tx('.oauth-setup-last'), inactive: tx('.oauth-setup-inactive'),
       presets: [...c.querySelectorAll('details.oauth-setup-fold[data-who="preset"]')].map((d) => d.dataset.preset) };
   })()`);
-  ok(g.closed && g.summary === 'Setting up your own Google app? What to create and the exact addresses to register' && g.create === 'web' && g.what === 'Create a Web application OAuth client.' && /^Why: a sign-in here comes back through a relay page/.test(g.why || '') && /A Desktop app client works too/.test(g.alt || ''),
+  ok(gateOf(g.closed) && g.summary === 'Setting up your own Google app? What to create and the exact addresses to register' && g.create === 'web' && g.what === 'Create a Web application OAuth client.' && gateOf(/^Why: a sign-in here comes back through a relay page/.test(g.why || '')) && verdictOf(/A Desktop app client works too/.test(g.alt || '')),
     `the Gmail card, folded under one line: WHICH client — a Web application client (this hub signs in through the public relay page, an https address) — and the Desktop alternative for a browser on this machine (${JSON.stringify({ create: g.create, why: g.why })})`);
   const rk = g.rows.map((r) => `${r.row}${r.now ? '*' : ''}`).join(' ');
-  ok(rk === 'public* own route loopback also' && g.rows[0].uri === PUBLIC && g.rows[1].uri === null && g.rows[2].uri === null && g.rows[2].words.includes('https://<host>/api/channels/oauth/cb/gmail') && g.rows[3].uri === GLOOP && g.rows[4].uri === R.rowById('gmail').redirect.also[0].uri && g.rows.filter((r) => r.uri).every((r) => r.copy),
+  ok(rk === 'public* own route loopback also' && g.rows[0].uri === PUBLIC && g.rows[1].uri === null && g.rows[2].uri === null && gateOf(g.rows[2].words.includes('https://<host>/api/channels/oauth/cb/gmail')) && g.rows[3].uri === GLOOP && g.rows[4].uri === R.rowById('gmail').redirect.also[0].uri && verdictOf(g.rows.filter((r) => r.uri).every((r) => r.copy)),
     `the exact addresses, each with Copy: ① the public relay page (used now), ② your own copy (how), ③ your own https address (the template — this hub has none), this machine's FIXED address for a Web client, Drive's (${rk})`);
-  ok(/^Register the ones you use, each exactly as written, under Google Cloud console → APIs & Services → Credentials → OAuth 2\.0 Client IDs → your client → Authorized redirect URIs:/.test(g.register || '') && JSON.stringify(g.links) === JSON.stringify([['Google Cloud console', 'https://console.cloud.google.com/apis/credentials', '_blank', 'noopener noreferrer']]),   // (en: the page's language here)
+  ok(gateOf(/^Register the ones you use, each exactly as written, under Google Cloud console → APIs & Services → Credentials → OAuth 2\.0 Client IDs → your client → Authorized redirect URIs:/.test(g.register || '')) && JSON.stringify(g.links) === JSON.stringify([['Google Cloud console', 'https://console.cloud.google.com/apis/credentials', '_blank', 'noopener noreferrer']]),   // (en: the page's language here)
     'the console path, word for word, with its link (a new tab, no referrer)', JSON.stringify({ register: g.register, links: g.links }));
-  ok(g.where === 'Then: Connect an account → OAuth client → Custom — enter the client ID and secret there.' && /^If Google says “Error 400: redirect_uri_mismatch”/.test(g.refusal || '') && /The client is a Desktop app client, which cannot take one/.test(g.desktop || '') && /paste the last page’s address into its fold/.test(g.last || '') && g.inactive === null,
+  ok(g.where === 'Then: Connect an account → OAuth client → Custom — enter the client ID and secret there.' && gateOf(/^If Google says “Error 400: redirect_uri_mismatch”/.test(g.refusal || '')) && gateOf(/The client is a Desktop app client, which cannot take one/.test(g.desktop || '')) && gateOf(/paste the last page’s address into its fold/.test(g.last || '')) && g.inactive === null,
     'where the client ID and secret go, Google\'s own refusal words (+ the Desktop-client case), the paste-back last resort');
   const pre = await p1.evaljs(`(() => { const d = ${SETUP('gmail')}.querySelector('details.oauth-setup-fold[data-preset="channels"]'); d.open = true; return { summary: d.querySelector('summary').textContent, rows: [...d.querySelectorAll('.oauth-setup-row')].map((li) => li.dataset.row), create: d.querySelector('.oauth-setup-create').dataset.create, where: d.querySelector('.oauth-setup-where').textContent }; })()`);
   ok(JSON.stringify(g.presets) === JSON.stringify(['org1', 'channels']) && pre.summary === 'Company app: Channels' && pre.create === 'preset' && !pre.rows.includes('public') && pre.where === 'The client ID and secret are set by your admin in the cluster presets.',
     `each company preset's card: nothing to create, set by your admin — and never the public page (${JSON.stringify(pre)})`);
   const copied = await p1.evaljs(`(async () => { const b = ${SETUP('gmail')}.querySelector('.oauth-setup-row[data-row="public"] button.integ-copy'); b.click(); for (let i = 0; i < 40; i++) { const tt = [...document.querySelectorAll('#global-toasts .global-toast-body')].map((x) => x.textContent); if (tt.some((x) => x.includes(${JSON.stringify(PUBLIC)}))) return { toast: tt.find((x) => x.includes(${JSON.stringify(PUBLIC)})), mark: b.dataset.copied || null }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(copied && copied.toast === `Copied: ${PUBLIC}` && copied.mark === '1', `Copy copies the exact address — the toast names it (${JSON.stringify(copied)})`);
+  ok(gateOf(copied) && copied.toast === `Copied: ${PUBLIC}` && copied.mark === '1', `Copy copies the exact address — the toast names it (${JSON.stringify(copied)})`);
   const lark = await p1.evaljs(`(() => { const d = ${SETUP('lark')}.querySelector('details.oauth-setup-fold[data-who="custom"]'); d.open = true; return { create: d.querySelector('.oauth-setup-create').dataset.create, loop: (d.querySelector('.oauth-setup-row[data-row="loopback"] code') || {}).textContent || null, refusal: d.querySelector('.oauth-setup-refusal').textContent, links: [...d.querySelectorAll('a.oauth-setup-console')].map((a) => a.textContent) }; })()`);
-  ok(lark.create === 'app' && lark.loop === LARK_CB && /^If Lark says “20029”/.test(lark.refusal) && JSON.stringify(lark.links) === JSON.stringify(['Lark', '飞书']), `the Lark card: its one kind of app, its registered loopback, 20029, both consoles (${JSON.stringify(lark)})`);
+  ok(lark.create === 'app' && lark.loop === LARK_CB && gateOf(/^If Lark says “20029”/.test(lark.refusal)) && JSON.stringify(lark.links) === JSON.stringify(['Lark', '飞书']), `the Lark card: its one kind of app, its registered loopback, 20029, both consoles (${JSON.stringify(lark)})`);
   // lane channel-row-notices (the owner: the Channels row's five-line install paragraph «很丑陋»): the push lane's STEPS live on the
   // account type's setup card under «Real-time push — optional» (the live lane's own declaration) — Lark's only; opened here
   // so the viewport check below measures its Copy buttons too
@@ -1412,7 +1412,7 @@ const p2 = await newPage();
     return { closed, summary: d.querySelector('summary').textContent, steps: [...d.querySelectorAll('.push-setup-step')].map((li) => ({ words: li.querySelector('.mounts-field-hint').textContent, code: (li.querySelector('code') || {}).textContent || null, copy: !!li.querySelector('button.integ-copy') })), after: (d.querySelector('.push-setup-after') || {}).textContent || null,
       others: ['gmail', 'slack'].map((k) => !!document.querySelector('.integ-setup-card[data-integ-setup="' + k + '"] details.push-setup-fold')) };
   })()`);
-  ok(push && push.closed && push.summary === 'Real-time push — optional' && push.steps.length === 4 && push.steps[0].code === 'npm install @larksuiteoapi/node-sdk' && push.steps[0].copy && /restart VibeSpace/.test(push.steps[0].words) && push.steps[2].code === 'im:message.group_msg' && push.steps[3].code === null && /polling/.test(push.after || '') && push.others.every((x) => !x),
+  ok(gateOf(push) && gateOf(push.closed) && push.summary === 'Real-time push — optional' && push.steps.length === 4 && push.steps[0].code === 'npm install @larksuiteoapi/node-sdk' && gateOf(push.steps[0].copy) && gateOf(/restart VibeSpace/.test(push.steps[0].words)) && push.steps[2].code === 'im:message.group_msg' && push.steps[3].code === null && gateOf(/polling/.test(push.after || '')) && verdictOf(push.others.every((x) => !x)),
     `the Lark card carries the push lane's steps, folded under «Real-time push — optional»: the install command with Copy, the console steps, the scope, the bot — none on Gmail / Slack (${JSON.stringify(push)})`);
   await p1.probe('⚙ → Integrations: the Gmail setup card, opened', `.integ-setup-card[data-integ-setup="gmail"] .oauth-setup`);
   const fit = await p1.evaljs(`(() => { const bad = []; for (const el of document.querySelectorAll('.integ-setup-card button, .integ-setup-card a, .integ-setup-card code')) { const r = el.getBoundingClientRect(); if (r.width === 0 && r.height === 0) continue; if (r.right > 376 || r.left < -1) bad.push((el.className || el.tagName) + ':' + Math.round(r.left) + '-' + Math.round(r.right)); } return bad; })()`);
@@ -1421,7 +1421,7 @@ const p2 = await newPage();
   // the Connect dialog: the fold BEFORE the first attempt
   const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
   const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('[id^="chan-account-"]')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
-  ok(await openOn('gmail'), 'Connect an account on Gmail');
+  ok(verdictOf(await openOn('gmail')), 'Connect an account on Gmail');
   const before = await p1.evaljs(`(window.__opened || []).length`);
   const dlg = await p1.evaljs(`(() => {
     const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; const s = [...d.querySelectorAll(':scope > select')].find((x) => vis(x) && [...x.options].some((o) => o.value === 'custom'));
@@ -1431,7 +1431,7 @@ const p2 = await newPage();
     const f = folds[0]; const auth = [...d.querySelectorAll('.mounts-drive-connect')].find(vis);
     return { presetFold, who: folds.map((x) => x.dataset.who), open: f ? f.open : null, summary: f ? f.querySelector('summary').textContent : null, beforeAuth: !!(f && auth && (f.compareDocumentPosition(auth) & Node.DOCUMENT_POSITION_FOLLOWING)), rows: f ? [...f.querySelectorAll('.oauth-setup-row')].map((li) => li.dataset.row) : [] };
   })()`);
-  ok(JSON.stringify(dlg.presetFold) === JSON.stringify(['preset']) && JSON.stringify(dlg.who) === JSON.stringify(['custom']) && dlg.open === false && dlg.summary === 'Setting up your own Google app? What to create and the exact addresses to register' && dlg.beforeAuth && dlg.rows.join(' ') === 'public own route loopback also',
+  ok(JSON.stringify(dlg.presetFold) === JSON.stringify(['preset']) && JSON.stringify(dlg.who) === JSON.stringify(['custom']) && dlg.open === false && dlg.summary === 'Setting up your own Google app? What to create and the exact addresses to register' && gateOf(dlg.beforeAuth) && dlg.rows.join(' ') === 'public own route loopback also',
     `the Connect form, BEFORE the first attempt: the company app shows its card, Custom shows the person's own — folded under one line, above the sign-in block, the same addresses (${JSON.stringify(dlg)})`);
   ok(await p1.evaljs(`(window.__opened || []).length`) === before, 'nothing was started to show it (no sign-in page opened)');
   await p1.evaljs(`(() => { const f = [...${DLGC}.querySelectorAll(':scope > details.oauth-setup-fold')].find((x) => x.style.display !== 'none'); f.open = true; return 1; })()`);
@@ -1439,7 +1439,7 @@ const p2 = await newPage();
   if (process.env.OAUTH_SETUP_SHOTS) { const s = await frontShot(FS, p1.key, p1.bring, () => p1.cdp('Page.captureScreenshot', { format: 'png' }), { name: 'the OAUTH_SETUP_SHOTS picture' }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'connect-gmail-fold.png'), Buffer.from(s.result.data, 'base64')); }
   // Gmail's OAuth client type (an account option): what Google is asked for
   const kind = await p1.evaljs(`(() => { const d = ${DLGC}; const sel = [...d.querySelectorAll('select')].find((s) => JSON.stringify([...s.options].map((o) => o.value)) === JSON.stringify(['', 'web', 'desktop'])); if (!sel) return null; let l = sel.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return { label: l && l.textContent, options: [...sel.options].map((o) => o.textContent), value: sel.value }; })()`);
-  ok(kind && kind.label === 'OAuth client type' && JSON.stringify(kind.options) === JSON.stringify(['Not said', 'Web application', 'Desktop app']) && kind.value === '', `Gmail's form asks the OAuth client type: Not said / Web application / Desktop app (${JSON.stringify(kind)})`);
+  ok(gateOf(kind) && kind.label === 'OAuth client type' && JSON.stringify(kind.options) === JSON.stringify(['Not said', 'Web application', 'Desktop app']) && kind.value === '', `Gmail's form asks the OAuth client type: Not said / Web application / Desktop app (${JSON.stringify(kind)})`);
   const connectWith = async (type) => {
     const b0 = await p1.evaljs(`(window.__opened || []).length`);
     await p1.evaljs(`(() => { const d = ${DLGC}; const sel = [...d.querySelectorAll('select')].find((s) => JSON.stringify([...s.options].map((o) => o.value)) === JSON.stringify(['', 'web', 'desktop'])); sel.value = ${JSON.stringify(type)}; sel.dispatchEvent(new Event('change'));
@@ -1452,11 +1452,11 @@ const p2 = await newPage();
   const rDesk = await connectWith('desktop');
   const rUnsaid = await connectWith('');
   const rWeb = await connectWith('web');
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(rDesk || '') && rDesk !== PUBLIC, `«Desktop app»: the sign-in asks Google for 127.0.0.1 on any port — never the relay page a Desktop client cannot take (${rDesk})`);
+  ok(gateOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(rDesk || '')) && rDesk !== PUBLIC, `«Desktop app»: the sign-in asks Google for 127.0.0.1 on any port — never the relay page a Desktop client cannot take (${rDesk})`);
   ok(rUnsaid === PUBLIC && rWeb === PUBLIC, `CONTROL: not said (as before) and «Web application» ride the public relay page on this hub — the Desktop row above is the client type's doing (${rUnsaid} / ${rWeb})`);
   await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
 }
 
 p1.close(); p2.close();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

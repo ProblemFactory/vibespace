@@ -43,7 +43,7 @@ const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[proce
 for (const d of [HOME, MUT, MUT2]) fs.rmSync(d, { recursive: true, force: true });
 fs.mkdirSync(SHOTS, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SIGN_IN = 'day-one-pod-sign-in-7';
 
@@ -133,7 +133,7 @@ try {
   await cdp('Page.enable'); await cdp('Runtime.enable');
   await cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }, { urlPattern: '*/api/home*', requestStage: 'Request' }] });   // ⑪: /api/home held (every other route under it continues at once)
   startServer();
-  check('the pod-shaped hub is up (a sign-in password, HOME = the person’s home)', await ready());
+  check('the pod-shaped hub is up (a sign-in password, HOME = the person’s home)', verdictOf(await ready()));
   await cdp('Page.navigate', { url: URL_ + 'login' });
   await until(`document.readyState === 'complete'`);
   const login = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
@@ -178,7 +178,7 @@ try {
 
   console.log('④ the start step: a chat on the folder that holds the files');
   const chip0 = await until(`(() => { const c = document.querySelector('#ob-chips .cwd-recent-chip'); return c ? { text: c.textContent, kind: c.dataset.kind, sel: c.classList.contains('selected'), path: c.dataset.path } : null; })()`, { timeout: 8000 });
-  check('THE FINDING (D8 / M3): the first chip is «work (23 files)», CHOSEN', !!chip0 && chip0.text === 'work (23 files)' && chip0.kind === 'files' && chip0.sel && chip0.path === WORK, chip0);
+  check('THE FINDING (D8 / M3): the first chip is «work (23 files)», CHOSEN', !!chip0 && chip0.text === 'work (23 files)' && chip0.kind === 'files' && gateOf(chip0.sel) && chip0.path === WORK, chip0);
   check('… the field holds work/ (nothing to type)', (await evalJs(`document.getElementById('ob-cwd').value`)) === WORK);
   check('… the hidden cache is no chip; the empty Desktop comes after', !(await evalJs(`[...document.querySelectorAll('#ob-chips .cwd-recent-chip')].some((c) => c.dataset.path.endsWith('/.cache'))`)) && (await evalJs(`[...document.querySelectorAll('#ob-chips .cwd-recent-chip')].map((c) => c.textContent).indexOf('Desktop')`)) > 0);
   check('ONE primary button (the terminal is a link)', (await evalJs(`document.querySelectorAll('#welcome .welcome-actions .welcome-btn').length`)) === 1 && (await text('#ob-term')) === 'or a terminal');
@@ -198,7 +198,7 @@ try {
     mutantOn = true;
     await cdp('Page.reload', { ignoreCache: true });
     await loaded(); await sleep(2500);
-    check('RED CONTROL: the base’s vault rule asks the second password on day one (nothing stored)', await evalJs(setupDialog));
+    check('RED CONTROL: the base’s vault rule asks the second password on day one (nothing stored)', verdictOf(await evalJs(setupDialog)));
     await evalJs(`document.querySelector('#vault-setup-dialog .vault-later')?.click(); localStorage.removeItem('vs-vault-later'); sessionStorage.clear(); true`);
     await evalJs(`app.showNewSessionDialog(); document.getElementById('input-cwd').value = '/somewhere/another-area'; app.hideDialogs(); app.showNewSessionDialog(); true`);
     check('RED CONTROL: the base’s dialog keeps the other area’s folder', (await evalJs(`document.getElementById('input-cwd').value`)) === '/somewhere/another-area');
@@ -241,8 +241,8 @@ try {
 
   console.log('⑦ the rail’s words, the first week');
   const rail = await until(`(() => { const r = document.getElementById('sidebar-rail'); if (!r) return null; const lab = (id) => { const e = r.querySelector('.rail-item[data-rail="' + id + '"] .rail-label'); return e && e.getBoundingClientRect().height > 0 ? e.textContent : null; }; return { on: r.classList.contains('rail-labelled'), w: Math.round(r.getBoundingClientRect().width), agents: lab('agents'), mounts: lab('mounts'), rec: localStorage.getItem('vs-rail-labels') }; })()`, { timeout: 8000 });
-  check('THE FINDING (D11): the rail carries words — «Agents», «Remote» — at 68 px', !!rail && rail.on && rail.w === 68 && rail.agents === 'Agents' && rail.mounts === 'Remote', rail);
-  check('… the week’s record is kept on this device', !!rail && /"since":\d+/.test(rail.rec || ''), rail && rail.rec);
+  check('THE FINDING (D11): the rail carries words — «Agents», «Remote» — at 68 px', !!rail && gateOf(rail.on) && rail.w === 68 && rail.agents === 'Agents' && rail.mounts === 'Remote', rail);
+  check('… the week’s record is kept on this device', !!rail && verdictOf(/"since":\d+/.test(rail.rec || '')), rail && rail.rec);
   await shot('day-one-5-rail.png');
   await evalJs(`(() => { const ids = [...document.querySelectorAll('#sidebar-rail .rail-item')].map((b) => b.dataset.rail).filter((d) => d !== 'tasks'); localStorage.setItem('vs-rail-labels', JSON.stringify({ since: Date.now(), used: ids })); return true; })()`);
   await click('#sidebar-rail .rail-item[data-rail="tasks"]');
@@ -322,14 +322,14 @@ try {
       return { fresh: !!fresh, open: !!open, holdMs, dots };
     };
     const held = await firstVisit(1000, false);
-    check('⑪ /api/home held 1 s past /api/sessions: the first screen WAITED for it — it showed ONE count of dots, three (a protected pod: no «Protect this workspace»)', held.open && JSON.stringify(held.dots) === '[3]', held);
+    check('⑪ /api/home held 1 s past /api/sessions: the first screen WAITED for it — it showed ONE count of dots, three (a protected pod: no «Protect this workspace»)', gateOf(held.open) && JSON.stringify(held.dots) === '[3]', held);
     const ctl = await firstVisit(2500, true);
-    check('⑪ RED CONTROL (today’s order — a bundle with the wait taken out, the answer held 2.5 s): the first screen shows FOUR dots first, the flash a person saw', ctl.open && !!ctl.dots && ctl.dots[0] === 4, ctl);
+    check('⑪ RED CONTROL (today’s order — a bundle with the wait taken out, the answer held 2.5 s): the first screen shows FOUR dots first, the flash a person saw', gateOf(ctl.open) && !!ctl.dots && ctl.dots[0] === 4, ctl);
     const slow = await firstVisit(5000, false);
-    check('⑪ a hub slower than the 3 s bound (held 5 s): the screen shows what is known, and its dots are corrected ONCE in place when the answer comes — four, then three', slow.open && JSON.stringify(slow.dots) === '[4,3]', slow);
+    check('⑪ a hub slower than the 3 s bound (held 5 s): the screen shows what is known, and its dots are corrected ONCE in place when the answer comes — four, then three', gateOf(slow.open) && JSON.stringify(slow.dots) === '[4,3]', slow);
   }
 } catch (e) {
   failed++; console.error('  ✗ the suite threw: ' + (e && e.stack || e));
 }
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

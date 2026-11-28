@@ -27,7 +27,7 @@ import { anchored } from './scratch.mjs';   // lane lg-group-parents (restack 41
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const t0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -113,16 +113,16 @@ console.log('① the model: fold, filter + rank, sections, recent, keyboard, tai
   const badET = ET.filter(([f, want]) => PM.enterTarget(f) !== want).map(([f, want]) => [f, want, PM.enterTarget(f)]);
   ok(!badET.length, `enterTarget: ${ET.length} rows — the highlighted row by key, else the armed first row while still first, else nothing`, J(badET));
   const PK = read('src/lib/principal-picker.js');
-  ok(/const k = PM\.enterTarget\(\{ active, visibleKeys, armedFirst, skip: everyoneKeys\(\) \}\);/.test(PK) && !/active \|\| visibleKeys\[0\]/.test(PK) && /if \(byPerson\) armedFirst = PM\.armableFirst\(visibleKeys, everyoneKeys\(\)\);[^\n]*\n\s*else if \(gone\) armedFirst = null;/.test(PK) && /refresh: \(\) => \{ rows = source\(\) \|\| \[\]; noteRows\(\); drawChips\(\); drawList\(\{ byPerson: false \}\);( syncExcept\(\);)? \}/.test(PK), 'PIN: Enter asks the PURE rule; the person\'s redraw arms the first row, a roster patch never does (and disarms when the highlight vanished)');
+  ok(gateOf(/const k = PM\.enterTarget\(\{ active, visibleKeys, armedFirst, skip: everyoneKeys\(\) \}\);/.test(PK)) && !/active \|\| visibleKeys\[0\]/.test(PK) && gateOf(/if \(byPerson\) armedFirst = PM\.armableFirst\(visibleKeys, everyoneKeys\(\)\);[^\n]*\n\s*else if \(gone\) armedFirst = null;/.test(PK)) && verdictOf(/refresh: \(\) => \{ rows = source\(\) \|\| \[\]; noteRows\(\); drawChips\(\); drawList\(\{ byPerson: false \}\);( syncExcept\(\);)? \}/.test(PK)), 'PIN: Enter asks the PURE rule; the person\'s redraw arms the first row, a roster patch never does (and disarms when the highlight vanished)');
   // verify round 4: a refused Enter is SHOWN (the first row highlighted, picked by the next Enter through the highlighted-row
   // rule), and a redraw touches only the nodes that MOVED — `replaceChildren` detached every row and Chrome dropped the
   // click in flight on one (a trusted click across an `active-sessions` broadcast that changed nothing was lost)
-  ok(/else if \(!k && !active && visibleKeys\.length\) \{[\s\S]{0,1100}?active = PM\.armableFirst\(visibleKeys, everyoneKeys\(\)\);\n\s*if \(!active\) return;\n\s*drawList\(\{ byPerson: false \}\);/.test(PK), 'PIN: a refused Enter (nothing armed, nothing highlighted) highlights the first row and picks nothing — the next Enter takes the HIGHLIGHTED row by key (lane everyone-principal: the first row that is not ALL AGENTS)');
-  ok(!/\.replaceChildren\(/.test(PK) && /reconcile\(list, out\);/.test(PK) && /reconcile\(chips, out\);/.test(PK) && /for \(let i = 0; i < out\.length; i\+\+\) if \(kids\[i\] !== out\[i\]\) parent\.insertBefore\(out\[i\], kids\[i\] \|\| null\);/.test(PK), 'PIN: the list and the chips are reconciled in place (a node already at its place is never detached) — never replaceChildren');
+  ok(verdictOf(/else if \(!k && !active && visibleKeys\.length\) \{[\s\S]{0,1100}?active = PM\.armableFirst\(visibleKeys, everyoneKeys\(\)\);\n\s*if \(!active\) return;\n\s*drawList\(\{ byPerson: false \}\);/.test(PK)), 'PIN: a refused Enter (nothing armed, nothing highlighted) highlights the first row and picks nothing — the next Enter takes the HIGHLIGHTED row by key (lane everyone-principal: the first row that is not ALL AGENTS)');
+  ok(!/\.replaceChildren\(/.test(PK) && gateOf(/reconcile\(list, out\);/.test(PK)) && gateOf(/reconcile\(chips, out\);/.test(PK)) && verdictOf(/for \(let i = 0; i < out\.length; i\+\+\) if \(kids\[i\] !== out\[i\]\) parent\.insertBefore\(out\[i\], kids\[i\] \|\| null\);/.test(PK)), 'PIN: the list and the chips are reconciled in place (a node already at its place is never detached) — never replaceChildren');
   // verify round 5: a HELD Enter is one Enter — the OS auto-repeat (~30 Hz after its delay) toggled the first row of a
   // multi picker on and off per repeat (measured with trusted CDP `autoRepeat: true`: ∅ / picked / ∅ / picked …), the
   // final pick the parity of the hold; a repeat picks nothing, the highlight / arm rules are asked only by a new press
-  ok(/\} else if \(enterSubmits\(e\)\) \{\n\s*e\.preventDefault\(\); e\.stopPropagation\(\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(e\.repeat\) return;/.test(PK), 'PIN (round 5): an Enter auto-repeat (`e.repeat`) is consumed and picks NOTHING — a held Enter is one Enter, never a 30 Hz toggle of the first row');
+  ok(verdictOf(/\} else if \(enterSubmits\(e\)\) \{\n\s*e\.preventDefault\(\); e\.stopPropagation\(\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(e\.repeat\) return;/.test(PK)), 'PIN (round 5): an Enter auto-repeat (`e.repeat`) is consumed and picks NOTHING — a held Enter is one Enter, never a 30 Hz toggle of the first row');
   ok(PM.folderTail('/home/a/work/api') === 'api' && PM.folderTail('/home/a/work/api/') === 'api' && PM.folderTail('box: /srv/x/') === 'box: x' && PM.folderTail('/') === '/' && PM.folderTail('') === '', 'a folder\'s tail (a host label kept)');
   ok(PM.identityOf(ROSTER[0]) === 'group:t-ops' && PM.identityOf(ROSTER[3]) === 'agent:7f3a91c2', 'the identity every dialog remembers a pick by (never a caller\'s own key)');
   ok(PM.initialsOf === AV.initialsOf && PM.initialsOf('Ops triage') === 'OT', 'ONE initials implementation (the avatar rule\'s, re-exported)');
@@ -132,7 +132,7 @@ console.log('① the model: fold, filter + rank, sections, recent, keyboard, tai
 console.log('①b ALL AGENTS: first, never hidden by a search, never a recent pick, never Enter\'s fallback, its chip first');
 {
   const ALL = PM.everyoneRow({ key: 'everyone:*', name: 'All agents', hint: 'every conversation, now and later' });
-  ok(ALL.kind === 'everyone' && ALL.id === PM.EVERYONE_ID && PM.EVERYONE_ID === '*' && PM.isEveryone(ALL) && !ALL.disabled && J(PM.PRINCIPAL_KINDS) === J(['everyone', 'group', 'agent']), 'the model answers `everyone` as a principal kind — one id (*), never disabled');
+  ok(ALL.kind === 'everyone' && ALL.id === PM.EVERYONE_ID && PM.EVERYONE_ID === '*' && gateOf(PM.isEveryone(ALL)) && !ALL.disabled && J(PM.PRINCIPAL_KINDS) === J(['everyone', 'group', 'agent']), 'the model answers `everyone` as a principal kind — one id (*), never disabled');
   ok(PM.identityOf(ALL) === 'everyone:*', 'its identity is everyone:* (one row in every dialog)');
   const R2 = [...ROSTER, ALL];   // the caller may hand it anywhere — it is drawn first
   const FIRST = [['', 'All agents'], ['api', 'All agents'], ['zzz', 'All agents'], ['部署', 'All agents'], ['7f3a', 'All agents']];
@@ -142,7 +142,7 @@ console.log('①b ALL AGENTS: first, never hidden by a search, never a recent pi
   const secs = PM.groupPrincipals(PM.filterPrincipals(R2, ''));
   ok(secs[0].kind === 'everyone' && secs[0].rows.length === 1 && secs[1].kind === 'groups', 'the sections: ALL AGENTS first (its own), then Task Groups, then sessions');
   const rr = PM.rankRecent(R2, ['everyone:*', 'agent:e6f7']);
-  ok(J(names(rr.recent)) === J(['Deploy bot']) && rr.rest.includes(ALL), 'it is never a recent pick (always first already)');
+  ok(J(names(rr.recent)) === J(['Deploy bot']) && verdictOf(rr.rest.includes(ALL)), 'it is never a recent pick (always first already)');
   ok(PM.armableFirst(['everyone:*', 'agent:a', 'agent:b'], ['everyone:*']) === 'agent:a' && PM.armableFirst(['everyone:*'], ['everyone:*']) === null && PM.armableFirst(['agent:a'], []) === 'agent:a', 'Enter\'s fallback never lands on it: the first visible row that is not ALL AGENTS (none ⇒ nothing)');
   ok(PM.enterTarget({ active: 'everyone:*', visibleKeys: ['everyone:*', 'agent:a'], armedFirst: 'agent:a' }) === 'everyone:*', 'highlighted with ↑ / ↓, Enter takes it (the highlighted-row rule)');
   // the armed row is "still first" when it is the first ARMABLE row — All sits above it in every list (the heavy exit
@@ -159,8 +159,8 @@ console.log('①b ALL AGENTS: first, never hidden by a search, never a recent pi
   ok(PM.moveActive(KS, null, 1, SK) === 'agent:a' && PM.moveActive(KS, 'agent:a', -1, SK) === 'everyone:*' && PM.moveActive(KS, null, -1, SK) === 'agent:b' && PM.moveActive(['everyone:*'], null, 1, SK) === 'everyone:*' && PM.moveActive(KS, null, 1) === 'everyone:*', 'the keyboard: the FIRST ↓ lands on the first named row (typing then ↓ highlights a match), All is one ↑ above it; only All visible ⇒ ↓ reaches it');
   ok(J(PM.chipOrder(['agent:a', 'group:g', 'everyone:*'], ['everyone:*'])) === J(['everyone:*', 'agent:a', 'group:g']), 'its chip is drawn first, the picks after it in the order they were made');
   const PK = read('src/lib/principal-picker.js');
-  ok(/const allRow = everyone && typeof everyone === 'object' \? PM\.everyoneRow\(/.test(PK) && /for \(const s of secs\) if \(s\.kind === 'everyone'\) s\.rows\.forEach\(add\);\n\s*if \(recent\.length\)/.test(PK) && /if \(PM\.isEveryone\(row\)\) return;/.test(PK) && /PM\.chipOrder\(sel, everyoneKeys\(\)\)/.test(PK), 'PIN: the DOM half injects the row (an object option), draws it ABOVE Recent, never remembers it, orders the chips through the model');
-  ok(!/pp-row-everyone[^\n]*disabled/.test(PK) && /never disabled|Never disabled/.test(read('src/lib/principal-picker-model.js')), 'PIN: the All row is never a greyed hint (no disabled path names it)');
+  ok(gateOf(/const allRow = everyone && typeof everyone === 'object' \? PM\.everyoneRow\(/.test(PK)) && gateOf(/for \(const s of secs\) if \(s\.kind === 'everyone'\) s\.rows\.forEach\(add\);\n\s*if \(recent\.length\)/.test(PK)) && gateOf(/if \(PM\.isEveryone\(row\)\) return;/.test(PK)) && verdictOf(/PM\.chipOrder\(sel, everyoneKeys\(\)\)/.test(PK)), 'PIN: the DOM half injects the row (an object option), draws it ABOVE Recent, never remembers it, orders the chips through the model');
+  ok(!/pp-row-everyone[^\n]*disabled/.test(PK) && verdictOf(/never disabled|Never disabled/.test(read('src/lib/principal-picker-model.js'))), 'PIN: the All row is never a greyed hint (no disabled path names it)');
 }
 
 // ═══ ② the census ═══
@@ -185,7 +185,7 @@ console.log('② the census: every principal pick is the picker; no <select> of 
     'src/lib/window-share.js': /principalPicker\(\{/,
     'src/lib/exit-access-dialog.js': /principalPicker\(\{ items, app, multi: true/, // lane-pairing ⑥: "Who can use <machine>?" — two lists, each the ONE picker (multi)
   };
-  for (const [f, re] of Object.entries(SITES)) ok(re.test(read(f)) && /from '\.\/principal-picker\.js'/.test(read(f)), `${f} picks its principals with the ONE picker`);
+  for (const [f, re] of Object.entries(SITES)) ok(gateOf(re.test(read(f))) && verdictOf(/from '\.\/principal-picker\.js'/.test(read(f))), `${f} picks its principals with the ONE picker`);
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const ROSTER_WORDS = /\b(roster|principals?|choices|agents|sessions|_webuiSessions|_tasks|members)\b/;
   /** every `<select>` whose OPTIONS come from a roster of sessions / groups: a select variable filled by a
@@ -217,7 +217,7 @@ console.log('② the census: every principal pick is the picker; no <select> of 
   const exitSrc = read('src/lib/exit-access-dialog.js');
   const plantedExit = exitSrc.replace("const pickerWrap = el('div', 'exit-access-picker');", "const pickerWrap = el('div', 'exit-access-picker');\n      const whoSel = el('select', 'exit-who');\n      for (const r of roster()) { const op = el('option', '', r.name); whoSel.appendChild(op); }");
   ok(plantedExit !== exitSrc && judge(plantedExit).length === 1 && judge(exitSrc).length === 0, 'CONTROL: a `<select>` planted into exit-access-dialog.js (filled from its roster) is flagged; the real dialog is clean');
-  if (pre) ok(/whoSel = el\('select'/.test(pre) && judge(pre).length >= 1, `CONTROL: the pre-picker reach editor (git ${PRE_PICKER}) is flagged — the census has teeth on the real shape`);
+  if (pre) ok(gateOf(/whoSel = el\('select'/.test(pre)) && judge(pre).length >= 1, `CONTROL: the pre-picker reach editor (git ${PRE_PICKER}) is flagged — the census has teeth on the real shape`);
   else console.log(`  SKIP CONTROL: the pre-picker reach editor (${PRE_PICKER}) is not in this checkout (a depth-1 clone) — the planted control stands alone`);
 }
 
@@ -236,7 +236,7 @@ console.log('③ controls: a patched copy per rule turns its own leg red');
   // (d) verify round 3: Enter with the first-row fallback UNARMED (the pre-fix rule) — the row that moved up is picked
   const d = await load("  if (armedFirst != null && first != null && first === String(armedFirst)) return first;", '  if (first != null) return first;', 'unarmed');
   ok(!!d && d.enterTarget({ active: null, visibleKeys: ['b', 'c'], armedFirst: 'a' }) === 'b', 'CONTROL (d): without the arm, Enter after a roster patch picks the row that moved to the top — the person never saw it first (① reddens)');
-  for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(x.pass, 'tree: ' + x.name, x.detail);
+  for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(verdictOf(x.pass), 'tree: ' + x.name, x.detail);
 }
 
 // lane lg-group-parents U5b: «仅本组» rides the pick ↔ row mapping
@@ -252,7 +252,7 @@ console.log('⑭ lane lg-group-parents U5b: «仅本组» (only) on a picked Tas
     ok(JSON.stringify(drawn.only) === JSON.stringify([G.key]) && JSON.stringify(PM.rowToPick({ to: [{ kind: 'group', id: G.id }] }, ROSTER).only) === '[]', 'rowToPick: a stored «仅本组» group entry is drawn into `only` by its picker key');
   } else ok(false, 'the roster fixture holds a Task Group row');
   const ppSrc = fs.readFileSync(path.join(REPO, 'src/lib/principal-picker.js'), 'utf-8');
-  ok(/const onlyOffered = !!\(only && typeof only === 'object'\);/.test(ppSrc) && /if \(onlyOffered && r\.kind === 'group' && !exceptChips\)/.test(ppSrc) && /onlyKeys: \(\) => \(onlyOffered \? sel\.filter\(\(k\) => onlySet\.has\(k\)\) : null\)/.test(ppSrc), 'the picker: the switch only on a door that offers it, only on group chips; onlyKeys() answers the picked groups switched on (null when not offered)');
+  ok(gateOf(/const onlyOffered = !!\(only && typeof only === 'object'\);/.test(ppSrc)) && gateOf(/if \(onlyOffered && r\.kind === 'group' && !exceptChips\)/.test(ppSrc)) && verdictOf(/onlyKeys: \(\) => \(onlyOffered \? sel\.filter\(\(k\) => onlySet\.has\(k\)\) : null\)/.test(ppSrc)), 'the picker: the switch only on a door that offers it, only on group chips; onlyKeys() answers the picked groups switched on (null when not offered)');
 }
 
 console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry admits is what the grant model admits — every state walked');
@@ -291,7 +291,7 @@ console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry adm
   } finally { try { fs.rmSync(M2.dir, { recursive: true, force: true }); } catch { } }
   // the chips draw THESE words (the switch's face is the entry's reach; an exception chip says «…, always»)
   const ppSrc2 = read('src/lib/principal-picker.js');
-  ok(/const reach = PM\.entryReach\(r, \{ except: exceptChips, only: onlyOffered && onlySet\.has\(String\(r\.key\)\) \}\);/.test(ppSrc2) && /o\.textContent = reachWords\(reach\);/.test(ppSrc2) && /\} else if \(reach\) c\.appendChild\(el\('span', 'pp-chip-reach', reachWords\(reach\)\)\);/.test(ppSrc2) && /chipPrefix: t\('Except: '\), exceptChips: true,/.test(ppSrc2), 'the picker draws the reach words on every Task Group chip (the switch\'s face; an exception chip «and its child groups, always»)');
+  ok(gateOf(/const reach = PM\.entryReach\(r, \{ except: exceptChips, only: onlyOffered && onlySet\.has\(String\(r\.key\)\) \}\);/.test(ppSrc2)) && gateOf(/o\.textContent = reachWords\(reach\);/.test(ppSrc2)) && gateOf(/\} else if \(reach\) c\.appendChild\(el\('span', 'pp-chip-reach', reachWords\(reach\)\)\);/.test(ppSrc2)) && verdictOf(/chipPrefix: t\('Except: '\), exceptChips: true,/.test(ppSrc2)), 'the picker draws the reach words on every Task Group chip (the switch\'s face; an exception chip «and its child groups, always»)');
 }
 
 // r600 (3) — THE OWNER'S FINGER RULE (lane lg-group-parents, row B-91a7 U5b / cure C2; the hosted run 44818862371 placed test-channels-i18n's
@@ -361,12 +361,12 @@ console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry adm
   const rC = fingerFailures(anchored(css, LM, '@media (pointer: coarse), (max-width: 480px) {\n  .pp-list, .pp-pop .pp-list', 'list-bound-by-finger'), i18n);   // stale-pins: kept (the RED plants the finger-only media back)
   const rA = fingerFailures(noRule, i18n), rB = fingerFailures(dlg, i18n);
   console.log(`    judged (RED: the finger rule removed): ${JSON.stringify(rA.slice(0, 3))} · (RED: a dialog's 36 px copy planted back): ${JSON.stringify(rB)}`);
-  ok(fr0 > 0 && rA.some((b) => /^\.pp-chip-only: no coarse-pointer rule/.test(b)), 'NEGATIVE CONTROL: the stylesheet without the finger rule fails — the «仅本组» switch has no 44 px target', rA);
+  ok(fr0 > 0 && verdictOf(rA.some((b) => /^\.pp-chip-only: no coarse-pointer rule/.test(b))), 'NEGATIVE CONTROL: the stylesheet without the finger rule fails — the «仅本组» switch has no 44 px target', rA);
   console.log(`    judged (RED r767: the list's bound by the finger): ${JSON.stringify(rC)}`);
-  ok(rC.some((b) => /follows the finger, not the room/.test(b)), 'NEGATIVE CONTROL (r767): the option list bounded for EVERY finger device fails — a tall tablet would get a three-row list', rC);
-  ok(rB.some((b) => /exit-access-dialog \.pp-chip/.test(b)), 'NEGATIVE CONTROL: a dialog\'s own 36 px copy of the chip planted back fails — it outranks the picker\'s rule', rB);   // stale-pins: kept (the RED plants the dialog's old 36 px copy back)
+  ok(verdictOf(rC.some((b) => /follows the finger, not the room/.test(b))), 'NEGATIVE CONTROL (r767): the option list bounded for EVERY finger device fails — a tall tablet would get a three-row list', rC);
+  ok(verdictOf(rB.some((b) => /exit-access-dialog \.pp-chip/.test(b))), 'NEGATIVE CONTROL: a dialog\'s own 36 px copy of the chip planted back fails — it outranks the picker\'s rule', rB);   // stale-pins: kept (the RED plants the dialog's old 36 px copy back)
 }
 
 console.log(`\n(${Date.now() - t0} ms)`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const { ClaudeCodeAdapter } = require('../src/adapters/claude-code.js');
 
 let failed = 0;
-const assert = (cond, name) => {
+const assert = (cond, name) => { if (typeof cond !== 'boolean') throw new TypeError(`assert: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   console.log(`${cond ? '  ✓' : '  ✗ FAIL'} ${name}`);
   if (!cond) failed++;
 };
@@ -29,7 +29,7 @@ const parsed = JSON.parse(tracked.line);
 assert(parsed.type === 'control_request', 'line is a control_request');
 assert(parsed.request?.subtype === 'set_permission_mode', 'subtype set_permission_mode');
 assert(parsed.request?.mode === 'bypassPermissions', 'mode key is `mode` (the shape 2.1.215 parses)');
-assert(parsed.request_id && parsed.request_id === tracked.requestId, 'requestId matches the line');
+assert(gateOf(parsed.request_id) && parsed.request_id === tracked.requestId, 'requestId matches the line');
 const t2 = adapter.buildTrackedSetPermissionMode('acceptEdits');
 assert(t2.requestId !== tracked.requestId, 'ids are unique per request');
 
@@ -43,9 +43,9 @@ const session = { _pendingModeReqs: new Map() };
 session._pendingModeReqs.set(tracked.requestId, { mode: 'bypassPermissions', ts: Date.now() });
 const ackErr = { type: 'control_response', response: { subtype: 'error', request_id: tracked.requestId, error: 'Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions' } };
 const hit = session._pendingModeReqs.has(ackErr.response?.request_id);
-assert(hit, 'error ack resolves the pending entry');
+assert(verdictOf(hit), 'error ack resolves the pending entry');
 const okAck = { type: 'control_response', response: { subtype: 'success', request_id: t2.requestId, response: { mode: 'acceptEdits' } } };
 assert(!session._pendingModeReqs.has(okAck.response?.request_id), 'foreign/expired ids never match');
 
 console.log(failed ? `\n${failed} FAILED` : '\nall passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

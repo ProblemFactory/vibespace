@@ -25,7 +25,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const MOCK = path.join(REPO, 'scripts/dev/mock-opencode-serve.mjs');
 const { startMockServe, createMockState } = await import(MOCK);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // lane claude-md-diet (B-23e7): the per-file / per-incident index lines moved out of CLAUDE.md into the kb INDEX heads
 const indexHead = (f) => ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f));
@@ -43,33 +43,33 @@ console.log('— ① client over the mock serve');
   const c = new serve.OpencodeServeClient(mock.url);
   ok('health() reads /global/health', (await c.health()).healthy === true);
   const all = await c.listAllSessions();
-  ok('listAllSessions rung 1 = the DIRECTORY-LESS listing (verified 1.18.29: store-wide, boots no instance), rung 2 = scope=project for REAL worktrees only', all.length === 4 && mock.state.requests.includes('GET /session?limit=500') && mock.state.requests.some((r) => r.startsWith('GET /project')) && mock.state.requests.includes('GET /session?limit=500&directory=%2Fwork%2Falpha&scope=project'), mock.state.requests);
-  ok('…and NEVER bootstraps "/" or the vcs-less catch-all project (2.369.42: directory=/ every 10s against a serve whose only project WAS "/")', !mock.state.requests.some((r) => r.includes('directory=%2F&scope=project')) && c.skippedWorktrees.includes('/'), { skipped: c.skippedWorktrees, reqs: mock.state.requests.filter((r) => r.includes('scope=project')) });
+  ok('listAllSessions rung 1 = the DIRECTORY-LESS listing (verified 1.18.29: store-wide, boots no instance), rung 2 = scope=project for REAL worktrees only', all.length === 4 && gateOf(mock.state.requests.includes('GET /session?limit=500')) && gateOf(mock.state.requests.some((r) => r.startsWith('GET /project'))) && verdictOf(mock.state.requests.includes('GET /session?limit=500&directory=%2Fwork%2Falpha&scope=project')), mock.state.requests);
+  ok('…and NEVER bootstraps "/" or the vcs-less catch-all project (2.369.42: directory=/ every 10s against a serve whose only project WAS "/")', !mock.state.requests.some((r) => r.includes('directory=%2F&scope=project')) && verdictOf(c.skippedWorktrees.includes('/')), { skipped: c.skippedWorktrees, reqs: mock.state.requests.filter((r) => r.includes('scope=project')) });
   ok('bootstrappableWorktree: a vcs-backed project dir yes; "/", $HOME, tmpdir, the vcs-less "global" row, a relative path, "" — no', serve.bootstrappableWorktree({ worktree: '/work/alpha', vcs: 'git' }) === true && serve.bootstrappableWorktree({ worktree: '/', vcs: 'git' }) === false && serve.bootstrappableWorktree({ worktree: os.homedir(), vcs: 'git' }) === false && serve.bootstrappableWorktree({ worktree: os.tmpdir(), vcs: 'git' }) === false && serve.bootstrappableWorktree({ worktree: '/work/alpha' }) === false && serve.bootstrappableWorktree({ worktree: 'work/alpha', vcs: 'git' }) === false && serve.bootstrappableWorktree({}) === false && serve.bootstrappableWorktree(null) === false);
-  ok('unsafeWorktreeReason names "/" and $HOME (the 2.369.42 leftover shapes) and clears a real dir', /WHOLE filesystem/.test(serve.unsafeWorktreeReason('/') || '') && /home directory/.test(serve.unsafeWorktreeReason(os.homedir()) || '') && serve.unsafeWorktreeReason('/work/alpha') === null && serve.unsafeWorktreeReason('') === null && serve.unsafeWorktreeReason(null) === null);
+  ok('unsafeWorktreeReason names "/" and $HOME (the 2.369.42 leftover shapes) and clears a real dir', gateOf(/WHOLE filesystem/.test(serve.unsafeWorktreeReason('/') || '')) && gateOf(/home directory/.test(serve.unsafeWorktreeReason(os.homedir()) || '')) && serve.unsafeWorktreeReason('/work/alpha') === null && serve.unsafeWorktreeReason('') === null && serve.unsafeWorktreeReason(null) === null);
   ok('a bare directory filter is an EXACT match (verified 1.18.29: `directory=/` lists nothing — the bug the live run caught)', (await c.listSessions({ directory: '/' })).length === 0 && (await c.listSessions({ directory: '/work/alpha' })).length === 2);
-  ok('disposeInstance = POST /instance/dispose?directory=', (await c.disposeInstance('/work/alpha')) === true && mock.state.disposed.includes('/work/alpha'));
+  ok('disposeInstance = POST /instance/dispose?directory=', (await c.disposeInstance('/work/alpha')) === true && verdictOf(mock.state.disposed.includes('/work/alpha')));
   ok('currentProject = GET /project/current (the serve\'s OWN project — what the boot self-heal probes)', (await c.currentProject()).worktree === '/work/alpha');
   ok('getSession', (await c.getSession('ses_a2')).title === 'Fix the flaky test');
   const msgs = await c.listMessages('ses_a1');
-  ok('listMessages returns the v1 [{info, parts}] list', Array.isArray(msgs) && msgs.length === 5 && msgs[0].info.role === 'user' && Array.isArray(msgs[0].parts));
+  ok('listMessages returns the v1 [{info, parts}] list', gateOf(Array.isArray(msgs)) && msgs.length === 5 && msgs[0].info.role === 'user' && verdictOf(Array.isArray(msgs[0].parts)));
   const tail = await c.listMessages('ses_a1', { limit: 2 });
   ok('v1 limit = the NEWEST N (so naming must not use it)', tail.length === 2 && tail[1].info.id === 'msg_u3');
   const reqBefore = mock.state.requests.length;
   const first = await c.firstUserMessage('ses_a1');
-  ok('firstUserMessage reads the v1 list (oldest-first) → the first NON-SYNTHETIC user text', first?.id === 'msg_u1' && first.text === 'please read README.md and fix the typo' && mock.state.requests.slice(reqBefore).includes('GET /session/ses_a1/message'), first);
+  ok('firstUserMessage reads the v1 list (oldest-first) → the first NON-SYNTHETIC user text', first?.id === 'msg_u1' && first.text === 'please read README.md and fix the typo' && verdictOf(mock.state.requests.slice(reqBefore).includes('GET /session/ses_a1/message')), first);
   ok('THE 2.369.42 RULE: naming NEVER touches the v2 per-session family (every /api/session/{id}/… route boots an OpenCode instance that indexes the session\'s whole directory tree — measured)', !mock.state.requests.some((r) => /^GET \/api\/session\/[^/?]+\//.test(r)) && mock.state.instances.size === 0, { reqs: mock.state.requests.filter((r) => r.includes('/api/session')), instances: [...mock.state.instances] });
   ok('…null when the session has no user message yet', (await c.firstUserMessage('ses_g1')) === null);
   let eBig = null; try { await c.firstUserMessage('ses_a1', { maxBytes: 64 }); } catch (e) { eBig = e; }
-  ok('the naming read is BYTE-CAPPED (six unbounded whole-conversation fetches into this process = an OOM): over the cap → code too-large, never a giant string', eBig?.code === 'too-large' && /exceeded 64 bytes/.test(eBig.message), eBig?.message);
+  ok('the naming read is BYTE-CAPPED (six unbounded whole-conversation fetches into this process = an OOM): over the cap → code too-large, never a giant string', eBig?.code === 'too-large' && verdictOf(/exceeded 64 bytes/.test(eBig.message)), eBig?.message);
   let e404 = null; try { await c.getSession('ses_nope'); } catch (e) { e404 = e; }
-  ok('404 → OpencodeServeError {status:404} carrying the server message', e404 instanceof serve.OpencodeServeError && e404.status === 404 && /Session not found/.test(e404.message), e404?.message);
+  ok('404 → OpencodeServeError {status:404} carrying the server message', e404 instanceof serve.OpencodeServeError && e404.status === 404 && verdictOf(/Session not found/.test(e404.message)), e404?.message);
   const forked = await c.fork('ses_a2', { directory: '/work/alpha/sub' });
-  ok('fork → POST /session/:id/fork?directory= → the new Session', forked.id === 'ses_a2_fork1' && /fork #1/.test(forked.title) && mock.state.requests.includes('POST /session/ses_a2/fork?directory=%2Fwork%2Falpha%2Fsub'));
+  ok('fork → POST /session/:id/fork?directory= → the new Session', forked.id === 'ses_a2_fork1' && gateOf(/fork #1/.test(forked.title)) && verdictOf(mock.state.requests.includes('POST /session/ses_a2/fork?directory=%2Fwork%2Falpha%2Fsub')));
   mock.state.hang = true;
   const t0 = Date.now(); let et = null; try { await c.listSessions({ timeoutMs: 300 }); } catch (e) { et = e; }
   // the budget's own word (lane wall-clock-ratchet-down: `< 1500 ms` judged the machine): the 300 ms abort answered
-  ok(`a hung serve → code timeout at the budget (${Date.now() - t0} ms)`, et?.code === 'timeout' && /timed out after 300ms/.test(et?.message || ''), et?.message);
+  ok(`a hung serve → code timeout at the budget (${Date.now() - t0} ms)`, et?.code === 'timeout' && verdictOf(/timed out after 300ms/.test(et?.message || '')), et?.message);
   mock.state.hang = false;
   const dead = new serve.OpencodeServeClient('http://127.0.0.1:1');
   let ec = null; try { await dead.health({ timeoutMs: 500 }); } catch (e) { ec = e; }
@@ -82,30 +82,30 @@ console.log('— ② acp-events synthesis + the real normalizer');
   const st = createMockState();
   const session = st.sessions.find((s) => s.id === 'ses_a1');
   const recs = serve.messagesToAcpRecords(st.messages.ses_a1, session);
-  ok('every record is {ts, type:acp, kind}', recs.every((r) => typeof r.ts === 'string' && r.type === 'acp' && typeof r.kind === 'string'));
+  ok('every record is {ts, type:acp, kind}', verdictOf(recs.every((r) => typeof r.ts === 'string' && r.type === 'acp' && typeof r.kind === 'string')));
   ok('session record: how serve, model provider/id, mode = agent, cwd = directory', recs[0].kind === 'session' && recs[0].how === 'serve' && recs[0].model === 'opencode/big-pickle' && recs[0].mode === 'build' && recs[0].cwd === '/work/alpha' && recs[0].sessionId === 'ses_a1', recs[0]);
   const users = recs.filter((r) => r.kind === 'user');
   ok('user messages → user records keyed by message id; non-synthetic text + a [file:] line; synthetic text dropped', users.length === 3 && users[0].msgId === 'msg_u1' && users[0].content[0].text === 'please read README.md and fix the typo\n[file: shot.png]' && users[2].content[0].text === 'try again', users.map((u) => u.content[0].text));
   const ups = recs.filter((r) => r.kind === 'update').map((r) => r.update);
   const thought = ups.find((u) => u.sessionUpdate === 'agent_thought_chunk');
-  ok('reasoning part → agent_thought_chunk', thought && thought.content.text === 'I should look at the file first.' && thought.messageId === 'prt_r1');
+  ok('reasoning part → agent_thought_chunk', gateOf(thought) && thought.content.text === 'I should look at the file first.' && thought.messageId === 'prt_r1');
   const texts = ups.filter((u) => u.sessionUpdate === 'agent_message_chunk');
   ok('text parts → agent_message_chunk per part (messageId = part id)', texts.length === 2 && texts[0].content.text === 'Found the typo, fixing it now.' && texts[0].messageId === 'prt_x1' && texts[1].content.text === 'Done.');
   const readCall = ups.find((u) => u.sessionUpdate === 'tool_call' && u.toolCallId === 'call_read_1');
   const readDone = ups.find((u) => u.sessionUpdate === 'tool_call_update' && u.toolCallId === 'call_read_1');
-  ok('completed tool part → tool_call (kind read, rawInput, locations) + tool_call_update completed with the output', readCall && readCall.kind === 'read' && readCall.status === 'in_progress' && readCall.rawInput.filePath === '/work/alpha/README.md' && readCall.rawInput.tool === 'read' && readCall.locations[0].path === '/work/alpha/README.md' && readCall.title === 'README.md' && readDone && readDone.status === 'completed' && readDone.content[0].content.text === '# Alpha\nTeh project', { readCall, readDone });
+  ok('completed tool part → tool_call (kind read, rawInput, locations) + tool_call_update completed with the output', gateOf(readCall) && readCall.kind === 'read' && readCall.status === 'in_progress' && readCall.rawInput.filePath === '/work/alpha/README.md' && readCall.rawInput.tool === 'read' && readCall.locations[0].path === '/work/alpha/README.md' && readCall.title === 'README.md' && gateOf(readDone) && readDone.status === 'completed' && readDone.content[0].content.text === '# Alpha\nTeh project', { readCall, readDone });
   const editDone = ups.find((u) => u.sessionUpdate === 'tool_call_update' && u.toolCallId === 'call_edit_1');
-  ok('errored edit part → tool_call_update failed with the error text + an Edit diff (oldString/newString)', editDone && editDone.status === 'failed' && editDone.content[0].content.text === 'permission denied' && editDone.content[1].type === 'diff' && editDone.content[1].oldText === 'Teh' && editDone.content[1].newText === 'The' && editDone.rawOutput === 'permission denied', editDone);
+  ok('errored edit part → tool_call_update failed with the error text + an Edit diff (oldString/newString)', gateOf(editDone) && editDone.status === 'failed' && editDone.content[0].content.text === 'permission denied' && editDone.content[1].type === 'diff' && editDone.content[1].oldText === 'Teh' && editDone.content[1].newText === 'The' && editDone.rawOutput === 'permission denied', editDone);
   const task = ups.find((u) => u.sessionUpdate === 'tool_call' && u.toolCallId === 'prt_t3');
-  ok('subtask part → a completed tool_call kind other titled Task: <description>', task && task.kind === 'other' && task.status === 'completed' && task.title === 'Task: typo sweep' && task.rawInput.agent === 'explore' && task.rawInput.model === 'opencode/big-pickle');
+  ok('subtask part → a completed tool_call kind other titled Task: <description>', gateOf(task) && task.kind === 'other' && task.status === 'completed' && task.title === 'Task: typo sweep' && task.rawInput.agent === 'explore' && task.rawInput.model === 'opencode/big-pickle');
   const bash = ups.find((u) => u.sessionUpdate === 'tool_call' && u.toolCallId === 'call_bash_1');
-  ok('a RUNNING tool part → tool_call in_progress and NO tool_call_update', bash && bash.kind === 'execute' && bash.status === 'in_progress' && bash.rawInput.command === 'npm test' && !ups.some((u) => u.sessionUpdate === 'tool_call_update' && u.toolCallId === 'call_bash_1'));
-  ok('compaction part → notice', recs.some((r) => r.kind === 'notice' && r.noticeKind === 'compaction' && r.text === 'Context compacted (automatic)'));
+  ok('a RUNNING tool part → tool_call in_progress and NO tool_call_update', gateOf(bash) && bash.kind === 'execute' && bash.status === 'in_progress' && bash.rawInput.command === 'npm test' && !ups.some((u) => u.sessionUpdate === 'tool_call_update' && u.toolCallId === 'call_bash_1'));
+  ok('compaction part → notice', verdictOf(recs.some((r) => r.kind === 'notice' && r.noticeKind === 'compaction' && r.text === 'Context compacted (automatic)')));
   const ends = recs.filter((r) => r.kind === 'prompt_end');
   ok('assistant end → prompt_end: completed = end_turn, MessageAbortedError = cancelled; a trailing user message gets none', ends.length === 2 && ends[0].promptId === 'msg_a1' && ends[0].stopReason === 'end_turn' && ends[1].promptId === 'msg_a2' && ends[1].stopReason === 'cancelled', ends);
   const cfg = recs.find((r) => r.kind === 'config');
   const cfgIdx = recs.indexOf(cfg), a2Idx = recs.findIndex((r) => r.kind === 'update' && r.update.toolCallId === 'call_bash_1');
-  ok('a model/agent switch between assistant messages → config record BEFORE that message', cfg && cfg.model === 'deepseek/deepseek-v4' && cfg.mode === 'plan' && cfgIdx < a2Idx && recs.filter((r) => r.kind === 'config').length === 1);
+  ok('a model/agent switch between assistant messages → config record BEFORE that message', gateOf(cfg) && cfg.model === 'deepseek/deepseek-v4' && cfg.mode === 'plan' && cfgIdx < a2Idx && recs.filter((r) => r.kind === 'config').length === 1);
   ok('step-start/step-finish are not rendered', !ups.some((u) => /step/.test(u.sessionUpdate)) && !recs.some((r) => /step/.test(r.kind)));
   ok('tool id → ACP kind map', serve.acpKindOfTool('read') === 'read' && serve.acpKindOfTool('grep') === 'search' && serve.acpKindOfTool('write') === 'edit' && serve.acpKindOfTool('bash') === 'execute' && serve.acpKindOfTool('webfetch') === 'fetch' && serve.acpKindOfTool('todowrite') === 'think' && serve.acpKindOfTool('mcp_github_search') === 'other' && serve.acpStatusOfState('running') === 'in_progress' && serve.acpStatusOfState('error') === 'failed');
   ok('sessionTitle: the "New session - <date>" placeholder names nothing, a real title does', serve.sessionTitle(session) === '' && serve.sessionTitle(st.sessions[1]) === 'Fix the flaky test');
@@ -114,13 +114,13 @@ console.log('— ② acp-events synthesis + the real normalizer');
   const mm = new AcpMessageManager('ses_a1');
   const msgs = mm.convertHistory(recs);
   const u = msgs.filter((m) => m.role === 'user');
-  ok('normalizer: 3 user bubbles in order', u.length === 3 && u[0].content[0].text.startsWith('please read README.md') && u[2].content[0].text === 'try again');
-  ok('normalizer: assistant text cards + a thinking block', msgs.some((m) => m.role === 'assistant' && m.content[0].type === 'text' && m.content[0].text === 'Found the typo, fixing it now.') && msgs.some((m) => m.role === 'assistant' && m.content[0].type === 'thinking' && /look at the file/.test(m.content[0].text)));
+  ok('normalizer: 3 user bubbles in order', u.length === 3 && gateOf(u[0].content[0].text.startsWith('please read README.md')) && u[2].content[0].text === 'try again');
+  ok('normalizer: assistant text cards + a thinking block', gateOf(msgs.some((m) => m.role === 'assistant' && m.content[0].type === 'text' && m.content[0].text === 'Found the typo, fixing it now.')) && verdictOf(msgs.some((m) => m.role === 'assistant' && m.content[0].type === 'thinking' && /look at the file/.test(m.content[0].text))));
   const rc = msgs.find((m) => m.role === 'tool' && m.toolCallId === 'call_read_1');
-  ok('normalizer: Read card complete with output, fold read', rc && rc.toolName === 'Read' && rc.status === 'complete' && rc.collapseKind === 'read' && /Teh project/.test(rc.content[0].output) && rc.content[0].input.file_path === '/work/alpha/README.md', rc);
+  ok('normalizer: Read card complete with output, fold read', gateOf(rc) && rc.toolName === 'Read' && rc.status === 'complete' && rc.collapseKind === 'read' && gateOf(/Teh project/.test(rc.content[0].output)) && rc.content[0].input.file_path === '/work/alpha/README.md', rc);
   const ec = msgs.find((m) => m.role === 'tool' && m.toolCallId === 'call_edit_1');
-  ok('normalizer: Edit card = error status with old/new strings', ec && ec.toolName === 'Edit' && ec.status === 'error' && ec.content[0].input.old_string === 'Teh' && ec.content[0].input.new_string === 'The', ec);
-  ok('normalizer: Task card completed, Bash card pending, Interrupted marker, compaction notice', msgs.some((m) => m.role === 'tool' && m.toolCallId === 'prt_t3' && m.status === 'complete') && msgs.some((m) => m.role === 'tool' && m.toolCallId === 'call_bash_1' && m.status === 'pending') && msgs.some((m) => m.role === 'system' && m.status === 'interrupted') && msgs.some((m) => m.role === 'system' && /Context compacted/.test(m.content[0].text)));
+  ok('normalizer: Edit card = error status with old/new strings', gateOf(ec) && ec.toolName === 'Edit' && ec.status === 'error' && ec.content[0].input.old_string === 'Teh' && ec.content[0].input.new_string === 'The', ec);
+  ok('normalizer: Task card completed, Bash card pending, Interrupted marker, compaction notice', gateOf(msgs.some((m) => m.role === 'tool' && m.toolCallId === 'prt_t3' && m.status === 'complete')) && gateOf(msgs.some((m) => m.role === 'tool' && m.toolCallId === 'call_bash_1' && m.status === 'pending')) && gateOf(msgs.some((m) => m.role === 'system' && m.status === 'interrupted')) && verdictOf(msgs.some((m) => m.role === 'system' && /Context compacted/.test(m.content[0].text))));
   const stt = mm.status();
   ok('normalizer status: the LAST model/mode (config record) — deepseek/deepseek-v4, plan', stt.model === 'deepseek/deepseek-v4' && stt.permissionMode === 'plan', stt);
   ok('turnMap: one entry per user turn', mm.turnMap().filter((t) => t.role === 'user').length === 3);
@@ -137,9 +137,9 @@ console.log('— ③ facts.discover / readConversation / forkSession');
   const facts = serve.createFacts(fakeLocator(client), { now: clock });
   const active = new Map([['w1', { backend: 'opencode', backendSessionId: 'ses_a2', name: 'my live one', mode: 'chat' }], ['w2', { backend: 'claude', claudeSessionId: 'x' }]]);
   const e1 = await facts.discover({ activeSessions: active });
-  ok('entries: backend/backendSessionId/sessionId/sessionKey/cwd/startedAt/status/name', e1.length === 4 && e1.every((e) => e.backend === 'opencode' && e.sessionId === e.backendSessionId && e.sessionKey === 'opencode:' + e.backendSessionId && typeof e.cwd === 'string' && typeof e.startedAt === 'number' && ['live', 'stopped'].includes(e.status) && typeof e.name === 'string'), e1[0]);
+  ok('entries: backend/backendSessionId/sessionId/sessionKey/cwd/startedAt/status/name', e1.length === 4 && verdictOf(e1.every((e) => e.backend === 'opencode' && e.sessionId === e.backendSessionId && e.sessionKey === 'opencode:' + e.backendSessionId && typeof e.cwd === 'string' && typeof e.startedAt === 'number' && ['live', 'stopped'].includes(e.status) && typeof e.name === 'string')), e1[0]);
   const live = e1.find((e) => e.backendSessionId === 'ses_a2');
-  ok('a session held by a LIVE opencode webui session is live with its webui id/name/mode', live && live.status === 'live' && live.webuiId === 'w1' && live.webuiName === 'my live one' && live.webuiMode === 'chat' && e1.filter((e) => e.status === 'live').length === 1, live);
+  ok('a session held by a LIVE opencode webui session is live with its webui id/name/mode', gateOf(live) && live.status === 'live' && live.webuiId === 'w1' && live.webuiName === 'my live one' && live.webuiMode === 'chat' && e1.filter((e) => e.status === 'live').length === 1, live);
   ok('a child session (parentID) is a subagent with parentThreadId; roots are primary', e1.find((e) => e.backendSessionId === 'ses_child').agentKind === 'subagent' && e1.find((e) => e.backendSessionId === 'ses_child').parentThreadId === 'ses_a2' && e1.find((e) => e.backendSessionId === 'ses_a1').agentKind === 'primary');
   ok('sorted by updated time desc; cwd = directory', e1.map((e) => e.backendSessionId).join() === 'ses_g1,ses_a2,ses_child,ses_a1' && e1[0].cwd === '/tmp/x');
   ok('before the first-message lookup lands: the OpenCode title names a session, the placeholder names nothing', e1.find((e) => e.backendSessionId === 'ses_a1').name === '' && e1.find((e) => e.backendSessionId === 'ses_a2').name === 'Fix the flaky test');
@@ -147,11 +147,11 @@ console.log('— ③ facts.discover / readConversation / forkSession');
   const reqCount = mock.state.requests.length;
   const e2 = await facts.discover({ activeSessions: new Map() });
   ok('a second discover inside 10s is served from the cache (zero requests)', mock.state.requests.length === reqCount && e2.length === 4);
-  ok('names = nameFromText(first user message) via the v1 list; a session without one keeps the title fallback', e2.find((e) => e.backendSessionId === 'ses_a1').name === 'please read README.md and fix the typo' && e2.find((e) => e.backendSessionId === 'ses_a2').name === 'Fix the flaky test in ci' && e2.find((e) => e.backendSessionId === 'ses_g1').name === '' && mock.state.requests.includes('GET /session/ses_a1/message'), e2.map((e) => e.name));
+  ok('names = nameFromText(first user message) via the v1 list; a session without one keeps the title fallback', e2.find((e) => e.backendSessionId === 'ses_a1').name === 'please read README.md and fix the typo' && e2.find((e) => e.backendSessionId === 'ses_a2').name === 'Fix the flaky test in ci' && e2.find((e) => e.backendSessionId === 'ses_g1').name === '' && verdictOf(mock.state.requests.includes('GET /session/ses_a1/message')), e2.map((e) => e.name));
   ok('a WHOLE discovery tick (list + names) bootstraps ZERO OpenCode instances — the 2.369.42 regression gate', mock.state.instances.size === 0 && !mock.state.requests.some((r) => /^GET \/api\/session\/[^/?]+\//.test(r)) && !mock.state.requests.some((r) => r.includes('directory=%2F&scope=project')), { instances: [...mock.state.instances], v2: mock.state.requests.filter((r) => r.includes('/api/session/')) });
   now += 11000; mock.state.fail = true;
   const e3 = await facts.discover({ activeSessions: new Map() });
-  ok('a failing refresh keeps the LAST GOOD list (silent in the poll)', e3.length === 4 && /HTTP 500/.test(facts.state().lastError || ''), facts.state().lastError);
+  ok('a failing refresh keeps the LAST GOOD list (silent in the poll)', e3.length === 4 && verdictOf(/HTTP 500/.test(facts.state().lastError || '')), facts.state().lastError);
   const rc = mock.state.requests.length; now += 5000;
   await facts.discover({});
   ok('negative cache: no request for 10s after a failure', mock.state.requests.length === rc);
@@ -159,16 +159,16 @@ console.log('— ③ facts.discover / readConversation / forkSession');
   const t0 = Date.now(); const e4 = await facts.discover({}); const dt = Date.now() - t0;
   // the poll's own budget answered (lane wall-clock-ratchet-down: `dt < 2000` judged the machine): the list request
   // timed out on the client's timer and the last good list came back with that error said
-  ok(`a HUNG serve: discover resolves with the last good list (${dt}ms) — the poll never stalls`, e4.length === 4 && /timed out after \d+ms/.test(facts.state().lastError || ''), facts.state().lastError);
+  ok(`a HUNG serve: discover resolves with the last good list (${dt}ms) — the poll never stalls`, e4.length === 4 && verdictOf(/timed out after \d+ms/.test(facts.state().lastError || '')), facts.state().lastError);
   mock.state.hang = false;
   now += 11000;
   const conv = await facts.readConversation('ses_a1');
   ok('readConversation → {session, messages, records}', conv.session.id === 'ses_a1' && conv.messages.length === 5 && conv.records.length > 10 && conv.records[0].kind === 'session');
   let e404 = null; try { await facts.readConversation('ses_nope'); } catch (e) { e404 = e; }
-  ok('a missing conversation is LOUD (user action) with the status', e404 instanceof serve.OpencodeServeError && e404.status === 404 && /could not be read/.test(e404.message), e404?.message);
+  ok('a missing conversation is LOUD (user action) with the status', e404 instanceof serve.OpencodeServeError && e404.status === 404 && verdictOf(/could not be read/.test(e404.message)), e404?.message);
   const f = await facts.forkSession('ses_a1', { cwd: '/work/alpha' });
-  ok('forkSession → POST fork with the directory → the new session; the list cache is invalidated', f.id === 'ses_a1_fork1' && mock.state.requests.includes('POST /session/ses_a1/fork?directory=%2Fwork%2Falpha') && (await facts.discover({})).some((e) => e.backendSessionId === 'ses_a1_fork1'));
-  ok('…and DISPOSES the instance for that directory afterwards (fork is the one call that hands a directory to a mutating endpoint)', mock.state.disposed.includes('/work/alpha') && mock.state.requests.includes('POST /instance/dispose?directory=%2Fwork%2Falpha'), mock.state.disposed);
+  ok('forkSession → POST fork with the directory → the new session; the list cache is invalidated', f.id === 'ses_a1_fork1' && gateOf(mock.state.requests.includes('POST /session/ses_a1/fork?directory=%2Fwork%2Falpha')) && verdictOf((await facts.discover({})).some((e) => e.backendSessionId === 'ses_a1_fork1')));
+  ok('…and DISPOSES the instance for that directory afterwards (fork is the one call that hands a directory to a mutating endpoint)', gateOf(mock.state.disposed.includes('/work/alpha')) && verdictOf(mock.state.requests.includes('POST /instance/dispose?directory=%2Fwork%2Falpha')), mock.state.disposed);
   // ── readConfig: the READ-ONLY permission-rule source (owner ruling 10) ──
   // THE ROUTE LAW, re-measured on a real 1.18.29 serve (2026-09-07, /proc):
   // v1 `GET /config` left it at threads 15, inotify fds 0, RSS flat across
@@ -180,7 +180,7 @@ console.log('— ③ facts.discover / readConversation / forkSession');
     const before = mock.state.requests.length;
     const cfg = await facts.readConfig();
     ok('readConfig reads the v1 GET /config (the permission block, verbatim)',
-      cfg?.permission?.edit === 'allow' && cfg.permission.bash['git push*'] === 'deny' && mock.state.requests.slice(before).some((r) => r.startsWith('GET /config')), mock.state.requests.slice(before));
+      cfg?.permission?.edit === 'allow' && cfg.permission.bash['git push*'] === 'deny' && verdictOf(mock.state.requests.slice(before).some((r) => r.startsWith('GET /config'))), mock.state.requests.slice(before));
     ok('…and boots ZERO OpenCode instances — the v2 `/api/permission/saved` twin is never called (measured: it takes one serve from 13→37 threads, 0→2 inotify fds, 345→507 MB)',
       mock.state.instances.size === 0 && !mock.state.requests.some((r) => r.includes('/api/permission')), { instances: [...mock.state.instances], perm: mock.state.requests.filter((r) => r.includes('permission')) });
     const n2 = mock.state.requests.length;
@@ -188,7 +188,7 @@ console.log('— ③ facts.discover / readConversation / forkSession');
     ok('a second read inside the cache window is free (a config does not change between two clicks)', mock.state.requests.length === n2);
     mock.state.fail = true; facts.invalidate();
     let ec = null; try { await facts.readConfig(); } catch (e) { ec = e; }
-    ok('a FAILING read is LOUD (user action) — never a silent "this agent has no rules"', ec instanceof serve.OpencodeServeError && /config could not be read/.test(ec.message), ec?.message);
+    ok('a FAILING read is LOUD (user action) — never a silent "this agent has no rules"', ec instanceof serve.OpencodeServeError && verdictOf(/config could not be read/.test(ec.message)), ec?.message);
     mock.state.fail = false;
     const cfg2 = await facts.readConfig();
     ok('…and it is NOT negative-cached: the next click after fixing the serve gets the real answer', cfg2?.permission?.edit === 'allow');
@@ -203,19 +203,19 @@ console.log('— ③ facts.discover / readConversation / forkSession');
     // rejected), so a raw grep would pin the warning instead of the code.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
     ok('the module\'s CODE contains no `/api/` route string at all (the v2 family is named only in comments), and its config call is a GET — never the `/config` PATCH write twin (ruling 10 is read-only)',
-      !/['"`]\/api\//.test(code) && /\/api\//.test(src) && /this\.request\('GET', '\/config'/.test(code) && !/request\('(PATCH|POST|PUT|DELETE)', ?'\/config/.test(code),
+      !/['"`]\/api\//.test(code) && gateOf(/\/api\//.test(src)) && gateOf(/this\.request\('GET', '\/config'/.test(code)) && !/request\('(PATCH|POST|PUT|DELETE)', ?'\/config/.test(code),
       (code.match(/['"`]\/api\/[^'"`]*/g) || []).join(' | '));
   }
   const facts2 = serve.createFacts(fakeLocator(client, { caps: { fork: false }, version: '1.10.0' }), { now: clock });
   let ef = null; try { await facts2.forkSession('ses_a1'); } catch (e) { ef = e; }
-  ok('forkSession is REFUSED (code unsupported) when the serve OpenAPI has no fork endpoint', ef?.code === 'unsupported' && /no session fork endpoint/.test(ef.message) && /1\.10\.0/.test(ef.message), ef?.message);
+  ok('forkSession is REFUSED (code unsupported) when the serve OpenAPI has no fork endpoint', ef?.code === 'unsupported' && gateOf(/no session fork endpoint/.test(ef.message)) && verdictOf(/1\.10\.0/.test(ef.message)), ef?.message);
   const facts3 = serve.createFacts({ client: async () => null, ensure: async () => null, state: () => ({ installed: false, parked: false }), invalidate() { }, stop() { }, command: () => null }, { now: clock });
   ok('no CLI → discover [] silently', (await facts3.discover({})).length === 0);
   let eu = null; try { await facts3.readConversation('ses_a1'); } catch (e) { eu = e; }
-  ok('…but a user action says WHY (not installed, how to fix)', /not installed/.test(eu?.message) && /OPENCODE_CMD/.test(eu?.message), eu?.message);
+  ok('…but a user action says WHY (not installed, how to fix)', gateOf(/not installed/.test(eu?.message)) && verdictOf(/OPENCODE_CMD/.test(eu?.message)), eu?.message);
   const facts4 = serve.createFacts({ client: async () => null, ensure: async () => null, state: () => ({ installed: true, parked: true, crashes: 5, lastError: 'opencode serve exited (code 3)' }), invalidate() { }, stop() { }, command: () => '/x' }, { now: clock });
   let ep = null; try { await facts4.forkSession('ses_a1'); } catch (e) { ep = e; }
-  ok('a PARKED keeper: discover [] silently, fork says parked after N crashes', (await facts4.discover({})).length === 0 && /parked after 5 crashes/.test(ep?.message), ep?.message);
+  ok('a PARKED keeper: discover [] silently, fork says parked after N crashes', (await facts4.discover({})).length === 0 && verdictOf(/parked after 5 crashes/.test(ep?.message)), ep?.message);
   await mock.close();
 }
 
@@ -232,7 +232,7 @@ console.log('— ④ locator / keeper');
   const c1 = await loc.client({ budgetMs: 3000 });
   ok('a recorded instance that answers /global/health is REUSED (no spawn)', !!c1 && loc.state().source === 'reused' && spawns === 0 && loc.state().port === mock.port && loc.state().ready === true, loc.state());
   ok('…and its OpenAPI is probed once: fork verdict true (1.18.29 carries POST /session/{sessionID}/fork); version from /global/health', capsSeen?.fork === true && loc.state().caps.fork === true && loc.state().version === '1.18.29' && loc.state().capsProbed === true);
-  ok('stop() on a reused instance never kills a process it did not spawn', (loc.stop(), pidAlive(process.pid)));
+  ok('stop() on a reused instance never kills a process it did not spawn', verdictOf((loc.stop(), pidAlive(process.pid))));
   await mock.close();
   // dead record → spawn a fresh one (mock child), wait for health, write the record, probe caps (no fork this time)
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-loc-'));
@@ -251,7 +251,7 @@ console.log('— ④ locator / keeper');
   // the cwd (git walk UP, else the '/' catch-all) and indexes that tree
   const wantCwd = path.join(dir2, 'opencode-serve', 'cwd');
   ok('the serve is spawned from ITS OWN data/opencode-serve/cwd — never the server process cwd/$HOME (2.369.42 ran with cwd=$HOME ⇒ project "/")', spawnOpts.length === 1 && spawnOpts[0].cwd === wantCwd && loc2.state().cwd === wantCwd && spawnOpts[0].cwd !== os.homedir(), spawnOpts[0]);
-  ok('…and that directory is EMPTY and its own throwaway git repo (a plain dir inside a checkout resolves the WHOLE checkout — measured; a fake .git does not stop the walk)', fs.existsSync(path.join(wantCwd, '.git')) && fs.readdirSync(wantCwd).filter((f) => f !== '.git').length === 0 && loc2.state().cwdIsolated === true && fs.existsSync(path.join(dir2, 'opencode-serve', 'README.txt')));
+  ok('…and that directory is EMPTY and its own throwaway git repo (a plain dir inside a checkout resolves the WHOLE checkout — measured; a fake .git does not stop the walk)', gateOf(fs.existsSync(path.join(wantCwd, '.git'))) && fs.readdirSync(wantCwd).filter((f) => f !== '.git').length === 0 && loc2.state().cwdIsolated === true && verdictOf(fs.existsSync(path.join(dir2, 'opencode-serve', 'README.txt'))));
   const rec = JSON.parse(fs.readFileSync(path.join(dir2, 'opencode-serve.json'), 'utf8'));
   ok('data/opencode-serve.json = {port, pid, startedAt, command, cwd}', rec.port === loc2.state().port && rec.pid === loc2.state().pid && rec.startedAt > 0 && rec.command === 'opencode' && rec.cwd === wantCwd, rec);
   ok('an OpenAPI WITHOUT the fork path → fork verdict false', caps2?.fork === false && loc2.state().caps.fork === false);
@@ -259,7 +259,7 @@ console.log('— ④ locator / keeper');
   const pid2 = loc2.state().pid;
   loc2.stop();
   let gone = false; for (let i = 0; i < 40 && !gone; i++) { await sleep(50); gone = !pidAlive(pid2); }
-  ok('stop() kills the spawned serve and clears the record', gone && !fs.existsSync(path.join(dir2, 'opencode-serve.json')) && loc2.state().ready === false);
+  ok('stop() kills the spawned serve and clears the record', gateOf(gone) && !fs.existsSync(path.join(dir2, 'opencode-serve.json')) && loc2.state().ready === false);
   ok('after stop(), client() stays null (no respawn)', (await loc2.client({ budgetMs: 200 })) === null);
   // crash loop → backoff → parked
   const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-loc-'));
@@ -267,18 +267,18 @@ console.log('— ④ locator / keeper');
   const loc3 = serve.createServeLocator({ dataDir: dir3, command: 'opencode', log: { warn: (m) => warned.push(m), error: (m) => warned.push(m), log() { } }, spawnImpl: spawnMock, env: () => ({ MOCK_OPENCODE_CRASH: '1' }), bootTimeoutMs: 3000, backoffBaseMs: 5, maxCrashes: 3 });
   const c4 = await loc3.ensure();
   let parked = false; for (let i = 0; i < 100 && !parked; i++) { await sleep(50); parked = loc3.state().parked; }
-  ok('a serve that exits at once: respawn with backoff, PARKED after maxCrashes', c4 === null && parked && loc3.state().crashes >= 3 && /exited/.test(loc3.state().lastError) && warned.some((m) => /respawn in \d+ms/.test(m)) && warned.some((m) => /PARKED after/.test(m)), { state: loc3.state(), warned });
-  ok('parked → client() null; a user action through the facts says parked', (await loc3.client({ budgetMs: 200 })) === null && await serve.createFacts(loc3).forkSession('x').then(() => false, (e) => /parked after 3 crashes/.test(e.message)));
+  ok('a serve that exits at once: respawn with backoff, PARKED after maxCrashes', c4 === null && gateOf(parked) && loc3.state().crashes >= 3 && gateOf(/exited/.test(loc3.state().lastError)) && gateOf(warned.some((m) => /respawn in \d+ms/.test(m))) && verdictOf(warned.some((m) => /PARKED after/.test(m))), { state: loc3.state(), warned });
+  ok('parked → client() null; a user action through the facts says parked', (await loc3.client({ budgetMs: 200 })) === null && verdictOf(await serve.createFacts(loc3).forkSession('x').then(() => false, (e) => /parked after 3 crashes/.test(e.message))));
   ok('the crash loop leaves no record behind', !fs.existsSync(path.join(dir3, 'opencode-serve.json')));
   // no CLI → nothing to start
   const dir4 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-loc-'));
   const loc4 = serve.createServeLocator({ dataDir: dir4, command: null, log: null, spawnImpl: () => { throw new Error('must not spawn'); } });
-  ok('no opencode CLI → client() null with the reason, never a spawn', (await loc4.client()) === null && /not installed/.test(loc4.state().lastError) && loc4.state().installed === false);
+  ok('no opencode CLI → client() null with the reason, never a spawn', (await loc4.client()) === null && gateOf(/not installed/.test(loc4.state().lastError)) && loc4.state().installed === false);
   // autostart off (smoke harnesses): reuse a recorded instance, never spawn
   const dir5 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-loc-'));
   let spawns5 = 0;
   const loc5 = serve.createServeLocator({ dataDir: dir5, command: '/usr/bin/opencode', log: null, autostart: false, spawnImpl: () => { spawns5++; throw new Error('must not spawn'); } });
-  ok('autostart:false → no spawn, the reason names the PLUGIN (the switch since 2026-09-07)', (await loc5.client()) === null && spawns5 === 0 && /background service is off/.test(loc5.state().lastError) && /⚙ → Plugins/.test(loc5.state().lastError) && loc5.state().autostart === false);
+  ok('autostart:false → no spawn, the reason names the PLUGIN (the switch since 2026-09-07)', (await loc5.client()) === null && spawns5 === 0 && gateOf(/background service is off/.test(loc5.state().lastError)) && gateOf(/⚙ → Plugins/.test(loc5.state().lastError)) && loc5.state().autostart === false);
   const mock5 = await startMockServe();
   fs.writeFileSync(path.join(dir5, 'opencode-serve.json'), JSON.stringify({ port: mock5.port, pid: process.pid, startedAt: Date.now() }));
   ok('…but a recorded live instance is still reused', !!(await loc5.client({ budgetMs: 3000 })) && loc5.state().source === 'reused' && spawns5 === 0);
@@ -287,7 +287,7 @@ console.log('— ④ locator / keeper');
   const dir5b = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-loc-'));
   let allow = false;
   const loc5b = serve.createServeLocator({ dataDir: dir5b, command: 'opencode', log: null, autostart: () => allow, spawnImpl: spawnMock, env: () => ({}), bootTimeoutMs: 15000 });
-  ok('autostart accepts a FUNCTION (the plugin record, read live): false → no spawn and the reason names the plugin', (await loc5b.client()) === null && loc5b.state().autostart === false && /"OpenCode background service" plugin/.test(loc5b.state().lastError));
+  ok('autostart accepts a FUNCTION (the plugin record, read live): false → no spawn and the reason names the plugin', (await loc5b.client()) === null && loc5b.state().autostart === false && verdictOf(/"OpenCode background service" plugin/.test(loc5b.state().lastError)));
   allow = true;
   ok('…enabling the plugin lets the very next ensure() start it (no restart)', !!(await loc5b.ensure()) && loc5b.state().source === 'spawned' && loc5b.state().autostart === true, loc5b.state());
   loc5b.stop();
@@ -303,9 +303,9 @@ console.log('— ④ locator / keeper');
   const warned6 = [];
   const loc6 = serve.createServeLocator({ dataDir: dir6, command: 'opencode', log: { warn: (m) => warned6.push(m), error: (m) => warned6.push(m), log() { } }, spawnImpl: spawnMock, env: () => ({}), bootTimeoutMs: 15000 });
   const c6 = await loc6.ensure();
-  ok('BOOT SELF-HEAL: a recorded serve whose GET /project/current worktree is "/" is NOT adopted — it is SIGTERMed and a fresh one spawns from the isolated cwd', !!c6 && loc6.state().source === 'spawned' && loc6.state().port !== leftoverPort && loc6.state().cwd === path.join(dir6, 'opencode-serve', 'cwd') && warned6.some((m) => /replacing the recorded serve/.test(m) && /WHOLE filesystem/.test(m)), { st: loc6.state(), warned6 });
+  ok('BOOT SELF-HEAL: a recorded serve whose GET /project/current worktree is "/" is NOT adopted — it is SIGTERMed and a fresh one spawns from the isolated cwd', !!c6 && loc6.state().source === 'spawned' && loc6.state().port !== leftoverPort && loc6.state().cwd === path.join(dir6, 'opencode-serve', 'cwd') && verdictOf(warned6.some((m) => /replacing the recorded serve/.test(m) && /WHOLE filesystem/.test(m))), { st: loc6.state(), warned6 });
   let dead6 = false; for (let i = 0; i < 40 && !dead6; i++) { await sleep(50); dead6 = !pidAlive(leftover.pid); }
-  ok('…and the leftover process is actually gone', dead6);
+  ok('…and the leftover process is actually gone', verdictOf(dead6));
   loc6.stop();
   // a HEALTHY record whose worktree is safe is still reused (no churn), and a probe failure never churns
   const dir7 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-loc-'));
@@ -336,14 +336,14 @@ console.log('— ④ locator / keeper');
   ok('165% CPU for 4 minutes is NOT yet a runaway (the bound is SUSTAINED, not a spike)', !loc8.state().parked, loc8.state());
   tick(60000, 165);                                       // …the 5-minute mark
   const st8 = loc8.state();
-  ok('>150% CPU sustained ≥5 min → the serve is STOPPED and the locator is parked:runaway with the numbers in the reason', st8.parked === true && st8.parkedKind === 'runaway' && /165% CPU sustained for 5 min/.test(st8.lastError) && st8.ready === false && killed8 === 1 && !fs.existsSync(path.join(dir8, 'opencode-serve.json')), st8);
-  ok('…telemetry fires ONCE as opencode-serve-runaway with the detail, and the console says WHY + what to turn off', tele8.length === 1 && tele8[0].name === 'opencode-serve-runaway' && /165% CPU/.test(tele8[0].detail) && errs8.some((m) => /RUNAWAY/.test(m) && /"OpenCode background service" plugin/.test(m)), { tele8, errs8 });
-  ok('…the parked state is PUSHED (onState) so the harness reason reaches open clients', states8.some((s) => s.parked && s.parkedKind === 'runaway'));
-  ok('a parked runaway refuses to restart inside the cooldown; the store reason names the runaway (no silent failure)', (await loc8.client({ budgetMs: 200 })) === null && /RUNAWAY/.test(serve.createFacts(loc8).reasonUnavailable()) && /not restart for up to an hour/i.test(serve.createFacts(loc8).reasonUnavailable()), serve.createFacts(loc8).reasonUnavailable());
+  ok('>150% CPU sustained ≥5 min → the serve is STOPPED and the locator is parked:runaway with the numbers in the reason', st8.parked === true && st8.parkedKind === 'runaway' && gateOf(/165% CPU sustained for 5 min/.test(st8.lastError)) && st8.ready === false && killed8 === 1 && !fs.existsSync(path.join(dir8, 'opencode-serve.json')), st8);
+  ok('…telemetry fires ONCE as opencode-serve-runaway with the detail, and the console says WHY + what to turn off', tele8.length === 1 && tele8[0].name === 'opencode-serve-runaway' && gateOf(/165% CPU/.test(tele8[0].detail)) && verdictOf(errs8.some((m) => /RUNAWAY/.test(m) && /"OpenCode background service" plugin/.test(m))), { tele8, errs8 });
+  ok('…the parked state is PUSHED (onState) so the harness reason reaches open clients', verdictOf(states8.some((s) => s.parked && s.parkedKind === 'runaway')));
+  ok('a parked runaway refuses to restart inside the cooldown; the store reason names the runaway (no silent failure)', (await loc8.client({ budgetMs: 200 })) === null && gateOf(/RUNAWAY/.test(serve.createFacts(loc8).reasonUnavailable())) && verdictOf(/not restart for up to an hour/i.test(serve.createFacts(loc8).reasonUnavailable())), serve.createFacts(loc8).reasonUnavailable());
   tick(30 * 60000, 0);
   ok('…still refuses 30 min later (at most ONE respawn per hour)', (await loc8.client({ budgetMs: 200 })) === null && loc8.state().parked === true);
   t8 += 31 * 60000;
-  ok('…and after the hour it tries exactly once more (the record is gone, so it takes the spawn rung)', (await loc8.client({ budgetMs: 500 })) === null && loc8.state().parked === false && /must not spawn/.test(loc8.state().lastError || ''), loc8.state());
+  ok('…and after the hour it tries exactly once more (the record is gone, so it takes the spawn rung)', (await loc8.client({ budgetMs: 500 })) === null && loc8.state().parked === false && verdictOf(/must not spawn/.test(loc8.state().lastError || '')), loc8.state());
   loc8.stop(); await mock8.close();
   // the RSS bound trips at once (no sustain window)
   const dir9 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-loc-'));
@@ -360,8 +360,8 @@ console.log('— ④ locator / keeper');
   ok('a SUMMED-RSS-only reading of 5.0 GB is recorded but NOT judged — the serve runs on (the metric the Chrome incident lied with)', !loc9.state().parked && loc9.state().memMetric === 'rss' && tele9.length === 0, loc9.state());
   proc9 = { cpuTicks: 0, memBytes: 5.0 * 2 ** 30, memMetric: 'pss', rssBytes: 5.3 * 2 ** 30 };
   t9 += 60000; loc9._sampleGuard();
-  ok('a FOOTPRINT (PSS) past the bound STOPS the headless serve on the FIRST sample (the owner\'s instance sat at 5.0 GB) — no sustain window, `why` names the metric', loc9.state().parked && loc9.state().parkedKind === 'runaway' && /memory \(PSS\) 5\.0 GB \(limit 2\.0 GB\)/.test(loc9.state().lastError) && tele9.length === 1 && tele9[0].value === 5120, loc9.state());
-  ok('an unreadable /proc (a reused instance on another machine, a vanished pid) never parks anything', (() => { const l = serve.createServeLocator({ dataDir: dir9, command: 'opencode', log: null, guardSampleMs: 0, readProc: () => null }); l._sampleGuard(); const s = l.state(); l.stop(); return !s.parked && s.cpuPct === null; })());
+  ok('a FOOTPRINT (PSS) past the bound STOPS the headless serve on the FIRST sample (the owner\'s instance sat at 5.0 GB) — no sustain window, `why` names the metric', gateOf(loc9.state().parked) && loc9.state().parkedKind === 'runaway' && gateOf(/memory \(PSS\) 5\.0 GB \(limit 2\.0 GB\)/.test(loc9.state().lastError)) && tele9.length === 1 && tele9[0].value === 5120, loc9.state());
+  ok('an unreadable /proc (a reused instance on another machine, a vanished pid) never parks anything', verdictOf((() => { const l = serve.createServeLocator({ dataDir: dir9, command: 'opencode', log: null, guardSampleMs: 0, readProc: () => null }); l._sampleGuard(); const s = l.state(); l.stop(); return !s.parked && s.cpuPct === null; })()));
   loc9.stop(); await mock9.close();
   for (const d of [dir, dir2, dir3, dir4, dir5, dir5b, dir6, dir7, dir8, dir9]) fs.rmSync(d, { recursive: true, force: true });
 }
@@ -374,7 +374,7 @@ console.log('— ⑤ serve-backed reader + the harness store contract');
   const h = require(path.join(REPO, 'src/harnesses/opencode.js'));
   ok('descriptor store: discover/createReader/forkSession/no forkChain/locate(null)/SessionMessages', typeof h.store.discover === 'function' && typeof h.store.createReader === 'function' && typeof h.store.forkSession === 'function' && !('forkChain' in h.store) && h.store.locate('ses_a1', '/x') === null);
   const entries = await h.store.discover({ activeSessions: new Map() });
-  ok('descriptor discover reads the INSTALLED facts (4 entries)', entries.length === 4 && entries.every((e) => e.backend === 'opencode'));
+  ok('descriptor discover reads the INSTALLED facts (4 entries)', entries.length === 4 && verdictOf(entries.every((e) => e.backend === 'opencode')));
   const rd = h.store.createReader({ backend: 'opencode', backendSessionId: 'ses_a1', cwd: '/work/alpha', buffer: '' }, undefined, { buffersDir: os.tmpdir(), live: false });
   ok('the STOPPED (synthetic) shape: a serve-backed reader, empty until prepare()', rd instanceof serve.OpencodeServeSessionMessages && rd.source === 'serve' && rd.total === 0 && rd.chatStatus() === null);
   await rd.prepare();
@@ -391,10 +391,10 @@ console.log('— ⑤ serve-backed reader + the harness store contract');
   await mock.close(); facts.invalidate();
   const rd2 = h.store.createReader({ backend: 'opencode', backendSessionId: 'ses_a1', buffer: '' }, undefined, { live: false });
   let er = null; try { await rd2.prepare(); } catch (e) { er = e; }
-  ok('serve down while a user opens a stopped conversation → prepare() throws (LOUD, reaches the route error)', er instanceof serve.OpencodeServeError && /could not be read/.test(er.message), er?.message);
+  ok('serve down while a user opens a stopped conversation → prepare() throws (LOUD, reaches the route error)', er instanceof serve.OpencodeServeError && verdictOf(/could not be read/.test(er.message)), er?.message);
   serve.uninstall();
   let en = null; try { await h.store.forkSession('ses_a1'); } catch (e) { en = e; }
-  ok('uninstalled (no cli-env wiring, e.g. a bare require): discover [] silently, fork says not configured', (await h.store.discover({})).length === 0 && /not configured/.test(en?.message));
+  ok('uninstalled (no cli-env wiring, e.g. a bare require): discover [] silently, fork says not configured', (await h.store.discover({})).length === 0 && verdictOf(/not configured/.test(en?.message)));
 }
 
 console.log('— ⑥ caps verdict');
@@ -410,9 +410,9 @@ console.log('— ⑥ caps verdict');
   const rowOf = (src, id) => { const i = src.indexOf(`\n  ${id}: {`); if (i < 0) return ''; const e = src.indexOf('\n  },', i); return e < 0 ? '' : src.slice(i, e); };
   const ocRow = rowOf(capsSrc, 'opencode');
   ok('shipped verdict: capsOf(opencode).fork is false until the serve OpenAPI proves it (row-scoped source pin, layout-independent)',
-    capsOf('opencode').fork === false && /\bfork: false\b/.test(ocRow) && /streamProtocol: 'acp-events'/.test(ocRow), ocRow.slice(0, 200));
+    capsOf('opencode').fork === false && gateOf(/\bfork: false\b/.test(ocRow)) && verdictOf(/streamProtocol: 'acp-events'/.test(ocRow)), ocRow.slice(0, 200));
   ok('…NEGATIVE CONTROL: the row extractor is bounded and the pin catches a flipped declaration (a `fork: true` planted in the row fails; the claude row is a different row)',
-    /\bfork: true\b/.test(ocRow.replace('fork: false', 'fork: true')) && !/streamProtocol: 'acp-events'/.test(rowOf(capsSrc, 'claude')) && rowOf(capsSrc, 'nosuch') === '');
+    gateOf(/\bfork: true\b/.test(ocRow.replace('fork: false', 'fork: true'))) && !/streamProtocol: 'acp-events'/.test(rowOf(capsSrc, 'claude')) && rowOf(capsSrc, 'nosuch') === '');
   ok('setVerifiedCap flips the SAME row object the descriptor holds', setVerifiedCap('opencode', 'fork', true) === true && capsOf('opencode').fork === true && h.caps === capsOf('opencode') && h.caps.fork === true && BACKEND_CAPS.opencode.fork === true);
   ok('setVerifiedCap refuses an unknown backend or key (returns false, no row grows)', setVerifiedCap('gemini', 'fork', true) === false && setVerifiedCap('claude', 'nope', 1) === false && !('nope' in BACKEND_CAPS.claude));
   setVerifiedCap('opencode', 'fork', false);
@@ -421,39 +421,39 @@ console.log('— ⑥ caps verdict');
 console.log('— ⑦ wiring pins');
 {
   const ce = read('src/server/cli-env.js');
-  ok('cli-env installs the locator ONCE: data dir, resolved opencode command, agentEnv, stopOnExit, caps verdict + harness-caps-updated broadcast', /const opencodeServeModule = require\('\.\.\/opencode-serve'\);/.test(ce) && /opencodeServeModule\.install\(\{/.test(ce) && /command: \(\) => ACP_COMMANDS\.opencode \|\| null/.test(ce) && /env: \(\) => require\('\.\.\/ws-handler'\)\.agentEnv\(\)/.test(ce) && /stopOnExit: true/.test(ce) && /setVerifiedCap\('opencode', 'fork', !!caps\.fork\)/.test(ce) && /type: 'harness-caps-updated', backend: 'opencode', caps: \{ fork: !!caps\.fork \}/.test(ce) && /dataDir: path\.join\(rootDir, 'data'\)/.test(ce));
-  ok('autostart is DECIDED ONCE in the shared module (env override > the plugin record) and cli-env only wires the plugin half through a function, so enabling takes effect without a restart', /opencodeServeModule\.decideAutostart\(\{/.test(ce) && /pluginWantsUp: .*getPlugins\(\)\?\.wantsServiceUp\?\.\(opencodeServeModule\.SERVICE_PLUGIN_ID\)/.test(ce) && /autostart: opencodeServeAutostart,/.test(ce) && !/process\.env\.VIBESPACE_SKIP_AGENT_HOOKS/.test(ce) && !/getSetting\(/.test(ce));
+  ok('cli-env installs the locator ONCE: data dir, resolved opencode command, agentEnv, stopOnExit, caps verdict + harness-caps-updated broadcast', gateOf(/const opencodeServeModule = require\('\.\.\/opencode-serve'\);/.test(ce)) && gateOf(/opencodeServeModule\.install\(\{/.test(ce)) && gateOf(/command: \(\) => ACP_COMMANDS\.opencode \|\| null/.test(ce)) && gateOf(/env: \(\) => require\('\.\.\/ws-handler'\)\.agentEnv\(\)/.test(ce)) && gateOf(/stopOnExit: true/.test(ce)) && gateOf(/setVerifiedCap\('opencode', 'fork', !!caps\.fork\)/.test(ce)) && gateOf(/type: 'harness-caps-updated', backend: 'opencode', caps: \{ fork: !!caps\.fork \}/.test(ce)) && verdictOf(/dataDir: path\.join\(rootDir, 'data'\)/.test(ce)));
+  ok('autostart is DECIDED ONCE in the shared module (env override > the plugin record) and cli-env only wires the plugin half through a function, so enabling takes effect without a restart', gateOf(/opencodeServeModule\.decideAutostart\(\{/.test(ce)) && gateOf(/pluginWantsUp: .*getPlugins\(\)\?\.wantsServiceUp\?\.\(opencodeServeModule\.SERVICE_PLUGIN_ID\)/.test(ce)) && gateOf(/autostart: opencodeServeAutostart,/.test(ce)) && !/process\.env\.VIBESPACE_SKIP_AGENT_HOOKS/.test(ce) && !/getSetting\(/.test(ce));
   ok('the REMOVED setting is gone everywhere (schema, docs table, readers) — a stored value is ignored silently, no migration', !/opencodeServeAutostart/.test(read('src/lib/settings-schema.js')) && !/\| `agents\.opencodeServeAutostart`/.test(read('docs/settings.md')) && !/opencodeServeAutostart/.test(read('src/opencode-serve.js')) && !/opencodeServeAutostart/.test(read('server.js')));
-  ok('cli-env feeds the guard: telemetry record + the parked/runaway state PUSHED as harness-store-updated, and harnessAvailability carries storeReason', /telemetry: \(ev\) => \{ try \{ getTelemetry\(\)\?\.record\(\{ kind: 'event', \.\.\.ev \}\); \} catch \{ \} \}/.test(ce) && /type: 'harness-store-updated', backend: 'opencode', parked: !!st\.parked/.test(ce) && /const failed = storeFailureReason\(h\);\n\s*if \(failed\) row\.storeReason = failed;/.test(ce) && /if \(!s \|\| !s\.parked\) return null;/.test(ce));
-  ok('server.js passes the lazy telemetry + plugins getters (both singletons are defined BELOW the cli-env create — the lost-binding class)', /getTelemetry: \(\) => \{ try \{ return telemetry; \} catch \{ return null; \} \}, getPlugins: \(\) => \{ try \{ return plugins; \} catch \{ return null; \} \}/.test(read('server.js')));
-  ok('app.js surfaces a parked/runaway harness store: BACKEND_META.storeReason from /api/home AND a toast on the live harness-store-updated push (no silent failure)', /msg\.type !== 'harness-store-updated'/.test(read('src/lib/app.js')) && /BACKEND_META\[msg\.backend\]\.storeReason = msg\.reason \|\| null;/.test(read('src/lib/app.js')) && /showToast\(`\$\{BACKEND_META\[msg\.backend\]\.label \|\| msg\.backend\}: \$\{msg\.reason\}`, \{ type: 'error' \}\)/.test(read('src/lib/app.js')) && /BACKEND_META\[h\.id\]\.storeReason = h\.storeReason \|\| null;/.test(read('src/lib/app.js')));
+  ok('cli-env feeds the guard: telemetry record + the parked/runaway state PUSHED as harness-store-updated, and harnessAvailability carries storeReason', gateOf(/telemetry: \(ev\) => \{ try \{ getTelemetry\(\)\?\.record\(\{ kind: 'event', \.\.\.ev \}\); \} catch \{ \} \}/.test(ce)) && gateOf(/type: 'harness-store-updated', backend: 'opencode', parked: !!st\.parked/.test(ce)) && gateOf(/const failed = storeFailureReason\(h\);\n\s*if \(failed\) row\.storeReason = failed;/.test(ce)) && verdictOf(/if \(!s \|\| !s\.parked\) return null;/.test(ce)));
+  ok('server.js passes the lazy telemetry + plugins getters (both singletons are defined BELOW the cli-env create — the lost-binding class)', verdictOf(/getTelemetry: \(\) => \{ try \{ return telemetry; \} catch \{ return null; \} \}, getPlugins: \(\) => \{ try \{ return plugins; \} catch \{ return null; \} \}/.test(read('server.js'))));
+  ok('app.js surfaces a parked/runaway harness store: BACKEND_META.storeReason from /api/home AND a toast on the live harness-store-updated push (no silent failure)', gateOf(/msg\.type !== 'harness-store-updated'/.test(read('src/lib/app.js'))) && gateOf(/BACKEND_META\[msg\.backend\]\.storeReason = msg\.reason \|\| null;/.test(read('src/lib/app.js'))) && gateOf(/showToast\(`\$\{BACKEND_META\[msg\.backend\]\.label \|\| msg\.backend\}: \$\{msg\.reason\}`, \{ type: 'error' \}\)/.test(read('src/lib/app.js'))) && verdictOf(/BACKEND_META\[h\.id\]\.storeReason = h\.storeReason \|\| null;/.test(read('src/lib/app.js'))));
   // 2026-09-13: the /proc sample is cli-identity.procSample (ONE reader shared
   // with the desktop-app keeper) and the five bounds live in src/keeper-limits.js
   // (the ONE constants home every keeper reads) — the pin follows the numbers.
-  ok('the runaway guard is REAL in the shipped module: /proc sampling (cli-identity.procSample, memory = PSS via smaps_rollup), the ONE verdict (src/runaway-guard.js), the CPU/memory bounds from keeper-limits, the once-an-hour respawn floor, and telemetry opencode-serve-runaway', /cliIdentity\.procSample\(pid, \{ memory: true \}\)/.test(read('src/opencode-serve.js')) && /RG\.resourceVerdict\(/.test(read('src/opencode-serve.js')) && /\/stat`/.test(read('src/cli-identity.js')) && /smaps_rollup/.test(read('src/cli-identity.js')) && /require\('\.\/keeper-limits'\)/.test(read('src/opencode-serve.js')) && /GUARD_CPU_PCT = 150/.test(read('src/keeper-limits.js')) && /GUARD_MEM_BYTES = 2 \* 1024 \* 1024 \* 1024/.test(read('src/keeper-limits.js')) && /RUNAWAY_COOLDOWN_MS = 60 \* 60 \* 1000/.test(read('src/keeper-limits.js')) && /name: 'opencode-serve-runaway'/.test(read('src/opencode-serve.js')));
-  ok('the discovery path may NEVER call the instance-booting v2 per-session family (2.369.42) — the module contains no such request', !/\/api\/session\/\$\{encodeURIComponent\(id\)\}/.test(read('src/opencode-serve.js')) && /THE NAMING LOOKUP MUST STAY ON THE v1 ROUTE/.test(read('src/opencode-serve.js')));
-  ok('the serve is spawned from the isolated data/opencode-serve/cwd, never os.homedir() as the default', /cwd: state\.cwd \|\| cwd \|\| os\.homedir\(\)/.test(read('src/opencode-serve.js')) && /function serveCwdPath\(dataDir\) \{ return path\.join\(dataDir, 'opencode-serve', 'cwd'\); \}/.test(read('src/opencode-serve.js')));
-  ok('harnessAvailability carries the verified caps for ACP harnesses only', /\.\.\.\(h\.acp \? \{ caps: \{ fork: !!capsOf\(h\.id\)\.fork \} \} : \{\}\)/.test(ce));
-  ok('server.js hands the broadcaster to cli-env (no new line — the size ratchet)', /refreshHarnessModels: \(\.\.\.a\) => refreshHarnessModels\(\.\.\.a\), broadcast: \(m\) => bcastAll\(m\)/.test(read('server.js')) && read('server.js').split('\n').length - 1 <= 2100);
+  ok('the runaway guard is REAL in the shipped module: /proc sampling (cli-identity.procSample, memory = PSS via smaps_rollup), the ONE verdict (src/runaway-guard.js), the CPU/memory bounds from keeper-limits, the once-an-hour respawn floor, and telemetry opencode-serve-runaway', gateOf(/cliIdentity\.procSample\(pid, \{ memory: true \}\)/.test(read('src/opencode-serve.js'))) && gateOf(/RG\.resourceVerdict\(/.test(read('src/opencode-serve.js'))) && gateOf(/\/stat`/.test(read('src/cli-identity.js'))) && gateOf(/smaps_rollup/.test(read('src/cli-identity.js'))) && gateOf(/require\('\.\/keeper-limits'\)/.test(read('src/opencode-serve.js'))) && gateOf(/GUARD_CPU_PCT = 150/.test(read('src/keeper-limits.js'))) && gateOf(/GUARD_MEM_BYTES = 2 \* 1024 \* 1024 \* 1024/.test(read('src/keeper-limits.js'))) && gateOf(/RUNAWAY_COOLDOWN_MS = 60 \* 60 \* 1000/.test(read('src/keeper-limits.js'))) && verdictOf(/name: 'opencode-serve-runaway'/.test(read('src/opencode-serve.js'))));
+  ok('the discovery path may NEVER call the instance-booting v2 per-session family (2.369.42) — the module contains no such request', !/\/api\/session\/\$\{encodeURIComponent\(id\)\}/.test(read('src/opencode-serve.js')) && verdictOf(/THE NAMING LOOKUP MUST STAY ON THE v1 ROUTE/.test(read('src/opencode-serve.js'))));
+  ok('the serve is spawned from the isolated data/opencode-serve/cwd, never os.homedir() as the default', gateOf(/cwd: state\.cwd \|\| cwd \|\| os\.homedir\(\)/.test(read('src/opencode-serve.js'))) && verdictOf(/function serveCwdPath\(dataDir\) \{ return path\.join\(dataDir, 'opencode-serve', 'cwd'\); \}/.test(read('src/opencode-serve.js'))));
+  ok('harnessAvailability carries the verified caps for ACP harnesses only', verdictOf(/\.\.\.\(h\.acp \? \{ caps: \{ fork: !!capsOf\(h\.id\)\.fork \} \} : \{\}\)/.test(ce)));
+  ok('server.js hands the broadcaster to cli-env (no new line — the size ratchet)', gateOf(/refreshHarnessModels: \(\.\.\.a\) => refreshHarnessModels\(\.\.\.a\), broadcast: \(m\) => bcastAll\(m\)/.test(read('server.js'))) && read('server.js').split('\n').length - 1 <= 2100);
   const mw = read('src/server/mounts-plugins-wiring.js');
-  ok('createSessionMessages dispatches store.createReader WITH the live fact (activeSessions membership), SessionMessages stays the fallback', /typeof h\?\.store\?\.createReader === 'function'/.test(mw) && /for \(const s of activeSessions\.values\(\)\) if \(s === session\) \{ live = true; break; \}/.test(mw) && /h\.store\.createReader\(session, sessionId, \{ buffersDir: BUFFERS_DIR, live \}\)/.test(mw) && /h\?\.store\?\.SessionMessages\) return new h\.store\.SessionMessages/.test(mw));
+  ok('createSessionMessages dispatches store.createReader WITH the live fact (activeSessions membership), SessionMessages stays the fallback', gateOf(/typeof h\?\.store\?\.createReader === 'function'/.test(mw)) && gateOf(/for \(const s of activeSessions\.values\(\)\) if \(s === session\) \{ live = true; break; \}/.test(mw)) && gateOf(/h\.store\.createReader\(session, sessionId, \{ buffersDir: BUFFERS_DIR, live \}\)/.test(mw)) && verdictOf(/h\?\.store\?\.SessionMessages\) return new h\.store\.SessionMessages/.test(mw)));
   const ts = read('src/transcript-service.js');
   ok('transcript-service awaits sm.prepare() on all three reader sites (view/status/taskState)', (ts.match(/if \(typeof sm\.prepare === 'function'\) await sm\.prepare\(\);/g) || []).length === 3);
   const rt = read('src/routes/sessions.js');
-  ok('/api/session-messages catches a reader refusal and ANSWERS (404 unknown conversation / 502 unreachable store) — an uncaught async throw was a hung request (the HTTP probe caught it)', /router\.get\('\/api\/session-messages', async \(req, res\) => \{[\s\S]{0,600}try \{[\s\S]{0,2000}res\.status\(e\?\.status === 404 \? 404 : 502\)\.json\(\{ error: e\?\.message \|\| String\(e\), code: e\?\.code \|\| 'transcript-error' \}\)/.test(rt));
+  ok('/api/session-messages catches a reader refusal and ANSWERS (404 unknown conversation / 502 unreachable store) — an uncaught async throw was a hung request (the HTTP probe caught it)', verdictOf(/router\.get\('\/api\/session-messages', async \(req, res\) => \{[\s\S]{0,600}try \{[\s\S]{0,2000}res\.status\(e\?\.status === 404 \? 404 : 502\)\.json\(\{ error: e\?\.message \|\| String\(e\), code: e\?\.code \|\| 'transcript-error' \}\)/.test(rt)));
   const wc = read('src/ws-create.js');
   const mint = wc.indexOf("typeof harnessOf(backend).store?.forkSession === 'function'"), build = wc.indexOf('const sessionSpec = adapter.buildSessionArgs({');
-  ok('ws-create mints the store fork BEFORE buildSessionArgs, resumes the forked id, refuses loudly on failure', mint > 0 && build > mint && /require\('\.\/harnesses'\)/.test(wc) && /data\.fork && data\.resume && data\.resumeId && !data\.hostId/.test(wc) && /data\.resumeId = forked\.id;/.test(wc) && /code: 'fork-failed', message: `Fork failed: \$\{e\.message\}`/.test(wc) && /forkSession\(data\.resumeId, \{ cwd \}\)/.test(wc));
+  ok('ws-create mints the store fork BEFORE buildSessionArgs, resumes the forked id, refuses loudly on failure', mint > 0 && build > mint && gateOf(/require\('\.\/harnesses'\)/.test(wc)) && gateOf(/data\.fork && data\.resume && data\.resumeId && !data\.hostId/.test(wc)) && gateOf(/data\.resumeId = forked\.id;/.test(wc)) && gateOf(/code: 'fork-failed', message: `Fork failed: \$\{e\.message\}`/.test(wc)) && verdictOf(/forkSession\(data\.resumeId, \{ cwd \}\)/.test(wc)));
   const app = read('src/lib/app.js');
-  ok('app.js merges verified caps from /api/home and the live harness-caps-updated broadcast (then re-renders the sidebar)', /if \(h\.caps && BACKEND_META\[h\.id\]\?\.caps\) Object\.assign\(BACKEND_META\[h\.id\]\.caps, h\.caps\);/.test(app) && /msg\.type !== 'harness-caps-updated'/.test(app) && /Object\.assign\(BACKEND_META\[msg\.backend\]\.caps, msg\.caps\);/.test(app) && /this\.sidebar\?\._render\?\.\(\);/.test(app));
-  ok('the sidebar Fork row + fork command gate on META caps (no id list)', /when: \(c\) => !!backendFeatureCaps\(c\.s\.backend \|\| 'claude'\)\.fork/.test(read('src/lib/session-card.js')));
-  ok('backend-caps exports setVerifiedCap (PURE setter, in-place row mutation)', /function setVerifiedCap\(backend, key, value\)/.test(read('src/backend-caps.js')) && /module\.exports = \{[^}]*\bsetVerifiedCap\b[^}]*\};/.test(read('src/backend-caps.js')));
-  ok('test-architecture places src/opencode-serve.js in SHARED; ci.mjs runs this suite', /SHARED = new Set\(\[[\s\S]*?'src\/opencode-serve\.js'[\s\S]*?\]\);/.test(read('scripts/test-architecture.mjs')) && /'test-opencode-serve'/.test(read('scripts/ci.mjs')));
+  ok('app.js merges verified caps from /api/home and the live harness-caps-updated broadcast (then re-renders the sidebar)', gateOf(/if \(h\.caps && BACKEND_META\[h\.id\]\?\.caps\) Object\.assign\(BACKEND_META\[h\.id\]\.caps, h\.caps\);/.test(app)) && gateOf(/msg\.type !== 'harness-caps-updated'/.test(app)) && gateOf(/Object\.assign\(BACKEND_META\[msg\.backend\]\.caps, msg\.caps\);/.test(app)) && verdictOf(/this\.sidebar\?\._render\?\.\(\);/.test(app)));
+  ok('the sidebar Fork row + fork command gate on META caps (no id list)', verdictOf(/when: \(c\) => !!backendFeatureCaps\(c\.s\.backend \|\| 'claude'\)\.fork/.test(read('src/lib/session-card.js'))));
+  ok('backend-caps exports setVerifiedCap (PURE setter, in-place row mutation)', gateOf(/function setVerifiedCap\(backend, key, value\)/.test(read('src/backend-caps.js'))) && verdictOf(/module\.exports = \{[^}]*\bsetVerifiedCap\b[^}]*\};/.test(read('src/backend-caps.js'))));
+  ok('test-architecture places src/opencode-serve.js in SHARED; ci.mjs runs this suite', gateOf(/SHARED = new Set\(\[[\s\S]*?'src\/opencode-serve\.js'[\s\S]*?\]\);/.test(read('scripts/test-architecture.mjs'))) && verdictOf(/'test-opencode-serve'/.test(read('scripts/ci.mjs'))));
   const oc = read('src/opencode-serve.js');
-  ok('opencode-serve talks to 127.0.0.1 only, never a vendor host, never a secret in argv', /http:\/\/127\.0\.0\.1:\$\{port\}/.test(oc) && /'--hostname', '127\.0\.0\.1'/.test(oc) && !/api\.anthropic\.com|api\.openai\.com|Bearer sk-/.test(oc) && !/OPENCODE_SERVER_PASSWORD.*args/.test(oc));
-  ok('the record is written atomically through the device\'s one door (B-574d: one sync of its temp, then its name) and the serve is spawned detached with ignored stdio under the caller env', /DFILE\.writeDurable\(\{ file, tmp: /.test(oc) && /stdio: 'ignore', detached: true/.test(oc) && /env: env\(\)/.test(oc));
-  ok('docs: kb-file-structure essay + design S9 row + its INDEX-head line', /src\/opencode-serve\.js — /.test(read('docs/kb-file-structure.md')) && /\| S9 ✅/.test(read('docs/design-harness-plugins.md')) && /opencode-serve\.js — /.test(indexHead('docs/kb-file-structure.md')));
-  ok('the manual live script exists', fs.existsSync(path.join(REPO, 'scripts/dev/opencode-serve-live.mjs')));
+  ok('opencode-serve talks to 127.0.0.1 only, never a vendor host, never a secret in argv', gateOf(/http:\/\/127\.0\.0\.1:\$\{port\}/.test(oc)) && gateOf(/'--hostname', '127\.0\.0\.1'/.test(oc)) && !/api\.anthropic\.com|api\.openai\.com|Bearer sk-/.test(oc) && !/OPENCODE_SERVER_PASSWORD.*args/.test(oc));
+  ok('the record is written atomically through the device\'s one door (B-574d: one sync of its temp, then its name) and the serve is spawned detached with ignored stdio under the caller env', gateOf(/DFILE\.writeDurable\(\{ file, tmp: /.test(oc)) && gateOf(/stdio: 'ignore', detached: true/.test(oc)) && verdictOf(/env: env\(\)/.test(oc)));
+  ok('docs: kb-file-structure essay + design S9 row + its INDEX-head line', gateOf(/src\/opencode-serve\.js — /.test(read('docs/kb-file-structure.md'))) && gateOf(/\| S9 ✅/.test(read('docs/design-harness-plugins.md'))) && verdictOf(/opencode-serve\.js — /.test(indexHead('docs/kb-file-structure.md'))));
+  ok('the manual live script exists', verdictOf(fs.existsSync(path.join(REPO, 'scripts/dev/opencode-serve-live.mjs'))));
 }
 
 
@@ -477,10 +477,10 @@ console.log('— ⑦ wiring pins');
   const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-cwd-'));
   const cwd9 = serve.serveCwdPath(dd); fs.mkdirSync(cwd9, { recursive: true }); fs.mkdirSync(path.join(cwd9, '.git'));
   const r9 = await serve.ensureServeCwd(dd, {});
-  ok('a bare .git entry is re-initialised into a real repo (HEAD exists) so OpenCode\'s upward walk stops there', r9.isolated === true && fs.existsSync(path.join(cwd9, '.git', 'HEAD')), r9);
+  ok('a bare .git entry is re-initialised into a real repo (HEAD exists) so OpenCode\'s upward walk stops there', r9.isolated === true && verdictOf(fs.existsSync(path.join(cwd9, '.git', 'HEAD'))), r9);
   fs.rmSync(dd, { recursive: true, force: true });
   const src9 = fs.readFileSync(path.join(REPO, 'src/opencode-serve.js'), 'utf8');
-  ok('the reuse-safety cwd shortcut only applies when OUR cwd is a VERIFIED repo (state.cwdIsolated === true)', /state\.cwdIsolated === true && state\.cwd && rec\.cwd/.test(src9));
+  ok('the reuse-safety cwd shortcut only applies when OUR cwd is a VERIFIED repo (state.cwdIsolated === true)', verdictOf(/state\.cwdIsolated === true && state\.cwd && rec\.cwd/.test(src9)));
   const ce9 = fs.readFileSync(path.join(REPO, 'src/server/cli-env.js'), 'utf8');
   // NARROWED (2026-09-07 follow-up): "unavailable" is not "broken". The old
   // `!ready && autostart === false` half became TRUE for every default-off
@@ -488,7 +488,7 @@ console.log('— ⑦ wiring pins');
   // a red error for every reason /api/home carries. Only a PARK is a failure;
   // the deliberately-off case rides `row.service` + the passive sidebar row.
   const { storeFailureReason: sfr9 } = require(path.join(REPO, 'src/server/cli-env.js'));
-  ok('harnessAvailability reports a store reason only when the store actually FAILED (parked/runaway) — a reused healthy serve is never called "not running", and neither is a service that is simply off', /if \(!s \|\| !s\.parked\) return null;/.test(ce9) && !/autostart === false/.test(ce9)
+  ok('harnessAvailability reports a store reason only when the store actually FAILED (parked/runaway) — a reused healthy serve is never called "not running", and neither is a service that is simply off', gateOf(/if \(!s \|\| !s\.parked\) return null;/.test(ce9)) && !/autostart === false/.test(ce9)
     && sfr9({ store: { serveState: () => ({ parked: true }), unavailableReason: () => 'parked after 5 crashes' } }) === 'parked after 5 crashes'
     && sfr9({ store: { serveState: () => ({ ready: false, autostart: false }), unavailableReason: () => 'off' } }) === null);
 }
@@ -511,7 +511,7 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
   const niceOf = (pid) => { try { return Number(fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ')[16]); } catch { return null; } };
   const gotNice = niceOf(pidN), factN = locN.state().cpuNice;
   ok('THE SERVE STARTS BELOW THE HUB: its spawn is `<the hub\'s nice> -n 5 <opencode> serve …` and the serve\'s own process runs at the hub\'s niceness + 5 (read back from /proc — everything it starts inherits it); a serve this process started states {by: 5}',
-    !!cN && spawned.length === 1 && spawned[0].cmd === (pri.priority && pri.priority.nice) && JSON.stringify(spawned[0].args.slice(0, 4)) === JSON.stringify(['-n', '5', standin, 'serve']) && gotNice === want && factN && factN.by === 5,
+    !!cN && spawned.length === 1 && spawned[0].cmd === (pri.priority && pri.priority.nice) && JSON.stringify(spawned[0].args.slice(0, 4)) === JSON.stringify(['-n', '5', standin, 'serve']) && gotNice === want && gateOf(factN) && factN.by === 5,
     { spawned, gotNice, want, factN });
   // THE SERVE TERMINAL'S FACT, END TO END (the round's should, lens 3): ws-create's OWN ocServeFact — its source text, run — over
   // this serve's REAL facts (createFacts over this locator); RED: the same expression with the facts' key renamed reads null
@@ -550,12 +550,12 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
     const st = OA.serveStartFor({ serverSetting: ON, hello: HELLO, machine: MACH });
     const none = [OA.serveStartFor({ serverSetting: OFF, hello: HELLO, machine: MACH }), OA.serveStartFor({ serverSetting: ON, hello: { platform: 'linux' }, machine: MACH }), OA.serveStartFor({ serverSetting: ON, hello: { nicePath: NICE, platform: 'win32' }, machine: MACH }), OA.serveStartFor({ hello: HELLO, machine: MACH })];
     ok('B-460d last part: THE HUB\'s COMPOSITION for a paired machine — the ONE verdict (devicePriorityFor, fed its hello nicePath) composed by priorityArgv → [<its nice>, -n, 5] with the fact {by: 5}; the setting off, an agent that states no program, a Windows agent, no setting reader ⇒ none (the release\'s start)',
-      !!st && JSON.stringify(st.argv) === JSON.stringify([NICE, '-n', '5']) && st.fact && st.fact.by === 5 && none.every((x) => x === null), { st, none });
+      !!st && JSON.stringify(st.argv) === JSON.stringify([NICE, '-n', '5']) && gateOf(st.fact) && st.fact.by === 5 && verdictOf(none.every((x) => x === null)), { st, none });
     const took = NP.serveStartOf(st, NICE);
     const refused = [NP.serveStartOf(st, '/bin/nice'), NP.serveStartOf({ argv: ['/tmp/nice', '-n', '5'] }, '/tmp/x'), NP.serveStartOf({ argv: [NICE, '-n', '0'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '20'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', 5] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '5', 'x'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '5x'] }, NICE), NP.serveStartOf(null, NICE), NP.serveStartOf(st, null),
       NP.serveStartOf({ argv: [NICE, '-n', '-5'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '05'] }, NICE), NP.serveStartOf({}, NICE), NP.serveStartOf({ fact: { by: 5 } }, NICE), NP.serveStartOf(st, '')];   // r4422 (2): a negative step, a leading zero, no argv, an empty program on the device
     ok('B-460d last part: THE DEVICE TAKES IT ONLY AS ITS OWN PROGRAM (serveStartOf): the hub\'s composition → the same argv and a fact built from its step; another program, a step of 0 / 20 / −5 / «05» / a number / «5x», more words, an object with no argv, none handed, a machine with no program or an empty one ⇒ none',
-      !!took && JSON.stringify(took.argv) === JSON.stringify(st.argv) && took.fact.by === 5 && refused.every((x) => x === null), { took, refused: refused.map((x) => x === null) });
+      !!took && JSON.stringify(took.argv) === JSON.stringify(st.argv) && took.fact.by === 5 && verdictOf(refused.every((x) => x === null)), { took, refused: refused.map((x) => x === null) });
     // the device's serve, started with what it took: below its agent (the step in front), the fact said
     const dirP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), captP = [];
     const locP = serve.createServeLocator({ dataDir: dirP, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captP.push({ cmd, args }); throw new Error('captured'); }, startPrefix: () => took });
@@ -583,7 +583,7 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
     await DeviceManager.prototype.opencodeServe.call(fakeDm, OPN, {}, { start: st });
     await DeviceManager.prototype.opencodeServe.call(fakeDm, OPN, {});
     ok('B-460d last part: THE ROAD — the access layer hands hosts.opencodeOp a startOf (the verdict for THAT machine); the device rung hands its answer (read from the link\'s hello) to the client as `start`, and none when there is none; the client sends `start` beside the op only when handed one',
-      !!viaLayer && JSON.stringify(viaLayer.argv) === JSON.stringify(st.argv) && !!seenStart && JSON.stringify(seenStart.argv) === JSON.stringify(st.argv) && seenNone
+      !!viaLayer && JSON.stringify(viaLayer.argv) === JSON.stringify(st.argv) && !!seenStart && JSON.stringify(seenStart.argv) === JSON.stringify(st.argv) && gateOf(seenNone)
         && sent.length === 2 && sent[0].op === 'opencode-serve' && JSON.stringify(sent[0].start) === JSON.stringify(st) && !('start' in sent[1]), { viaLayer, seenStart, seenNone, sent: sent.map((m) => Object.keys(m)) });
     // THE DEVICE's HANDLER (src/agentd/agentd.js, by its text: the daemon is not booted here): each op takes the hub's start NOW,
     // and the ONE install reads it at each serve start
@@ -591,7 +591,7 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
     const handled = (src) => { const t = src.indexOf('ocStart = serveStartOf(msg.start, niceProgram());'), i = src.indexOf('if (!ocFacts) {'); return t >= 0 && i > t; };
     const installed = (blk) => blk.includes('startPrefix: () => ocStart,');
     ok('B-460d last part: THE DEVICE\'s HANDLER takes the hub\'s start at EACH op (`ocStart = serveStartOf(msg.start, niceProgram())`, before its one install) and the install reads it at each serve start (`startPrefix: () => ocStart`); nicePath of its hello and the check are ONE look (niceProgram)',
-      handled(HB) && installed(block) && AGD.includes("const { niceProgram, serveStartOf } = require('../nice-program.js');"), { handled: handled(HB), installed: installed(block) });
+      gateOf(handled(HB)) && gateOf(installed(block)) && verdictOf(AGD.includes("const { niceProgram, serveStartOf } = require('../nice-program.js');")), { handled: handled(HB), installed: installed(block) });
     // a copy of the shared check with its OWN-PROGRAM test cut: it takes a foreign program — the device would run what it was handed
     const { mutantCopies: MCN } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
     const MN = MCN('nice-start-any', REPO), NSRC = read('src/nice-program.js');
@@ -613,10 +613,10 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
     const NEW = await runHandler(HBODY, MSG), NEW0 = await runHandler(HBODY, { ...MSG, start: undefined });
     const OLDB = HBODY.replace(TAKE, '').replace(PREFIX, ''), OLD = await runHandler(OLDB, MSG);
     ok('B-460d last part (r4422 (3)): THE HANDLER RUN — the new one takes the handed start (its one install reads it: `<nice> -n 5`), and an op with none hands the release\'s start; AN OLDER AGENT\'s handler (this unit\'s two takes cut) run against the new field IGNORES it: its install gets no prefix, the op runs with its action and params only, and it answers as before',
-      HBODY.includes(TAKE) && HBODY.includes(PREFIX) && !OLDB.includes('msg.start')
-        && NEW.installs.length === 1 && typeof NEW.installs[0].startPrefix === 'function' && JSON.stringify((NEW.installs[0].startPrefix() || {}).argv) === JSON.stringify(st.argv) && NEW.reply && NEW.reply.op === 'opencode-serve-result' && NEW.reply.id === 7
+      gateOf(HBODY.includes(TAKE)) && gateOf(HBODY.includes(PREFIX)) && !OLDB.includes('msg.start')
+        && NEW.installs.length === 1 && typeof NEW.installs[0].startPrefix === 'function' && JSON.stringify((NEW.installs[0].startPrefix() || {}).argv) === JSON.stringify(st.argv) && gateOf(NEW.reply) && NEW.reply.op === 'opencode-serve-result' && NEW.reply.id === 7
         && NEW0.installs.length === 1 && NEW0.installs[0].startPrefix() === null
-        && OLD.installs.length === 1 && OLD.installs[0].startPrefix === undefined && OLD.ops.length === 1 && OLD.ops[0].a === OPN && JSON.stringify(OLD.ops[0].p) === JSON.stringify({ a: 1 }) && OLD.reply && OLD.reply.op === 'opencode-serve-result' && OLD.reply.result && OLD.reply.result.ok === true,
+        && OLD.installs.length === 1 && OLD.installs[0].startPrefix === undefined && OLD.ops.length === 1 && OLD.ops[0].a === OPN && JSON.stringify(OLD.ops[0].p) === JSON.stringify({ a: 1 }) && gateOf(OLD.reply) && OLD.reply.op === 'opencode-serve-result' && gateOf(OLD.reply.result) && OLD.reply.result.ok === true,
       { new: NEW.installs.map((o) => typeof o.startPrefix), none: NEW0.installs.map((o) => o.startPrefix && o.startPrefix()), old: OLD.installs.map((o) => typeof o.startPrefix), oldOps: OLD.ops.map((o) => [o.a, o.p]), oldReply: OLD.reply && OLD.reply.op });
     ok('B-460d last part RED CONTROLS: a handler that never takes the op\'s start, and an install that hands no prefix, read false; a copy of serveStartOf with its own-program test cut TAKES a foreign program (the tree\'s refuses it)',
       !handled(HB.replace('ocStart = serveStartOf(msg.start, niceProgram());', '')) && !installed(block.replace('startPrefix: () => ocStart,', ''))
@@ -644,12 +644,12 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
   };
   const claimsNothing = (r) => r.started >= 1 && r.client && r.source === 'reused' && r.cpuNice === null;
   const RA = await reAdopt(serve);
-  ok('A LOCATOR THAT STARTED ONCE, THEN ADOPTS FROM THE RECORD, claims nothing: its start\'s fact is never handed to a serve another life started', claimsNothing(RA), RA);
+  ok('A LOCATOR THAT STARTED ONCE, THEN ADOPTS FROM THE RECORD, claims nothing: its start\'s fact is never handed to a serve another life started', verdictOf(claimsNothing(RA)), RA);
   // the terminal's fact: a serve terminal states the serve's fact (ws-create); the hub hands the ONE verdict (cli-env)
   const WSC = read('src/ws-create.js'), CLI = read('src/server/cli-env.js');
   ok('THE WIRING: a serve terminal\'s fact is the serve\'s (ws-create ocServeFact over the locator\'s state — no longer null); the hub hands the serve the ONE verdict read at each start, composed by the ONE composer (cli-env)',
-    WSC.includes('session._cpuNice = ocPty ? ocServeFact() : (') && WSC.includes("SPRI.factOf(require('./opencode-serve').facts()?.locator?.state?.()?.cpuNice)")
-      && CLI.includes("const pri = require('./spawn-priority.js').priorityFor({ serverSetting });") && !CLI.includes('readSettings()[k]') && CLI.includes("return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };"));   // stale-pins: kept (a deliberate absence check: no second settings reader)
+    gateOf(WSC.includes('session._cpuNice = ocPty ? ocServeFact() : (')) && gateOf(WSC.includes("SPRI.factOf(require('./opencode-serve').facts()?.locator?.state?.()?.cpuNice)"))
+      && gateOf(CLI.includes("const pri = require('./spawn-priority.js').priorityFor({ serverSetting });")) && !CLI.includes('readSettings()[k]') && verdictOf(CLI.includes("return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };")));   // stale-pins: kept (a deliberate absence check: no second settings reader)
   // RED: a copy whose spawn drops the prefix (the release's spawn) — the serve starts at the hub's own priority
   const { mutantCopies } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
   const MO = mutantCopies('opencode-serve-nice', REPO), OSRC = read('src/opencode-serve.js');
@@ -662,13 +662,13 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
   const captT = [], dirT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-'));
   { const locT = serve.createServeLocator({ dataDir: dirT, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captT.push({ cmd, args }); throw new Error('captured'); }, startPrefix: prefix }); await locT.ensure().catch(() => null); }
   fs.rmSync(dirT, { recursive: true, force: true });
-  ok('RED CONTROL: a copy whose spawn drops the prefix starts the serve at the hub\'s own priority — the start\'s check, re-run: green on the tree\'s spawn, RED on the copy\'s', !!SM && lowered(captT[0], 'opencode') && captM.length >= 1 && !lowered(captM[0], 'opencode') && captM[0].cmd === 'opencode', { captT, captM });
+  ok('RED CONTROL: a copy whose spawn drops the prefix starts the serve at the hub\'s own priority — the start\'s check, re-run: green on the tree\'s spawn, RED on the copy\'s', !!SM && gateOf(lowered(captT[0], 'opencode')) && captM.length >= 1 && !lowered(captM[0], 'opencode') && captM[0].cmd === 'opencode', { captT, captM });
   // and the adopt's guard: a copy without it hands the reused serve that start's fact
   const GUARD = "state.cpuNice = source === 'spawned' ? (state.startFact || null) : null;";
   const SG = MO.load('src/opencode-serve.js', anchored(OSRC, GUARD, 'state.cpuNice = state.startFact || null;', 'the adopt guard cut'), 'serve-adopt-guard-cut');
   const RAX = SG ? await reAdopt(SG) : null;
-  ok('RED CONTROL (the adopt\'s guard cut, in a copy): the serve another life started is told {by: 5} — the re-adopt leg above is red on it', !!RAX && !claimsNothing(RAX) && RAX.cpuNice && RAX.cpuNice.by === 5, RAX);
+  ok('RED CONTROL (the adopt\'s guard cut, in a copy): the serve another life started is told {by: 5} — the re-adopt leg above is red on it', !!RAX && !claimsNothing(RAX) && gateOf(RAX.cpuNice) && RAX.cpuNice.by === 5, RAX);
   for (const x of [() => fs.rmSync(dirN, { recursive: true, force: true }), () => fs.rmSync(dirF, { recursive: true, force: true }), () => fs.rmSync(dirD, { recursive: true, force: true }), () => fs.rmSync(dirR, { recursive: true, force: true }), () => fs.rmSync(dirM, { recursive: true, force: true })]) { try { x(); } catch { } }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

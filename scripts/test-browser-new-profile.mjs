@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -69,14 +69,14 @@ function judgeProviders(MM) {
   ok(consent.state === 'not-a-profile', 'tier 3 is NOT a profile even with the desktop consent on (a window target)');
   // machines
   const mach = M.machineChoices({ machines: [{ hostId: 'local' }, { hostId: 'mac', label: 'Mac', connected: false }, { hostId: 'old', label: 'Old', connected: true, capabilities: ['probe'] }, { hostId: 'dev', label: 'Dev', connected: true, capabilities: ['browser-serve'] }], t: tEn });
-  ok(mach.length === 4 && mach[0].hostId === null && mach[0].pickable && mach[1].state === 'offline' && mach[2].state === 'no-browser' && mach[3].state === 'ready' && mach.filter((m) => !m.pickable).every((m) => m.note),
+  ok(mach.length === 4 && mach[0].hostId === null && gateOf(mach[0].pickable) && mach[1].state === 'offline' && mach[2].state === 'no-browser' && mach[3].state === 'ready' && verdictOf(mach.filter((m) => !m.pickable).every((m) => m.note)),
     'machines: this computer first; offline / an agent without the browser op greyed WITH the reason; a capable one pickable');
   const mach2 = M.machineChoices({ machines: [{ hostId: 'local' }, { hostId: 'dev', label: 'Dev', connected: true, capabilities: ['browser-serve'] }], providerOnHost: { ok: false, code: 'provider_needs_local_key' }, t: tEn });
   ok(mach2[1].state === 'provider-here-only' && !mach2[1].pickable && mach2[1].note === 'This browser runs only on the computer VibeSpace runs on.', 'a provider that runs only here greys every paired machine with that sentence (P4\'s rule)');
   ok(M.machineChoices({ machines: [], t: tEn }).length === 1, 'no machine list (the desktop route absent) ⇒ this computer alone');
   // the body
   const b0 = M.createBody({ label: '  Work  ' });
-  ok(b0.ok && JSON.stringify(b0.body) === JSON.stringify({ label: 'Work', provider: 'chromium' }), 'the body: the trimmed name + the browser; "All my conversations" sends NO list (the server\'s default)', b0);
+  ok(gateOf(b0.ok) && JSON.stringify(b0.body) === JSON.stringify({ label: 'Work', provider: 'chromium' }), 'the body: the trimmed name + the browser; "All my conversations" sends NO list (the server\'s default)', b0);
   ok(M.createBody({ label: ' ' }).code === 'label_required' && M.createBody({ label: 'x', provider: 'cdp', cdpPort: '0' }).field === 'cdpPort' && M.createBody({ label: 'x', provider: 'cdp', cdpPort: ' 9222 ' }).body.cdpPort === 9222,
     'the body: an empty name / a cdp port out of range are said beside their field, nothing sent; a good port rides as a number');
   ok(M.createBody({ label: 'x', mode: 'only', who: [] }).code === 'empty_list' && M.createBody({ label: 'x', mode: 'only', who: [{ kind: 'task', id: 'T-1' }] }).body.use.who.length === 1, '"Only these" with nobody is refused in place; with rows it carries them');
@@ -85,7 +85,7 @@ function judgeProviders(MM) {
   const forms = [M.adoptFormOf(null), M.adoptFormOf({ browserVariant: 'D', adoptKeeps: true }), M.adoptFormOf({ browserVariant: 'C', adoptKeeps: false }), M.adoptFormOf({ browserVariant: 'C' }), M.adoptFormOf({ browserVariant: 'D' })];
   ok(JSON.stringify(forms) === JSON.stringify([null, 'keep', 'empty', 'keep', 'empty']), 'adoptFormOf: the panel\'s own dialog ⇒ no adopt; the server\'s plan decides keep / empty; no plan ⇒ the rung (C keeps)', forms);
   const keep = M.createBody({ label: 'x', provider: 'cdp', host: 'dev', adopt: 'keep' });
-  ok(keep.ok && !('provider' in keep.body) && !('host' in keep.body), 'a conversation\'s kept browser (the adopt rung) sends no browser / machine — they are its own');
+  ok(gateOf(keep.ok) && !('provider' in keep.body) && !('host' in keep.body), 'a conversation\'s kept browser (the adopt rung) sends no browser / machine — they are its own');
   const fk = M.createBody({ label: 'x', adopt: 'keep' }), fe = M.createBody({ label: 'x', adopt: 'empty' }), fn = M.createBody({ label: 'x' });
   ok(fk.body.form === 'keep' && fe.body.form === 'empty' && !('form' in fn.body), 'verify r2 (B4): the picker\'s door names the FORM it drew (keep | empty); the panel\'s own create names none', [fk.body, fe.body, fn.body]);
   // the refusal words: every code the create / adopt routes can answer has a sentence, in all three languages
@@ -102,7 +102,7 @@ function judgeProviders(MM) {
   const noZh = [...said].filter((k) => !(k in zh)), noJa = [...said].filter((k) => !(k in ja));
   ok(said.size > 30 && !noZh.length && !noJa.length, `every sentence the model says (${said.size}) has a zh and a ja entry`, { noZh, noJa });
   const zhLocal = M.providerChoices({ providers: ROWS, t: tZh }).find((c) => c.id === 'cdp');
-  ok(zhLocal.note && zhLocal.note === zh[M.providerChoices({ providers: ROWS, t: tEn }).find((c) => c.id === 'cdp').note] && M.providerChoices({ providers: ROWS, t: tJa }).find((c) => c.id === 'cdp').note === ja[M.providerChoices({ providers: ROWS, t: tEn }).find((c) => c.id === 'cdp').note], 'the device\'s own language: zh / ja words, never the server\'s English');
+  ok(gateOf(zhLocal.note) && zhLocal.note === zh[M.providerChoices({ providers: ROWS, t: tEn }).find((c) => c.id === 'cdp').note] && M.providerChoices({ providers: ROWS, t: tJa }).find((c) => c.id === 'cdp').note === ja[M.providerChoices({ providers: ROWS, t: tEn }).find((c) => c.id === 'cdp').note], 'the device\'s own language: zh / ja words, never the server\'s English');
 }
 
 // ═══ ② the REAL keeper ══════════════════════════════════════════════════════
@@ -130,14 +130,14 @@ function mkKeeper(dataDir, extra = {}) {
   const n0 = notifies(), v0 = verOf();
   const p = k.createProfile({ label: 'Ops browser' }, { owner: { kind: 'instance', id: null }, use: { mode: 'only', who: [{ kind: 'task', id: 'T-1' }, { kind: 'session', key: KEY_A }] }, knownKeys: [KEY_A] });
   const U = B.whoMayUse(p);
-  ok(U.mode === 'only' && U.who.length === 2 && U.who.some((w) => w.kind === 'task' && w.id === 'T-1') && U.who.some((w) => w.kind === 'session' && w.id === KEY_A), 'the record is BORN with its list (a Task Group + a picked conversation)', U);
+  ok(U.mode === 'only' && U.who.length === 2 && gateOf(U.who.some((w) => w.kind === 'task' && w.id === 'T-1')) && verdictOf(U.who.some((w) => w.kind === 'session' && w.id === KEY_A)), 'the record is BORN with its list (a Task Group + a picked conversation)', U);
   ok(notifies() - n0 === 1 && verOf() - v0 === 1, 'ONE write (one hand-off to the store writer), ONE broadcast for the create with its list (never create-then-PATCH)', { broadcasts: notifies() - n0, writes: verOf() - v0 });
   const before = landed(), v1 = verOf();
   const thr = (fn) => { try { fn(); return null; } catch (e) { return e; } };
   const e1 = thr(() => k.createProfile({ label: 'Ghost' }, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-9' }] } }));
   const e2 = thr(() => k.createProfile({ label: 'Ghost' }, { use: { mode: 'only', who: [{ kind: 'session', key: KEY_B }] }, knownKeys: [] }));
   const e3 = thr(() => k.createProfile({ label: 'Ghost' }, { use: { mode: 'only', who: [] } }));
-  ok(e1 && e1.code === 'unknown_task' && e2 && e2.code === 'unknown_conversation' && e3 && e3.code === 'empty_list', 'an unknown Task Group / a conversation nobody picked / an empty list ⇒ refused BY NAME (the PATCH\'s own verdict)', [e1 && e1.code, e2 && e2.code, e3 && e3.code]);
+  ok(gateOf(e1) && e1.code === 'unknown_task' && gateOf(e2) && e2.code === 'unknown_conversation' && gateOf(e3) && e3.code === 'empty_list', 'an unknown Task Group / a conversation nobody picked / an empty list ⇒ refused BY NAME (the PATCH\'s own verdict)', [e1 && e1.code, e2 && e2.code, e3 && e3.code]);
   ok(verOf() === v1 && landed() === before && !k.list().profiles.some((x) => x.label === 'Ghost') && !fs.readdirSync(path.join(HOME, '.agent-browser')).some((d) => !k.list().profiles.some((x) => x.dir && path.basename(x.dir) === d)),
     '…and a refusal writes NOTHING: nothing handed to the store writer for the registry, the file byte-identical once landed, no record, no directory minted');
   const all = k.createProfile({ label: 'Everyone' }, { owner: { kind: 'instance', id: null }, use: { mode: 'all' } });
@@ -263,10 +263,10 @@ let srv = null;
   r = await j('POST', '/api/browser/profiles', { label: 'Elsewhere', host: 'dev-9' });
   ok(r.status === 400 && r.json.code === 'unsupported-host', 'a machine that is not paired ⇒ unsupported-host by name (never a silent local fallback)');
   r = await j('POST', '/api/browser/profiles', { label: 'Desk', provider: 'local-window' });
-  ok(r.status >= 400 && ['tier3_is_a_window_target', 'provider_needs_consent'].includes(r.json.code), 'tier 3 is never a profile', r.json);
+  ok(r.status >= 400 && verdictOf(['tier3_is_a_window_target', 'provider_needs_consent'].includes(r.json.code)), 'tier 3 is never a profile', r.json);
   // the picker's door: the adopt route takes the dialog's list and (an EMPTY profile — no kept directory) its fields
   r = await j('POST', '/api/browser/adopt', { sessionId: 'sess-n', label: 'Fresh profile', provider: 'chromium', use: { mode: 'only', who: [{ kind: 'session', session: 'sess-n' }, { kind: 'task', id: 'T-1' }] } });
-  ok(r.status === 200 && r.json.adopted === false && r.json.profile.use.mode === 'only' && r.json.profile.use.who.length === 2 && r.json.pin && r.json.pin.profileId === r.json.profile.id,
+  ok(r.status === 200 && r.json.adopted === false && r.json.profile.use.mode === 'only' && r.json.profile.use.who.length === 2 && gateOf(r.json.pin) && r.json.pin.profileId === r.json.profile.id,
     'the adopt route (the picker\'s "New persistent profile…"): the dialog\'s list rides it, the empty profile is created and the conversation pinned to it', r.json);
   r = await j('POST', '/api/browser/adopt', { sessionId: 'sess-n', label: 'Bad list', use: { mode: 'only', who: [{ kind: 'task', id: 'T-9' }] } });
   ok(r.status === 400 && r.json.code === 'unknown_task' && !k.list().profiles.some((p) => p.label === 'Bad list'), 'the adopt route refuses a bad list by name before anything is created');
@@ -275,29 +275,29 @@ let srv = null;
   // nothing moves — never adopted with them dropped in silence (the reproduction: CloakBrowser ⇒ Chromium, Chrome 146 ⇒ default)
   const keepLeg = await adoptKeepLeg(R);
   ok(keepLeg.plan.status === 200 && keepLeg.plan.json.keep === true && keepLeg.planN.json.keep === false, 'GET /api/browser/adopt: THE plan — a rung-D conversation that keeps its browser ⇒ keep, an N one ⇒ empty (the dialog draws that form)', { d: keepLeg.plan.json, n: keepLeg.planN.json });
-  ok(keepLeg.refused.every((x) => x.status === 409 && x.json.code === 'adopt_keeps_browser') && keepLeg.dirStill && keepLeg.made === 0,
+  ok(gateOf(keepLeg.refused.every((x) => x.status === 409 && x.json.code === 'adopt_keeps_browser')) && gateOf(keepLeg.dirStill) && keepLeg.made === 0,
     'a kept browser asked to be another build / CloakBrowser / a paired machine ⇒ 409 adopt_keeps_browser by name — the directory not moved, no profile (never a silent drop)', keepLeg.refused.map((x) => [x.status, x.json && x.json.code]));
-  ok(keepLeg.plain.status === 200 && keepLeg.plain.json.adopted === true && keepLeg.plainProfile && keepLeg.plainProfile.provider === 'chromium' && !keepLeg.plainProfile.browser, '…and as it is (Chromium, this computer, its build) it is adopted with its logins', keepLeg.plain.json);
-  ok(keepLeg.emptyHost.status === 200 && keepLeg.emptyHost.json.adopted === false && keepLeg.emptyHost.json.profile && keepLeg.emptyHost.json.profile.host === 'dev-1', 'an EMPTY profile from the picker on a paired machine is made there (the create\'s own verdict) — never "browser profiles are local-only" for a machine the dialog offered', keepLeg.emptyHost.json);
+  ok(keepLeg.plain.status === 200 && keepLeg.plain.json.adopted === true && gateOf(keepLeg.plainProfile) && keepLeg.plainProfile.provider === 'chromium' && !keepLeg.plainProfile.browser, '…and as it is (Chromium, this computer, its build) it is adopted with its logins', keepLeg.plain.json);
+  ok(keepLeg.emptyHost.status === 200 && keepLeg.emptyHost.json.adopted === false && gateOf(keepLeg.emptyHost.json.profile) && keepLeg.emptyHost.json.profile.host === 'dev-1', 'an EMPTY profile from the picker on a paired machine is made there (the create\'s own verdict) — never "browser profiles are local-only" for a machine the dialog offered', keepLeg.emptyHost.json);
   // verify r2 (B4): the conversation's rung changes while the dialog is open ⇒ the POST re-judges the FORM it drew and refuses
   // by name, nothing moved (reproduced: keep ⇒ empty made an EMPTY profile under "Keeps this conversation's browser and its
   // logins"; empty ⇒ keep moved the conversation's kept directory into a profile every conversation may use)
   const flip = await adoptFlipLeg(R);
-  ok(flip.gets.join() === 'true,false' && flip.keepThenEmpty.status === 409 && flip.keepThenEmpty.json.code === 'adopt_form_changed' && flip.emptyThenKeep.status === 409 && flip.emptyThenKeep.json.code === 'adopt_form_changed' && flip.made === 0 && flip.dirsStill.every(Boolean),
+  ok(flip.gets.join() === 'true,false' && flip.keepThenEmpty.status === 409 && flip.keepThenEmpty.json.code === 'adopt_form_changed' && flip.emptyThenKeep.status === 409 && flip.emptyThenKeep.json.code === 'adopt_form_changed' && flip.made === 0 && verdictOf(flip.dirsStill.every(Boolean)),
     'a dialog drawn keep (or empty) whose conversation changed rung before Create ⇒ 409 adopt_form_changed by name — no profile, the kept directory not moved', { k: [flip.keepThenEmpty.status, flip.keepThenEmpty.json && flip.keepThenEmpty.json.code], e: [flip.emptyThenKeep.status, flip.emptyThenKeep.json && flip.emptyThenKeep.json.code], made: flip.made, dirs: flip.dirsStill });
   ok(flip.same.status === 200 && flip.same.json.adopted === true, '…and a form that still holds is applied as drawn (the keep adopts the kept browser)', flip.same.status);
   const pkw = read('src/lib/browser-profile-picker.js'); const ZH = (await import('../src/lib/i18n-zh.js')).default, JA = (await import('../src/lib/i18n-ja.js')).default;
-  ok(pkw.includes("export function adoptLabel(browserVariant) { // eslint-disable-line no-unused-vars\n  return t('New persistent profile from this conversation…');\n}") && !pkw.includes("t('New empty persistent profile (reopens the browser)…')") && ZH['New persistent profile from this conversation…'] && JA['New persistent profile from this conversation…'],
+  ok(gateOf(pkw.includes("export function adoptLabel(browserVariant) { // eslint-disable-line no-unused-vars\n  return t('New persistent profile from this conversation…');\n}")) && !pkw.includes("t('New empty persistent profile (reopens the browser)…')") && gateOf(ZH['New persistent profile from this conversation…']) && verdictOf(JA['New persistent profile from this conversation…']),
     'verify r2 (H3): the picker\'s row claims neither keep nor empty (rung D keeps too) — the dialog says which from the server\'s plan');
   // verify r3 (Y4): an AGENT's token on the adopt route — bare, with no who-list and no build (verify r1 F6 refused only those)
   // — moved its own conversation's kept browser, and by naming another session's id ANOTHER conversation's, into a profile
   // every conversation may use (reproduced: 200, the directory with the user's logins gone); the whole route is the user's
   const ag = await agentAdoptLeg(R);
-  ok(ag.get.status === 403 && ag.get.code === 'agent_forbidden' && ag.own.status === 403 && ag.own.code === 'agent_forbidden' && ag.other.status === 403 && ag.other.code === 'agent_forbidden' && ag.keptStill.every(Boolean) && ag.made === 0,
+  ok(ag.get.status === 403 && ag.get.code === 'agent_forbidden' && ag.own.status === 403 && ag.own.code === 'agent_forbidden' && ag.other.status === 403 && ag.other.code === 'agent_forbidden' && gateOf(ag.keptStill.every(Boolean)) && ag.made === 0,
     'an agent\'s token on GET / POST /api/browser/adopt — bare, its own conversation or another\'s — ⇒ 403 agent_forbidden; the kept directories stay, no profile', ag);
-  ok(ag.user && ag.user.status === 200 && ag.user.adopted === true, '…and the user\'s own door (no token) still adopts the kept browser', ag.user);
+  ok(gateOf(ag.user) && ag.user.status === 200 && ag.user.adopted === true, '…and the user\'s own door (no token) still adopts the kept browser', ag.user);
   const dlw = read('src/lib/browser-new-profile.js'); const EMPTYW = "A new, empty profile — this conversation's own browser is not moved; you sign in once in the new one.";
-  ok(dlw.includes(`if (adopt === 'empty') body.appendChild(el('div', 'bnew-keep chat-status-dim', t("${EMPTYW}")));`) && ZH[EMPTYW] && JA[EMPTYW], '…and the EMPTY form says it in plain words, as the keep form does (zh / ja)');
+  ok(gateOf(dlw.includes(`if (adopt === 'empty') body.appendChild(el('div', 'bnew-keep chat-status-dim', t("${EMPTYW}")));`)) && gateOf(ZH[EMPTYW]) && verdictOf(JA[EMPTYW]), '…and the EMPTY form says it in plain words, as the keep form does (zh / ja)');
   r = await j('POST', '/api/agent/browser/new', { label: 'Agent made', use: { mode: 'only', who: [{ kind: 'task', id: 'T-1' }] } });
   ok(r.status === 401, 'the agent\'s `new` needs its token (unchanged)');
   // verify r1 (F6): "Who can use it" is the USER's — an agent's own token (an auth-off instance answers every cookie route)
@@ -310,16 +310,16 @@ let srv = null;
   const b6 = await ja('POST', '/api/browser/adopt', { sessionId: 'sess-n', label: 'Agent adopt', use: { mode: 'all' } });
   const vendor = k.list().profiles.find((p) => p.label === 'Vendor');
   const c6 = await ja('PATCH', '/api/browser/profiles/' + vendor.id, { use: { mode: 'all' } });
-  ok([a6, b6, c6].every((x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden') && k.list().profiles.length === n6 && B.whoMayUse(k.profile(vendor.id)).mode === 'only',
+  ok(gateOf([a6, b6, c6].every((x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden')) && k.list().profiles.length === n6 && B.whoMayUse(k.profile(vendor.id)).mode === 'only',
     '"Who can use it" is the user\'s: an agent\'s token on the create / adopt / PATCH with `use` ⇒ 403 agent_forbidden — nothing created, nothing widened', { a: [a6.status, a6.json && a6.json.code], b: [b6.status, b6.json && b6.json.code], c: [c6.status, c6.json && c6.json.code] });
   // verify r1 (A6 revert table): a BUILD named by an agent's token on the create and on the adopt — refused by name, nothing
   // created (the adopt's refusal had no gate: reverting it left every suite green)
   const n7 = k.list().profiles.length;
   const a7 = await ja('POST', '/api/browser/profiles', { label: 'Agent build', browser: { kind: 'build', version: '151.0.7922.34' } });
   const b7 = await ja('POST', '/api/browser/adopt', { sessionId: 'sess-n', label: 'Agent build adopt', browser: { kind: 'build', version: '151.0.7922.34' } });
-  ok([a7, b7].every((x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden') && k.list().profiles.length === n7, 'which Chrome build a profile runs is the user\'s: an agent\'s token naming a build on the create / the adopt ⇒ 403 agent_forbidden, nothing created', { a: [a7.status, a7.json && a7.json.code], b: [b7.status, b7.json && b7.json.code] });
+  ok(gateOf([a7, b7].every((x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden')) && k.list().profiles.length === n7, 'which Chrome build a profile runs is the user\'s: an agent\'s token naming a build on the create / the adopt ⇒ 403 agent_forbidden, nothing created', { a: [a7.status, a7.json && a7.json.code], b: [b7.status, b7.json && b7.json.code] });
   const d6 = await ja('POST', '/api/browser/profiles', { label: 'Plain by token' });
-  ok(d6.status === 200 && d6.json.profile && d6.json.profile.use && d6.json.profile.use.mode === 'all', '…a create with NO list still answers (every conversation — what the agent\'s own `new` makes too)');
+  ok(d6.status === 200 && gateOf(d6.json.profile) && gateOf(d6.json.profile.use) && d6.json.profile.use.mode === 'all', '…a create with NO list still answers (every conversation — what the agent\'s own `new` makes too)');
 }
 if (srv) await new Promise((r) => srv.close(r));
 
@@ -327,22 +327,22 @@ if (srv) await new Promise((r) => srv.close(r));
 console.log('— ④ wiring: the panel\'s New profile… and the picker\'s adopt rows open THE dialog');
 {
   const tv = read('src/lib/browser-trace-view.js');
-  ok(/newBtn = el\('button', 'file-tool-btn bprof-btn bprof-new', t\('New profile…'\)\)/.test(tv) && /newBtn\.onclick = \(\) => openNewProfileDialog\(app, \{ onCreated: \(p\) => \{ if \(p && p\.id\) st\.focus = p\.id; load\(\); \} \}\)/.test(tv) && /bar\.append\(summary, info, spacer, newBtn,/.test(tv),
+  ok(gateOf(/newBtn = el\('button', 'file-tool-btn bprof-btn bprof-new', t\('New profile…'\)\)/.test(tv)) && gateOf(/newBtn\.onclick = \(\) => openNewProfileDialog\(app, \{ onCreated: \(p\) => \{ if \(p && p\.id\) st\.focus = p\.id; load\(\); \} \}\)/.test(tv)) && verdictOf(/bar\.append\(summary, info, spacer, newBtn,/.test(tv)),
     'the Agent browser panel\'s bar carries New profile…, which opens the dialog and focuses the new row in place');
   const pk = read('src/lib/browser-profile-picker.js');
-  ok(/App\.prototype\.adoptBrowserProfile = function \(s\) \{[\s\S]{0,1200}openNewProfileDialog\(this, \{ label: name, fromSession,/.test(pk) && !/showInputDialog/.test(pk), 'the picker\'s two "New persistent profile…" rows open the SAME dialog with the conversation\'s name prefilled (the label-only prompt is gone)');
-  ok(/fetchJson\('\/api\/browser\/adopt\?sessionId=' \+ encodeURIComponent\(s\.webuiId\)\)\.then\(\(plan\) => [\s\S]{0,200}\{ \.\.\.s, adoptKeeps: plan\.keep \}/.test(pk) && /const adopt = adoptFormOf\(fromSession\);/.test(read('src/lib/browser-new-profile.js')),
+  ok(gateOf(/App\.prototype\.adoptBrowserProfile = function \(s\) \{[\s\S]{0,1200}openNewProfileDialog\(this, \{ label: name, fromSession,/.test(pk)) && !/showInputDialog/.test(pk), 'the picker\'s two "New persistent profile…" rows open the SAME dialog with the conversation\'s name prefilled (the label-only prompt is gone)');
+  ok(gateOf(/fetchJson\('\/api\/browser\/adopt\?sessionId=' \+ encodeURIComponent\(s\.webuiId\)\)\.then\(\(plan\) => [\s\S]{0,200}\{ \.\.\.s, adoptKeeps: plan\.keep \}/.test(pk)) && verdictOf(/const adopt = adoptFormOf\(fromSession\);/.test(read('src/lib/browser-new-profile.js'))),
     'verify r1 (F7): the picker asks THE plan before the dialog opens, and the dialog draws the form it names (adoptFormOf) — never the rung\'s guess');
   const dl = read('src/lib/browser-new-profile.js');
   const posts = dl.match(/fetchJson\('\/api\/browser\/(profiles|adopt)'/g) || [];
-  ok(posts.length === 2 && /const r = fromSession\s*\? await fetchJson\('\/api\/browser\/adopt'[\s\S]{0,120}: await fetchJson\('\/api\/browser\/profiles', jsonPost\(c\.body\)\)/.test(dl), 'the dialog makes ONE POST per create (adopt from a conversation, else the profiles route) with the ONE body');
+  ok(posts.length === 2 && verdictOf(/const r = fromSession\s*\? await fetchJson\('\/api\/browser\/adopt'[\s\S]{0,120}: await fetchJson\('\/api\/browser\/profiles', jsonPost\(c\.body\)\)/.test(dl)), 'the dialog makes ONE POST per create (adopt from a conversation, else the profiles route) with the ONE body');
   // verify r3 (Y4): a 409 adopt_form_changed REOPENS the dialog on the form the server names now (the name kept, the doors
   // kept, a handoff — no dismissal), never a dialog left on a form every Create refuses again
-  ok(/if \(r && r\.code === 'adopt_form_changed' && fromSession && \(r\.now === 'keep' \|\| r\.now === 'empty'\)\) \{[\s\S]{0,400}st\.handoff = true; shell\.close\(\);\s*openNewProfileDialog\(app, \{ label: nameInput\.value, fromSession: \{ \.\.\.fromSession, adoptKeeps: r\.now === 'keep' \}, onCreated, onDismissed, opener: 'person' \}\);/.test(dl) && /if \(!st\.created && !st\.handoff\) \{ try \{ onDismissed\?\.\(\); \}/.test(dl),
+  ok(gateOf(/if \(r && r\.code === 'adopt_form_changed' && fromSession && \(r\.now === 'keep' \|\| r\.now === 'empty'\)\) \{[\s\S]{0,400}st\.handoff = true; shell\.close\(\);\s*openNewProfileDialog\(app, \{ label: nameInput\.value, fromSession: \{ \.\.\.fromSession, adoptKeeps: r\.now === 'keep' \}, onCreated, onDismissed, opener: 'person' \}\);/.test(dl)) && verdictOf(/if \(!st\.created && !st\.handoff\) \{ try \{ onDismissed\?\.\(\); \}/.test(dl)),
     'verify r3 (Y4): 409 adopt_form_changed ⇒ the dialog is reopened on the server\'s current form with the typed name and the same callbacks (a handoff, not a dismissal) — the person\'s Create press re-opened it: opener \'person\', in front (lane dialog-yield r4 — r3\'s \'system\' put it behind)');
   { const W2 = "This conversation's browser changed since this dialog opened — nothing was created; the dialog was reopened with the form that applies now."; const ZH2 = (await import('../src/lib/i18n-zh.js')).default, JA2 = (await import('../src/lib/i18n-ja.js')).default;
-    ok(M.createRefusalWords({ code: 'adopt_form_changed' }) === W2 && ZH2[W2] && JA2[W2], '…and the sentence says the dialog was reopened (zh / ja)'); }
-  ok(/createRefusalWords\(r, t\) \|\| buildRefusalWords\(r, t\) \|\| whoRefusalWords\(r, t\) \|\| \(t\('Could not create the profile'\)/.test(dl), 'a refusal is said by its code (the create\'s, then the build\'s, then the who list\'s — the Task Groups hold among them), and an unknown code still says the server\'s sentence (never silence)');
+    ok(M.createRefusalWords({ code: 'adopt_form_changed' }) === W2 && gateOf(ZH2[W2]) && verdictOf(JA2[W2]), '…and the sentence says the dialog was reopened (zh / ja)'); }
+  ok(verdictOf(/createRefusalWords\(r, t\) \|\| buildRefusalWords\(r, t\) \|\| whoRefusalWords\(r, t\) \|\| \(t\('Could not create the profile'\)/.test(dl)), 'a refusal is said by its code (the create\'s, then the build\'s, then the who list\'s — the Task Groups hold among them), and an unknown code still says the server\'s sentence (never silence)');
 }
 
 // ═══ ⑤ controls ═════════════════════════════════════════════════════════════
@@ -369,7 +369,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   fs.mkdirSync(D, { recursive: true });
   const kl = Kl.create({ dataDir: D, homeDir: HOME, env: () => ({ PATH: '/usr/bin:/bin', HOME }), broadcast: () => { }, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: quiet, taskInfo: () => null, hostKnown: () => false });
   let threw = null; try { kl.createProfile({ label: 'Late' }, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-9' }] } }); } catch (e) { threw = e; }
-  ok(threw && threw.code === 'unknown_task' && kl.list().profiles.some((p) => p.label === 'Late'), 'control (c): …the refusal still comes, but the record was written first — exactly what ②\'s "a refusal writes NOTHING" catches');
+  ok(gateOf(threw) && threw.code === 'unknown_task' && verdictOf(kl.list().profiles.some((p) => p.label === 'Late')), 'control (c): …the refusal still comes, but the record was written first — exactly what ②\'s "a refusal writes NOTHING" catches');
   // verify r1 (F6): a create that takes an agent's list
   const rs = read('src/routes/browser.js');
   const open = editAnchor(rs, "  if (use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;\n", '', "src/routes/browser.js");
@@ -380,13 +380,13 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   const appo = express(); appo.use(express.json()); Ro.setup({ keeper: ko, activeSessions: new Map(), browserEnv: () => null }); appo.use(Ro.router);
   const so = await new Promise((r) => { const s = appo.listen(0, '127.0.0.1', () => r(s)); });
   const ro = await fetch(`http://127.0.0.1:${so.address().port}/api/browser/profiles`, { method: 'POST', headers: { Authorization: 'Bearer vsst_' + 'a'.repeat(24), 'Content-Type': 'application/json' }, body: JSON.stringify({ label: 'Opened', use: { mode: 'all' } }) });
-  ok(ro.status === 200 && ko.list().profiles.some((p) => p.label === 'Opened'), 'control (d): …the agent\'s token wrote a who-list — exactly what ③ catches', ro.status);
+  ok(ro.status === 200 && verdictOf(ko.list().profiles.some((p) => p.label === 'Opened')), 'control (d): …the agent\'s token wrote a who-list — exactly what ③ catches', ro.status);
   await new Promise((r) => so.close(r));
   // verify r1 (F7): the adopt door that keeps a directory and drops the dialog's browser / build in silence (the pre-fix shape)
   const silent = editAnchor(rs, "      const kr = adoptKeepRefusal(req.body); // verify r1 (F7): the dialog's browser / machine / build are never dropped in silence\n      if (kr) return res.status(409).json({ error: kr.error, code: kr.code, asks: kr.asks });\n", '', "src/routes/browser.js");
   ok(silent !== rs, 'control (e): the patch (a kept directory adopted with the dialog\'s browser / build dropped) applies');
   const ce = await adoptKeepLeg(MUT.load('src/routes/browser.js', silent, 'keep-silent'));
-  ok(ce.refused.some((x) => x.status === 200 && x.json && x.json.adopted === true), 'control (e): …the kept browser is adopted with the build / CloakBrowser the user picked dropped — exactly what ③\'s keep leg catches', ce.refused.map((x) => [x.status, x.json && (x.json.code || x.json.adopted)]));
+  ok(verdictOf(ce.refused.some((x) => x.status === 200 && x.json && x.json.adopted === true)), 'control (e): …the kept browser is adopted with the build / CloakBrowser the user picked dropped — exactly what ③\'s keep leg catches', ce.refused.map((x) => [x.status, x.json && (x.json.code || x.json.adopted)]));
   // verify r2 (B4): an adopt door that never re-judges the form it was shown (the pre-fix shape) applies the other form
   const blindForm = editAnchor(rs, "    if (form && (form === 'keep') !== !!(plan.keep && be)) return res.status(409)", "    if (false) return res.status(409)", "src/routes/browser.js");
   ok(blindForm !== rs, 'control (f): the patch (an adopt that ignores the form the dialog drew) applies');
@@ -408,7 +408,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(pick('cdp') === 'external' && pick('chromium') === 'shared' && pick('cloud:browserbase') === 'shared' && pick('cloud:kernel') === 'shared' && pick('cdp', { roads: null, road: 'no-proxy' }) === 'no-proxy' && M.roadOfChoice({}, 'cdp') === null && M.roadOfChoice({ roads: { cdp: '' }, road: 'shared' }, 'cdp') === 'shared',
     'PURE roadOfChoice: the server\'s road FOR the chosen provider; the machine-wide road only where the server named none for that row (an older server); nothing read ⇒ null');
   const own = Wm.allAgentsSentence('shared'), ext = Wm.allAgentsSentence(pick('cdp'));
-  ok(ext !== own && /did not start/.test(ext) && !/its own tab/.test(ext) && Wm.allAgentsSentence(pick('chromium')) === own, 'a `cdp` row is worded as the outside endpoint (every conversation sees and drives every tab), never «each conversation in its own tab»; chromium keeps its own-tab sentence');
+  ok(ext !== own && gateOf(/did not start/.test(ext)) && !/its own tab/.test(ext) && Wm.allAgentsSentence(pick('chromium')) === own, 'a `cdp` row is worded as the outside endpoint (every conversation sees and drives every tab), never «each conversation in its own tab»; chromium keeps its own-tab sentence');
   const dlg = read('src/lib/browser-new-profile.js');
   const wired = (src) => src.includes("allAgentsSentence(st.host ? roadOfChoice({ roads: st.hostRoads, road: st.hostRoad }, st.provider) : roadOfChoice({ roads: st.roads, road: st.road }, st.provider), t)")
     && src.includes("st.roads = pv && pv.roads && typeof pv.roads === 'object' ? pv.roads : null;") && src.includes("st.hostRoads = hv && hv.roads && typeof hv.roads === 'object' ? hv.roads : null;")
@@ -416,8 +416,8 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
     && src.includes('input.onchange = () => { st.provider = c.id; drawProviders(); drawMachines(); drawBuilds(); };') && src.includes('input.onchange = () => { st.host = m.hostId; drawProviders(); drawMachines(); loadBuilds(); loadClones(); };');
   const oneRoad = editAnchor(dlg, "allAgentsSentence(st.host ? roadOfChoice({ roads: st.hostRoads, road: st.hostRoad }, st.provider) : roadOfChoice({ roads: st.roads, road: st.road }, st.provider), t)", "allAgentsSentence(st.host ? st.hostRoad : st.road, t)", 'src/lib/browser-new-profile.js'); /* stale-pins: kept — the RED copy restores the one-road line */
   const stale = editAnchor(dlg, "    try { syncWho(); } catch { /* drawn before the picker */ }   // B-19a9 r2669 (3)", "    // B-19a9 r2669 (3)", 'src/lib/browser-new-profile.js');
-  ok(wired(dlg) && !wired(oneRoad) && !wired(stale), 'the dialog words the CHOSEN provider\'s road (the route\'s `roads`, here and on the paired machine) and words it again when the provider or the machine changes (both pickers redraw the machines, which ends in syncWho); CONTROL (RED), each for one reason: one road for every provider; a sentence left stale after a change');
+  ok(gateOf(wired(dlg)) && !wired(oneRoad) && !wired(stale), 'the dialog words the CHOSEN provider\'s road (the route\'s `roads`, here and on the paired machine) and words it again when the provider or the machine changes (both pickers redraw the machines, which ends in syncWho); CONTROL (RED), each for one reason: one road for every provider; a sentence left stale after a change');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

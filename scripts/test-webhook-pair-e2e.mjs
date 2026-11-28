@@ -20,7 +20,7 @@ const WA = require(path.join(repo, 'src/webhook-auth.js'));
 const WP = require(path.join(repo, 'src/webhook-pair.js'));
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 700) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 700) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms = 20000, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch { } await sleep(step); } return null; };
 try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); } catch (e) { if (e.code === 'ENOENT') { console.log('SKIP: no dtach on PATH (the stub agent sessions are dtach sessions)'); process.exit(0); } }
@@ -91,10 +91,10 @@ try {
     boot('b', { cid: 'b2b2b2b2-0000-4000-8000-0000000000b2', name: 'beta', token: 'vsst_' + 'webhookpairbeta000000000000002' }),
   ]);
   const ups = await Promise.all([A.up(), B.up()]);
-  ok(ups[0] && ups[1], 'FIXTURE: two servers up (sign-in ON), each owner logged in, each stub agent adopted (alpha on A, beta on B)', ups);
+  ok(gateOf(ups[0]) && verdictOf(ups[1]), 'FIXTURE: two servers up (sign-in ON), each owner logged in, each stub agent adopted (alpha on A, beta on B)', ups);
   const mk = await A.owner('POST', '/api/channels/webhook/paths', { slug: 'ci', title: 'CI' });
   const code1 = await A.owner('POST', '/api/channels/webhook/paths/ci/pair-code', { name: 'Hub A' });
-  ok(mk.status === 200 && code1.status === 200 && code1.j.code.startsWith('vswp_') && code1.j.hookUrl === `http://127.0.0.1:${A.PORT}/hook/ci`, 'A\'s owner mints a code — A\'s hook URL from the instance URL', code1.t.slice(0, 200));
+  ok(mk.status === 200 && code1.status === 200 && gateOf(code1.j.code.startsWith('vswp_')) && code1.j.hookUrl === `http://127.0.0.1:${A.PORT}/hook/ci`, 'A\'s owner mints a code — A\'s hook URL from the instance URL', code1.t.slice(0, 200));
   const join = await B.owner('POST', '/api/channels/webhook/join', { code: code1.j.code, slug: 'hub-a', name: 'Hub B' });
   const aRow = A.callers('ci')[0] || {}, bRow = B.callers('hub-a')[0] || {};
   ok(join.status === 200 && aRow.kind === 'peer' && aRow.name === 'Hub B' && aRow.delivery.replyUrl === `http://127.0.0.1:${B.PORT}/hook/hub-a` && bRow.kind === 'peer' && bRow.name === 'Hub A' && bRow.delivery.replyUrl === `http://127.0.0.1:${A.PORT}/hook/ci`, 'B\'s owner joins ⇒ each server holds the other as a `peer` caller (reply-url = the other\'s hook)', { join: join.t.slice(0, 200), aRow, bRow });
@@ -102,18 +102,18 @@ try {
   const gb = await B.owner('PUT', '/api/channels/webhook/hub-a/access', { access: [{ principal: { kind: 'agent', id: B.AG.cid, name: B.AG.name }, authority: 'send' }] });
   ok(ga.status === 200 && gb.status === 200, 'FIXTURE: each owner grants its agent (send) on the paired path');
   const lsA = await A.cli(['list']);
-  ok(lsA.code === 0 && lsA.stdout.includes('webhook/ci'), 'alpha: `vibespace-channels list` names the path webhook/ci like any conversation', lsA.stdout.slice(0, 400));
+  ok(lsA.code === 0 && verdictOf(lsA.stdout.includes('webhook/ci')), 'alpha: `vibespace-channels list` names the path webhook/ci like any conversation', lsA.stdout.slice(0, 400));
   const rdB = await B.cli(['read', 'webhook/hub-a']);
-  ok(rdB.code === 0 && rdB.stdout.includes('callers: 1') && rdB.stdout.includes(`  ${bRow.id} "Hub A" · peer · delivery reply-url · last call never · generation 1`) && !/vsw[hp]_/.test(rdB.stdout), 'beta: `read webhook/hub-a` prints the callers header — A as a peer (id, name, kind, delivery, last call, generation)', rdB.stdout);
+  ok(rdB.code === 0 && gateOf(rdB.stdout.includes('callers: 1')) && gateOf(rdB.stdout.includes(`  ${bRow.id} "Hub A" · peer · delivery reply-url · last call never · generation 1`)) && !/vsw[hp]_/.test(rdB.stdout), 'beta: `read webhook/hub-a` prints the callers header — A as a peer (id, name, kind, delivery, last call, generation)', rdB.stdout);
   const cmp = await B.cli(['compose', 'webhook/hub-a', '--caller', bRow.id, 'nightly build 812 is green']);
   const recA = await waitFor(async () => { const r = await A.cli(['read', 'webhook/ci']); return r.stdout.includes('nightly build 812 is green') ? r : null; }, 15000, 300);
-  ok(cmp.code === 0 && /sent directly \(policy: direct\) — proposal \S+ to c-/.test(cmp.stdout) && recA && recA.stdout.includes('Hub B: nightly build 812 is green') && recA.stdout.includes(`  ${aRow.id} "Hub B" · peer · delivery reply-url`), 'beta `compose --caller` A ⇒ a `peer` record on A by the REGISTERED name (alpha reads it, with the callers header)', { cmp, recA: recA && recA.stdout });
+  ok(cmp.code === 0 && gateOf(/sent directly \(policy: direct\) — proposal \S+ to c-/.test(cmp.stdout)) && gateOf(recA) && gateOf(recA.stdout.includes('Hub B: nightly build 812 is green')) && verdictOf(recA.stdout.includes(`  ${aRow.id} "Hub B" · peer · delivery reply-url`)), 'beta `compose --caller` A ⇒ a `peer` record on A by the REGISTERED name (alpha reads it, with the callers header)', { cmp, recA: recA && recA.stdout });
   const vid = recA ? ((recA.stdout.match(/nightly build 812 is green\s+\(id (\S+)\)/) || [])[1] || '') : '';
   const rep = await A.cli(['reply', 'webhook/ci', 'thanks — promoting 812', '--to', vid]);
   const recB = await waitFor(async () => { const r = await B.cli(['read', 'webhook/hub-a']); return r.stdout.includes('thanks — promoting 812') ? r : null; }, 15000, 300);
-  ok(!!vid && rep.code === 0 && /sent directly/.test(rep.stdout) && recB && recB.stdout.includes('Hub A: thanks — promoting 812'), 'alpha `reply --to` that record ⇒ it lands on B as a record by A\'s name', { vid, rep, recB: recB && recB.stdout.slice(0, 500) });
+  ok(!!vid && rep.code === 0 && gateOf(/sent directly/.test(rep.stdout)) && gateOf(recB) && verdictOf(recB.stdout.includes('Hub A: thanks — promoting 812')), 'alpha `reply --to` that record ⇒ it lands on B as a record by A\'s name', { vid, rep, recB: recB && recB.stdout.slice(0, 500) });
   const amb = await A.cli(['reply', 'webhook/ci', 'x']);
-  ok(amb.code === 0 && /sent directly/.test(amb.stdout), 'alpha `reply` without --to on a ONE-caller path ⇒ that caller (sent directly)', amb);
+  ok(amb.code === 0 && verdictOf(/sent directly/.test(amb.stdout)), 'alpha `reply` without --to on a ONE-caller path ⇒ that caller (sent directly)', amb);
   // re-pair: both rows rotate in place; the old token is refused after; the new pair carries a message
   const oldTAB = WP.decodeCode(code1.j.code, Date.now()).token;
   const code2 = await A.owner('POST', '/api/channels/webhook/paths/ci/pair-code', { callerId: aRow.id, name: 'Hub A' });
@@ -133,11 +133,11 @@ try {
   ok(onHook.status === 401 && after === before, 'a completion frame POSTed to /hook/ci (signed with the live token) ⇒ 401, no record', [onHook.status, before, after]);
   const cmp2 = await B.cli(['compose', 'webhook/hub-a', '--caller', bRow.id, 'after the re-pair']);
   const recA2 = await waitFor(async () => { const r = await A.cli(['read', 'webhook/ci']); return r.stdout.includes('Hub B: after the re-pair') ? r : null; }, 15000, 300);
-  ok(cmp2.code === 0 && !!recA2 && recA2.stdout.includes('· generation 2'), 'the re-paired tokens carry the next message B → A (the header says generation 2)', { cmp2, recA2: recA2 && recA2.stdout.slice(0, 400) });
+  ok(cmp2.code === 0 && !!recA2 && verdictOf(recA2.stdout.includes('· generation 2')), 'the re-paired tokens carry the next message B → A (the header says generation 2)', { cmp2, recA2: recA2 && recA2.stdout.slice(0, 400) });
   const sinks = [A, B].flatMap((I) => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== 'sockets') walk(f); } else out.push(f); } }; walk(path.join(I.wt, 'data')); return out; });
   const sent = [code1.j.code, code2.j.code, oldTAB, tAB2];
   const hits = sinks.filter((f) => { try { const t = fs.readFileSync(f, 'latin1'); return sent.some((s) => t.includes(s)); } catch { return false; } });
   ok(!hits.length && sinks.length > 10, `neither code nor A's tokens in any of the ${sinks.length} files under both data/ dirs`, hits);
 } catch (e) { fail++; console.error('  ✗ threw:', e.stack || e.message); }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

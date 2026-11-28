@@ -467,7 +467,7 @@ export const PLANTED_SURFACE = "\nconst plantedRove = document.createElement('bu
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let pass = 0, fail = 0;
-  const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+  const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
   const J = (x) => JSON.stringify(x);
   const t0 = Date.now();
 
@@ -475,7 +475,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const LIB = readLib(REPO);
   const HITS = surfaceHits(LIB);
   const CV = censusVerdict(HITS, CENSUS);
-  ok(CV.ok && HITS.size === CENSUS.length && HITS.size >= 120, `the census: ${HITS.size} (file, construct) surfaces in ${LIB.length} files (src/lib/** + index.html) — every one classified, no dead row, no duplicate, every class known`, J(CV));
+  ok(gateOf(CV.ok) && HITS.size === CENSUS.length && HITS.size >= 120, `the census: ${HITS.size} (file, construct) surfaces in ${LIB.length} files (src/lib/** + index.html) — every one classified, no dead row, no duplicate, every class known`, J(CV));
   { const byClass = {}; for (const r of CENSUS) for (const c of r[2].split('+')) (byClass[c] ||= []).push(r[0].replace(/\.js$/, '') + ':' + r[1]);
     const unused = Object.keys(SURFACE_CLASSES).filter((c) => !byClass[c]);
     ok(!unused.length, `every class has rows (${Object.entries(byClass).map(([c, l]) => c + ' ' + l.length).join(' · ')})`, unused.join(', '));
@@ -488,9 +488,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const git = (...a) => execFileSync('git', a, { cwd: S, encoding: 'utf8', env: gitEnvFrom(process.env), stdio: ['ignore', 'pipe', 'pipe'] });
       git('init', '-q'); git('add', '-A');
       const copy = readLib(S), copyHits = surfaceHits(copy), clean = censusVerdict(copyHits, CENSUS);
-      ok(clean.ok && copy.length === LIB.length && copyHits.size === HITS.size, `the scratch copy (git init + add, the same ls-files road, ${copy.length} files) reads exactly as today's tree: green`, J(clean));
+      ok(gateOf(clean.ok) && copy.length === LIB.length && copyHits.size === HITS.size, `the scratch copy (git init + add, the same ls-files road, ${copy.length} files) reads exactly as today's tree: green`, J(clean));
       const live = path.join(S, 'src/lib/vnc-view.js');
-      ok(fs.existsSync(live) && !/tabIndex|tabindex/i.test(codeOnly(fs.readFileSync(live, 'utf8'))), 'the desktop live view (vnc-view.js) has no tabindex construct of its own before the plant');
+      ok(gateOf(fs.existsSync(live)) && !/tabIndex|tabindex/i.test(codeOnly(fs.readFileSync(live, 'utf8'))), 'the desktop live view (vnc-view.js) has no tabindex construct of its own before the plant');
       fs.appendFileSync(live, PLANTED_SURFACE); git('add', '-A');
       const red = censusVerdict(surfaceHits(readLib(S)), CENSUS);
       ok(!red.ok && J(red.unclassified) === J(['vnc-view.js tabindex']) && !red.dead.length && !red.dup.length && !red.badClass.length, 'NEGATIVE CONTROL (one roving-focus <button> with a keydown handler planted in vnc-view.js): RED — "vnc-view.js tabindex" unclassified, nothing else moves', J(red));
@@ -546,4 +546,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`\n(${Date.now() - t0} ms)`);
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
   process.exit(fail ? 1 : 0);
-}
+};import { gateOf } from './lib/check.mjs';

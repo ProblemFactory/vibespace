@@ -27,7 +27,7 @@ const require = createRequire(import.meta.url);
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d).slice(0, 1500)) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d).slice(0, 1500)) : '')); } };
 const OUT = process.env.PAIR_PICS_OUT || '';
 const BEFORE = process.env.PAIR_PICS_BEFORE || '';
 const OSES = [['mac', 'macOS'], ['linux', 'Linux'], ['win', 'Windows']];
@@ -138,12 +138,12 @@ async function walkSheet(P, phase, lang, { expectRed = false } = {}) {
       await shootBoth(P, phase, `${lang}-${m.tag}-${os}`);
       if (!expectRed) {
         const at = `${lang} ${m.tag} px ${label}`;
-        ok(j.labels, `① ${at}: every box BESIDE its word (${lc.n} labels, ${lc.bad.length} not)`, lc.bad.slice(0, 2));
-        ok(j.greyed, `② ${at}: no greyed control on the sheet`, c.greyed);
-        ok(j.words, `③ ${at}: this system's facts only (says ${c.own.join(', ')}; never ${c.wrong.join(', ') || 'another system\'s'})`, c);
-        ok(j.whole, `④ ${at}: the command shows WHOLE (cut ${c.cut} px, resize ${c.resize})`, c);
-        ok(j.order, `⑤ ${at}: ${c.nSteps} steps → the allow list → the fold; the Windows rights box ${c.elevShown ? 'shown' : 'hidden'}`, c);
-        ok(j.rect, `⑥ ${at}: inside the viewport, no sideways scroll, rows ≥ ${m.mobile ? 44 : 28} px`, rc);
+        ok(verdictOf(j.labels), `① ${at}: every box BESIDE its word (${lc.n} labels, ${lc.bad.length} not)`, lc.bad.slice(0, 2));
+        ok(verdictOf(j.greyed), `② ${at}: no greyed control on the sheet`, c.greyed);
+        ok(verdictOf(j.words), `③ ${at}: this system's facts only (says ${c.own.join(', ')}; never ${c.wrong.join(', ') || 'another system\'s'})`, c);
+        ok(verdictOf(j.whole), `④ ${at}: the command shows WHOLE (cut ${c.cut} px, resize ${c.resize})`, c);
+        ok(verdictOf(j.order), `⑤ ${at}: ${c.nSteps} steps → the allow list → the fold; the Windows rights box ${c.elevShown ? 'shown' : 'hidden'}`, c);
+        ok(verdictOf(j.rect), `⑥ ${at}: inside the viewport, no sideways scroll, rows ≥ ${m.mobile ? 44 : 28} px`, rc);
       }
     }
   }
@@ -176,7 +176,7 @@ try {
   ok(c1.btn === (isZh ? '已复制' : 'Copied'), 'a real click on Copy ⇒ the button says it copied', c1);
   await P.realClick(`#device-pair-dialog .device-pair-allow-flag[data-flag="lan"]`); await sleep(200);
   const c2 = await copyState();
-  ok(c2.btn === (isZh ? '复制命令' : 'Copy command') && c2.state === (isZh ? '命令已经变了——请重新复制。' : 'The command changed — copy it again.') && c2.cmd !== c1.cmd && /\n  --allow all(?: \\\n  --setup [a-z,]+)?$/.test(c1.cmd) && /\n  --allow run,files,input,socks,sessions,upgrade(?: \\\n  --setup [a-z,]+)?$/.test(c2.cmd), 'a click on 局域网\'s ROW (a local instance starts with everything on) changes the command ⇒ Copy says so: «copy it again»', { c1: c1.cmd.slice(-40), c2 });
+  ok(c2.btn === (isZh ? '复制命令' : 'Copy command') && c2.state === (isZh ? '命令已经变了——请重新复制。' : 'The command changed — copy it again.') && c2.cmd !== c1.cmd && gateOf(/\n  --allow all(?: \\\n  --setup [a-z,]+)?$/.test(c1.cmd)) && verdictOf(/\n  --allow run,files,input,socks,sessions,upgrade(?: \\\n  --setup [a-z,]+)?$/.test(c2.cmd)), 'a click on 局域网\'s ROW (a local instance starts with everything on) changes the command ⇒ Copy says so: «copy it again»', { c1: c1.cmd.slice(-40), c2 });
   await P.realClick(`#device-pair-dialog .device-pair-copy`); await sleep(200);
   ok((await copyState()).btn === (isZh ? '已复制' : 'Copied'), '…and copying again says it copied');
   await P.realClick(`#device-pair-dialog .device-pair-allow-flag[data-flag="lan"]`); await sleep(150);
@@ -185,12 +185,12 @@ try {
   const held = () => P.evalJs(`[...document.querySelectorAll('#device-pair-dialog .device-pair-allow-flag')].map((l) => { const i = l.querySelector('input'); return { f: l.dataset.flag, on: i.checked, held: l.classList.contains('is-held'), shown: getComputedStyle(i).visibility !== 'hidden', hint: l.querySelector('.device-pair-allow-hint').textContent }; })`);
   const h0 = await held();
   const runRow = h0.find((x) => x.f === 'run'), filesRow = h0.find((x) => x.f === 'files');
-  ok(h0.map((x) => x.f).join(' ') === 'run files sessions upgrade socks lan input' && runRow.held && filesRow.held && !runRow.shown && !filesRow.shown && runRow.on && filesRow.on && runRow.hint === (isZh ? '勾选了“会话”就一直开着——对话需要它。' : 'On while sessions is ticked — a conversation needs it.'), 'sessions on ⇒ 命令 and 文件 are ON and said in words (no box shown), every other row has its box', h0);
-  ok(h0.filter((x) => !x.held).every((x) => x.shown && x.hint.length > 6), 'every other item says in plain words what it lets this VibeSpace do there', h0.map((x) => x.hint));
+  ok(h0.map((x) => x.f).join(' ') === 'run files sessions upgrade socks lan input' && gateOf(runRow.held) && gateOf(filesRow.held) && !runRow.shown && !filesRow.shown && gateOf(runRow.on) && gateOf(filesRow.on) && runRow.hint === (isZh ? '勾选了“会话”就一直开着——对话需要它。' : 'On while sessions is ticked — a conversation needs it.'), 'sessions on ⇒ 命令 and 文件 are ON and said in words (no box shown), every other row has its box', h0);
+  ok(verdictOf(h0.filter((x) => !x.held).every((x) => x.shown && x.hint.length > 6)), 'every other item says in plain words what it lets this VibeSpace do there', h0.map((x) => x.hint));
   await P.realClick(`#device-pair-dialog .device-pair-allow-flag[data-flag="sessions"]`); await sleep(200);
   const h1 = await held();
-  ok(h1.every((x) => !x.held && x.shown) && h1.find((x) => x.f === 'run').on && !h1.find((x) => x.f === 'sessions').on, 'untick 会话 ⇒ 命令 and 文件 are boxes again (still ticked), nothing held', h1);
-  ok(/\n  --allow run,files,input,socks,lan,upgrade(?: \\\n  --setup [a-z,]+)?$/.test((await copyState()).cmd), '…and the command says --allow run,files,input,socks,lan,upgrade (the flags as before)', (await copyState()).cmd.slice(-60));
+  ok(gateOf(h1.every((x) => !x.held && x.shown)) && gateOf(h1.find((x) => x.f === 'run').on) && !h1.find((x) => x.f === 'sessions').on, 'untick 会话 ⇒ 命令 and 文件 are boxes again (still ticked), nothing held', h1);
+  ok(verdictOf(/\n  --allow run,files,input,socks,lan,upgrade(?: \\\n  --setup [a-z,]+)?$/.test((await copyState()).cmd)), '…and the command says --allow run,files,input,socks,lan,upgrade (the flags as before)', (await copyState()).cmd.slice(-60));
   await P.realClick(`#device-pair-dialog .device-pair-allow-flag[data-flag="sessions"]`); await sleep(150);
   // ── lane machine-needs-at-pairing pick 3: STEP ② — what this device will be used for (主开发's Q1–Q4) ──
   console.log('⑦ step ② — what the device will be used for: the defaults, and the tick IS the command');
@@ -200,14 +200,14 @@ try {
     await pickOs(P, label); await sleep(200);
     const n = await needs();
     const last = n.cmd.split('\n').pop().trim();
-    ok(n.steps.join(' ') === 'os needs copy run' && n.rows && JSON.stringify(n.rows.map((r) => [r.k, r.on])) === JSON.stringify(rows) && n.rows.every((r) => r.row && r.hint.length > 20), `⑦ ${label}: step ② sits between the system and the command; its rows and their default ticks ${JSON.stringify(rows)}, each a house check row with its facts`, n);
+    ok(n.steps.join(' ') === 'os needs copy run' && gateOf(n.rows) && JSON.stringify(n.rows.map((r) => [r.k, r.on])) === JSON.stringify(rows) && verdictOf(n.rows.every((r) => r.row && r.hint.length > 20)), `⑦ ${label}: step ② sits between the system and the command; its rows and their default ticks ${JSON.stringify(rows)}, each a house check row with its facts`, n);
     const flag = label === 'Windows' ? '-Setup desktop' : label === 'macOS' ? '--setup mac' : null;
     ok(flag ? last === flag : !/--setup|-Setup/.test(n.cmd), `⑦ ${label}: the command's last line is ${flag ? `«${flag}»` : 'no setup flag (xpra unticked)'}`, last);
   }
   await pickOs(P, 'macOS'); await sleep(150);
   await P.realClick(`#device-pair-dialog .device-pair-need-row[data-need="sharing"]`); await sleep(200);
   const ns = await needs();
-  ok(ns.cmd.split('\n').pop().trim() === '--setup mac,sharing' && /5900/.test(ns.rows.find((r) => r.k === 'sharing').hint), '⑦ ticking a Mac\'s Screen Sharing (its row says it listens on the local network, port 5900) ⇒ --setup mac,sharing', ns.cmd.slice(-40));
+  ok(ns.cmd.split('\n').pop().trim() === '--setup mac,sharing' && verdictOf(/5900/.test(ns.rows.find((r) => r.k === 'sharing').hint)), '⑦ ticking a Mac\'s Screen Sharing (its row says it listens on the local network, port 5900) ⇒ --setup mac,sharing', ns.cmd.slice(-40));
   await P.realClick(`#device-pair-dialog .device-pair-need-row[data-need="sharing"]`); await sleep(150);
   await pickOs(P, 'Windows'); await sleep(150);
   await P.realClick(`#device-pair-dialog .device-pair-need-row[data-need="desktop"]`); await sleep(200);
@@ -240,7 +240,7 @@ try {
   await shoot(P, 'after', `${isZh ? 'zh' : 'en'}-1280-repair-sheet`);
   await P.realClick(`#device-pair-dialog .device-pair-go`);
   const rep = await P.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-cmd')`, 10000);
-  ok(rep, 'the re-pair sheet: Generate ⇒ the command sheet');
+  ok(verdictOf(rep), 'the re-pair sheet: Generate ⇒ the command sheet');
   if (rep) {
     for (const m of WIDTHS) {
       await setMetrics(P, m); await sleep(300);
@@ -248,7 +248,7 @@ try {
       const c = await P.evalJs(censusJs('win'));
       const lc = await P.evalJs(labelRowCensusJs('#device-pair-dialog'));
       const head = await P.evalJs(`document.querySelector('#device-pair-dialog .device-pair-head').textContent`);
-      ok(judge(c, 'win', lc, { ok: true }).labels && c.greyed.length === 0 && c.wrong.length === 0 && c.cut === 0 && c.order && c.nSteps === 4 && head.includes(nm), `the re-pair command at ${m.tag} px: its own head («${head.slice(0, 60)}…»), the same steps, boxes beside words, Windows' facts only`, { c, lc: lc.bad.slice(0, 2), head });
+      ok(gateOf(judge(c, 'win', lc, { ok: true }).labels) && c.greyed.length === 0 && c.wrong.length === 0 && c.cut === 0 && gateOf(c.order) && c.nSteps === 4 && verdictOf(head.includes(nm)), `the re-pair command at ${m.tag} px: its own head («${head.slice(0, 60)}…»), the same steps, boxes beside words, Windows' facts only`, { c, lc: lc.bad.slice(0, 2), head });
       await shootBoth(P, 'after', `${isZh ? 'zh' : 'en'}-${m.tag}-win-repair`);
     }
     await setMetrics(P, WIDTHS[0]); await sleep(200);
@@ -261,7 +261,7 @@ try {
   const HELD_RULE = '#device-pair-dialog label.device-pair-allow-flag.is-held input { visibility: hidden; }';
   ok(realCss.split(HELD_RULE).length === 2, 'the held-box rule is in public/style.css once (the control\'s anchor)');
   const preRow = '\n#device-pair-dialog .device-pair-allow-flag { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; min-height: 28px; }\n';
-  ok(CHECK_ROW_REVERT.every(([fixed]) => realCss.split(fixed).length === 2), 'the check row\'s rules are in public/style.css once each (the control\'s anchors since pick 1)');
+  ok(verdictOf(CHECK_ROW_REVERT.every(([fixed]) => realCss.split(fixed).length === 2)), 'the check row\'s rules are in public/style.css once each (the control\'s anchors since pick 1)');
   // + the check row taken back (ui-phone-and-fit pick 1 rows every dialog label that holds a box — beneath the planted pre-polish rule
   //   it still set flex-direction: row, so the census saw 0 words under their boxes)
   const C = await sheetPage(isZh ? 'zh' : 'en', 'polish-ctl', { css: CHECK_ROW_REVERT.reduce((x, [fixed, old]) => x.replace(fixed, old), realCss.replace(HELD_RULE, '')) + preRow });
@@ -273,7 +273,7 @@ try {
     ok(!lc.ok && lc.bad.length >= 7, `CONTROL ①: the pre-polish allow-row rule put back ⇒ the census sees ${lc.bad.length} words UNDER their boxes (RED)`, lc);
     ok(c.greyed.length === 2, `CONTROL ②: the held boxes shown ⇒ the census sees ${c.greyed.length} greyed controls (RED)`, c.greyed);
     await C.P.evalJs(swapStyleJs(realCss)); await sleep(200);
-    ok((await C.P.evalJs(labelRowCensusJs('#device-pair-dialog'))).ok && (await C.P.evalJs(censusJs('win'))).greyed.length === 0, '…and the real style.css puts every word beside its box, no box greyed');
+    ok(gateOf((await C.P.evalJs(labelRowCensusJs('#device-pair-dialog'))).ok) && (await C.P.evalJs(censusJs('win'))).greyed.length === 0, '…and the real style.css puts every word beside its box, no box greyed');
     await C.P.cdp('Page.close').catch(() => {});
   }
   const smSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
@@ -282,7 +282,7 @@ try {
     ["const fitCmd = () => { if (!ta.isConnected) return; ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight + 2}px`; };", 'const fitCmd = () => {};'],
     ['dir: OS[k].dir }', "dir: '~/.vibespace' }"],
   ];
-  ok(LEV.every(([a]) => smSrc.split(a).length === 2), 'the bundle control\'s levers are spelled once each in src/lib/sidebar-mounts.js');
+  ok(verdictOf(LEV.every(([a]) => smSrc.split(a).length === 2)), 'the bundle control\'s levers are spelled once each in src/lib/sidebar-mounts.js');
   let bundleCtl = null;
   try { bundleCtl = await bundleWith({ 'src/lib/sidebar-mounts.js': LEV.reduce((s, [a, b]) => s.replace(a, b), smSrc) }, 'ctl'); } catch (e) { ok(false, 'CONTROL bundle builds', e.message); }
   if (bundleCtl) {
@@ -291,7 +291,7 @@ try {
     if (!B.err) {
       await pickOs(B.P, 'Windows'); await sleep(200);
       const c = await B.P.evalJs(censusJs('win'));
-      ok(c.wrong.includes('launchd') && c.wrong.includes('~/.vibespace'), `CONTROL ③: the facts left at macOS's ⇒ Windows says ${c.wrong.join(', ')} (RED)`, c);
+      ok(gateOf(c.wrong.includes('launchd')) && verdictOf(c.wrong.includes('~/.vibespace')), `CONTROL ③: the facts left at macOS's ⇒ Windows says ${c.wrong.join(', ')} (RED)`, c);
       ok(c.cut > 0, `CONTROL ④: the command box never measured ⇒ ${c.cut} px of it cut (RED)`, c);
       await B.P.cdp('Page.close').catch(() => {});
     }
@@ -314,10 +314,10 @@ try {
       await s.P.cdp('Page.close').catch(() => {});
     }
   }
-  ok(Object.values(pages).every((p) => p.errors.length === 0), 'no page exception', Object.values(pages).flatMap((p) => p.errors).slice(0, 3));
+  ok(verdictOf(Object.values(pages).every((p) => p.errors.length === 0)), 'no page exception', Object.values(pages).flatMap((p) => p.errors).slice(0, 3));
   if (OUT) console.log(`  pictures: ${OUT}/after${BEFORE ? ` + ${OUT}/before` : ''}`);
 } catch (e) {
   fail++; console.error('  ✗ threw:', e.stack || e.message);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -17,7 +17,7 @@ import { BEFORE_REF, FIXTURE, beforeBlocks, beforeText, census, cut, formatFixtu
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname), SCRIPT = path.join(REPO, 'scripts/claude-md-retire.mjs');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 const raw = fs.readFileSync(path.join(REPO, FIXTURE), 'utf8'), fx = JSON.parse(raw), K = fx.keyChars;
 const blk = (name, f = fx) => f.blocks.find((b) => b.name === name);
 const homeLines = (b, repo = REPO) => region(fs.readFileSync(path.join(repo, b.home), 'utf8'), b.region) || [];
@@ -31,7 +31,7 @@ else for (const b of fx.blocks) {
     `${b.name}: ${g.length} non-blank lines cut from ${BEFORE_REF}:CLAUDE.md give the fixture's rows, line count and sha256 byte-identical`);
   ok(JSON.stringify(g.map((l) => cut(l, K))) === JSON.stringify(b.heads), `${b.name}: its ${b.heads.length} clear heads are those lines' first ${K} characters, same order`);
 }
-for (const b of fx.blocks) ok(b.heads.length === b.rows.length && b.heads.every((t, i) => crypto.createHash('sha256').update(t).digest('hex').slice(0, 10) === b.rows[i].split(':')[0]),
+for (const b of fx.blocks) ok(b.heads.length === b.rows.length && verdictOf(b.heads.every((t, i) => crypto.createHash('sha256').update(t).digest('hex').slice(0, 10) === b.rows[i].split(':')[0])),
   `${b.name}: every clear head hashes to its row's head (git-free)`);
 ok(formatFixture(fx) === raw, 'the fixture is in the retire verb\'s own format (a rewrite changes only `retired`)');
 // lane path-field (the first REAL retirement — src/lib/autocomplete.js deleted): every real retirement is well-formed (a head the
@@ -39,10 +39,10 @@ ok(formatFixture(fx) === raw, 'the fixture is in the retire verb\'s own format (
 const retiredRows = fx.blocks.flatMap((b) => (b.retired || []).map((r) => ({ block: b.name, ...r })));
 const R0 = Object.fromEntries(fx.blocks.map((b) => [b.name, (b.retired || []).length]));   // the real tree's retirements per block
 const headText = (b, h) => b.heads[b.rows.findIndex((r) => r.split(':')[0] === h)] || '';
-ok(fx.blocks.every((b) => Array.isArray(b.retired) && b.retired.every((r) => headText(b, r.head) && String(r.why || '').length >= 12 && /^\d{4}-\d{2}-\d{2}$/.test(r.at))), `every real retirement is well-formed — a row of its block, a why, a date (${retiredRows.length}: ${retiredRows.map((r) => r.block + ' «' + headText(blk(r.block), r.head).trim() + '»').join(', ') || 'none'})`);
+ok(verdictOf(fx.blocks.every((b) => Array.isArray(b.retired) && b.retired.every((r) => headText(b, r.head) && String(r.why || '').length >= 12 && /^\d{4}-\d{2}-\d{2}$/.test(r.at)))), `every real retirement is well-formed — a row of its block, a why, a date (${retiredRows.length}: ${retiredRows.map((r) => r.block + ' «' + headText(blk(r.block), r.head).trim() + '»').join(', ') || 'none'})`);
 // int238: a moved row widened at its tail is "edited since the move" — green under §82 (lanes browser-profile-clone and browser-disk-sample
 // each widen one file-index row), so the real tree is judged as §82 judges it: nothing lost, every moved row verbatim or edited
-for (const b of fx.blocks) { const j = judge(fx, b, homeLines(b)); ok(j.ok && j.census.lost === 0 && j.census.retired === R0[b.name] && j.census.verbatim + j.census.edited + j.census.retired === b.lines, `real §82 ④ ${j.line}`); }
+for (const b of fx.blocks) { const j = judge(fx, b, homeLines(b)); ok(gateOf(j.ok) && j.census.lost === 0 && j.census.retired === R0[b.name] && j.census.verbatim + j.census.edited + j.census.retired === b.lines, `real §82 ④ ${j.line}`); }
 
 console.log('② the shared census answers the diet\'s census on every zero-retirement shape');
 // the diet's census82 as it shipped in 2.369.235 (test-architecture §82), kept here as the reference
@@ -92,37 +92,37 @@ ok(r.code === 0 && shellAt > 0 && read('docs/kb-file-structure.md') === fsBefore
   `by file path: exit 0, docs/kb-file-structure.md lost exactly its line ${shellAt + 1} and nothing else — "${r.out.split('\n')[0]}"`);
 const ret1 = blk('file-index', fx1).retired;
 const new1 = ret1[ret1.length - 1];
-ok(ret1.length === R0['file-index'] + 1 && new1.head === fil.rows[shellRow].split(':')[0] && new1.why === WHY && /^\d{4}-\d{2}-\d{2}$/.test(new1.at)
+ok(ret1.length === R0['file-index'] + 1 && new1.head === fil.rows[shellRow].split(':')[0] && new1.why === WHY && gateOf(/^\d{4}-\d{2}-\d{2}$/.test(new1.at))
   && formatFixture({ ...fx1, blocks: fx1.blocks.map((b) => ({ ...b, retired: blk(b.name).retired })) }) === raw, 'the fixture gained ONE {head, why, at} retirement (after the real ones) and is otherwise byte-identical');
 let s0 = snap(); r = run('file-index', 'src/exit-shell.js', '--why', WHY);
-ok(r.code === 0 && /already retired/.test(r.out) && snap() === s0, `twice: exit 0, "${r.out.trim().split('\n')[0].slice(0, 90)}…", nothing written`);
+ok(r.code === 0 && gateOf(/already retired/.test(r.out)) && snap() === s0, `twice: exit 0, "${r.out.trim().split('\n')[0].slice(0, 90)}…", nothing written`);
 const incident = bl[m1], text30 = [...incident].slice(0, 30).join('');
 r = run('docs/kb-bugfix-invariants.md', text30, '--why', 'the incident\'s file was renamed by a test lane', '--dry-run');
-ok(r.code === 0 && /would retire bugfix-index row \d+/.test(r.out) && /would remove docs\/kb-bugfix-invariants\.md line \d+/.test(r.out) && snap() === s0, '--dry-run (by home file + head text): says what it would retire and remove, writes nothing');
+ok(r.code === 0 && gateOf(/would retire bugfix-index row \d+/.test(r.out)) && gateOf(/would remove docs\/kb-bugfix-invariants\.md line \d+/.test(r.out)) && snap() === s0, '--dry-run (by home file + head text): says what it would retire and remove, writes nothing');
 r = run('bugfix-index', text30, '--why', 'the incident\'s file was renamed by a test lane');
 ok(r.code === 0 && !read('docs/kb-bugfix-invariants.md').split('\n').includes(incident) && blk('bugfix-index', JSON.parse(read(FIXTURE))).retired.length === R0['bugfix-index'] + 1, `by head text ("${text30}"): retired, its line gone`);
 const pfx = (() => { const hs = fil.heads; for (let i = 0; i < hs.length; i++) for (let j = i + 1; j < hs.length; j++) { const p = [...hs[i]].slice(0, 22).join(''); if ([...p].length === 22 && hs[j].startsWith(p) && hs[i].split(':')[0] !== hs[j].split(':')[0] && !/^[`│├└ ]/.test(p)) return p; } return null; })();
 s0 = snap(); r = run('file-index', pfx || 'none', '--why', WHY);
-ok(!!pfx && r.code === 2 && /ambiguous/.test(r.out) && (r.out.match(/file-index row \d+:/g) || []).length >= 2 && snap() === s0, `ambiguous ("${pfx}"): refused with ${(r.out.match(/file-index row \d+:/g) || []).length} candidates listed, nothing written`);
+ok(!!pfx && r.code === 2 && gateOf(/ambiguous/.test(r.out)) && (r.out.match(/file-index row \d+:/g) || []).length >= 2 && snap() === s0, `ambiguous ("${pfx}"): refused with ${(r.out.match(/file-index row \d+:/g) || []).length} candidates listed, nothing written`);
 r = run('file-index', 'src/no-such-file-ever.js', '--why', WHY);
-ok(r.code === 2 && /not found/.test(r.out) && snap() === s0, 'not found: refused, nothing written');
+ok(r.code === 2 && gateOf(/not found/.test(r.out)) && snap() === s0, 'not found: refused, nothing written');
 r = run('file-index', 'src/exit-runs.js', '--why', 'gone');
-ok(r.code === 2 && /--why must name/.test(r.out) && snap() === s0, 'a why under 12 characters: refused, nothing written');
+ok(r.code === 2 && gateOf(/--why must name/.test(r.out)) && snap() === s0, 'a why under 12 characters: refused, nothing written');
 r = run('no-such-block', 'src/exit-runs.js', '--why', WHY);
-ok(r.code === 2 && /no block or home file/.test(r.out) && /file-index/.test(r.out) && snap() === s0, 'an unknown block: refused naming the four blocks');
+ok(r.code === 2 && gateOf(/no block or home file/.test(r.out)) && gateOf(/file-index/.test(r.out)) && snap() === s0, 'an unknown block: refused naming the four blocks');
 
 console.log('④ §82\'s verdict over the scratch copies');
 const v = (f, name, lines, b4 = before) => judge(f, blk(name, f), lines ?? homeLines(blk(name, f), S), { before: b4 && b4[name] });
 const fxS = JSON.parse(read(FIXTURE));
 const a = ['file-index', 'bugfix-index'].map((n) => v(fxS, n));
-ok(a.every((j, i) => j.ok && j.census.retired === R0[['file-index', 'bugfix-index'][i]] + 1 && j.census.lost === 0 && (md ? j.census.shaOk === true : j.census.shaOk === null)),
+ok(verdictOf(a.every((j, i) => j.ok && j.census.retired === R0[['file-index', 'bugfix-index'][i]] + 1 && j.census.lost === 0 && (md ? j.census.shaOk === true : j.census.shaOk === null))),
   `(a) removed WITH a retirement ⇒ green — ${a[0].line}`);
 // a MOVED row (its head is one of the fixture's): lane vault-locked-refusal-notice — one INDEX line added near the top moved
 // the middle onto a `src/` line written after the diet (no fixture row), so `gone` named nothing and (b)/(d) went red
 const sFl = homeLines(blk('file-index', fxS), S), gone = sFl.findIndex((l, i) => i > sFl.length / 2 && l.startsWith('src/') && fil.heads.includes(cut(l, K)));
 const goneRow = fil.heads.findIndex((t) => t === cut(sFl[gone], K));
 const b = v(fxS, 'file-index', sFl.filter((_, i) => i !== gone));
-ok(!b.ok && b.census.lost === 1 && b.said.includes(`lost: file-index row ${goneRow + 1}: "${fil.heads[goneRow]}"`), `(b) removed WITHOUT ⇒ red, in words: ${b.said[0]}`);
+ok(!b.ok && b.census.lost === 1 && verdictOf(b.said.includes(`lost: file-index row ${goneRow + 1}: "${fil.heads[goneRow]}"`)), `(b) removed WITHOUT ⇒ red, in words: ${b.said[0]}`);
 const withRet = (name, extra) => ({ ...fxS, blocks: fxS.blocks.map((x) => (x.name === name ? { ...x, retired: [...x.retired, ...extra] } : x)) });
 // a row LONGER than its head (K): an edit at its end keeps the head, so it reads `edited` — a bare `src/` heading row would
 // read LOST (lane automation-verbs: its INDEX lines moved the middle so the next `src/` row after `gone` was that heading)
@@ -130,21 +130,21 @@ const withRet = (name, extra) => ({ ...fxS, blocks: fxS.blocks.map((x) => (x.nam
 // onto a row already edited since the move, so (e)'s edit added no `edited` row and went red
 const live = sFl.findIndex((l, i) => i > gone && l.startsWith('src/') && l.length > K && fil.heads.includes(cut(l, K)) && fil.rows.includes(rowOf(l, K))), liveHead = fil.rows[fil.heads.findIndex((t) => t === cut(sFl[live], K))].split(':')[0];
 const c = v(withRet('file-index', [{ head: liveHead, why: 'a control: this line was not removed', at: '2026-10-08' }]), 'file-index');
-ok(!c.ok && c.said.some((x) => x.startsWith('dead retirement: file-index row ')), `(c) a retirement whose line still exists ⇒ red: ${c.said.find((x) => x.startsWith('dead'))}`);
+ok(!c.ok && verdictOf(c.said.some((x) => x.startsWith('dead retirement: file-index row '))), `(c) a retirement whose line still exists ⇒ red: ${c.said.find((x) => x.startsWith('dead'))}`);
 const d = v(withRet('file-index', [{ head: fil.rows[gone > -1 ? fil.heads.findIndex((t) => t === cut(sFl[gone], K)) : 0].split(':')[0], why: 'short', at: '2026-10-08' }]), 'file-index', sFl.filter((_, i) => i !== gone));
-ok(!d.ok && d.census.lost === 0 && d.said.some((x) => /why "short" is under 12 characters/.test(x)), `(d) a why of 5 characters ⇒ red: ${d.said[0]}`);
+ok(!d.ok && d.census.lost === 0 && verdictOf(d.said.some((x) => /why "short" is under 12 characters/.test(x))), `(d) a why of 5 characters ⇒ red: ${d.said[0]}`);
 const d2 = v(withRet('file-index', [{ head: fil.rows[goneRow].split(':')[0], why: 'a control: the date is malformed', at: '2026-02-30' }]), 'file-index', sFl.filter((_, i) => i !== gone));
-ok(!d2.ok && d2.said.some((x) => /at "2026-02-30" is not a YYYY-MM-DD date/.test(x)), '(d) an `at` of 2026-02-30 ⇒ red');
+ok(!d2.ok && verdictOf(d2.said.some((x) => /at "2026-02-30" is not a YYYY-MM-DD date/.test(x))), '(d) an `at` of 2026-02-30 ⇒ red');
 const eL = sFl.map((l, i) => (i === live ? l + ' (edited)' : l)), e = v(fxS, 'file-index', eL);
-ok(e.ok && e.census.edited === a[0].census.edited + 1 && e.census.retired === R0['file-index'] + 1 && (md ? e.census.shaOk === true && /verbatim rows left re-assembled hash like/.test(e.line) : /SKIP the before-text sha/.test(e.line)),
+ok(gateOf(e.ok) && e.census.edited === a[0].census.edited + 1 && e.census.retired === R0['file-index'] + 1 && (md ? e.census.shaOk === true && verdictOf(/verbatim rows left re-assembled hash like/.test(e.line)) : verdictOf(/SKIP the before-text sha/.test(e.line))),
   `(e) a retirement + one EDITED other row ⇒ green — ${e.line}`);
 const e2 = v(fxS, 'file-index', eL, null);
-ok(e2.ok && e2.census.shaOk === null && /SKIP the before-text sha/.test(e2.line), '(e) without the before-text (a depth-1 checkout) the sha leg says SKIP; the per-row leg still holds');
+ok(gateOf(e2.ok) && e2.census.shaOk === null && verdictOf(/SKIP the before-text sha/.test(e2.line)), '(e) without the before-text (a depth-1 checkout) the sha leg says SKIP; the per-row leg still holds');
 if (md) {
   const bad = { ...before, 'file-index': before['file-index'].map((l, i) => (i === shellRow + 3 ? l + '!' : l)) };
   const e3 = v(fxS, 'file-index', eL, bad);
-  ok(!e3.ok && e3.census.shaOk === false && /SHA MISMATCH/.test(e3.line), '(e) control: a before-text that does not regenerate the fixture rows ⇒ SHA MISMATCH, never a silent pass');
+  ok(!e3.ok && e3.census.shaOk === false && verdictOf(/SHA MISMATCH/.test(e3.line)), '(e) control: a before-text that does not regenerate the fixture rows ⇒ SHA MISMATCH, never a silent pass');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

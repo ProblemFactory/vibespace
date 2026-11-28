@@ -17,7 +17,7 @@ const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d (lin
 waitEverySave(AccountManager);
 const { buildClaudeSubscriptionLoginCommand } = require('../src/claude-subscription-login.js');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-relogin-'));
 try {
@@ -25,8 +25,8 @@ try {
   const { id } = am.createSubscription({ name: 'ReloginMe' });
   const dir = am.subDir(id);
   const cmd = buildClaudeSubscriptionLoginCommand({ nodeCmd: 'node', helperPath: '/x/helper.mjs', claudeCmd: 'claude', configDir: dir });
-  ok(cmd.includes(dir), 'login command is scoped to the EXISTING account dir', cmd);
-  ok(/--config-dir/.test(cmd), 'dir travels as --config-dir argv — the HELPER sets both config envs itself (env isolation is its contract)');
+  ok(verdictOf(cmd.includes(dir)), 'login command is scoped to the EXISTING account dir', cmd);
+  ok(verdictOf(/--config-dir/.test(cmd)), 'dir travels as --config-dir argv — the HELPER sets both config envs itself (env isolation is its contract)');
   ok(am._subscriptionLoginStatus(id) == null || typeof am._subscriptionLoginStatus(id) === 'object',
     'login-status read never throws on a status-less account (baseline=null path)');
   // a token-less husk (the real trigger for this feature) still yields a
@@ -34,7 +34,7 @@ try {
   fs.writeFileSync(path.join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { scopes: [] } }));
   ok(!am.readSubCreds(id).loggedIn, 'husk reads as signed out');
   const cmd2 = buildClaudeSubscriptionLoginCommand({ nodeCmd: 'node', helperPath: '/x/helper.mjs', claudeCmd: 'claude', configDir: am.subDir(id) });
-  ok(cmd2.includes(dir), 'signed-out account still gets a valid re-login command into the SAME dir');
+  ok(verdictOf(cmd2.includes(dir)), 'signed-out account still gets a valid re-login command into the SAME dir');
 
   // ── THE RELOGIN DOOR ON THE ONE COMPARISON (row B-87fd identity unit 3, 主开发 r2533 / r2536): the scenes table, a leg each.
   // BEFORE = what the row's folder names at the «sign in again» press (reloginBegin); AFTER = what it names at the resolve. Every
@@ -73,11 +73,11 @@ try {
   // 2b. …and its config cleared too (unproven whether the vendor's sign-out does): the row's NAME (its login's address) checks the read
   { const s = row('a5@example.invalid'); blank(am2.subDir(s)); fs.rmSync(cfgAt(am2.subDir(s))); const r = relogin(s, 'a5@example.invalid');
     const s2 = row('a6@example.invalid'); blank(am2.subDir(s2)); fs.rmSync(cfgAt(am2.subDir(s2))); const r2 = relogin(s2, 'b6@example.invalid');
-    ok(r.outcome === 'same' && r2.outcome === 'ask' && held(s2) && !am2.readSubCreds(s2).loggedIn, 'scene 2b (blanked, config cleared): the row\'s name checks the read — equal ⇒ SAME; different ⇒ ASK (the sign-in HELD, not adopted: the row stays signed out) — never a split on a word alone', JSON.stringify([r.outcome, r2.outcome]));
+    ok(r.outcome === 'same' && r2.outcome === 'ask' && gateOf(held(s2)) && !am2.readSubCreds(s2).loggedIn, 'scene 2b (blanked, config cleared): the row\'s name checks the read — equal ⇒ SAME; different ⇒ ASK (the sign-in HELD, not adopted: the row stays signed out) — never a split on a word alone', JSON.stringify([r.outcome, r2.outcome]));
     const listed = am2.list().accounts.find((x) => x.id === s2);
-    ok(listed && listed.reloginAsk && JSON.stringify(Object.keys(listed.reloginAsk)) === '["at"]', 'the asked row carries its question as a MARK (when), no identity — the list and its push', listed && listed.reloginAsk);
+    ok(gateOf(listed) && gateOf(listed.reloginAsk) && JSON.stringify(Object.keys(listed.reloginAsk)) === '["at"]', 'the asked row carries its question as a MARK (when), no identity — the list and its push', listed && listed.reloginAsk);
     const ans = am2.reloginAnswer(s2, 'same');
-    ok(ans.outcome === 'same' && am2.readSubCreds(s2).loggedIn && !held(s2) && !am2.list().accounts.find((x) => x.id === s2).reloginAsk, '«the same account: keep this row» ⇒ the held sign-in returns into the row, in place; the question gone', ans.outcome);
+    ok(ans.outcome === 'same' && gateOf(am2.readSubCreds(s2).loggedIn) && !held(s2) && !am2.list().accounts.find((x) => x.id === s2).reloginAsk, '«the same account: keep this row» ⇒ the held sign-in returns into the row, in place; the question gone', ans.outcome);
     ok(am2.reloginAnswer(s2, 'same').outcome === 'none', 'a second answer ⇒ «none» (nothing asked any more), said by name'); }
   // (b) THE ROW's OWN WORD OUTRANKS THE CONFIG ALONE: a typed address that disagrees with the last login ⇒ a conflict ⇒ ASK
   { const s = row('a7@example.invalid'); am2.setEmail(s, 'c7@example.invalid'); blank(am2.subDir(s)); const r = relogin(s, 'a7@example.invalid');
@@ -92,7 +92,7 @@ try {
   { const r = relogin(tokenRow(), 'a9@example.invalid'), s2 = tokenRow(), r2 = relogin(s2, 'b9@example.invalid'), r3 = relogin(tokenRow(), 'x9@example.invalid');
     ok(r.outcome === 'same' && r2.outcome === 'ask' && r3.outcome === 'ask', 'scene 5 (a long-lived token row): the same person (the mint\'s address) ⇒ SAME; another ⇒ ASK; the OLD login the config names ⇒ ASK, never «same» by the config beside a token (law 5)', JSON.stringify([r.outcome, r2.outcome, r3.outcome]));
     const k = n0(), ans = am2.reloginAnswer(s2, 'another'), made = am2.list().accounts.find((x) => ans.account && x.id === ans.account.id);
-    ok(ans.outcome === 'split' && n0() === k + 1 && made && am2.readSubCreds(made.id).loggedIn && !am2.readSubCreds(s2).loggedIn, '«another account: make a new row» ⇒ a NEW row holds the sign-in; this row stays as it was (signed out)', ans.outcome); }
+    ok(ans.outcome === 'split' && n0() === k + 1 && gateOf(made) && gateOf(am2.readSubCreds(made.id).loggedIn) && !am2.readSubCreds(s2).loggedIn, '«another account: make a new row» ⇒ a NEW row holds the sign-in; this row stays as it was (signed out)', ans.outcome); }
   // 6. a TYPED address only (a sign-in flow that writes no config)
   { const s = am2.createSubscription({}).id; live(am2.subDir(s), 'a10@example.invalid', { cfg: false }); am2.finalizeSubscription(s); am2.setEmail(s, 'a10@example.invalid');
     const r = relogin(s, 'a10@example.invalid', { cfg: false });
@@ -101,7 +101,7 @@ try {
     ok(r.outcome === 'same' && r2.outcome === 'same' && r3.outcome === 'ask', 'scene 6 (a typed address only): AFTER names nothing read ⇒ IN PLACE; AFTER names the typed address ⇒ SAME; another address ⇒ ASK', JSON.stringify([r.outcome, r2.outcome, r3.outcome])); }
   // MOVED: the sign-in is another row's — its record (read facts) is «same»
   { const o = row('m1@example.invalid'), s = row('a13@example.invalid'); const r = relogin(s, 'm1@example.invalid');
-    ok(r.outcome === 'moved' && r.movedTo && r.movedTo.id === o && am2.readSubCreds(o).loggedIn && !am2.readSubCreds(s).loggedIn, 'another row whose record is «same» ⇒ MOVED into it (its read facts, never a word)', JSON.stringify(r)); }
+    ok(r.outcome === 'moved' && gateOf(r.movedTo) && r.movedTo.id === o && gateOf(am2.readSubCreds(o).loggedIn) && !am2.readSubCreds(s).loggedIn, 'another row whose record is «same» ⇒ MOVED into it (its read facts, never a word)', JSON.stringify(r)); }
   // ── r2734 MUST 1: THE RESOLVE JUDGES ONLY A SIGN-IN NEW SINCE THE PRESS — the page polls from the press ──
   const firstPolls = (M) => {
     const s = M.createSubscription({}).id; live(M.subDir(s), 'a30@example.invalid'); M.finalizeSubscription(s); expired(M.subDir(s));   // scene 1, the commonest
@@ -116,7 +116,7 @@ try {
     return { s, r0: r0.outcome, kept0, r1: r1.outcome, r2: r2.outcome, signedIn: M.readSubCreds(s).loggedIn };
   };
   { const f = firstPolls(am2);
-    ok(f.r0 === 'pending' && f.kept0 && f.r1 === 'pending' && f.r2 === 'split' && !f.signedIn, 'MUST 1 (scene 1, the page polls from the press): the first poll before any sign-in ⇒ PENDING, BEFORE kept; a poll between the credentials\' write and the config\'s ⇒ PENDING; the helper\'s success for this press with ANOTHER account ⇒ DIFFERENT (a new row) — never in place', JSON.stringify(f));
+    ok(f.r0 === 'pending' && gateOf(f.kept0) && f.r1 === 'pending' && f.r2 === 'split' && !f.signedIn, 'MUST 1 (scene 1, the page polls from the press): the first poll before any sign-in ⇒ PENDING, BEFORE kept; a poll between the credentials\' write and the config\'s ⇒ PENDING; the helper\'s success for this press with ANOTHER account ⇒ DIFFERENT (a new row) — never in place', JSON.stringify(f));
     const s = row('a31@example.invalid'); expired(am2.subDir(s)); const b = am2.reloginBegin(s);
     const p0 = am2.reloginResolve(s).outcome; live(am2.subDir(s), 'a31@example.invalid'); helper(am2.subDir(s), 'success', b.attempt); const p1 = am2.reloginResolve(s).outcome;
     ok(p0 === 'pending' && p1 === 'same', '…the same person back: PENDING until the helper\'s success, then SAME (in place, no question)', JSON.stringify([p0, p1]));
@@ -144,7 +144,7 @@ try {
     return { s, r0: r0.outcome, again: typeof again === 'string' ? again : again && 'kept', r1: r1.outcome, asks: !!(M.list().accounts.find((x) => x.id === s) || {}).reloginAsk, heldNow, heldIs };
   };
   { const g = asking(am2);
-    ok(g.r0 === 'ask' && g.again === 'ask-open' && g.r1 === 'ask' && g.asks && g.heldIs === 'at-b33@example.invalid', 'MUST 2: on an asking row a sign-in press is REFUSED by name (ask-open), a resolve answers the SAME question and moves nothing — C is not adopted, the mark and the held sign-in stay', JSON.stringify(g));
+    ok(g.r0 === 'ask' && g.again === 'ask-open' && g.r1 === 'ask' && gateOf(g.asks) && g.heldIs === 'at-b33@example.invalid', 'MUST 2: on an asking row a sign-in press is REFUSED by name (ask-open), a resolve answers the SAME question and moves nothing — C is not adopted, the mark and the held sign-in stay', JSON.stringify(g));
     const ans = am2.reloginAnswer(g.s, 'same'), held = path.join(am2.subDir(g.s), '.vibespace-relogin-held', '.credentials.json');
     ok(ans.outcome === 'same' && !fs.existsSync(held), '…every road that clears the mark gives the held sign-in back (or a new row takes it): no held sign-in outlives its question', ans.outcome); }
   { const Old = copyAMs([["    if (a.reloginAsk) return { outcome: 'ask', keptName: a.name, ...(a.reloginAsk.lost ? { lost: true } : {}) };\n", ''], ['  _signInAnswer(a, read) { return a && a.reloginAsk ? { loggedIn: false } : read(); }', '  _signInAnswer(a, read) { return read(); }']], 'an asking row whose resolve moves on (RED) — and reads signed in: r4177\'s signed-out read is the check\'s second guard'); // stale-pins: kept — the RED takes the one-open-question check out
@@ -172,7 +172,7 @@ try {
     return { r: r.outcome, to: r.movedTo && r.movedTo.id === o, oIn: M.readSubCreds(o).loggedIn };
   };
   { const u = await untiedMove(am2);
-    ok(u.r === 'moved' && u.to && u.oIn, 'r2915 MUST: the OTHER account\'s row with no tie on record TAKES THE MOVE (seeded from its own credentials, read now) — never a duplicate row', JSON.stringify(u));
+    ok(u.r === 'moved' && gateOf(u.to) && verdictOf(u.oIn), 'r2915 MUST: the OTHER account\'s row with no tie on record TAKES THE MOVE (seeded from its own credentials, read now) — never a duplicate row', JSON.stringify(u));
     const NoSeed2 = copyAMs([["      if (!this._hasTie(x.id)) {", "      if (false) {"], ["      if (seed) { try { this._seedTieAt(id, o); } catch { } }   // a row's own landing seeds a row with no tie (r3022 (2))\n", '']], 'a move target with no tie is seeded neither by the move nor by its landing (RED)'); // stale-pins: kept
     if (!NoSeed2.err) { const u2 = await untiedMove(new NoSeed2({ dataDir: path.join(tmp, 'red-move') })); ok(u2.r === 'split', 'RED: in that copy the untied row of the same account gets a DUPLICATE (a split)', JSON.stringify(u2)); } else ok(false, 'RED CONTROL built: the move without the seed', NoSeed2.err); }
   const mergeTie = (M) => {
@@ -183,7 +183,7 @@ try {
     return { err, carried: !!(tie && tie.rte === rteOf(M.subDir(into))), hadFrom, fromGone: !(M._loginTies && M._loginTies.has(from)) };
   };
   { const g = mergeTie(am2);
-    ok(!g.err && g.carried && g.hadFrom && g.fromGone, 'r2915: the MERGE carries the tie onto the survivor (its folder now holds the folded sign-in: its deadline on the row); r2972 5: the folded row\'s fingerprint leaves with it', JSON.stringify(g));
+    ok(!g.err && gateOf(g.carried) && gateOf(g.hadFrom) && verdictOf(g.fromGone), 'r2915: the MERGE carries the tie onto the survivor (its folder now holds the folded sign-in: its deadline on the row); r2972 5: the folded row\'s fingerprint leaves with it', JSON.stringify(g));
     const NoCarry = copyAMs([["    this._noteLoginTie(intoId, { fresh: true });   // the MERGE carries the tie onto the survivor: its folder now holds the folded sign-in (r2915)\n", ''], ["      if (seed) { try { this._seedTieAt(id, o); } catch { } }   // a row's own landing seeds a row with no tie (r3022 (2))\n", '']], 'the merge carries no tie, nor does the landing (RED)'); // stale-pins: kept — unit 4: the landing seeds too
     if (!NoCarry.err) { const r = mergeTie(new NoCarry({ dataDir: path.join(tmp, 'red-merge') })); ok(!r.carried, 'r2972 2 RED: in a copy without the carry the survivor holds NO tie of its folded sign-in', JSON.stringify(r)); } else ok(false, 'RED CONTROL built: the merge without the carry', NoCarry.err); }
   // r2915 (a): a second press JOINS the run still out; an errored run starts afresh
@@ -194,7 +194,7 @@ try {
     return { joined: !!(b2 && b2.attempt === b1.attempt && b2.joined), fresh: !!(b3 && b3.attempt !== b1.attempt) };
   };
   { const j = joins(am2);
-    ok(j.joined && j.fresh, 'r2915 (a): a second press while the first run still runs JOINS it (the same attempt, the same command); after an ERRORED run a press starts afresh', JSON.stringify(j));
+    ok(gateOf(j.joined) && verdictOf(j.fresh), 'r2915 (a): a second press while the first run still runs JOINS it (the same attempt, the same command); after an ERRORED run a press starts afresh', JSON.stringify(j));
     const Replace = copyAM("      if (!(st0 && st0.attempt === was.attempt && st0.state === 'error')) return { attempt: was.attempt, joined: true };\n", '', 'a second press replaces the attempt (RED)'); // stale-pins: kept
     if (!Replace.err) { const r = joins(new Replace({ dataDir: path.join(tmp, 'red-join') })); ok(!r.joined, 'r2972 2 RED: in a copy that replaces the attempt the first run is left unjudged (no join)', JSON.stringify(r)); } else ok(false, 'RED CONTROL built: the replaced attempt', Replace.err); }
   // r2972 3: a press that would join a run whose SUCCESS already sits unjudged judges it FIRST, then begins afresh
@@ -205,19 +205,19 @@ try {
     return { judged: M.list().accounts.length === k + 1 && !M.readSubCreds(s).loggedIn, fresh: !!(b2 && b2.attempt && b2.attempt !== b1.attempt && !b2.joined) };
   };
   { const u = unjudged(am2);
-    ok(u.judged && u.fresh, 'r2972 3: the run\'s success sat unjudged — the second press JUDGES it first (another account ⇒ its own new row) and only then begins afresh: never a second command whose sign-in lands with no watcher', JSON.stringify(u));
+    ok(gateOf(u.judged) && verdictOf(u.fresh), 'r2972 3: the run\'s success sat unjudged — the second press JUDGES it first (another account ⇒ its own new row) and only then begins afresh: never a second command whose sign-in lands with no watcher', JSON.stringify(u));
     const NoJudge = copyAM("      if (st0 && st0.attempt === was.attempt && st0.state === 'success') { try { this.reloginResolve(id); } catch { } if (this._reloginBefore) this._reloginBefore.delete(id); return this.reloginBegin(id); }\n", '', 'a join onto an unjudged success (RED)'); // stale-pins: kept
     if (!NoJudge.err) { const r = unjudged(new NoJudge({ dataDir: path.join(tmp, 'red-unjudged') })); ok(!r.judged && !r.fresh, 'RED: in that copy the second press joins the run and the success stays unjudged', JSON.stringify(r)); } else ok(false, 'RED CONTROL built: the join onto an unjudged success', NoJudge.err); }
   { const s = row('a51@example.invalid'); blank(am2.subDir(s)); fs.rmSync(cfgAt(am2.subDir(s))); const b = am2.reloginBegin(s);   // scene 2b: the row's word decides
     live(am2.subDir(s), 'b51@example.invalid'); helper(am2.subDir(s), 'success', b.attempt);   // another address, its success left unjudged
     const again = am2.reloginBegin(s), asks = !!(am2.list().accounts.find((x) => x.id === s) || {}).reloginAsk;
-    ok(again === 'ask-open' && asks, 'r2972 3: …and when that judgement ASKS, the second press is refused by name (ask-open): the question stands on the row', JSON.stringify({ again, asks })); }
+    ok(again === 'ask-open' && verdictOf(asks), 'r2972 3: …and when that judgement ASKS, the second press is refused by name (ask-open): the question stands on the row', JSON.stringify({ again, asks })); }
   // r2915 (b): after a restart a status naming some attempt does not vouch — a stale success TIES NOTHING
   { const d = path.join(tmp, 'stale'), A3 = new AccountManager({ dataDir: d });
     const s = A3.createSubscription({}).id; live(A3.subDir(s), 'a46@example.invalid'); A3.finalizeSubscription(s);
     const tie0 = A3.get(s).loginTie.rte, b = A3.reloginBegin(s); live(A3.subDir(s), 'a46@example.invalid'); helper(A3.subDir(s), 'success', b.attempt);
     const B3 = new AccountManager({ dataDir: d }), r = B3.reloginResolve(s);
-    ok(r.outcome === 'same' && !B3.get(s).loginTie && tie0, 'r2915 (b) + r2972 1: on the LOST road (a restart) a success naming an attempt this process never saw vouches nothing: the row\'s word settles it (SAME), NO tie is recorded from those credentials, and the row\'s OLD tie is dropped', JSON.stringify({ r: r.outcome, tie: B3.get(s).loginTie, tie0 }));
+    ok(r.outcome === 'same' && !B3.get(s).loginTie && verdictOf(tie0), 'r2915 (b) + r2972 1: on the LOST road (a restart) a success naming an attempt this process never saw vouches nothing: the row\'s word settles it (SAME), NO tie is recorded from those credentials, and the row\'s OLD tie is dropped', JSON.stringify({ r: r.outcome, tie: B3.get(s).loginTie, tie0 }));
     const r2 = relogin(s, 'a46@example.invalid', undefined, B3);
     ok(r2.outcome === 'same', 'r2972 1: …so the NEXT press seeds from the folder and the same person back is SAME, never asked', r2.outcome); }
   { const AnyVouch = copyAM("    const vouched = !lost ? true : kept ? !!(st && st.state === 'success' && st.attempt === kept.attempt) : !(st && st.attempt);\n", "    const vouched = !!(st && st.state === 'success');\n", 'any success vouches (RED)'); // stale-pins: kept
@@ -244,31 +244,31 @@ try {
     fs.rmSync(hold); return { r: r.outcome, kept, next: relogin(s, 'b50@example.invalid', undefined, B6).outcome };
   };
   { const f = refusedLost(AccountManager);
-    ok(f.r === 'refused' && f.kept && f.next === 'ask', 'r2972 1: after a restart a RENAMED row (no word) whose other-account sign-in could not be held is REFUSED and KEEPS its old tie — so the next press, that same other account again, is ASKED (never seeded from the unproven sign-in and silently adopted)', JSON.stringify(f));
+    ok(f.r === 'refused' && gateOf(f.kept) && f.next === 'ask', 'r2972 1: after a restart a RENAMED row (no word) whose other-account sign-in could not be held is REFUSED and KEEPS its old tie — so the next press, that same other account again, is ASKED (never seeded from the unproven sign-in and silently adopted)', JSON.stringify(f));
     const Unguarded = copyAM("    if (!vouched && verdict !== 'ask') this._dropLoginTie(id);", "    if (!vouched) this._dropLoginTie(id);", 'the drop also on a refused hold (RED)'); // stale-pins: kept
     if (!Unguarded.err) { const r = refusedLost(Unguarded); ok(r.r === 'refused' && !r.kept && r.next === 'same', 'RED: in a copy that drops the tie on the refusal too, the next press seeds from the unproven sign-in and adopts the other account SILENTLY', JSON.stringify(r)); } else ok(false, 'RED CONTROL built: the drop on a refused hold', Unguarded.err); }
   // r2915 (d): the two refusals reach the page in the person's language
   { const MAsrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8'), zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
     const words = ['Answer the question on this row first — its two presses are right there.', 'The new sign-in could not be set aside to ask about it, so this row was not asked — sign in again.'];
-    ok(MAsrc.includes("r?.code === 'relogin_ask_open' ? t('" + words[0] + "')") && MAsrc.includes("fin?.outcome === 'refused'") && MAsrc.includes("t('" + words[1] + "')") && words.every((w) => zh.includes(JSON.stringify(w) + ':') && ja.includes(JSON.stringify(w) + ':')), 'r2915 (d): the press\'s refusal (by its code) and the hold\'s refusal go through t(), with zh and ja rows'); }
+    ok(gateOf(MAsrc.includes("r?.code === 'relogin_ask_open' ? t('" + words[0] + "')")) && gateOf(MAsrc.includes("fin?.outcome === 'refused'")) && gateOf(MAsrc.includes("t('" + words[1] + "')")) && verdictOf(words.every((w) => zh.includes(JSON.stringify(w) + ':') && ja.includes(JSON.stringify(w) + ':'))), 'r2915 (d): the press\'s refusal (by its code) and the hold\'s refusal go through t(), with zh and ja rows'); }
   // ── r2734's REQUIRED LINE and smalls ──
   { const R = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
     const ans = R.slice(R.indexOf("app.post('/api/accounts/:id/relogin-answer'"), R.indexOf("app.post('/api/accounts/:id/relogin-answer'") + 400), start = R.slice(R.indexOf("app.post('/api/accounts/:id/relogin',"), R.indexOf("app.post('/api/accounts/:id/relogin-finalize'"));
-    ok(/^app\.post\('\/api\/accounts\/:id\/relogin-answer', \(req, res\) => \{\n\s*try \{\n\s*if \(isAgentBearer\(req\)\) return res\.status\(403\)\.json\(\{ error: 'human-triggered only', code: 'agent_forbidden' \}\);/.test(ans), 'REQUIRED LINE: the answer route refuses an agent\'s or a job\'s own sign-in by name, first, as its sibling routes do');
-    ok(start.includes("if (begun === 'ask-open') return res.status(409).json({ error: 'answer the question on this row first — its two presses are right there', code: 'relogin_ask_open' });") && start.includes('attempt: begun && begun.attempt'), 'the press route refuses an asking row by name (the door named) and hands the login command the press\'s attempt'); }
+    ok(verdictOf(/^app\.post\('\/api\/accounts\/:id\/relogin-answer', \(req, res\) => \{\n\s*try \{\n\s*if \(isAgentBearer\(req\)\) return res\.status\(403\)\.json\(\{ error: 'human-triggered only', code: 'agent_forbidden' \}\);/.test(ans)), 'REQUIRED LINE: the answer route refuses an agent\'s or a job\'s own sign-in by name, first, as its sibling routes do');
+    ok(gateOf(start.includes("if (begun === 'ask-open') return res.status(409).json({ error: 'answer the question on this row first — its two presses are right there', code: 'relogin_ask_open' });")) && verdictOf(start.includes('attempt: begun && begun.attempt')), 'the press route refuses an asking row by name (the door named) and hands the login command the press\'s attempt'); }
   { const s = row('a34@example.invalid'); blank(am2.subDir(s)); fs.rmSync(cfgAt(am2.subDir(s))); const b = am2.reloginBegin(s);
     fs.writeFileSync(path.join(am2.subDir(s), '.vibespace-relogin-held'), 'a file where the hold would go');   // the move into the hold cannot happen
     live(am2.subDir(s), 'b34@example.invalid'); helper(am2.subDir(s), 'success', b.attempt);
     let threw = null, r = null; try { r = am2.reloginResolve(s); } catch (e) { threw = e.message; }
-    ok(!threw && r && r.outcome === 'refused' && r.code === 'relogin_hold_failed' && !am2.list().accounts.find((x) => x.id === s).reloginAsk, '(a) + r2915 (c): a sign-in that could not be moved into the hold: REFUSED by name in an ANSWER the page shows and stops on (never a throw polled every 3 s), the row NOT asking', JSON.stringify({ threw, r })); }
+    ok(!threw && gateOf(r) && r.outcome === 'refused' && r.code === 'relogin_hold_failed' && !am2.list().accounts.find((x) => x.id === s).reloginAsk, '(a) + r2915 (c): a sign-in that could not be moved into the hold: REFUSED by name in an ANSWER the page shows and stops on (never a throw polled every 3 s), the row NOT asking', JSON.stringify({ threw, r })); }
   { const src = path.join(tmp, 'mv2-src'), dst = path.join(tmp, 'mv2-dst'); live(src, 'a35@example.invalid', { cfg: false }); fs.mkdirSync(cfgAt(src)); live(dst, 'old@example.invalid');
     const n = am2._moveLogin(src, dst);
-    ok(n === 1 && fs.existsSync(credsAt(dst)) && !fs.existsSync(cfgAt(dst)), '(b) the config\'s rename FAILS (not ENOENT) after the credentials moved ⇒ the destination\'s old config is removed — never new credentials beside an old record', n); }
+    ok(n === 1 && gateOf(fs.existsSync(credsAt(dst))) && !fs.existsSync(cfgAt(dst)), '(b) the config\'s rename FAILS (not ENOENT) after the credentials moved ⇒ the destination\'s old config is removed — never new credentials beside an old record', n); }
   { const body = accSrc.slice(accSrc.indexOf('  reloginResolve(id) {'), accSrc.indexOf('  reloginAnswer(id, answer) {'));
     const mark = body.indexOf("a.reloginAsk = { at: Date.now()"), save = body.indexOf("this._save({ now: true, why: 'the question about the new sign-in' });", mark), move = body.indexOf("this._moveLogin(src, path.join(src, RELOGIN_HELD))");
     ok(mark > 0 && save > mark && move > save, '(c) the mark is on disk BEFORE the move into the hold (a crash between leaves a question that can be answered) — by the store writer\'s synchronous road (B-574d; the order itself: test-accounts-store-writer H1)', { mark, save, move }); }
   { const MAsrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
-    ok(MAsrc.includes('if (reloginAnswering.has(target)) return;') && MAsrc.includes('.finally(() => reloginAnswering.delete(target));'), '(e) the two presses take one press at a time: a second press while the first is out does nothing'); }
+    ok(gateOf(MAsrc.includes('if (reloginAnswering.has(target)) return;')) && verdictOf(MAsrc.includes('.finally(() => reloginAnswering.delete(target));')), '(e) the two presses take one press at a time: a second press while the first is out does nothing'); }
   // A LOST BEFORE: a restart between the press and the resolve (a new store on the same data), and a before past its time
   { const d = path.join(tmp, 'restart'), A = new AccountManager({ dataDir: d });
     const att = {};
@@ -287,18 +287,18 @@ try {
     fs.rmSync(path.join(am2.subDir(s), '.vibespace-relogin-held'), { recursive: true, force: true });
     fs.writeFileSync(cfgAt(am2.subDir(s)), '{"marker":1}');   // a file of the row's own: a «gone» answer must not touch it
     let refused = null; try { am2.reloginAnswer(s, 'maybe'); } catch (e) { refused = e.message; }
-    ok(am2.reloginAnswer(s, 'same').outcome === 'gone' && /same.*another/.test(refused || '') && fs.readFileSync(cfgAt(am2.subDir(s)), 'utf8') === '{"marker":1}', 'nothing held any more ⇒ «gone», the row\'s own files untouched; an answer that is neither press ⇒ refused by name', refused); }
+    ok(am2.reloginAnswer(s, 'same').outcome === 'gone' && gateOf(/same.*another/.test(refused || '')) && fs.readFileSync(cfgAt(am2.subDir(s)), 'utf8') === '{"marker":1}', 'nothing held any more ⇒ «gone», the row\'s own files untouched; an answer that is neither press ⇒ refused by name', refused); }
   // MOVING A SIGN-IN moves both files; a file it lacks is REMOVED at the destination (else a config of the old login stays beside new credentials)
   { const src = path.join(tmp, 'mv-src'), dst = path.join(tmp, 'mv-dst'); live(src, 'a19@example.invalid', { cfg: false }); live(dst, 'old@example.invalid');
     const n = am2._moveLogin(src, dst);
-    ok(n === 1 && fs.existsSync(credsAt(dst)) && !fs.existsSync(cfgAt(dst)), 'a moved sign-in without a config REMOVES the destination\'s old config (law (5)\'s class: no stale record beside new credentials)', n); }
+    ok(n === 1 && gateOf(fs.existsSync(credsAt(dst))) && !fs.existsSync(cfgAt(dst)), 'a moved sign-in without a config REMOVES the destination\'s old config (law (5)\'s class: no stale record beside new credentials)', n); }
   // R4's READER — THE RESIDUE BY ITS EXACT SHAPE, nothing looser (condition (a)); it feeds nothing else (law 5 untouched)
   { const { get: harnessOf } = require('../src/harnesses');
     const CL = harnessOf('claude').creds;
     const rd = { facts: (f) => ({ text: fs.readFileSync(f, 'utf8') }), readText: (f) => fs.readFileSync(f, 'utf8') };
     const at = (name, write) => { const d = path.join(tmp, 'r4-' + name); live(d, 'a20@example.invalid'); if (write) write(d); return d; };
     const exact = at('exact', (d) => blank(d)), lst = CL.folderLastLoginOf(exact, rd);
-    ok(lst && lst.email === 'a20@example.invalid' && lst.seat === personOf('a20@example.invalid') && lst.orgId === ORG, 'the CLI\'s exact blanked residue ⇒ the config\'s last login', lst);
+    ok(gateOf(lst) && lst.email === 'a20@example.invalid' && lst.seat === personOf('a20@example.invalid') && lst.orgId === ORG, 'the CLI\'s exact blanked residue ⇒ the config\'s last login', lst);
     const not = {
       'a long-lived token (ours)': at('oat', (d) => ours(d)),
       'a long-lived token pasted (no mark, no refresh token)': at('pasted', (d) => fs.writeFileSync(credsAt(d), JSON.stringify({ claudeAiOauth: { accessToken: 'made-up', expiresAt: 0, scopes: ['user:inference'] } }))),
@@ -331,10 +331,10 @@ try {
     if (!MA || typeof MA.reloginAskHtml !== 'function') ok(false, 'the real manage-agents renders under a fake DOM', why);
     else {
       const h = MA.reloginAskHtml({ id: 'sub-made-up', reloginAsk: { at: 1 } }), hl = MA.reloginAskHtml({ id: 'sub-made-up', reloginAsk: { at: 1, lost: true } });
-      ok(h.includes('Is the new sign-in the same account as this row?') && h.includes('data-relogin-answer="same"') && h.includes('data-relogin-answer="another"') && h.includes('The same account: keep this row') && h.includes('Another account: make a new row') && !/disabled/.test(h), 'the row asks in ONE sentence with TWO presses named by what they do — no greyed control', h);
-      ok(hl.includes('This sign-in could not be compared with what this row had') && MA.reloginAskHtml({ id: 'x' }) === '', '(d) a lost before — a restart or its thirty minutes — says it could not be compared with what this row had; nothing asked ⇒ nothing rendered');
+      ok(gateOf(h.includes('Is the new sign-in the same account as this row?')) && gateOf(h.includes('data-relogin-answer="same"')) && gateOf(h.includes('data-relogin-answer="another"')) && gateOf(h.includes('The same account: keep this row')) && gateOf(h.includes('Another account: make a new row')) && !/disabled/.test(h), 'the row asks in ONE sentence with TWO presses named by what they do — no greyed control', h);
+      ok(gateOf(hl.includes('This sign-in could not be compared with what this row had')) && MA.reloginAskHtml({ id: 'x' }) === '', '(d) a lost before — a restart or its thirty minutes — says it could not be compared with what this row had; nothing asked ⇒ nothing rendered');
       ok(MA.loginExpiryChipHtml({ id: 'sub-made-up', type: 'subscription', reloginAsk: { at: 1 }, loginState: { state: 'logged-out' } }) === '', 'MUST 2: a row that asks offers NO sign-in press beside its question (the chip is not drawn)');
-      ok(MA.subIdentHtml({ id: 'sub-made-up', loggedIn: false, facts: { state: 'read' }, reloginAsk: { at: 1 } }, {}).startsWith('<span class="acct-relogin-ask">'), 'the row\'s identity line shows the question first');
+      ok(verdictOf(MA.subIdentHtml({ id: 'sub-made-up', loggedIn: false, facts: { state: 'read' }, reloginAsk: { at: 1 } }, {}).startsWith('<span class="acct-relogin-ask">')), 'the row\'s identity line shows the question first');
     } }
   // ── 主开发 r4177 (B-87fd unit 3's remainder): A STOP BETWEEN THE QUESTION's LANDING AND THE MOVE INTO THE HOLD (r2734 (c)) — the REAL
   // kill at that point (a child of this suite: scripts/fixtures/accounts-relogin-held-kill.cjs), then a FRESH start over the same data.
@@ -367,24 +367,24 @@ try {
     const finishSet = (f) => f.asks && !f.signedIn && f.held && f.inRow === null && /not logged in/.test(f.spawn || '');
     // (1) + (2) «another account»
     { const k = killed(), f = started(AccountManager, k);
-      ok(k.signal === 'SIGKILL' && !k.notKilled && f.asks, '(c) the REAL kill at the move into the hold (a child: the question on disk, the move never ran) — after a fresh start the row ASKS', JSON.stringify({ signal: k.signal, notKilled: k.notKilled, asks: f.asks }));
-      ok(finishSet(f), 'r4177 (1): WHILE IT ASKS IT READS SIGNED OUT — the store\'s start FINISHED THE MOVE (the sign-in in the hold, none in the row\'s folder) and a conversation on the row is refused by name', JSON.stringify({ signedIn: f.signedIn, held: f.held, inRow: f.inRow, spawn: f.spawn }));
+      ok(k.signal === 'SIGKILL' && !k.notKilled && verdictOf(f.asks), '(c) the REAL kill at the move into the hold (a child: the question on disk, the move never ran) — after a fresh start the row ASKS', JSON.stringify({ signal: k.signal, notKilled: k.notKilled, asks: f.asks }));
+      ok(verdictOf(finishSet(f)), 'r4177 (1): WHILE IT ASKS IT READS SIGNED OUT — the store\'s start FINISHED THE MOVE (the sign-in in the hold, none in the row\'s folder) and a conversation on the row is refused by name', JSON.stringify({ signedIn: f.signedIn, held: f.held, inRow: f.inRow, spawn: f.spawn }));
       const n0 = f.M.list().accounts.length, r = f.M.reloginAnswer(k.row, 'another'), nw = r.account && r.account.id;
       ok(r.outcome === 'split' && !!nw && who(f.M.subDir(nw)) === 'b40@example.invalid' && who(f.dir) === null && f.M.list().accounts.length === n0 + 1 && !f.M.get(k.row).reloginAsk, 'r4177 (2): «another account» then takes that sign-in into its NEW row (this row keeps no sign-in, the question gone)', JSON.stringify({ outcome: r.outcome, inNew: nw ? who(f.M.subDir(nw)) : null, inRow: who(f.dir) })); }
     // «the same account»
     { const k = killed(), f = started(AccountManager, k), r = f.M.reloginAnswer(k.row, 'same');
-      ok(r.outcome === 'same' && who(f.dir) === 'b40@example.invalid' && !inHold(f.dir) && f.M.readSubCreds(k.row).loggedIn && !f.M.get(k.row).reloginAsk, '«the same account» after that start puts the sign-in back into this row, as today (signed in, no question)', JSON.stringify({ outcome: r.outcome, inRow: who(f.dir), held: inHold(f.dir) })); }
+      ok(r.outcome === 'same' && who(f.dir) === 'b40@example.invalid' && !inHold(f.dir) && gateOf(f.M.readSubCreds(k.row).loggedIn) && !f.M.get(k.row).reloginAsk, '«the same account» after that start puts the sign-in back into this row, as today (signed in, no question)', JSON.stringify({ outcome: r.outcome, inRow: who(f.dir), held: inHold(f.dir) })); }
     // a move that CANNOT finish (the hold's place is a file): still signed out while it asks; «another» takes it from the row's own folder
     { const k = killed(), hold = path.join(k.d, 'subs', String(k.row), '.vibespace-relogin-held');
       fs.rmSync(hold, { recursive: true, force: true }); fs.writeFileSync(hold, 'a file where the hold would be');
       const f = started(AccountManager, k);
-      ok(f.asks && !f.signedIn && f.inRow === 'b40@example.invalid' && /not logged in/.test(f.spawn || ''), 'r4177 (1): a move that CANNOT finish (the hold\'s place is a file) — the row still asks and reads SIGNED OUT; a conversation on it is refused by name', JSON.stringify({ asks: f.asks, signedIn: f.signedIn, inRow: f.inRow, spawn: f.spawn }));
+      ok(gateOf(f.asks) && !f.signedIn && f.inRow === 'b40@example.invalid' && verdictOf(/not logged in/.test(f.spawn || '')), 'r4177 (1): a move that CANNOT finish (the hold\'s place is a file) — the row still asks and reads SIGNED OUT; a conversation on it is refused by name', JSON.stringify({ asks: f.asks, signedIn: f.signedIn, inRow: f.inRow, spawn: f.spawn }));
       const r = f.M.reloginAnswer(k.row, 'another'), nw = r.account && r.account.id;
       ok(r.outcome === 'split' && !!nw && who(f.M.subDir(nw)) === 'b40@example.invalid' && who(f.dir) === null, 'r4177 (2): …and «another account» takes it from the row\'s own folder into its new row — never «gone» while it sits in this row', JSON.stringify({ outcome: r.outcome, inNew: nw ? who(f.M.subDir(nw)) : null, inRow: who(f.dir) }));
       const k2 = killed(), hold2 = path.join(k2.d, 'subs', String(k2.row), '.vibespace-relogin-held');
       fs.rmSync(hold2, { recursive: true, force: true }); fs.writeFileSync(hold2, 'a file where the hold would be');
       const f2 = started(AccountManager, k2), r2 = f2.M.reloginAnswer(k2.row, 'same');
-      ok(r2.outcome === 'same' && who(f2.dir) === 'b40@example.invalid' && f2.M.readSubCreds(k2.row).loggedIn, '…and «the same account» finds it in place (same, signed in)', JSON.stringify({ outcome: r2.outcome, inRow: who(f2.dir) })); }
+      ok(r2.outcome === 'same' && who(f2.dir) === 'b40@example.invalid' && verdictOf(f2.M.readSubCreds(k2.row).loggedIn), '…and «the same account» finds it in place (same, signed in)', JSON.stringify({ outcome: r2.outcome, inRow: who(f2.dir) })); }
     // ── 主开发 r4200: (1) ONE CHOKE POINT, (2) the signed-out shape only, (3) an answer's move that moved NOTHING — in the world where the
     // move into the hold cannot finish (the hold's place is a file), each with its red ──
     const noHold = () => { const k = killed(), hold = path.join(k.d, 'subs', String(k.row), '.vibespace-relogin-held'); fs.rmSync(hold, { recursive: true, force: true }); fs.writeFileSync(hold, 'a file where the hold would be'); return k; };
@@ -398,7 +398,7 @@ try {
     };
     const named = (w, x) => (x === w.k.row ? 'the asking row' : x === w.o ? 'the other row' : x);
     { const w = await poolWorld(AccountManager);
-      ok(w.f.asks && !w.members.includes(w.k.row) && w.members.includes(w.o) && w.placeable === false && w.auth.loggedIn === false, 'r4200 (1): ONE CHOKE POINT — an asking member whose move could not finish is NOT among the pool\'s placeable members (the pool\'s own read answers signed out)', JSON.stringify({ members: w.members.map((x) => named(w, x)), placeable: w.placeable, err: w.err }));
+      ok(gateOf(w.f.asks) && !w.members.includes(w.k.row) && gateOf(w.members.includes(w.o)) && w.placeable === false && w.auth.loggedIn === false, 'r4200 (1): ONE CHOKE POINT — an asking member whose move could not finish is NOT among the pool\'s placeable members (the pool\'s own read answers signed out)', JSON.stringify({ members: w.members.map((x) => named(w, x)), placeable: w.placeable, err: w.err }));
       ok(w.token === null && JSON.stringify(w.read) === '{"loggedIn":false}' && JSON.stringify(w.auth) === '{"loggedIn":false}', 'r4200 (2): the asking answer is the SIGNED-OUT SHAPE ONLY — no token (the usage read asks the vendor nothing for it), no identity of the sign-in in question', JSON.stringify({ token: w.token ? 'a token' : null, read: Object.keys(w.read), auth: Object.keys(w.auth) }));
       ok(w.listed === false, '…and the list\'s line of that row reads signed out (the same rule, over the kept display facts)', JSON.stringify({ listed: w.listed })); }
     const refusing = (test) => { const orig = fs.renameSync; fs.renameSync = function (a, b) { if (test(String(a), String(b))) throw Object.assign(new Error('EACCES: permission denied, rename (a placed refusal)'), { code: 'EACCES' }); return orig.call(this, a, b); }; return () => { fs.renameSync = orig; }; };
@@ -412,20 +412,20 @@ try {
     };
     for (const answer of ['another', 'same']) {
       const m = moveFailed(AccountManager, answer);
-      ok(!!m.r && m.r.outcome === 'refused' && m.r.code === 'relogin_move_failed' && m.asks && m.disk === true && !m.signedIn && (answer === 'another' ? m.inRow === 'b40@example.invalid' && m.rows[1] === m.rows[0] : m.held), `r4200 (3): «${answer === 'another' ? 'another account' : 'the same account'}» whose move moves NOTHING (a placed refusal of that rename) — refused BY NAME, the question PUT BACK in memory and on disk, the sign-in still where it sat, the row signed out${answer === 'another' ? ', the new row gone again' : ''}`, JSON.stringify({ outcome: m.r && m.r.outcome, code: m.r && m.r.code, err: m.err, asks: m.asks, disk: m.disk, inRow: m.inRow, held: m.held, signedIn: m.signedIn, rows: m.rows }));
+      ok(!!m.r && m.r.outcome === 'refused' && m.r.code === 'relogin_move_failed' && gateOf(m.asks) && m.disk === true && !m.signedIn && (answer === 'another' ? m.inRow === 'b40@example.invalid' && m.rows[1] === m.rows[0] : verdictOf(m.held)), `r4200 (3): «${answer === 'another' ? 'another account' : 'the same account'}» whose move moves NOTHING (a placed refusal of that rename) — refused BY NAME, the question PUT BACK in memory and on disk, the sign-in still where it sat, the row signed out${answer === 'another' ? ', the new row gone again' : ''}`, JSON.stringify({ outcome: m.r && m.r.outcome, code: m.r && m.r.code, err: m.err, asks: m.asks, disk: m.disk, inRow: m.inRow, held: m.held, signedIn: m.signedIn, rows: m.rows }));
     }
     const GONE = ["    if (!a || !this._heldSignInAt(id)) { this._notify(); return { outcome: 'gone' }; }", "    if (a || !a) { this._notify(); return { outcome: 'gone' }; }"];   // the release: a move that moved nothing answers «gone»
     { const R5 = copyAMs([["  _readAuthFor(be, id) { return this._signInAnswer(this.get(id), () => this._credsOf(be).parseAuth(this._acctDir(be, id))); }", "  _readAuthFor(be, id) { return this._credsOf(be).parseAuth(this._acctDir(be, id)); }"]], 'the pool\'s read around the choke point (31f0ccda6\'s form)');
       const R6 = copyAMs([['  _signInAnswer(a, read) { return a && a.reloginAsk ? { loggedIn: false } : read(); }', '  _signInAnswer(a, read) { return a && a.reloginAsk ? { ...read(), loggedIn: false } : read(); }']], 'the asking answer keeps the parse\'s fields (31f0ccda6\'s spread)');
       const R7 = copyAMs([GONE], 'a move that moved nothing answers «gone» (the release)');
       ok(!R5.err && !R6.err && !R7.err, 'RED CONTROLS built: the read around the choke point; the asking answer with the parse\'s fields; «gone» after a move that moved nothing', [R5.err, R6.err, R7.err].filter(Boolean).join(' ; '));
-      if (!R5.err) { const w = await poolWorld(R5); ok(w.placeable === true && w.members.includes(w.k.row), 'RED: with the pool\'s read around the choke point the asking member IS placeable — a pooled conversation could start on the unproven sign-in', JSON.stringify({ placeable: w.placeable, members: w.members.map((x) => named(w, x)) })); }
+      if (!R5.err) { const w = await poolWorld(R5); ok(w.placeable === true && verdictOf(w.members.includes(w.k.row)), 'RED: with the pool\'s read around the choke point the asking member IS placeable — a pooled conversation could start on the unproven sign-in', JSON.stringify({ placeable: w.placeable, members: w.members.map((x) => named(w, x)) })); }
       if (!R6.err) { const w = await poolWorld(R6); ok(w.token === 'at-b40@example.invalid', 'RED: with the parse\'s fields kept, the usage read\'s token is the OTHER account\'s (a vendor ask under this row\'s name)', JSON.stringify({ token: w.token ? 'the other account\'s' : null })); }
       if (!R7.err) for (const answer of ['another', 'same']) { const m = moveFailed(R7, answer); ok(!!m.r && m.r.outcome === 'gone' && !m.asks, `RED (the release): «${answer === 'another' ? 'another account' : 'the same account'}» whose move moved nothing answers «gone» and the row no longer asks`, JSON.stringify({ outcome: m.r && m.r.outcome, asks: m.asks })); } }
     // r3782 (主开发 r4177): «the same account»'s removal of the question is ON DISK before the move back
     { const k = killed(); started(AccountManager, k);   // the start sets it aside (as above)
       const c = sameThenKill(ACCP, k); await tick(); const f = started(AccountManager, k);
-      ok(c.signal === 'SIGKILL' && c.answered === 'same' && !f.asks && f.signedIn && f.inRow === 'b40@example.invalid', 'r3782 (r4177): a stop RIGHT AFTER «the same account» (the same turn) — the next start does NOT ask again: the question came off on disk before the sign-in moved back', JSON.stringify({ signal: c.signal, answered: c.answered, asks: f.asks, signedIn: f.signedIn, inRow: f.inRow })); }
+      ok(c.signal === 'SIGKILL' && c.answered === 'same' && !f.asks && gateOf(f.signedIn) && f.inRow === 'b40@example.invalid', 'r3782 (r4177): a stop RIGHT AFTER «the same account» (the same turn) — the next start does NOT ask again: the question came off on disk before the sign-in moved back', JSON.stringify({ signal: c.signal, answered: c.answered, asks: f.asks, signedIn: f.signedIn, inRow: f.inRow })); }
     // REDS: the release's order
     const NOFIN = ["    this._finishHeldMoves();   // r4177 (1): an asking row whose sign-in never reached the hold — set aside before anything starts on it\n", ''];
     const NOBELT = ['  _signInAnswer(a, read) { return a && a.reloginAsk ? { loggedIn: false } : read(); }', '  _signInAnswer(a, read) { return read(); }'];
@@ -433,14 +433,14 @@ try {
     const QUEUED = ["      try { this._save({ now: true, why: 'the answer to the question about the new sign-in' }); }\n      catch (e) { if (e && e.signInSave) { a.reloginAsk = asked; this._save(); this._notify(); } throw e; }\n", '      this._save();\n'];
     { const R1 = copyAMs([NOFIN], 'no finish at the start'), R2 = copyAMs([NOFIN, NOBELT], 'the release: no finish, no signed-out read'), R3 = copyAMs([NOFIN, NOBELT, NOROW, GONE], 'the release\'s answer: only the hold, and «gone» after a move that moved nothing');
       ok(!R1.err && !R2.err && !R3.err, 'RED CONTROLS built: no finish at the start; …and no signed-out read; …and the answer looking only in the hold', [R1.err, R2.err, R3.err].filter(Boolean).join(' ; '));
-      if (!R1.err) { const f = started(R1, killed()); ok(f.asks && !f.held && f.inRow === 'b40@example.invalid', 'RED: with no finish at the start the sign-in is still in the row\'s folder while it asks (the hold empty)', JSON.stringify({ held: f.held, inRow: f.inRow })); }
-      if (!R2.err) { const f = started(R2, killed()); ok(f.asks && f.signedIn && f.spawn === 'started', 'RED (the release): the row ASKS and yet READS SIGNED IN — a conversation on it STARTS on the unproven sign-in', JSON.stringify({ signedIn: f.signedIn, spawn: f.spawn })); }
+      if (!R1.err) { const f = started(R1, killed()); ok(gateOf(f.asks) && !f.held && f.inRow === 'b40@example.invalid', 'RED: with no finish at the start the sign-in is still in the row\'s folder while it asks (the hold empty)', JSON.stringify({ held: f.held, inRow: f.inRow })); }
+      if (!R2.err) { const f = started(R2, killed()); ok(gateOf(f.asks) && gateOf(f.signedIn) && f.spawn === 'started', 'RED (the release): the row ASKS and yet READS SIGNED IN — a conversation on it STARTS on the unproven sign-in', JSON.stringify({ signedIn: f.signedIn, spawn: f.spawn })); }
       if (!R3.err) { const k = killed(), f = started(R3, k), r = f.M.reloginAnswer(k.row, 'another'); ok(r.outcome === 'gone' && who(f.dir) === 'b40@example.invalid', 'RED (the release): «another account» answers «gone» and LEAVES the other account\'s sign-in in this row', JSON.stringify({ outcome: r.outcome, inRow: who(f.dir) })); } }
     { const P = (() => { try { return MUT.write('src/accounts.js', anchored(accSrc, QUEUED[0], QUEUED[1], 'the release\'s queued removal'), 'queued-same'); } catch (e) { return { err: e.message }; } })();
       ok(typeof P === 'string', 'RED CONTROL built: «the same account» with its removal queued (the release\'s `this._save()`)', P && P.err);
-      if (typeof P === 'string') { const k = killed(); started(AccountManager, k); const c = sameThenKill(P, k); await tick(); const f = started(AccountManager, k); ok(c.signal === 'SIGKILL' && f.asks && !f.signedIn, 'RED: with the removal queued, a stop right after «the same account» ASKS AGAIN at the next start (the answered sign-in set aside once more)', JSON.stringify({ signal: c.signal, answered: c.answered, asks: f.asks, signedIn: f.signedIn })); } } }
+      if (typeof P === 'string') { const k = killed(); started(AccountManager, k); const c = sameThenKill(P, k); await tick(); const f = started(AccountManager, k); ok(c.signal === 'SIGKILL' && gateOf(f.asks) && !f.signedIn, 'RED: with the removal queued, a stop right after «the same account» ASKS AGAIN at the next start (the answered sign-in set aside once more)', JSON.stringify({ signal: c.signal, answered: c.answered, asks: f.asks, signedIn: f.signedIn })); } } }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

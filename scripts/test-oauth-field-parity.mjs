@@ -58,7 +58,7 @@ import path from 'node:path';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const read = (rel) => { try { return fs.readFileSync(path.join(REPO, rel), 'utf-8'); } catch { return null; } };
 
 export const MODULE = 'src/lib/mounts-dialog.js';
@@ -515,7 +515,7 @@ const isMain = import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
   const texts = loadTexts();
   console.log('§1–§4 the census over the tree');
-  for (const r of census(texts)) ok(r.ok, r.rule, r.why);
+  for (const r of census(texts)) ok(verdictOf(r.ok), r.rule, r.why);
 
   console.log(`\n  (the channel side = ${CHANNEL_SIDE.join(' + ')}; ${SHARED.filter((r) => r.channels === true).length} shared spellings written by it, ${SHARED.filter((r) => r.channels === 'module').length} drawn for it by the module — all ${SHARED.length} asserted on both sides; the design's §4 list: ${DESIGN_I18N.length} keys + ${DESIGN_I18N_DELETED.length} deleted, ${DESIGN_I18N.filter((r) => r.built !== undefined).length} built under another spelling or not drawn, each with its reason)`);
 
@@ -598,4 +598,4 @@ if (isMain) {
 
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
   process.exit(fail ? 1 : 0);
-}
+};import { verdictOf } from './lib/check.mjs';

@@ -38,7 +38,7 @@ const F0 = require(path.join(REPO, MODEL));
 const caps = require(path.join(REPO, 'src/channel-caps.js'));
 
 let passN = 0, failN = 0, QUIET = false;
-const ok = (c, n, extra) => { if (QUIET) return !!c; if (c) { passN++; console.log('  ✓ ' + n); } else { failN++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (QUIET) return !!c; if (c) { passN++; console.log('  ✓ ' + n); } else { failN++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 const J = (x) => JSON.stringify(x);
 const T0 = Date.UTC(2026, 8, 28, 12, 0, 0);
 const DECL = Object.freeze({ via: 'search', scope: 'search:message', option: 'search', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: { chatType: 'p2p', pagesMax: 20 }, describes: true });
@@ -56,7 +56,7 @@ function legWindow(F, label = '') {
   const floor = F.window({ cursorAt: T0 - 30e3 }, T0, DECL, { overlapSec: 5 });
   ok(floor.from === T0 - 30e3 - F.OVERLAP_MIN_SEC * 1000, `${label}① the overlap never goes under its floor (${F.OVERLAP_MIN_SEC} s) whatever the setting says (5 ⇒ 30)`, J(floor));
   const gap = F.window({ cursorAt: T0 - 5 * 3600e3 }, T0, DECL, { overlapSec: 60 });
-  ok(gap.act === 'new' && gap.from === T0 - 3600e3 && gap.gap && gap.gap.from === T0 - 5 * 3600e3 - 60e3 && gap.gap.to === T0 - 3600e3, `${label}① a 5-hour stop: the steady window covers the last hour only; [cursor − overlap, now − 1 h] becomes the single-chat catch-up`, J(gap));
+  ok(gap.act === 'new' && gap.from === T0 - 3600e3 && gateOf(gap.gap) && gap.gap.from === T0 - 5 * 3600e3 - 60e3 && gap.gap.to === T0 - 3600e3, `${label}① a 5-hour stop: the steady window covers the last hour only; [cursor − overlap, now − 1 h] becomes the single-chat catch-up`, J(gap));
   const back = F.window({ cursorAt: T0 + 300e3 }, T0, DECL, { overlapSec: 60 });
   ok(back.act === 'none' && back.why === 'clock-backwards', `${label}① a clock that went backwards past the cursor ⇒ no call this tick`, J(back));
   const cont = F.window({ cursorAt: T0 - 30e3, window: { from: T0 - 90e3, to: T0, pages: 2 } }, T0 + 20e3, DECL, { overlapSec: 60, tokenAt: T0 + 5e3 });
@@ -94,19 +94,19 @@ const hit = (o = {}) => ({ convId: 'oc_a', vendorId: `om_${Math.random().toStrin
 function legVerdict(F, label = '') {
   const win = { from: T0 - 90e3, to: T0 };
   const good = F.pageVerdict({ hits: [hit(), hit({ at: T0 - 89e3 }), hit({ at: T0 + 100e3 })], total: 3 }, win, { pageSize: 30, now: T0 });
-  ok(good.ok && good.hits.length === 3 && good.malformed === 0, `${label}② in-window hits pass (the slack admits a hit 100 s past \`to\`)`, J(good));
+  ok(gateOf(good.ok) && good.hits.length === 3 && good.malformed === 0, `${label}② in-window hits pass (the slack admits a hit 100 s past \`to\`)`, J(good));
   const ign = F.pageVerdict({ hits: [hit(), hit({ at: T0 - 90e3 - 121e3 })], total: 2 }, win, { pageSize: 30, now: T0 });
   ok(!ign.ok && ign.park === 'time-range-ignored' && ign.outside === 1, `${label}② ONE hit 121 s before the window ⇒ time-range-ignored (the vendor ignored its range) — no hit is used`, J(ign));
   const edited = F.pageVerdict({ hits: [hit({ at: T0 - 30 * 86400e3, updatedAt: T0 - 5e3 })] }, win, { pageSize: 30, now: T0 });
-  ok(edited.ok && edited.hits.length === 1, `${label}② an OLD message EDITED inside the window is judged by its update (it is news again), never "outside"`, J(edited));
+  ok(gateOf(edited.ok) && edited.hits.length === 1, `${label}② an OLD message EDITED inside the window is judged by its update (it is news again), never "outside"`, J(edited));
   // verify r1: a message CREATED inside the window and edited after its end (a later page read after a typo fix, a window
   // re-read after a restart) is inside by its creation — never a park; an old message edited long after is still outside
   const editedLate = F.pageVerdict({ hits: [hit({ at: T0 - 60e3, updatedAt: T0 + 3 * 3600e3 })] }, win, { pageSize: 30, now: T0 + 4 * 3600e3 });
   const oldEditedLate = F.pageVerdict({ hits: [hit({ at: T0 - 30 * 86400e3, updatedAt: T0 + 3 * 3600e3 })] }, win, { pageSize: 30, now: T0 + 4 * 3600e3 });
-  ok(editedLate.ok && editedLate.hits.length === 1 && !oldEditedLate.ok && oldEditedLate.park === 'time-range-ignored', `${label}② (verify r1) created inside the window + edited 3 h after its end ⇒ inside (no park); created a month before + edited after ⇒ outside`, J([editedLate, oldEditedLate]));
+  ok(gateOf(editedLate.ok) && editedLate.hits.length === 1 && !oldEditedLate.ok && oldEditedLate.park === 'time-range-ignored', `${label}② (verify r1) created inside the window + edited 3 h after its end ⇒ inside (no park); created a month before + edited after ⇒ outside`, J([editedLate, oldEditedLate]));
   const tot = F.pageVerdict({ hits: [hit()], total: 90 * 50 + 1 }, win, { pageSize: 30, now: T0 });
   const totOk = F.pageVerdict({ hits: [hit()], total: 90 * 50 }, win, { pageSize: 30, now: T0 });
-  ok(!tot.ok && tot.park === 'time-range-ignored' && totOk.ok, `${label}② the total sanity: ${90 * 50 + 1} hits counted for a 90 s window (> 50/s) ⇒ ignored; ${90 * 50} ⇒ trusted`, J([tot, totOk.ok]));
+  ok(!tot.ok && tot.park === 'time-range-ignored' && verdictOf(totOk.ok), `${label}② the total sanity: ${90 * 50 + 1} hits counted for a 90 s window (> 50/s) ⇒ ignored; ${90 * 50} ⇒ trusted`, J([tot, totOk.ok]));
   // verify r1 (U9): a continuation page answering the token we SENT, or repeating the previous page of this window,
   // means the vendor ignores the page token — parked by name (a window that never completes spent 10 pages a minute)
   const p1 = F.pageVerdict({ hits: [hit({ vendorId: 'om_p1' }), hit({ vendorId: 'om_p2' })], pageToken: 'tk-2' }, win, { pageSize: 30, now: T0 });
@@ -115,7 +115,7 @@ function legVerdict(F, label = '') {
   const next = F.pageVerdict({ hits: [hit({ vendorId: 'om_p3' })], pageToken: 'tk-3' }, win, { pageSize: 30, now: T0, sent: 'tk-2', prevSig: p1.sig });
   const firstPage = F.pageVerdict({ hits: [hit({ vendorId: 'om_p1' }), hit({ vendorId: 'om_p2' })], pageToken: 'tk-2' }, win, { pageSize: 30, now: T0, sent: null, prevSig: p1.sig });
   const emptyTwice = F.pageVerdict({ hits: [], pageToken: null }, win, { pageSize: 30, now: T0, sent: 'tk-2', prevSig: '' });
-  ok(p1.ok && !sameTok.ok && sameTok.park === 'contract' && sameTok.paging && !samePage.ok && samePage.park === 'contract' && next.ok && firstPage.ok && emptyTwice.ok, `${label}② (verify r1, U9) a continuation answering the token it was sent, or the previous page's hits again ⇒ the page token is ignored, parked by name; the next real page, a first page, an empty last page pass`, J([sameTok, samePage, next.ok, firstPage.ok, emptyTwice.ok]));
+  ok(gateOf(p1.ok) && !sameTok.ok && sameTok.park === 'contract' && gateOf(sameTok.paging) && !samePage.ok && samePage.park === 'contract' && gateOf(next.ok) && gateOf(firstPage.ok) && verdictOf(emptyTwice.ok), `${label}② (verify r1, U9) a continuation answering the token it was sent, or the previous page's hits again ⇒ the page token is ignored, parked by name; the next real page, a first page, an empty last page pass`, J([sameTok, samePage, next.ok, firstPage.ok, emptyTwice.ok]));
   // verify r3: a loop of period TWO (A → B → A …, fresh tokens) repeats no PREVIOUS page — judged against every page of the
   // window (`prevSig` a list) it is parked by name at its third page; against the previous page's signature alone it passed
   // (measured: 161 pages in 77 minutes, then the count's ceiling under the wrong name)
@@ -124,7 +124,7 @@ function legVerdict(F, label = '') {
   const loopA = F.pageVerdict({ hits: [hit({ vendorId: 'om_a2' }), hit({ vendorId: 'om_a1' })], pageToken: 'tk-A' }, win, { pageSize: 30, now: T0, sent: 'tk-B', prevSig: [pA.sig, pB.sig] });
   const loopLast = F.pageVerdict({ hits: [hit({ vendorId: 'om_a2' }), hit({ vendorId: 'om_a1' })], pageToken: 'tk-A' }, win, { pageSize: 30, now: T0, sent: 'tk-B', prevSig: pB.sig });
   const loopFresh = F.pageVerdict({ hits: [hit({ vendorId: 'om_c1' })], pageToken: 'tk-C' }, win, { pageSize: 30, now: T0, sent: 'tk-B', prevSig: [pA.sig, pB.sig, 7, null] });
-  ok(pA.ok && pB.ok && !loopA.ok && loopA.park === 'contract' && loopA.paging && loopLast.ok && loopFresh.ok, `${label}② (verify r3) a period-two loop (A → B → A) is parked by name against the window's every page (a string is the previous page alone: it passed); a fresh page passes a list with junk in it`, J([loopA, loopLast.ok, loopFresh.ok]));
+  ok(gateOf(pA.ok) && gateOf(pB.ok) && !loopA.ok && loopA.park === 'contract' && gateOf(loopA.paging) && gateOf(loopLast.ok) && verdictOf(loopFresh.ok), `${label}② (verify r3) a period-two loop (A → B → A) is parked by name against the window's every page (a string is the previous page alone: it passed); a fresh page passes a list with junk in it`, J([loopA, loopLast.ok, loopFresh.ok]));
   const many = F.pageVerdict({ hits: Array.from({ length: 31 }, () => hit()) }, win, { pageSize: 30, now: T0 });
   ok(!many.ok && many.park === 'contract', `${label}② more hits than the page size ⇒ a contract violation (parked by name)`, J(many));
   // lane lark-p2p verify r1: THE COUNT'S CEILING — the `total` rule applied to what was PAGED: page 151 of a 90 s window
@@ -133,9 +133,9 @@ function legVerdict(F, label = '') {
   const ceilZero = F.pageVerdict({ hits: [hit()], total: 0 }, win, { pageSize: 30, now: T0, pages: 150 });
   const ceilOk = F.pageVerdict({ hits: [hit()], total: null }, win, { pageSize: 30, now: T0, pages: 149 });
   const ceilFirst = F.pageVerdict({ hits: Array.from({ length: 30 }, () => hit()), total: null }, win, { pageSize: 30, now: T0, pages: 0 });
-  ok(!ceilHit.ok && ceilHit.park === 'time-range-ignored' && ceilHit.paged === 4501 && !ceilZero.ok && ceilOk.ok && ceilFirst.ok, `${label}② (verify r1) THE COUNT'S CEILING: the 151st page of a 90 s window (4 501 hits paged > 90 × ${F.TOTAL_PER_SEC_MAX}) is parked by name with no \`total\` and with \`total: 0\` alike; the 150th passes; a first page never trips it`, J([ceilHit, ceilZero.park, ceilOk.ok, ceilFirst.ok]));
+  ok(!ceilHit.ok && ceilHit.park === 'time-range-ignored' && ceilHit.paged === 4501 && !ceilZero.ok && gateOf(ceilOk.ok) && verdictOf(ceilFirst.ok), `${label}② (verify r1) THE COUNT'S CEILING: the 151st page of a 90 s window (4 501 hits paged > 90 × ${F.TOTAL_PER_SEC_MAX}) is parked by name with no \`total\` and with \`total: 0\` alike; the 150th passes; a first page never trips it`, J([ceilHit, ceilZero.park, ceilOk.ok, ceilFirst.ok]));
   const mal = F.pageVerdict({ hits: [hit(), hit({ convId: '' }), hit({ vendorId: 'x'.repeat(600) }), hit({ at: 'soon' }), hit({ convId: 'oc_<script>' }), hit({ threadKey: 'bad key!' })], malformed: 2 }, win, { pageSize: 30, now: T0 });
-  ok(mal.ok && mal.hits.length === 1 && mal.malformed === 2 + 5, `${label}② malformed hits (no chat, a 600-char id, a word for a time, markup in an id, a bad thread key) are dropped + counted with the adapter's own count`, J(mal));
+  ok(gateOf(mal.ok) && mal.hits.length === 1 && mal.malformed === 2 + 5, `${label}② malformed hits (no chat, a 600-char id, a word for a time, markup in an id, a bad thread key) are dropped + counted with the adapter's own count`, J(mal));
   // THE DECLARED UNIT
   const ms = F.normalizeHit({ convId: 'oc_a', vendorId: 'om_1', createTime: String(T0 - 5e3), isP2p: 'true' }, { unit: 'ms', now: T0 });
   const secUnderMs = F.normalizeHit({ convId: 'oc_a', vendorId: 'om_1', createTime: String(Math.floor((T0 - 5e3) / 1000)) }, { unit: 'ms', now: T0 });
@@ -143,7 +143,7 @@ function legVerdict(F, label = '') {
   const future = F.normalizeHit({ convId: 'oc_a', vendorId: 'om_1', createTime: String(T0 + 2 * 86400e3) }, { unit: 'ms', now: T0 });
   const undeclared = F.normalizeHit({ convId: 'oc_a', vendorId: 'om_1', createTime: String(T0) }, { unit: 'us', now: T0 });
   const r = { ms: ms.ok && ms.hit.at === T0 - 5e3 && ms.hit.isP2p === true, secUnderMs: !secUnderMs.ok && secUnderMs.why === 'time-out-of-range', sec: sec.ok && sec.hit.at === Math.floor((T0 - 5e3) / 1000) * 1000, future: !future.ok, undeclared: !undeclared.ok && undeclared.why === 'unit-undeclared' };
-  ok(Object.values(r).every(Boolean), `${label}② ONE DECLARED UNIT: a ms value reads as ms; a SECONDS value under a ms declaration is MALFORMED (1970), never rescaled by its magnitude; a seconds declaration reads it; a day ahead of now and an undeclared unit are refused`, J(r));
+  ok(verdictOf(Object.values(r).every(Boolean)), `${label}② ONE DECLARED UNIT: a ms value reads as ms; a SECONDS value under a ms declaration is MALFORMED (1970), never rescaled by its magnitude; a seconds declaration reads it; a day ahead of now and an undeclared unit are refused`, J(r));
   return r;
 }
 
@@ -169,8 +169,8 @@ function legIso(F, label = '') {
     number: iso(T0).why === 'no-time',
     update: F.normalizeHit({ convId: 'oc_a', vendorId: 'om_1', createTime: '2026-09-28T11:59:50Z', updateTime: '2026-09-28T11:59:55Z' }, { unit: 'iso', now: T0 }).hit.updatedAt === T0 - 5e3,
   };
-  ok(Object.values(r).every(Boolean), `${label}②b THE ISO FORM (declared): an offset, Z, an offset without its colon, fractions, a west offset read to the exact ms; digits under the ISO declaration and ISO under the ms one are malformed (never read in a form nobody declared); Feb 30, a space for T, an over-long value, a day ahead, a number — refused; an ISO update_time read`, J(r));
-  ok(F.TIME_UNITS.includes('iso') && F.PARK_CODES.includes('shape'), `${label}②b the ISO form is a declared unit; \`shape\` is a park code`);
+  ok(verdictOf(Object.values(r).every(Boolean)), `${label}②b THE ISO FORM (declared): an offset, Z, an offset without its colon, fractions, a west offset read to the exact ms; digits under the ISO declaration and ISO under the ms one are malformed (never read in a form nobody declared); Feb 30, a space for T, an over-long value, a day ahead, a number — refused; an ISO update_time read`, J(r));
+  ok(gateOf(F.TIME_UNITS.includes('iso')) && verdictOf(F.PARK_CODES.includes('shape')), `${label}②b the ISO form is a declared unit; \`shape\` is a park code`);
   return r;
 }
 function legShape(F, label = '') {
@@ -192,7 +192,7 @@ function legShape(F, label = '') {
     emptyKeeps: !empty.park && empty.run && empty.run.items === 1,
     bounded: J(many.fields) === J([['a'], ['b'], ['c']]),
   };
-  ok(Object.values(r).every(Boolean), `${label}②b THE SHAPE VERDICT: a page of 30 unreadable parks with its field; one stray unreadable hit does not (a run of ≥ ${F.SHAPE_MIN_ITEMS} items does); a mostly readable page ends the run; 90 % parks, 80 % does not; an empty page keeps the run; the fields are the first ${F.SHAPE_FIELDS_MAX} distinct lists in the field alphabet`, J(r));
+  ok(verdictOf(Object.values(r).every(Boolean)), `${label}②b THE SHAPE VERDICT: a page of 30 unreadable parks with its field; one stray unreadable hit does not (a run of ≥ ${F.SHAPE_MIN_ITEMS} items does); a mostly readable page ends the run; 90 % parks, 80 % does not; an empty page keeps the run; the fields are the first ${F.SHAPE_FIELDS_MAX} distinct lists in the field alphabet`, J(r));
   return r;
 }
 /** An all-unreadable vendor that pages for ever (the production 2026-09-29/30): how many pages the feed asks before it stops. */
@@ -262,7 +262,7 @@ function legFold(F) {
   ];
   const f = F.foldHits(hits, { seen, stateOf: (c) => state[c] || null, hasRecord: (c, v) => stored.has(`${c}|${v}`), separateThreads: true });
   ok(f.owed.get('oc_live') === T0 - 10e3 && f.owed.get('oc_paused') === T0 - 3e3 && f.owed.size === 2, '③ one owed mark per conversation at its NEWEST hit (a paused row is owed too — fetched once unpaused)', J([...f.owed]));
-  ok(f.threadOwed.get('oc_live') && f.threadOwed.get('oc_live').get('omt_7') === T0 - 10e3 && f.owed.has('oc_live'), '③ U6: a thread hit marks BOTH the conversation (roots ride the listing) and the thread (replies need the walk)', J([...(f.threadOwed.get('oc_live') || [])]));
+  ok(gateOf(f.threadOwed.get('oc_live')) && f.threadOwed.get('oc_live').get('omt_7') === T0 - 10e3 && verdictOf(f.owed.has('oc_live')), '③ U6: a thread hit marks BOTH the conversation (roots ride the listing) and the thread (replies need the walk)', J([...(f.threadOwed.get('oc_live') || [])]));
   ok(f.repeats === 2 && f.stored === 1, `③ dedup by message id: the in-page repeat and the overlap's re-read are dropped (${f.repeats}); a message the store holds marks nothing (${f.stored})`, J(f));
   ok(f.births.size === 1 && f.births.get('oc_dm').at === T0 - 8e3 && J(f.births.get('oc_dm').fromIds) === J(['ou_peer', 'ou_me']), '③ an unknown SINGLE chat is BORN (its newest instant, its authors for the describe ladder)', J([...f.births]));
   ok(f.groups.size === 1 && f.groups.get('oc_newgrp').at === T0 - 7e3 && !f.births.has('oc_newgrp') && f.unlisted === 1, '③ an unknown GROUP is a discovery hint, never born by the feed (the chat listing is the membership authority); an unlisted row is counted, never marked', J([...f.groups.keys(), f.unlisted]));
@@ -271,7 +271,7 @@ function legFold(F) {
   // CREATION as the activity instant (`created`), the edit's instant only in `at` (the read line's input)
   const ed = F.foldHits([hit({ convId: 'oc_olddm', vendorId: 'om_old', at: T0 - 400 * 86400e3, updatedAt: T0 - 5e3, isP2p: true, fromId: 'ou_old' })], { stateOf: () => null });
   const eb = ed.births.get('oc_olddm');
-  ok(eb && eb.created === T0 - 400 * 86400e3 && eb.at === T0 - 5e3 && f.births.get('oc_dm').created === T0 - 8e3, '③ verify r2: a birth keeps its newest CREATION apart from an edit\'s instant (an edit of a year-old message is not activity)', J(eb));
+  ok(gateOf(eb) && eb.created === T0 - 400 * 86400e3 && eb.at === T0 - 5e3 && f.births.get('oc_dm').created === T0 - 8e3, '③ verify r2: a birth keeps its newest CREATION apart from an edit\'s instant (an edit of a year-old message is not activity)', J(eb));
   // verify r2 (#9): WHERE THE FEED'S REACH BEGAN per owed thread — a new mark takes the window's start, a live one the
   // earlier of the two, a STALE entry (no owed mark before) never lowers a new line, keys outside the marks are dropped
   const rch = F.mergeThreadReach({ omt_a: T0 - 900e3, omt_stale: T0 - 86400e3, omt_gone: T0 - 5e3 }, { omt_a: T0 - 1e3 }, ['omt_a', 'omt_stale', 'omt_new'], T0 - 60e3, { omt_a: T0, omt_stale: T0, omt_new: T0 });
@@ -280,17 +280,17 @@ function legFold(F) {
   // a hit on a STORED message that names a thread still marks THE THREAD owed (the search re-surfaced a root once its
   // topic existed, or a reply the push delivered) — a widened mark, never an owed chat read; the stored count unchanged
   const stTh = F.foldHits([hit({ convId: 'oc_live', vendorId: 'om_root', at: T0 - 4e3, threadKey: 'omt_born' }), hit({ convId: 'oc_live', vendorId: 'om_plain', at: T0 - 3e3 })], { stateOf: () => 'live', hasRecord: () => true, separateThreads: true });
-  ok(stTh.stored === 2 && stTh.owed.size === 0 && stTh.threadOwed.get('oc_live') && stTh.threadOwed.get('oc_live').get('omt_born') === T0 - 4e3 && stTh.threadOwed.get('oc_live').size === 1, '③ lane lark-threads (A3): a STORED hit that names a thread marks the thread owed (never the conversation); a stored plain hit marks nothing', J({ stored: stTh.stored, owed: [...stTh.owed], th: [...(stTh.threadOwed.get('oc_live') || [])] }));
+  ok(stTh.stored === 2 && stTh.owed.size === 0 && gateOf(stTh.threadOwed.get('oc_live')) && stTh.threadOwed.get('oc_live').get('omt_born') === T0 - 4e3 && stTh.threadOwed.get('oc_live').size === 1, '③ lane lark-threads (A3): a STORED hit that names a thread marks the thread owed (never the conversation); a stored plain hit marks nothing', J({ stored: stTh.stored, owed: [...stTh.owed], th: [...(stTh.threadOwed.get('oc_live') || [])] }));
   // A5: `threadHits` = the page's NEW hits carrying a thread id (the measurement: does the search carry thread ids at all)
   ok(f.threadHits === 2 && stTh.threadHits === 1, `③ lane lark-threads (A5): threadHits counts the new hits that carry a thread id (${f.threadHits} of the fixture page, ${stTh.threadHits} stored)`, J([f.threadHits, stTh.threadHits]));
   // A4: `owedHits` = the hits that made an owed CHAT mark with no thread id — what the conversation's chat read must find
   // (a hit it does not find is read by id: a thread reply the chat listing never shows)
-  ok(J(f.owedHits.map((x) => x.vendorId).sort()) === J(['om_1', 'om_2', 'om_p']) && f.owedHits.every((x) => x.convId && x.at > 0) && stTh.owedHits.length === 0, '③ lane lark-threads (A4): owedHits lists the hits behind an owed chat read (no thread id) — never a stored one, never a thread hit', J(f.owedHits));
+  ok(J(f.owedHits.map((x) => x.vendorId).sort()) === J(['om_1', 'om_2', 'om_p']) && gateOf(f.owedHits.every((x) => x.convId && x.at > 0)) && stTh.owedHits.length === 0, '③ lane lark-threads (A4): owedHits lists the hits behind an owed chat read (no thread id) — never a stored one, never a thread hit', J(f.owedHits));
   const noSep = F.foldHits([hit({ convId: 'oc_live', vendorId: 'om_x', threadKey: 'omt_1' })], { stateOf: () => 'live', separateThreads: false });
   ok(noSep.threadOwed.size === 0 && noSep.owed.size === 1, '③ an adapter whose replies ride the listing gets no thread mark (nothing to walk)');
   const big = {}; for (let i = 0; i < 70; i++) big[`omt_${i}`] = T0 + i;
   const mt = F.mergeThreadOwed(big, new Map([['omt_new', T0 + 1000]]));
-  ok(Object.keys(mt.marks).length === F.THREAD_OWED_MAX && mt.dropped === 71 - F.THREAD_OWED_MAX && mt.marks.omt_new && !mt.marks.omt_0, `③ thread owed marks are bounded to ${F.THREAD_OWED_MAX} per conversation — the OLDEST dropped and counted`, J([Object.keys(mt.marks).length, mt.dropped]));
+  ok(Object.keys(mt.marks).length === F.THREAD_OWED_MAX && mt.dropped === 71 - F.THREAD_OWED_MAX && gateOf(mt.marks.omt_new) && !mt.marks.omt_0, `③ thread owed marks are bounded to ${F.THREAD_OWED_MAX} per conversation — the OLDEST dropped and counted`, J([Object.keys(mt.marks).length, mt.dropped]));
 }
 
 // ═══ ④ owedSatisfied + birthFacts ═══════════════════════════════════════════════════════════
@@ -303,7 +303,7 @@ function legOwed(F) {
     incomplete: F.owedSatisfied(o, o + 60e3, { complete: false }),
     none: F.owedSatisfied(null, null),
   };
-  ok(r.after && !r.inSkew && !r.before && !r.incomplete && r.none, `④ an owed mark is satisfied ONLY by a complete walk that started ≥ the message + ${F.FEED_SKEW_MS / 1000} s (inside the skew, before it, or incomplete ⇒ still owed)`, J(r));
+  ok(gateOf(r.after) && !r.inSkew && !r.before && !r.incomplete && verdictOf(r.none), `④ an owed mark is satisfied ONLY by a complete walk that started ≥ the message + ${F.FEED_SKEW_MS / 1000} s (inside the skew, before it, or incomplete ⇒ still owed)`, J(r));
   const cu = F.birthFacts({ at: T0 - 3 * 86400e3 }, { linkedAt: T0 - 30 * 86400e3, backlogUntil: T0, catchUp: true });
   const st = F.birthFacts({ at: T0 + 50e3 }, { linkedAt: T0 - 30 * 86400e3, backlogUntil: T0 });
   const early = F.birthFacts({ at: T0 - 10e3 }, { linkedAt: T0 - 86400e3, backlogUntil: T0 });
@@ -324,7 +324,7 @@ function legCensus(src, F, label = '') {
   const h = F.cleanHit({ convId: 'oc_a', vendorId: 'om_1', at: T0, text: 'secret words', snippet: '<em>x</em>', display_info: 'y' }, { now: T0 });
   const keys = h ? Object.keys(h) : [];
   const clean = !!h && keys.every((k) => F.HIT_FIELDS.includes(k)) && !('text' in h) && !('snippet' in h) && !('display_info' in h);
-  ok(clean, `${label}⑤ a hit that carries a snippet comes out WITHOUT it (the closed field list is what passes)`, J(h));
+  ok(verdictOf(clean), `${label}⑤ a hit that carries a snippet comes out WITHOUT it (the closed field list is what passes)`, J(h));
   return clean;
 }
 function legEngineCensus() {
@@ -338,7 +338,7 @@ function legEngineCensus() {
   const leak = logs.filter((l) => /\bh\.|hits\b|\.vendorId/.test(l));
   ok(leak.length === 0, `⑤ …and no log line of the feed page prints a hit (only counts, codes, field NAMES)`, leak.join(' | '));
   const reg = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf8');
-  ok(/async changes\(/.test(reg) && /cleanHit/.test(reg), '⑤ the registry\'s `changes()` wrapper passes every hit through the closed field list (cleanHit)');
+  ok(gateOf(/async changes\(/.test(reg)) && verdictOf(/cleanHit/.test(reg)), '⑤ the registry\'s `changes()` wrapper passes every hit through the closed field list (cleanHit)');
 }
 
 // ═══ ⑥ THE MEASUREMENT ══════════════════════════════════════════════════════════════════════
@@ -429,7 +429,7 @@ const patch = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`con
   let red = false;
   QUIET = true;
   try { red = !legCensus(SRC, F3, 'CONTROL(copy) '); } finally { QUIET = false; }
-  ok(red, 'CONTROL the snippet kept: a copy whose hit keeps the vendor\'s extra fields turns ⑤ red');
+  ok(verdictOf(red), 'CONTROL the snippet kept: a copy whose hit keeps the vendor\'s extra fields turns ⑤ red');
 }
 {
   // verify r1 (U9): the page token ignored — the same first page answered for every continuation; the real verdict parks
@@ -451,7 +451,7 @@ const patch = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`con
   let r = null;
   QUIET = true;
   try { r = legVerdict(F4, 'CONTROL(copy) '); } finally { QUIET = false; }
-  ok(r && r.secUnderMs === false, 'CONTROL the unit guessed from the magnitude: a seconds value under a ms declaration is RESCALED by the copy — ② goes red');
+  ok(gateOf(r) && r.secUnderMs === false, 'CONTROL the unit guessed from the magnitude: a seconds value under a ms declaration is RESCALED by the copy — ② goes red');
 }
 {
   // lane lark-p2p: the shape verdict that never parks — the all-unreadable vendor pages to the test's bound (60), the
@@ -461,7 +461,7 @@ const patch = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`con
   let red = false;
   QUIET = true;
   try { red = !Object.values(legShape(F7, 'CONTROL(copy) ')).every(Boolean); } finally { QUIET = false; }
-  ok(n === 60 && red, `CONTROL the shape never parks: the all-unreadable vendor pages ${n} times (the bound) through the copy, and the verdict table goes red`, n);
+  ok(n === 60 && verdictOf(red), `CONTROL the shape never parks: the all-unreadable vendor pages ${n} times (the bound) through the copy, and the verdict table goes red`, n);
 }
 {
   // lane lark-p2p: the ISO form read by Date.parse — its legacy fallbacks read "2026-09-28 11:59:50Z" (a space for T), a
@@ -470,7 +470,7 @@ const patch = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`con
   let red = false;
   QUIET = true;
   try { red = !Object.values(legIso(F8, 'CONTROL(copy) ')).every(Boolean); } finally { QUIET = false; }
-  ok(red, 'CONTROL the ISO form read by Date.parse: a copy that falls back to it reads a form nobody declared — ②b goes red');
+  ok(verdictOf(red), 'CONTROL the ISO form read by Date.parse: a copy that falls back to it reads a form nobody declared — ②b goes red');
 }
 {
   // lane lark-p2p verify r1: the count's ceiling removed — the endless readable vendor pages to the walker's bound (400),
@@ -478,7 +478,7 @@ const patch = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`con
   const F9 = patch("    if (paged > most) return { ok: false, park: 'time-range-ignored', why: `the window has run to", "    if (false) return { ok: false, park: 'time-range-ignored', why: `the window has run to", 'no-page-ceiling');
   const e = endlessPages(F9);
   const red = F9.pageVerdict({ hits: [hit()], total: null }, { from: T0 - 90e3, to: T0 }, { pageSize: 30, now: T0, pages: 150 }).ok === true;
-  ok(e === 400 && red, `CONTROL the count's ceiling removed: the endless readable vendor pages ${e} times (the bound) through the copy, and the 151st page passes — ② goes red`, e);
+  ok(e === 400 && verdictOf(red), `CONTROL the count's ceiling removed: the endless readable vendor pages ${e} times (the bound) through the copy, and the 151st page passes — ② goes red`, e);
 }
 {
   // lane lark-threads (A3 / H1): the pre-fix order — a stored hit dropped BEFORE its thread mark (the owner's post: a thread
@@ -550,10 +550,10 @@ console.log('⑩ lane gmail-feed-gap: the gap verdict (gap × cursor × expired)
     ['no cursor', { cursor: null, lastPageAt: T0 - 20 * MIN }, 'rewalk'],
   ];
   const got = table.map(([, a]) => F0.gapVerdict({ now: T0, coldTierSec: 900, freshBoundMs: fb, ...a }).verdict);
-  ok(table.every(([, , v], i) => got[i] === v), `the gap table: ${table.map(([l], i) => `${l} ⇒ ${got[i]}`).join(' · ')}`, J(got));
+  ok(verdictOf(table.every(([, , v], i) => got[i] === v)), `the gap table: ${table.map(([l], i) => `${l} ⇒ ${got[i]}`).join(' · ')}`, J(got));
   const g20 = F0.gapVerdict({ cursor: 'h1', lastPageAt: T0 - 20 * MIN, now: T0, coldTierSec: 900, freshBoundMs: fb });
   const g4 = F0.gapVerdict({ cursor: 'h1', lastPageAt: T0 - 4 * MIN, now: T0, coldTierSec: 900, freshBoundMs: fb });
-  ok(g20.overCold && !g4.overCold && g20.gapMs === 20 * MIN && g20.from === T0 - 20 * MIN, 'overCold names the gap that used to fall to the tiers (20 min > the 15-min cold tier; 4 min is not)', J([g20, g4]));
+  ok(gateOf(g20.overCold) && !g4.overCold && g20.gapMs === 20 * MIN && g20.from === T0 - 20 * MIN, 'overCold names the gap that used to fall to the tiers (20 min > the 15-min cold tier; 4 min is not)', J([g20, g4]));
   let gs = [];
   for (let i = 0; i < 30; i++) gs = F0.addGap(gs, { from: T0 + i * 10 * MIN, to: T0 + i * 10 * MIN + MIN });
   const mg = F0.addGap([{ from: T0, to: T0 + 5 * MIN }], { from: T0 + 4 * MIN, to: T0 + 9 * MIN });
@@ -595,7 +595,7 @@ console.log('⑩ lane gmail-feed-gap: the gap verdict (gap × cursor × expired)
   ok(JSON.stringify(cls) === JSON.stringify(wantCls), '⑪ every miss has ONE class: lag / excluded type / excluded chat / bot / thread reply / gap / unknown', JSON.stringify(cls));
   ok(sm.n === 3 && sm.p === 2 && JSON.stringify(sm.excluded) === JSON.stringify({ 'excluded-type': 2, 'excluded-chat': 1, bot: 1, thread: 1, gap: 1 }), '⑪ only a miss the search COULD return counts (lag + unknown: 2 of 3 samples); a record it cannot return is no sample, found or not', JSON.stringify({ n: sm.n, p: sm.p, ex: sm.excluded }));
   const lagRow = sm.misses.find((x) => x.id === 'om_lag');
-  ok(lagRow && lagRow.ageAtFirstSeen === 223 && lagRow.searchWindow.from === T - 60e3 && lagRow.searchWindow.to === T + 60e3 && F0.searchAgeSec(lagRow) === 50 && lagRow.hadSearchHit === true && lagRow.convId === 'oc_a' && lagRow.chatType === 'group' && !('text' in lagRow),
+  ok(gateOf(lagRow) && lagRow.ageAtFirstSeen === 223 && lagRow.searchWindow.from === T - 60e3 && lagRow.searchWindow.to === T + 60e3 && F0.searchAgeSec(lagRow) === 50 && lagRow.hadSearchHit === true && lagRow.convId === 'oc_a' && lagRow.chatType === 'group' && !('text' in lagRow),
     '⑪ a memo row: id, conversation, chat type, type, created / first seen (age 223 s), the windows that searched it (last look 50 s in), hadSearchHit — never text', JSON.stringify(lagRow));
   const noWins = F0.sample([FX.gap], { coveredTo: T + 200e3, memStart: T - 4000e3, seen: new Map() });
   ok(noWins.p === 1 && noWins.misses[0].cls === 'unknown', '⑪ a caller that hands no windows cannot say gap or lag — the miss is unknown and COUNTS', JSON.stringify(noWins.misses));
@@ -632,7 +632,7 @@ console.log('⑩ lane gmail-feed-gap: the gap verdict (gap × cursor × expired)
     return { early: missAt.filter((a) => a < T + 1200e3).length, late: missAt.filter((a) => a >= T + 1200e3).length, margin, classes: F.memoCounts(memo2) };
   };
   const sim = simulate(F0);
-  ok(sim.early > 0 && sim.late === 0 && sim.margin && sim.margin.sec >= 200 && Object.keys(sim.classes).join() === 'lag', `⑪ a search lagging 90 s: ${sim.early} lag misses before the overlap learned ${sim.margin && sim.margin.sec} s, then NONE — the window finds every record`, JSON.stringify(sim));
+  ok(sim.early > 0 && sim.late === 0 && gateOf(sim.margin) && sim.margin.sec >= 200 && Object.keys(sim.classes).join() === 'lag', `⑪ a search lagging 90 s: ${sim.early} lag misses before the overlap learned ${sim.margin && sim.margin.sec} s, then NONE — the window finds every record`, JSON.stringify(sim));
   // THE FLIP RULES: promote only after 3 CLEAN cycles; a demotion holds 6 h; demote unchanged (> 2 % over ≥ 20)
   const CYC = 1020e3, full = { rate: 0, total: 300, missed: 0 };
   const fv = [F0.modeVerdict('measuring', full, { spanMs: 3 * CYC, minSpanMs: CYC, cleanMs: CYC }).mode, F0.modeVerdict('measuring', full, { spanMs: 3 * CYC, minSpanMs: CYC, cleanMs: 3 * CYC - 1 }).mode, F0.modeVerdict('measuring', full, { spanMs: 3 * CYC, minSpanMs: CYC, cleanMs: 3 * CYC }).mode,
@@ -649,7 +649,7 @@ console.log('⑩ lane gmail-feed-gap: the gap verdict (gap × cursor × expired)
   const Fp = patch('const PROMOTE_CYCLES = 3;', 'const PROMOTE_CYCLES = 1;', 'promote-one-cycle');
   ok(Fp.modeVerdict('measuring', full, { spanMs: 3 * CYC, minSpanMs: CYC, cleanMs: CYC }).mode === 'carrying', 'CONTROL: the promote rule with ONE clean cycle promotes the fixture ⑪ holds back — red');
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 8, label: 'larkfeed: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 8, label: 'larkfeed: ' })) ok(verdictOf(c.pass), c.name, c.pass ? undefined : c.detail);
 
 console.log(`\n${failN ? '✗' : '✓'} test-channel-feed: ${passN} passed, ${failN} failed`);
-process.exit(failN ? 1 : 0);
+process.exit(failN ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

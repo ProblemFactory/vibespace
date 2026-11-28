@@ -47,7 +47,7 @@ const DV = require(path.join(repo, 'src/desktop-viewers.js'));
 const DS = { ...require(path.join(repo, 'src/server/desktop-stream.js')), ...require(path.join(repo, 'src/server/stream-relay-rfb.js')), ...require(path.join(repo, 'src/server/stream-relay-xpra.js')) } /* F-B4: the relays' classifiers live in their own modules */;
 const K = require(path.join(repo, 'src/server/desktop-app-keeper.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -77,7 +77,7 @@ console.log('§1 the PURE rule (src/desktop-viewers.js)');
   const S = { active: 'v-a' };
   ok(DV.viewerState(S, 'v-a', null) === 'active' && DV.viewerState(S, 'v-b', null) === 'blocked', 'no lease: the elected viewer is ACTIVE, every other one BLOCKED');
   ok(DV.viewerState({ active: null }, 'v-a', null) === 'blocked', 'nobody elected ⇒ nobody active (the join elects)');
-  ok(['v-a', 'v-b', 'v-c'].every((v) => DV.viewerState(S, v, { input: 'agent', holder: null }) === 'watch'), 'an agent DRIVING the window ⇒ every human is WATCH — the elected one too');
+  ok(verdictOf(['v-a', 'v-b', 'v-c'].every((v) => DV.viewerState(S, v, { input: 'agent', holder: null }) === 'watch')), 'an agent DRIVING the window ⇒ every human is WATCH — the elected one too');
   ok(DV.viewerState(S, 'v-b', { input: 'user', holder: 'v-b' }) === 'active' && DV.viewerState(S, 'v-a', { input: 'user', holder: 'v-b' }) === 'blocked', 'a human TAKEOVER of an agent\'s window ⇒ the taker is active, everyone else blocked (the election\'s own pick included)');
   ok(DV.viewerState(S, 'v-a', { input: 'user', holder: null }) === 'blocked', 'a takeover with no holder recorded makes nobody active (never a guess)');
   ok(JSON.stringify(DV.RELAY_RULES) === JSON.stringify({ active: { picture: true, input: true, geometry: true }, blocked: { picture: false, input: false, geometry: false }, watch: { picture: true, input: false, geometry: false } }), 'the relay table: active = everything, blocked = nothing, watch = the picture only');
@@ -111,7 +111,7 @@ const keeper = K.create({ dataDir: path.join(root, 'data'), env: () => ({ PATH: 
   keeper.viewerJoined('da-k', { viewerId: 'v-b', pane: 'pb' });
   ok(keeper.activeViewer('da-k') === 'v-a' && vb().active === 'pa' && vb().viewers.length === 2, 'B attaches ⇒ A stays active (B is blocked), the broadcast lists both');
   const t = keeper.takeoverViewer('da-k', 'v-b');
-  ok(t.ok && keeper.activeViewer('da-k') === 'v-b' && vb().active === 'pb' && t.viewers.active === 'pb', 'B: Resume here ⇒ B active, A blocked, broadcast + the answer say pb');
+  ok(gateOf(t.ok) && keeper.activeViewer('da-k') === 'v-b' && vb().active === 'pb' && t.viewers.active === 'pb', 'B: Resume here ⇒ B active, A blocked, broadcast + the answer say pb');
   ok(!keeper.takeoverViewer('da-k', 'v-nope').ok && keeper.takeoverViewer('da-k', 'v-nope').code === 'no_viewer', 'a takeover by a socket id nobody holds is refused no_viewer');
   keeper.viewerJoined('da-k', { viewerId: 'v-c', pane: 'pc' });
   keeper.viewerLeft('da-k', 'v-b');
@@ -267,16 +267,16 @@ async function xpraScenario(Smod, label) {
   ok(X.bRelayed === 0 && X.bBack === 0 && X.statsBlocked >= 7, `a blocked viewer: 0 packets relayed either way — nothing of its hello / input / display size / geometry / keymap / clipboard / shutdown reaches xpra (${X.bRelayed}), nothing comes back (${X.bBack} messages), ${X.statsBlocked} counted`);
   ok(X.bReplay.slice(0, 4).join() === 'hello,keyboard-config,display-configure,configure-window', `Resume here on B: its upstream opens and what it said while blocked is replayed FIRST, in order — hello, keymap, display size, geometry (${X.bReplay.join(', ')}) — the app re-fits to B's pane`, X.bReplay);
   ok(X.takeoverMs < 1000, `…within ${X.takeoverMs} ms of the takeover`);
-  ok(X.aClosed && X.aClosed.code === 4001 && /blocked/.test(X.aClosed.reason) && X.upClosed >= 1, 'the previous active A is CUT: its upstream closed and its socket closed 4001 "blocked" (the pane reconnects as a blocked viewer)', X.aClosed);
+  ok(gateOf(X.aClosed) && X.aClosed.code === 4001 && gateOf(/blocked/.test(X.aClosed.reason)) && X.upClosed >= 1, 'the previous active A is CUT: its upstream closed and its socket closed 4001 "blocked" (the pane reconnects as a blocked viewer)', X.aClosed);
   ok(X.bKeyAfter === 'key-action' && X.bBackAfter > 0, 'B is active now: its input reaches xpra and the picture flows back');
   ok(X.connsAfterA2 === 2, 'A reconnecting after the cut is blocked: no upstream for it');
   ok(X.a2First[0] === 'hello', 'an agent DRIVES the window ⇒ A2 is WATCH: its upstream opens with its held hello (the picture)', X.a2First);
-  ok(X.watchTypes.length > 0 && X.watchTypes.every((t) => t === 'map-window' || t === 'damage-sequence') && X.watchTypes.filter((t) => t === 'map-window').length === 2, `Watch (both viewers): only the picture's packets reach xpra (${X.watchTypes.join(', ')}) — configure-window, display-configure, keyboard-config and key-action are cut (the r3 open item closed)`, X.watchTypes);
+  ok(X.watchTypes.length > 0 && gateOf(X.watchTypes.every((t) => t === 'map-window' || t === 'damage-sequence')) && X.watchTypes.filter((t) => t === 'map-window').length === 2, `Watch (both viewers): only the picture's packets reach xpra (${X.watchTypes.join(', ')}) — configure-window, display-configure, keyboard-config and key-action are cut (the r3 open item closed)`, X.watchTypes);
   ok(X.a2Replay.slice(0, 3).join() === 'keyboard-config,display-configure,configure-window', `a human takes over the agent's window from A2 ⇒ A2 ACTIVE and its held keymap, display size and geometry are replayed at once (${X.a2Replay.join(', ')})`, X.a2Replay);
-  ok(X.bClosedAtTakeover && X.bClosedAtTakeover.code === 4001, 'the other viewer (B, Watch until then) is BLOCKED by that takeover: cut 4001', X.bClosedAtTakeover);
-  ok(X.reElect.active && X.reElect.firstUp && X.reElect.firstUp[0] === 'hello', `the ACTIVE viewer leaves ⇒ the remaining (dormant) one takes over by itself: its upstream opens with its held hello (${X.reElect.active}; first up: ${X.reElect.firstUp && X.reElect.firstUp.join(', ')})`, X.reElect);
-  ok(X.endedClose && X.endedClose.code === 1001, 'the app session ending closes a blocked socket too (1001 — it had nothing upstream to notice it)', X.endedClose);
-  ok(X.log.some((l) => /viewer v-b is BLOCKED \(another client is active\)/.test(l)) && X.log.some((l) => /is active now — the hello and the keymap and the display size and the window geometry it sent while blocked reach xpra first/.test(l)), 'the bridge NAMES a blocked viewer and the replay in its log', X.log.filter((l) => /BLOCKED|active now/.test(l)));
+  ok(gateOf(X.bClosedAtTakeover) && X.bClosedAtTakeover.code === 4001, 'the other viewer (B, Watch until then) is BLOCKED by that takeover: cut 4001', X.bClosedAtTakeover);
+  ok(gateOf(X.reElect.active) && gateOf(X.reElect.firstUp) && X.reElect.firstUp[0] === 'hello', `the ACTIVE viewer leaves ⇒ the remaining (dormant) one takes over by itself: its upstream opens with its held hello (${X.reElect.active}; first up: ${X.reElect.firstUp && X.reElect.firstUp.join(', ')})`, X.reElect);
+  ok(gateOf(X.endedClose) && X.endedClose.code === 1001, 'the app session ending closes a blocked socket too (1001 — it had nothing upstream to notice it)', X.endedClose);
+  ok(gateOf(X.log.some((l) => /viewer v-b is BLOCKED \(another client is active\)/.test(l))) && verdictOf(X.log.some((l) => /is active now — the hello and the keymap and the display size and the window geometry it sent while blocked reach xpra first/.test(l))), 'the bridge NAMES a blocked viewer and the replay in its log', X.log.filter((l) => /BLOCKED|active now/.test(l)));
   const warns = X.log.filter((l) => l.startsWith('W '));
   ok(warns.length === 0, `LOW-1: ZERO warn lines over the scenario's 5 joins (every join's own broadcast refreshes the sockets while the joining one is not wired yet — skipped, never "reconcile failed") (${warns.length})`, warns);
 
@@ -292,14 +292,14 @@ async function xpraScenario(Smod, label) {
   const l1w = L1.log.filter((l) => /^W .*reconcile failed — c\.reconcile is not a function/.test(l));
   ok(l1w.length >= 5, `CONTROL: without the skip every join logs the false "reconcile failed — c.reconcile is not a function" warn (${l1w.length} over 5 joins)`, L1.log.filter((l) => l.startsWith('W ')).slice(0, 3));
   const M = await xpraScenario(require(mfile), 'CONTROL pre-x5 bridge');
-  ok(M.connsAfterB === 2 && M.bTypes.includes('display-configure') && M.bTypes.includes('configure-window') && M.bTypes.includes('key-action'), `CONTROL: through the pre-x5 bridge the "blocked" viewer B gets its own upstream (${M.connsAfterB} connections) and its packets reach xpra (${M.bTypes.join(', ')}) — its display size, geometry and keys resize and drive the ACTIVE viewer's app`, M.bTypes);
+  ok(M.connsAfterB === 2 && gateOf(M.bTypes.includes('display-configure')) && gateOf(M.bTypes.includes('configure-window')) && verdictOf(M.bTypes.includes('key-action')), `CONTROL: through the pre-x5 bridge the "blocked" viewer B gets its own upstream (${M.connsAfterB} connections) and its packets reach xpra (${M.bTypes.join(', ')}) — its display size, geometry and keys resize and drive the ACTIVE viewer's app`, M.bTypes);
 }
 {
   const up = await fakeRfb();
   const R = await rig(DS, { kind: 'rfb', upstreamPort: up.port });
   const A = await R.viewer('v-a', 'pa');
   await until(() => A.back.length);
-  ok(up.st.conns === 1 && Buffer.concat(A.back).toString('latin1').startsWith('RFB 003.008'), 'rfb: A (first) is active — its TCP opens, the banner comes back');
+  ok(up.st.conns === 1 && verdictOf(Buffer.concat(A.back).toString('latin1').startsWith('RFB 003.008')), 'rfb: A (first) is active — its TCP opens, the banner comes back');
   const B = await R.viewer('v-b', 'pb');
   await sleep(80);
   B.send(Buffer.from('RFB 003.008\n'));
@@ -307,7 +307,7 @@ async function xpraScenario(Smod, label) {
   ok(up.st.conns === 1 && B.back.length === 0 && up.st.got.length === 0, `rfb: B is BLOCKED — no TCP for it (${up.st.conns} connection), 0 bytes either way`);
   R.k.takeoverViewer('da-x', 'v-b');
   await until(() => B.back.length && A.closed, 2000);
-  ok(up.st.conns === 2 && Buffer.concat(B.back).toString('latin1').startsWith('RFB 003.008') && A.closed && A.closed.code === 4001, 'rfb: Resume here on B ⇒ B\'s TCP opens (a fresh handshake for a fresh socket) and A is cut 4001', { conns: up.st.conns, a: A.closed });
+  ok(up.st.conns === 2 && gateOf(Buffer.concat(B.back).toString('latin1').startsWith('RFB 003.008')) && gateOf(A.closed) && A.closed.code === 4001, 'rfb: Resume here on B ⇒ B\'s TCP opens (a fresh handshake for a fresh socket) and A is cut 4001', { conns: up.st.conns, a: A.closed });
   A.close(); B.close(); await R.close(); await up.close();
 }
 
@@ -329,7 +329,7 @@ console.log('§4 the route + the wiring pins');
   const g = await (await fetch(`${base}/api/desktop/apps/da-r/viewers`)).json();
   ok(g.type === 'desktop-app-viewers' && g.active === 'pa' && g.viewers.length === 2, 'GET /api/desktop/apps/:id/viewers answers the broadcast payload (panes)', g);
   const r1 = await post('/api/desktop/apps/da-r/viewers/takeover', { viewerId: 'v-b' });
-  ok(r1.status === 200 && r1.j.ok && r1.j.viewers.active === 'pb' && k.activeViewer('da-r') === 'v-b' && takes.length === 0, 'POST …/viewers/takeover (no lease): a plain swap — B active, the engine never asked', r1.j);
+  ok(r1.status === 200 && gateOf(r1.j.ok) && r1.j.viewers.active === 'pb' && k.activeViewer('da-r') === 'v-b' && takes.length === 0, 'POST …/viewers/takeover (no lease): a plain swap — B active, the engine never asked', r1.j);
   const r2 = await post('/api/desktop/apps/da-r/viewers/takeover', { viewerId: 'v-gone' });
   ok(r2.status === 409 && r2.j.code === 'no_viewer', 'a pane whose socket is not open ⇒ 409 no_viewer, said in words', r2.j);
   leaseIn = { input: 'user', holder: 'v-b' };
@@ -375,7 +375,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   ok(kg.activeViewer('da-g') === null, 'pc leaves: held for pc');
   const tk = kg.takeoverViewer('da-g', 'v-b');
   await sleep(G + 120);
-  ok(tk.ok && kg.activeViewer('da-g') === 'v-b', 'Resume here INSIDE a grace wins at once, and the grace ends with it (still B after the timer would have fired)');
+  ok(gateOf(tk.ok) && kg.activeViewer('da-g') === 'v-b', 'Resume here INSIDE a grace wins at once, and the grace ends with it (still B after the timer would have fired)');
   // CONTROL: grace 0 — the pre-default rule: the reload hands the app to the other device at once
   const k0 = K.create({ dataDir: path.join(root, 'g0'), env: () => ({}), broadcast: () => {}, viewerGraceMs: 0, log: { log() {}, warn() {} } });
   k0.viewerJoined('da-0', { viewerId: 'v-a', pane: 'pa' }); k0.viewerJoined('da-0', { viewerId: 'v-b', pane: 'pb' });
@@ -416,7 +416,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
     return out;
   };
   const L4 = await low4Leg(K);
-  ok(L4.active === 'v-a2' && L4.got && L4.got.join() === 'hello,key-action' && L4.ms < 1000 && L4.upClosed >= 1, `LOW-4 through the bridge: the active pane's old socket silently dropped, its new one attaches ⇒ ACTIVE in ${L4.ms} ms (was up to two ping rounds, 29.8 s measured): its hello + keys reach xpra, the old upstream is closed`, L4);
+  ok(L4.active === 'v-a2' && gateOf(L4.got) && L4.got.join() === 'hello,key-action' && L4.ms < 1000 && L4.upClosed >= 1, `LOW-4 through the bridge: the active pane's old socket silently dropped, its new one attaches ⇒ ACTIVE in ${L4.ms} ms (was up to two ping rounds, 29.8 s measured): its hello + keys reach xpra, the old upstream is closed`, L4);
   const L4c = await low4Leg(require(kfile));
   ok(L4c.active === 'v-a' && L4c.conns === 1 && L4c.got === null, `CONTROL: without the seat move the pane's own reconnect is BLOCKED behind its dead socket (still ${L4c.active}; ${L4c.conns} upstream connection) — until the pings notice`, L4c);
 
@@ -464,7 +464,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   ok(src.split(seatAt).length === 2, 'LOW-3: the anonymous seat is spelled once (the control restores the old `anon-<n>` seating)');
   const afile = MUTV.write('src/server/desktop-stream.js', editAnchor(src, seatAt, "const seat = viewerSeats ? (viewerId || 'anon-1') : null;", "src/server/desktop-stream.js"), 'anon');
   const N3c = await anonLeg(require(afile));
-  ok(N3c.anonTypes.includes('key-action') && N3c.anonTypes.includes('configure-window') && N3c.active === 'anon-1', `CONTROL: seated as anon-<n> (the pre-fix bridge) the anonymous socket TAKES the active seat and its keys + geometry reach xpra (${N3c.anonTypes.join(', ')}; active ${N3c.active})`, N3c);
+  ok(gateOf(N3c.anonTypes.includes('key-action')) && gateOf(N3c.anonTypes.includes('configure-window')) && N3c.active === 'anon-1', `CONTROL: seated as anon-<n> (the pre-fix bridge) the anonymous socket TAKES the active seat and its keys + geometry reach xpra (${N3c.anonTypes.join(', ')}; active ${N3c.active})`, N3c);
 
   // ── LOW-2: the xpra rung's RECORD names the app for a blocked pane ──
   const D = require(path.join(repo, 'src/desktop-display.js'));
@@ -486,7 +486,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   await until(() => kt.get('da-t').appTitle, 1000);
   const upd = tb.filter((m) => m.type === 'desktop-apps-updated').slice(-1)[0];
   const rowT = upd && upd.apps.find((a) => a.id === 'da-t');
-  ok(reads === 1 && kt.get('da-t').appTitle === hostile && rowT && rowT.appTitle === hostile, `LOW-2: a BLOCKED pane appears on the xpra rung ⇒ the keeper reads X once and the RECORD carries the app's own title, verbatim as data (the Corral wrapper and the 1x1 leader skipped): ${JSON.stringify(kt.get('da-t').appTitle)}`, { reads, rec: kt.get('da-t') });
+  ok(reads === 1 && kt.get('da-t').appTitle === hostile && gateOf(rowT) && rowT.appTitle === hostile, `LOW-2: a BLOCKED pane appears on the xpra rung ⇒ the keeper reads X once and the RECORD carries the app's own title, verbatim as data (the Corral wrapper and the 1x1 leader skipped): ${JSON.stringify(kt.get('da-t').appTitle)}`, { reads, rec: kt.get('da-t') });
   kt.viewerJoined('da-t', { viewerId: 'v-c', pane: 'pc' }); kt.viewerJoined('da-t', { viewerId: 'v-d', pane: 'pd' });
   await sleep(50);
   ok(reads === 1, 'a burst of blocked joins reads X once (at most once a second off the tick, every 10 s on it)');
@@ -520,7 +520,7 @@ console.log('§6 (desktop A r1) a Scale ▸ relaunch CARRIES the active seat to 
   const arm = kr.carrySeat('da-old', 'da-new');
   kr.viewerJoined('da-new', { viewerId: 'v-H2', pane: 'pH' });
   const lastNew = () => cb.filter((m) => m.type === 'desktop-app-viewers' && m.id === 'da-new').slice(-1)[0];
-  ok(kr.activeViewer('da-new') === null && lastNew() && lastNew().active === 'pL', 'the other client (pH) attaching FIRST to the successor is BLOCKED — the broadcast already names pane pL as the seat holder', lastNew());
+  ok(kr.activeViewer('da-new') === null && gateOf(lastNew()) && lastNew().active === 'pL', 'the other client (pH) attaching FIRST to the successor is BLOCKED — the broadcast already names pane pL as the seat holder', lastNew());
   kr.viewerJoined('da-new', { viewerId: 'v-L2', pane: 'pL' });
   ok(kr.activeViewer('da-new') === 'v-L2' && lastNew().active === 'pL', 'the relaunching pane (same pane key, a new socket) attaches second and is ACTIVE with no Resume');
   arm();
@@ -555,7 +555,7 @@ console.log('§6 (desktop A r1) a Scale ▸ relaunch CARRIES the active seat to 
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTV.files, MUTV.dir, repo, { minCopies: 5 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTV.files, MUTV.dir, repo, { minCopies: 5 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

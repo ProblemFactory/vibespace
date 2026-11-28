@@ -39,7 +39,7 @@ import { scratch } from './scratch.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700) : '')); } };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -74,30 +74,30 @@ console.log('① the wrapper writes the kept file; the reference is {sha, ext}; 
 const kd = KC.keptDirOf(dir, ID);
 const b1 = KC.keepBlock(img('A'), kd);
 const n1 = KC.nameOf(b1.source);
-ok(b1.type === 'image' && b1.source.type === 'kept' && KC.SHA_RE.test(b1.source.sha) && b1.source.ext === 'png' && !('file' in b1.source) && !('data' in b1.source) && fs.existsSync(path.join(kd, n1)), 'a picture becomes {type:kept, sha, ext, media_type, bytes} and its bytes a file in <id>.img — no path, no bytes in the reference', b1);
+ok(b1.type === 'image' && b1.source.type === 'kept' && gateOf(KC.SHA_RE.test(b1.source.sha)) && b1.source.ext === 'png' && !('file' in b1.source) && !('data' in b1.source) && verdictOf(fs.existsSync(path.join(kd, n1))), 'a picture becomes {type:kept, sha, ext, media_type, bytes} and its bytes a file in <id>.img — no path, no bytes in the reference', b1);
 const long = KC.keepBlock({ type: 'text', text: 'x'.repeat(KC.TEXT_MIN + 1) }, kd);
-ok(long.type === 'text' && long.kept && long.kept.ext === 'txt' && long.text.length < 500 && fs.existsSync(path.join(kd, KC.nameOf(long.kept))), 'a text block over 8 KB is kept too (the line carries its head)', { kept: long.kept, head: long.text.length });
+ok(long.type === 'text' && gateOf(long.kept) && long.kept.ext === 'txt' && long.text.length < 500 && verdictOf(fs.existsSync(path.join(kd, KC.nameOf(long.kept)))), 'a text block over 8 KB is kept too (the line carries its head)', { kept: long.kept, head: long.text.length });
 const forgedIn = KC.keepBlock({ type: 'image', source: { type: 'kept', sha: 'a'.repeat(32), ext: 'png' } }, kd);
-ok(forgedIn.type === 'text' && /refused/.test(forgedIn.text), 'a frame that ALREADY carries a kept reference (client-built) is stripped by the wrapper', forgedIn);
+ok(forgedIn.type === 'text' && verdictOf(/refused/.test(forgedIn.text)), 'a frame that ALREADY carries a kept reference (client-built) is stripped by the wrapper', forgedIn);
 const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
 const ad = new ClaudeCodeAdapter({ buffersDir: os.tmpdir() });
 let refusal = null;
 try { ad.formatChatInput(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'hi' }, { type: 'image', source: { type: 'kept', sha: 'b'.repeat(32), ext: 'png' } }] } }), 'm-x'); } catch (e) { refusal = e.message; }
-ok(/^kept_refused:/.test(refusal || ''), 'the input road refuses a client-built kept block BY NAME (kept_refused)', refusal);
+ok(verdictOf(/^kept_refused:/.test(refusal || '')), 'the input road refuses a client-built kept block BY NAME (kept_refused)', refusal);
 const line1 = copyLine('m-a', 'u-a', [{ type: 'text', text: 'IMG-A a screenshot' }, img('A')], 1);
 ok(Buffer.byteLength(line1) < 500 && KC.namesIn(line1).join() === n1, `the copy line stays small (${Buffer.byteLength(line1)} B for one picture) and names its file`, Buffer.byteLength(line1));
 
 console.log('② the restart: the preload reads the file back OFF the loop, the merge resolves it with no fs call');
 const held = await restart(line1);
 ok(view(held).length === 1 && view(held)[0].pics === 1 && view(held)[0].gone === 0 && view(held)[0].msgId === 'm-a', 'a held copy after a restart: ONE bubble with its picture', view(held));
-ok(!/readFileSync|statSync|existsSync/.test(read('src/session-store.js').split('class SessionMessages {')[0].split("const KC = require('./kept-copies.js');")[1] || '') && /_keptLoad/.test(read('src/ws-handler.js')) && /_keptLoad = require\('\.\.\/kept-copies\.js'\)\.preload\(/.test(read('src/server/boot-restore.js')), 'the store resolves from the preload (no sync fs in the resolver); boot-restore preloads, the attach awaits it');
+ok(!/readFileSync|statSync|existsSync/.test(read('src/session-store.js').split('class SessionMessages {')[0].split("const KC = require('./kept-copies.js');")[1] || '') && gateOf(/_keptLoad/.test(read('src/ws-handler.js'))) && verdictOf(/_keptLoad = require\('\.\.\/kept-copies\.js'\)\.preload\(/.test(read('src/server/boot-restore.js'))), 'the store resolves from the preload (no sync fs in the resolver); boot-restore preloads, the attach awaits it');
 
 console.log('③ a reference whose file is gone ⇒ the placeholder that says so');
 const gl = copyLine('m-g', 'u-g', [{ type: 'text', text: 'IMG-G gone soon' }, img('G')], 1);
 fs.unlinkSync(path.join(kd, KC.namesIn(gl)[0]));
 const gone = await restart(gl);
 ok(view(gone)[0].gone === 1 && view(gone)[0].pics === 0, 'the file swept ⇒ the bubble keeps its words and a `gone` picture (never nothing)', view(gone));
-ok(/b\.type === 'image' && b\.gone\) return `<div class="chat-media chat-media-gone">/.test(read('src/lib/chat-renderers.js')) && /t\('Picture no longer kept'\)/.test(read('src/lib/chat-renderers.js')), 'the renderer draws «Picture no longer kept» for it');
+ok(gateOf(/b\.type === 'image' && b\.gone\) return `<div class="chat-media chat-media-gone">/.test(read('src/lib/chat-renderers.js'))) && verdictOf(/t\('Picture no longer kept'\)/.test(read('src/lib/chat-renderers.js'))), 'the renderer draws «Picture no longer kept» for it');
 
 console.log('④ the CLI\'s loss lines beside the picture');
 const l3 = copyLine('m-3', 'u-3', [{ type: 'text', text: 'IMG-3 three' }, img('X'), img('Y'), img('Z')], 1);
@@ -110,18 +110,18 @@ const p1 = copyLine('m-p', 'u-p', [{ type: 'text', text: 'pending' }, img('P')],
 const s1 = copyLine('m-s', 'u-s', [{ type: 'text', text: 'settled' }, img('S'), img('P')], 2);
 const drop = KC.namesToDrop(s1, [p1]);
 KC.dropFiles(kd, drop);
-ok(drop.length === 1 && !fs.existsSync(path.join(kd, drop[0])) && fs.existsSync(path.join(kd, KC.namesIn(p1)[0])), 'a witnessed frame\'s files go; a file a pending copy still names stays', { drop });
+ok(drop.length === 1 && !fs.existsSync(path.join(kd, drop[0])) && verdictOf(fs.existsSync(path.join(kd, KC.namesIn(p1)[0]))), 'a witnessed frame\'s files go; a file a pending copy still names stays', { drop });
 const ring = 'x\n' + p1 + '\n' + 'y\n', still = 'z\n';
 ok(KC.pinnedLines(ring, still, [p1]).join() === p1 && KC.pinnedLines(ring, still + p1 + '\n', [p1]).length === 0, 'the ring\'s pin writes a pending copy the trim cut back at the head (and never twice)');
 const w = read('data/bin/chat-wrapper.js');
-ok(/KC\.pinnedLines\(gone, buffer,/.test(w) && /const names = KC\.namesToDrop\(c\.line,[^\n]*\n\s+owedOnStop\(\(\) => KC\.dropFiles\(KEPT_DIR, unnamedNow\(names\)\)\);/.test(w)   /* law 6: on a Stop's road the unlink is owed to the batch's end, its names filtered again then (r5457 (1)) */ && /settleCopies\(ids\)/.test(w) && /settleCopy\(dropped\.msgId\)/.test(w), 'the wrapper calls them: the trim pins, a settle (witnessed / dropped) drops');
+ok(gateOf(/KC\.pinnedLines\(gone, buffer,/.test(w)) && gateOf(/const names = KC\.namesToDrop\(c\.line,[^\n]*\n\s+owedOnStop\(\(\) => KC\.dropFiles\(KEPT_DIR, unnamedNow\(names\)\)\);/.test(w))   /* law 6: on a Stop's road the unlink is owed to the batch's end, its names filtered again then (r5457 (1)) */ && gateOf(/settleCopies\(ids\)/.test(w)) && verdictOf(/settleCopy\(dropped\.msgId\)/.test(w)), 'the wrapper calls them: the trim pins, a settle (witnessed / dropped) drops');
 
 console.log('⑤b THE CAP: a session\'s kept bytes are bounded — the oldest files go (their copies draw the placeholder)');
 const cd = path.join(dir, 'cap-1.img'); fs.mkdirSync(cd, { recursive: true });
 for (let i = 0; i < 5; i++) { const f = path.join(cd, `${String(i).repeat(32)}.png`); fs.writeFileSync(f, Buffer.alloc(400)); const t = (Date.now() - (10 - i) * 1000) / 1000; fs.utimesSync(f, t, t); }
 const evicted = KC.capDir(cd, 1000);
-ok(evicted.length === 3 && evicted[0].startsWith('0') && fs.readdirSync(cd).length === 2 && KC.CAP_BYTES === 64 * 1024 * 1024, 'past the cap the OLDEST files are evicted until the folder fits (64 MB in the product)', { evicted, left: fs.readdirSync(cd) });
-ok(/KC\.capDir\(KEPT_DIR\)/.test(read('data/bin/chat-wrapper.js')), 'the wrapper caps its folder after every copy it writes');
+ok(evicted.length === 3 && gateOf(evicted[0].startsWith('0')) && fs.readdirSync(cd).length === 2 && KC.CAP_BYTES === 64 * 1024 * 1024, 'past the cap the OLDEST files are evicted until the folder fits (64 MB in the product)', { evicted, left: fs.readdirSync(cd) });
+ok(verdictOf(/KC\.capDir\(KEPT_DIR\)/.test(read('data/bin/chat-wrapper.js'))), 'the wrapper caps its folder after every copy it writes');
 
 console.log('⑥ the age sweep, the kill path, retireDuplicate, ws close');
 const WF = require(path.join(REPO, 'src/server/wrapper-files.js'));
@@ -129,8 +129,8 @@ const sw = scratch('kept-copies-sweep'); fs.mkdirSync(sw, { recursive: true });
 for (const n of ['old-1', 'young-1', 'live-1']) { fs.mkdirSync(path.join(sw, n + '.img')); fs.writeFileSync(path.join(sw, n + '.img', 'a.png'), 'x'); }
 const past = (Date.now() - 9 * 86400000) / 1000; fs.utimesSync(path.join(sw, 'old-1.img'), past, past); fs.utimesSync(path.join(sw, 'live-1.img'), past, past);
 WF.sweepAgedWrapperFiles(sw, { cutoff: Date.now() - 7 * 86400000, isActive: (id) => id === 'live-1' });
-ok(!fs.existsSync(path.join(sw, 'old-1.img')) && fs.existsSync(path.join(sw, 'young-1.img')) && fs.existsSync(path.join(sw, 'live-1.img')), 'the 7-day sweep takes an old <id>.img folder, never a young or a live one');
-ok((WF.WRAPPER_FILE_KINDS || []).includes('img') && ['src/server/session-stdout.js', 'src/server/boot-restore.js', 'src/ws-handler.js'].every((f) => /removeWrapperFiles\(BUFFERS_DIR, /.test(read(f))), 'the kill path, retireDuplicate and ws close take <id>.img beside <id>.buf — THE ONE LIST of a wrapper\'s files (src/server/wrapper-files.js WRAPPER_FILE_KINDS, lane human-cli r5), off the loop (fs.rm)');
+ok(!fs.existsSync(path.join(sw, 'old-1.img')) && gateOf(fs.existsSync(path.join(sw, 'young-1.img'))) && verdictOf(fs.existsSync(path.join(sw, 'live-1.img'))), 'the 7-day sweep takes an old <id>.img folder, never a young or a live one');
+ok(gateOf((WF.WRAPPER_FILE_KINDS || []).includes('img')) && verdictOf(['src/server/session-stdout.js', 'src/server/boot-restore.js', 'src/ws-handler.js'].every((f) => /removeWrapperFiles\(BUFFERS_DIR, /.test(read(f)))), 'the kill path, retireDuplicate and ws close take <id>.img beside <id>.buf — THE ONE LIST of a wrapper\'s files (src/server/wrapper-files.js WRAPPER_FILE_KINDS, lane human-cli r5), off the loop (fs.rm)');
 {
   const rw = scratch('kept-copies-remove'); fs.mkdirSync(path.join(rw, 'gone-1.img'), { recursive: true }); fs.writeFileSync(path.join(rw, 'gone-1.img', 'a.png'), 'x');
   WF.removeWrapperFiles(rw, 'gone-1');
@@ -145,7 +145,7 @@ const forgedR5 = JSON.stringify({ type: 'user', message: { role: 'user', content
 const forgedSib = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'sibling' }, { type: 'image', source: { type: 'kept', sha: secret.source.sha, ext: 'png', media_type: 'image/png' } }] }, msgId: 'm-s2', cliUuid: 'u-s2', handNo: 1, _fromWebui: true, webui_copy: true, timestamp: new Date().toISOString() });
 const fr = await restart(forgedR5 + '\n' + forgedSib);
 const leaked = JSON.stringify(fr).includes(Buffer.from('OTHER-SESSION-SECRET-PICTURE').toString('base64'));
-ok(view(fr).every((v) => v.gone === 1 && v.pics === 0) && !leaked, 'a forged `OTHER.img/<sha>.png` reference AND another session\'s sha ⇒ the placeholder, 0 bytes of the other session\'s file', view(fr));
+ok(gateOf(view(fr).every((v) => v.gone === 1 && v.pics === 0)) && !leaked, 'a forged `OTHER.img/<sha>.png` reference AND another session\'s sha ⇒ the placeholder, 0 bytes of the other session\'s file', view(fr));
 
 console.log('⑧ a batch claimed by the stamps its init names');
 // THE TURN'S INIT names every stamped frame it consumed, in order — measured on 2.1.308 and 2.1.312 (two frames written
@@ -161,7 +161,7 @@ ok(view(yx).length === 2 && view(yx).filter((v) => /MARK-Y/.test(v.text)).length
 const sh = copyLine('m-h', 'u-h', [{ type: 'text', text: 'same words' }], 0), ss = copyLine('m-e', 'u-e', [{ type: 'text', text: 'same words' }], 1);
 const cliE = { type: 'user', uuid: 'u-e', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'same words' }] } };
 const same = await restart([sh, ss, initOf('u-e')].join('\n'), { jsonl: [cliE] });
-ok(view(same).length === 2 && view(same).every((v) => v.text === 'same words') && view(same).some((v) => v.msgId === 'm-h') && view(same).some((v) => v.msgId === 'm-e'), 'the same words held and sent again: the held copy (hand-over 0) never takes the handed one\'s record — two bubbles, each its own', view(same));
+ok(view(same).length === 2 && gateOf(view(same).every((v) => v.text === 'same words')) && gateOf(view(same).some((v) => v.msgId === 'm-h')) && verdictOf(view(same).some((v) => v.msgId === 'm-e')), 'the same words held and sent again: the held copy (hand-over 0) never takes the handed one\'s record — two bubbles, each its own', view(same));
 // (r7) THE STAMP IS THE WITNESS: the hub restored the copy while its frame was HELD (handNo 0 — the wrapper's later number
 // never reaches the hub), the turn ended, the frame drained and the CLI wrote its record under the stamped uuid ⇒ ONE bubble
 const hd = copyLine('m-hd', 'u-hd', [{ type: 'text', text: 'MARK-H held across a restart' }], 0);
@@ -189,7 +189,7 @@ const recP2 = { type: 'user', uuid: 'u-q2', timestamp: new Date().toISOString(),
 const recP1 = { type: 'user', uuid: 'u-q1', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'continue' }] } };
 const pBuf = [q1, q2, handed('m-q2'), initOf('u-q2')].join('\n');
 const pv = await restart(pBuf, { jsonl: [recP2, { type: 'system', subtype: 'init', session_id: 'cli-sess-kept', user_message_uuids: ['u-q1'] }, recP1] });
-ok(view(pv).length === 2 && view(pv).filter((v) => v.msgId === 'm-q1').length === 1 && view(pv).find((v) => v.msgId === 'm-q2')?.pics === 1 && view(pv).every((v) => v.msgId), 'the same words held twice, the later one run first: the still-held one is never in its pool — each drawn ONCE (r7: three bubbles)', view(pv));
+ok(view(pv).length === 2 && view(pv).filter((v) => v.msgId === 'm-q1').length === 1 && view(pv).find((v) => v.msgId === 'm-q2')?.pics === 1 && verdictOf(view(pv).every((v) => v.msgId)), 'the same words held twice, the later one run first: the still-held one is never in its pool — each drawn ONCE (r7: three bubbles)', view(pv));
 // …and with no init at all (a ring that lost it, a CLI before 2.1.307): the still-held copy is still never pooled
 const pn = await restart([q1, q2].join('\n'), { jsonl: [recP2, recP1] });
 ok(view(pn).length === 2 && view(pn).filter((v) => v.msgId === 'm-q1').length === 1, 'with no init naming the turn\'s stamps: a stamped copy is never claimed by another frame\'s words — each once', view(pn));
@@ -209,7 +209,7 @@ const recL = { type: 'user', uuid: 'u-lh', timestamp: new Date().toISOString(), 
 const lv = await restart([lg('m-la', 'LEG-A legacy words'), lHit, handed('m-la')].join('\n'), { jsonl: [recL] });
 ok(view(lv).length === 2 && view(lv).find((v) => v.msgId === 'm-lh')?.text === 'LEG-H the last' && view(lv).filter((v) => /LEG-A/.test(v.text)).length === 1, 'a copy without a stamp, handed: claimed by its FULL words off the front — drawn once', view(lv));
 const lHeld = await restart([lg('m-la', 'LEG-A legacy words'), lHit].join('\n'), { jsonl: [recL] });
-ok(view(lHeld).filter((v) => v.msgId === 'm-la').length === 1 && /LEG-A/.test(view(lHeld).find((v) => v.msgId === 'm-lh')?.text || ''), 'a copy without a stamp that was never handed (still held): not claimed by its words', view(lHeld));
+ok(view(lHeld).filter((v) => v.msgId === 'm-la').length === 1 && verdictOf(/LEG-A/.test(view(lHeld).find((v) => v.msgId === 'm-lh')?.text || '')), 'a copy without a stamp that was never handed (still held): not claimed by its words', view(lHeld));
 const lPre = await restart([lg('m-la', 'LEG-A legacy'), lHit, handed('m-la')].join('\n'), { jsonl: [recL] });
 ok(view(lPre).filter((v) => v.msgId === 'm-la').length === 1 && view(lPre).find((v) => v.msgId === 'm-la')?.text === 'LEG-A legacy', 'a copy without a stamp whose words only BEGIN a block of the record: never a prefix — not claimed', view(lPre));
 
@@ -259,15 +259,15 @@ const once = (v) => v.filter((x) => /MARK-C/.test(x.text)).length === 1 && v.fin
 const b312 = batchRun(312), b296 = batchRun(296);
 const full = await realMerge(b312.jsonl, [...b312.head, ...b312.rest]);
 ok(full.fromJsonl === 3 && full.initAt > 0 && full.recAt > 0 && full.initAt < full.recAt, `the store's merge puts the batch's init (buffer only) BEFORE the CLI's record it names (init ${full.initAt} < record ${full.recAt})`, full.raw.map((r) => r.type + (r.subtype ? '/' + r.subtype : '') + (r.uuid ? ':' + r.uuid.slice(-3) : '')));
-ok(once(full.v), '2.1.312, everything persisted: C and D each drawn ONCE (the init names [C, D])', full.v);
+ok(verdictOf(once(full.v)), '2.1.312, everything persisted: C and D each drawn ONCE (the init names [C, D])', full.v);
 const lag = await realMerge(b312.jsonl, b312.head);
-ok(lag.initAt < 0 && once(lag.v), '2.1.312, the persist window lost (the file cut after hand-over D — no init): each ONCE (the record\'s mergedSendUuids)', lag.v);
+ok(lag.initAt < 0 && verdictOf(once(lag.v)), '2.1.312, the persist window lost (the file cut after hand-over D — no init): each ONCE (the record\'s mergedSendUuids)', lag.v);
 const lagBare = await realMerge(b312.jsonl, b312.head.filter((l) => !/"input_handover"/.test(l)));
-ok(once(lagBare.v), '…and with no hand-over record either: the record\'s own witness alone draws each ONCE', lagBare.v);
+ok(verdictOf(once(lagBare.v)), '…and with no hand-over record either: the record\'s own witness alone draws each ONCE', lagBare.v);
 const f296 = await realMerge(b296.jsonl, [...b296.head, ...b296.rest]);
-ok(once(f296.v), '2.1.296 (no stamps named anywhere), everything persisted: each ONCE (the hand-over order)', f296.v);
+ok(verdictOf(once(f296.v)), '2.1.296 (no stamps named anywhere), everything persisted: each ONCE (the hand-over order)', f296.v);
 const lag296 = await realMerge(b296.jsonl, b296.head);
-ok(once(lag296.v), '2.1.296, the persist window lost: each ONCE (the hand-over order)', lag296.v);
+ok(verdictOf(once(lag296.v)), '2.1.296, the persist window lost: each ONCE (the hand-over order)', lag296.v);
 const held296 = await realMerge(b296.jsonl, b296.head.filter((l) => !/"input_handover"/.test(l)));
 ok(held296.v.find((x) => x.msgId === 'm-c')?.text === 'MARK-C first' && held296.v.filter((x) => /MARK-C/.test(x.text)).length === 2, '2.1.296 with the hand-over records lost too (no witness at all): never claimed by words — the known boundary (C shown twice, never lost)', held296.v);
 
@@ -280,26 +280,26 @@ const MMx = require(mmMut);
 const mx = new MMx.MessageManager(ID);
 mx.convertHistory([...new SS.SessionMessages({ buffer: bcBuf, cwd: dir, backend: 'claude', _keptFiles: await KC.preload(dir, ID, bcBuf) }, ID, { buffersDir: dir }).raw(), cliBC]);
 const mxv = view(mx.messages.filter((m) => m.role === 'user'));
-ok(mmSrc.includes(PREFIX) && mxv.filter((v) => /IMG-B/.test(v.text)).length === 2, 'MUTANT copyPrefixLen → 0: RED — B drawn TWICE (its own bubble + inside C\'s)', mxv);
+ok(gateOf(mmSrc.includes(PREFIX)) && mxv.filter((v) => /IMG-B/.test(v.text)).length === 2, 'MUTANT copyPrefixLen → 0: RED — B drawn TWICE (its own bubble + inside C\'s)', mxv);
 // r7's road: every other copy pooled, matched by its words — the still-held H1 taken by H2's leading words, then drawn again
 const POOLED = '(named && c.cliUuid ? named.includes(c.cliUuid) : c.ran > 0)';
 const MMw = require(M.write('src/message-manager.js', editAnchor(mmSrc, POOLED, 'true', "src/message-manager.js"), 'words-pool'));
 const mw = new MMw.MessageManager(ID);
 mw.convertHistory([...new SS.SessionMessages({ buffer: pBuf, cwd: dir, backend: 'claude', _keptFiles: await KC.preload(dir, ID, pBuf) }, ID, { buffersDir: dir }).raw(), recP2, { type: 'system', subtype: 'init', session_id: 'cli-sess-kept', user_message_uuids: ['u-p1'] }, recP1]);
 const mwv = view(mw.messages.filter((m) => m.role === 'user'));
-ok(mmSrc.includes(POOLED) && mwv.length === 3 && mwv.filter((v) => v.text === 'continue' && !v.pics).length === 2, 'MUTANT every copy pooled by its words (r7\'s road): RED — the still-held «continue» drawn TWICE (three bubbles for two messages)', mwv);
+ok(gateOf(mmSrc.includes(POOLED)) && mwv.length === 3 && mwv.filter((v) => v.text === 'continue' && !v.pics).length === 2, 'MUTANT every copy pooled by its words (r7\'s road): RED — the still-held «continue» drawn TWICE (three bubbles for two messages)', mwv);
 const ssSrc = read('src/session-store.js');
 const RESOLVE = "into.push(rec && rec.webui_copy ? resolve(rec) : rec);";   // B-299b A5: the buffer's records are parsed in bufferRecordsOf (its resolve = KC.resolveRecord over the kept copies)
 const ssMut = M.write('src/session-store.js', editAnchor(ssSrc, RESOLVE, 'into.push(rec && false ? resolve(rec) : rec);', "src/session-store.js"), 'no-resolve');
 const SSx = require(ssMut);
 const nr = await restart(line1, { SSx });
-ok(ssSrc.includes(RESOLVE) && view(nr)[0].pics === 0 && view(nr)[0].gone === 1, 'MUTANT the store\'s merge without resolveRecord: RED — every kept picture a placeholder', view(nr));
+ok(gateOf(ssSrc.includes(RESOLVE)) && view(nr)[0].pics === 0 && view(nr)[0].gone === 1, 'MUTANT the store\'s merge without resolveRecord: RED — every kept picture a placeholder', view(nr));
 const kcSrc = read('src/kept-copies.js');
 const DROP = 'function dropFiles(dir, names) {';
 const KCx = require(M.write('src/kept-copies.js', editAnchor(kcSrc, DROP, DROP + ' return;', "src/kept-copies.js"), 'no-drop'));
 const leakLine = copyLine('m-l', 'u-l', [{ type: 'text', text: 'leak' }, img('L')], 1);
 KCx.dropFiles(kd, KCx.namesToDrop(leakLine, []));
-ok(kcSrc.includes(DROP) && fs.existsSync(path.join(kd, KC.namesIn(leakLine)[0])), 'MUTANT dropFiles a no-op: RED — a settled copy\'s .img file LEAKS', KC.namesIn(leakLine));
+ok(gateOf(kcSrc.includes(DROP)) && verdictOf(fs.existsSync(path.join(kd, KC.namesIn(leakLine)[0]))), 'MUTANT dropFiles a no-op: RED — a settled copy\'s .img file LEAKS', KC.namesIn(leakLine));
 
 // (r9) the merge holds a stdout-only init for the NEXT matched record (an anchor rule that reads «a turn's head rides its
 // first transcript record» — the acceptance's order-preserving mutant): the init lands after the batch it names
@@ -309,14 +309,14 @@ const holdSrc = editAnchor(editAnchor(editAnchor(ssSrc, '    let anyInsert = fal
   HOLD_A, '      if (hit !== undefined) { if (hit > anchor) anchor = hit; if (pend.length) { (inserts.get(anchor) || inserts.set(anchor, []).get(anchor)).push(...pend); pend = []; anyInsert = true; } continue; }', "src/session-store.js"),
   HOLD_C, "      if (pend.length || (msg.type === 'system' && msg.subtype === 'init')) { pend.push(msg); continue; }\n" + HOLD_C + '    if (pend.length) { (inserts.get(anchor) || inserts.set(anchor, []).get(anchor)).push(...pend); anyInsert = true; }\n', "src/session-store.js");
 const heldInit = await realMerge(b312.jsonl, [...b312.head, ...b312.rest], { SSx: require(M.write('src/session-store.js', holdSrc, 'init-held')) });
-ok(ssSrc.includes(HOLD_A) && ssSrc.includes(HOLD_C) && holdSrc !== ssSrc && heldInit.initAt > heldInit.recAt, `MUTANT the merge holds the init for the next matched record: RED — the init lands AFTER its batch's record (init ${heldInit.initAt} > record ${heldInit.recAt})`, heldInit.raw.map((r) => r.type + (r.uuid ? ':' + r.uuid.slice(-3) : '')));
+ok(gateOf(ssSrc.includes(HOLD_A)) && gateOf(ssSrc.includes(HOLD_C)) && holdSrc !== ssSrc && heldInit.initAt > heldInit.recAt, `MUTANT the merge holds the init for the next matched record: RED — the init lands AFTER its batch's record (init ${heldInit.initAt} > record ${heldInit.recAt})`, heldInit.raw.map((r) => r.type + (r.uuid ? ':' + r.uuid.slice(-3) : '')));
 // (r9) the init as the ONE road (r8): a batch whose init the hub never read has no witness — the earlier frame drawn twice
 const ONE_ROAD = ': Array.isArray(merged) && merged.length ? merged.map(String) : null;';
 const MMo = require(M.write('src/message-manager.js', editAnchor(mmSrc, ONE_ROAD, ': [];', "src/message-manager.js"), 'one-road'));
 const sOne = async (b) => { const csid = `5e551000-0000-4000-8000-${String(++csidN).padStart(12, '0')}`; fs.writeFileSync(path.join(projDir, csid + '.jsonl'), b.jsonl.map((r) => JSON.stringify(r)).join('\n') + '\n'); const buffer = b.head.join('\n') + '\n'; const mo = new MMo.MessageManager(ID); mo.convertHistory(new SS.SessionMessages({ buffer, cwd: work, claudeSessionId: csid, backend: 'claude', _keptFiles: await KC.preload(dir, ID, buffer) }, ID, { buffersDir: dir }).raw()); return view(mo.messages.filter((m) => m.role === 'user')); };
 const one312 = await sOne(b312), one296 = await sOne(b296);
-ok(mmSrc.includes(ONE_ROAD) && one312.filter((x) => /MARK-C/.test(x.text)).length === 2 && one296.filter((x) => /MARK-C/.test(x.text)).length === 2, 'MUTANT the init as the one road: RED — a restart inside the persist window draws C TWICE (2.1.312 and 2.1.296)', { one312, one296 });
+ok(gateOf(mmSrc.includes(ONE_ROAD)) && one312.filter((x) => /MARK-C/.test(x.text)).length === 2 && one296.filter((x) => /MARK-C/.test(x.text)).length === 2, 'MUTANT the init as the one road: RED — a restart inside the persist window draws C TWICE (2.1.312 and 2.1.296)', { one312, one296 });
 process.env.HOME = HOME0;
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

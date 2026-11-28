@@ -21,7 +21,7 @@ import { ETA_MIN_MS, accountResetEta, compactEta, bucketEta, bucketMayNameDeadli
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    got ' + JSON.stringify(e) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    got ' + JSON.stringify(e) : ''}`); } };
 const S = 1000, M = 60 * S, H = 60 * M, D = 24 * H;
 // an INJECTED clock: any instant works, so pick one the table cannot depend on
 const NOW = 1_700_000_000_000 + 12345;
@@ -100,46 +100,46 @@ const full = [
   [30 * D, '30d0h0m', '30 d'],
 ];
 for (const [rem, want, why] of full) check(`${why} → ${JSON.stringify(want)}`, fullEta(NOW + rem, NOW) === want, fullEta(NOW + rem, NOW));
-check('fullEta IS countdownMark over whole minutes (ONE spelling: every minute from 1 min to 40 d)', Array.from({ length: 40 * 1440 }, (_, i) => i + 1).every((m) => fullEta(NOW + m * M, NOW) === countdownMark(m)));
+check('fullEta IS countdownMark over whole minutes (ONE spelling: every minute from 1 min to 40 d)', verdictOf(Array.from({ length: 40 * 1440 }, (_, i) => i + 1).every((m) => fullEta(NOW + m * M, NOW) === countdownMark(m))));
 check('countdownMark spells the table\'s own form (2d21h38m · 2d0h5m · 3h0m · 38m · 0m)', ['2d21h38m', '2d0h5m', '3h0m', '38m', '0m'].join() === [2 * 1440 + 21 * 60 + 38, 2 * 1440 + 5, 180, 38, 0].map(countdownMark).join());
 check('fullEta: reset passed → null', fullEta(NOW - 5 * M, NOW) === null);
 check('fullEta: reset missing / NaN / non-numeric → null', fullEta(undefined, NOW) === null && fullEta(NaN, NOW) === null && fullEta('soon', NOW) === null);
 check('fullEta: now missing → null (no clock, no countdown)', fullEta(NOW + H, undefined) === null);
-check('fullEta agrees with compactEta on what is NOT a countdown (the same 45 s guard)', [0, 30 * S, 44.999 * S, -M].every((rem) => (fullEta(NOW + rem, NOW) === null) === (compactEta(NOW + rem, NOW) === null)));
+check('fullEta agrees with compactEta on what is NOT a countdown (the same 45 s guard)', verdictOf([0, 30 * S, 44.999 * S, -M].every((rem) => (fullEta(NOW + rem, NOW) === null) === (compactEta(NOW + rem, NOW) === null))));
 
 console.log('§6 the account-level pick: blocked ⇒ the LAST spent bucket\'s reset; free ⇒ the EARLIEST; only a bucket that may name a deadline');
 const at = (rem) => secs(NOW + rem);
 const run = (rem, extra = {}) => ({ state: 'running', resetsAt: at(rem), ...extra });
 let r = accountResetEta([{ bucket: run(15 * H), pct: 40, label: '7d' }, { bucket: run(65 * M), pct: 20, label: '5h' }, { bucket: run(3 * D), pct: 60, label: 'Fa' }], NOW);
-check('free: the EARLIEST reset (5h, 65 min) is the answer, in full form', r && r.text === '1h5m' && r.label === '5h' && r.blocked === false && r.ms === at(65 * M) * 1000, r);
+check('free: the EARLIEST reset (5h, 65 min) is the answer, in full form', gateOf(r) && r.text === '1h5m' && r.label === '5h' && r.blocked === false && r.ms === at(65 * M) * 1000, r);
 r = accountResetEta([{ bucket: run(15 * H), pct: 100, label: '7d' }, { bucket: run(65 * M), pct: 20, label: '5h' }, { bucket: run(3 * D), pct: 98, label: 'Fa', spentPct: 97 }], NOW);
-check('blocked: two spent buckets (7d 100 %, Fa 98 % ≥ its 97 bar) ⇒ the LATER reset (Fa, 3 d) — usable only when the last one resets', r && r.text === '3d0h0m' && r.label === 'Fa' && r.blocked === true, r);
+check('blocked: two spent buckets (7d 100 %, Fa 98 % ≥ its 97 bar) ⇒ the LATER reset (Fa, 3 d) — usable only when the last one resets', gateOf(r) && r.text === '3d0h0m' && r.label === 'Fa' && r.blocked === true, r);
 r = accountResetEta([{ bucket: run(15 * H), pct: 100, label: '7d' }, { bucket: run(65 * M), pct: 20, label: '5h' }], NOW);
-check('blocked: one spent bucket (7d) outranks a SOONER free one (5h) — the 5h reset does not make the account usable', r && r.label === '7d' && r.text === '15h0m' && r.blocked === true, r);
+check('blocked: one spent bucket (7d) outranks a SOONER free one (5h) — the 5h reset does not make the account usable', gateOf(r) && r.label === '7d' && r.text === '15h0m' && r.blocked === true, r);
 r = accountResetEta([{ bucket: run(15 * H), pct: 96, label: '7d', spentPct: 97 }, { bucket: run(65 * M), pct: 20, label: '5h' }], NOW);
-check('the bar is per entry: 96 % under a 97 bar is NOT spent ⇒ free, earliest (5h)', r && r.blocked === false && r.label === '5h', r);
+check('the bar is per entry: 96 % under a 97 bar is NOT spent ⇒ free, earliest (5h)', gateOf(r) && r.blocked === false && r.label === '5h', r);
 r = accountResetEta([{ bucket: run(15 * H), pct: 96, label: '7d', spentPct: 95 }, { bucket: run(65 * M), pct: 20, label: '5h' }], NOW);
-check('…and 96 % over a 95 bar IS spent ⇒ blocked on 7d', r && r.blocked === true && r.label === '7d' && r.text === '15h0m', r);
+check('…and 96 % over a 95 bar IS spent ⇒ blocked on 7d', gateOf(r) && r.blocked === true && r.label === '7d' && r.text === '15h0m', r);
 r = accountResetEta([{ bucket: run(15 * H), pct: 100, label: '7d' }], NOW);
-check('default bar 100: a bucket reading fully used is spent', r && r.blocked === true, r);
+check('default bar 100: a bucket reading fully used is spent', gateOf(r) && r.blocked === true, r);
 r = accountResetEta([{ bucket: run(15 * H), pct: 99.5, label: '7d' }], NOW);
-check('default bar 100: 99.5 % is not', r && r.blocked === false, r);
+check('default bar 100: 99.5 % is not', gateOf(r) && r.blocked === false, r);
 r = accountResetEta([{ bucket: run(15 * H, { utilization: 1 }), label: '7d' }], NOW);
-check('no pct given ⇒ the bucket\'s own utilization (1.0 = 100 %) decides: blocked, pct 100', r && r.blocked === true && r.pct === 100, r);
+check('no pct given ⇒ the bucket\'s own utilization (1.0 = 100 %) decides: blocked, pct 100', gateOf(r) && r.blocked === true && r.pct === 100, r);
 r = accountResetEta([{ bucket: run(15 * H, { usedPercent: 12 }), label: '7d' }], NOW);
-check('no pct given ⇒ usedPercent is read (12 %): free', r && r.blocked === false && r.pct === 12, r);
+check('no pct given ⇒ usedPercent is read (12 %): free', gateOf(r) && r.blocked === false && r.pct === 12, r);
 r = accountResetEta([{ bucket: run(15 * H), label: '7d' }], NOW);
-check('no pct anywhere ⇒ unknown is never "spent": free', r && r.blocked === false && r.pct === null, r);
+check('no pct anywhere ⇒ unknown is never "spent": free', gateOf(r) && r.blocked === false && r.pct === null, r);
 r = accountResetEta([{ bucket: { state: 'empty', resetsAt: at(5 * H) }, pct: 0, label: '5h' }, { bucket: run(15 * H), pct: 40, label: '7d' }], NOW);
-check('an EMPTY window is not a candidate even though its reset is sooner (B-8b12: it slides) ⇒ 7d', r && r.label === '7d' && r.text === '15h0m', r);
+check('an EMPTY window is not a candidate even though its reset is sooner (B-8b12: it slides) ⇒ 7d', gateOf(r) && r.label === '7d' && r.text === '15h0m', r);
 r = accountResetEta([{ bucket: run(-60 * S), pct: 100, label: '7d' }, { bucket: run(65 * M), pct: 20, label: '5h' }], NOW);
-check('a spent bucket whose reset PASSED rolled over and blocks nothing ⇒ free, 5h', r && r.blocked === false && r.label === '5h', r);
+check('a spent bucket whose reset PASSED rolled over and blocks nothing ⇒ free, 5h', gateOf(r) && r.blocked === false && r.label === '5h', r);
 r = accountResetEta([{ bucket: run(30 * S), pct: 100, label: '5h' }], NOW);
 check('a reset under the 45 s guard is not a countdown ⇒ null', r === null, r);
 check('no candidates ⇒ null (never "0m")', accountResetEta([{ bucket: { state: 'empty', resetsAt: at(5 * H) }, pct: 0 }, { bucket: { state: 'running' }, pct: 50 }], NOW) === null);
 check('empty / non-array / junk entries ⇒ null', accountResetEta([], NOW) === null && accountResetEta(null, NOW) === null && accountResetEta([null, 'x', { bucket: null }, { bucket: 7 }], NOW) === null);
 check('no clock ⇒ null', accountResetEta([{ bucket: run(15 * H), pct: 1 }], undefined) === null);
-check('the answer carries the instant in ms, so a reader can re-spell it later on its own clock', (() => { const x = accountResetEta([{ bucket: run(2 * H), pct: 1, label: '5h' }], NOW); return x && fullEta(x.ms, NOW + 30 * M) === '1h30m' && fullEta(x.ms, NOW + 2 * H) === null; })());
+check('the answer carries the instant in ms, so a reader can re-spell it later on its own clock', verdictOf((() => { const x = accountResetEta([{ bucket: run(2 * H), pct: 1, label: '5h' }], NOW); return x && fullEta(x.ms, NOW + 30 * M) === '1h30m' && fullEta(x.ms, NOW + 2 * H) === null; })()));
 
 console.log('§4 PURE: the module imports nothing');
 const src = fs.readFileSync(path.join(repo, 'src/lib/usage-eta.js'), 'utf8');
@@ -148,4 +148,4 @@ check('no import / require in src/lib/usage-eta.js', !/\bimport\b|\brequire\(/.t
 check('no DOM / clock access (document, window, Date.now) — the clock is an argument', !/\bdocument\b|\bwindow\b|Date\.now/.test(code));
 
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

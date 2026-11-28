@@ -10,7 +10,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const { parseCliUsageText } = require('../src/usage-routes.js');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 
 const FIXTURE = `You are currently using your subscription to power your Claude Code usage
 
@@ -43,7 +43,7 @@ ok(parseCliUsageText('API key detected — usage tracking is unavailable', NOW) 
 ok(parseCliUsageText('', NOW) === null, 'empty output → null');
 // resets clause absent → bucket kept, resetsAt absent (cache-merge keeps old)
 const r2 = parseCliUsageText('Current session: 12% used\nCurrent week (all models): 3% used', NOW);
-ok(r2 && r2.fiveHour.utilization === 0.12 && r2.fiveHour.resetsAt === undefined, 'reset-less lines still parse utilization');
+ok(gateOf(r2) && r2.fiveHour.utilization === 0.12 && r2.fiveHour.resetsAt === undefined, 'reset-less lines still parse utilization');
 // year rollover: a January reset read in late December belongs to NEXT year
 const DEC = Date.UTC(2026, 11, 30, 12, 0);
 const r3 = parseCliUsageText('Current session: 1% used · resets Jan 2, 3am (America/Los_Angeles)', DEC);
@@ -185,7 +185,7 @@ console.log("§ the machine login's kept read (r2575)");
   };
   try {
     const R = renameScene(SRC, 'rename');
-    ok(R.sameTime && R.newInode && R.first === A && R.second === B, 'two writes inside ONE tick by RENAME (time and size equal, a new inode): the kept read serves the second content', R);
+    ok(gateOf(R.sameTime) && gateOf(R.newInode) && R.first === A && R.second === B, 'two writes inside ONE tick by RENAME (time and size equal, a new inode): the kept read serves the second content', R);
     const KEY = "const oauthKeyOf = (st) => `${st.mtimeMs}|${st.size}|${st.ino}`;";
     ok(SRC.split(KEY).length === 2, 'control setup: the kept read\'s key is found once');
     const RT = renameScene(anchored(SRC, KEY, "const oauthKeyOf = (st) => `${st.mtimeMs}`;   /* MUTANT: the time alone (the release) */", 'oauth-key-time-alone'), 'rename-timex');
@@ -199,7 +199,7 @@ console.log("§ the machine login's kept read (r2575)");
     const PX = placeScene(anchored(SRC, LIFE, "(true /* MUTANT: never read again past its life */)", 'oauth-no-life-read'), 'place-lifex');
     ok(PX.pastLife === null, 'CONTROL (the read again past its life cut, in a copy): an expired kept sign-in stands while the file holds a live one — the poll keeps the last-known usage (red)', PX);
     const C = boundScene(SRC, 'bound');
-    ok(C.allNull && C.readsAtOnce === 1 && C.readsAtPace === 2 && C.readsAfter === 2, 'a file that stays old is read ONCE at the expiry (50 asks: 1 read), then at the poll\'s pace (5 min later: 1 more; 10 asks after: none)', C);
+    ok(gateOf(C.allNull) && C.readsAtOnce === 1 && C.readsAtPace === 2 && C.readsAfter === 2, 'a file that stays old is read ONCE at the expiry (50 asks: 1 read), then at the poll\'s pace (5 min later: 1 more; 10 asks after: none)', C);
     const CX = boundScene(anchored(SRC, "Date.now() - _oauthExpiredReadAt < OAUTH_EXPIRED_REREAD_MS", "false /* MUTANT: no pace */", 'oauth-no-pace'), 'bound-pacex');
     ok(CX.readsAtOnce >= 50, 'CONTROL (the pace cut, in a copy): the old file read at every ask (red)', CX);
     const E = signOutScene(SRC, 'signout');
@@ -257,4 +257,4 @@ console.log("§ the machine login's kept read (r2575)");
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { gateOf } from './lib/check.mjs';

@@ -79,7 +79,7 @@ const Model = await import(pathToFileURL(path.join(repo, 'src/lib/docx-viewer-mo
 const mammoth = require('mammoth');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const near = (a, b, eps) => Math.abs(a - b) <= eps;
 const TAB_SLACK = 16; // px: one em at 12 pt — see ②
@@ -231,11 +231,11 @@ try {
         theme: document.documentElement.dataset.theme, text: d.resolveVar('--text'),
       };
     })()`);
-    ok(g.probes.every((c) => c === 'docx-scroll'), 'no band: every probe 6 px above the first page (5 across its width) hits the surround itself', g.probes);
+    ok(verdictOf(g.probes.every((c) => c === 'docx-scroll')), 'no band: every probe 6 px above the first page (5 across its width) hits the surround itself', g.probes);
     ok(g.surround === g.workspace, `the surround is var(--bg-workspace) (${g.surround})`);
     ok(g.wrapperBg === 'rgba(0, 0, 0, 0)', `the library's grey wrapper paints nothing (${g.wrapperBg})`);
-    ok(g.pagesLeft.every((x) => x >= -0.5) && g.pagesRightOver.every((x) => x <= 0.5), 'every page lies inside the pane at fit width (none overhangs left or right)', { left: g.pagesLeft, rightOver: g.pagesRightOver });
-    ok(g.paper.every((c) => c === 'rgb(255, 255, 255)'), 'every page is white paper', g.paper);
+    ok(gateOf(g.pagesLeft.every((x) => x >= -0.5)) && verdictOf(g.pagesRightOver.every((x) => x <= 0.5)), 'every page lies inside the pane at fit width (none overhangs left or right)', { left: g.pagesLeft, rightOver: g.pagesRightOver });
+    ok(verdictOf(g.paper.every((c) => c === 'rgb(255, 255, 255)')), 'every page is white paper', g.paper);
     ok(g.plain === 'rgb(0, 0, 0)' && g.blue === 'rgb(31, 56, 100)' && g.title2 === H1 && g.heading === H2, `a plain run is the document's black (auto), the coloured run #1F3864, Heading 1 ${H1} and Heading 2 ${H2} as styles.xml says — never the theme's text colour (${g.text})`, g);
     await shot(`after-${theme}-apa.png`);
 
@@ -261,16 +261,16 @@ try {
       };
     })()`);
     ok(doc.n === 4, `4 pages: title, body, References (manual break), landscape appendix (${doc.n})`);
-    ok(doc.t1 && doc.t2 && doc.t3 && doc.t4, 'the title page and the next page are two pages; References and the appendix are pages 3 and 4', doc);
+    ok(gateOf(doc.t1) && gateOf(doc.t2) && gateOf(doc.t3) && verdictOf(doc.t4), 'the title page and the next page are two pages; References and the appendix are pages 3 and 4', doc);
     ok(doc.widths[0] === 816 && doc.widths[1] === 816 && doc.widths[3] === 1056 && doc.styleW[0] === '612pt' && doc.styleW[3] === '792pt', 'page width = the section\'s w:pgSz (12240 twips = 612 pt = 816 px; landscape 792 pt = 1056 px)', { w: doc.widths, s: doc.styleW });
-    ok(!/RUNNING-HEAD/.test(doc.headers[0] || '') && /^1$/.test(doc.headers[0] || ''), `the title page shows its FIRST-page header only (${JSON.stringify(doc.headers[0])})`);
-    ok(doc.headers.slice(1).every((h) => /RUNNING-HEAD SUPERVISOR SUPPORT AND BURNOUT/.test(h || '')), 'pages 2–4 show the running head (section 2+ inherit it — Word\'s Link to Previous)', doc.headers);
-    ok(doc.footers.every((f) => f === 'FOOTER-TEXT Example University'), 'the footer on every page', doc.footers);
-    ok(/^FOOTNOTE-ONE/.test(doc.footnote || '') && doc.sup, 'the footnote is rendered on its page, with its reference mark', { fn: doc.footnote, sup: doc.sup });
-    ok(doc.td && doc.td.style === 'solid' && doc.td.w >= 1, 'the table has borders (Table Grid)', doc.td);
-    ok(doc.bullets.length === 3 && doc.bullets.every((c) => c.includes('\u2022') && !/[\uf000-\uf0ff]/.test(c)), `the bulleted list shows • markers (Word's Symbol U+F0B7 mapped): ${JSON.stringify(doc.bullets)}`);
-    ok(doc.numbers.length === 3 && doc.numbers.every((c) => /counter\(/.test(c)), 'the numbered list keeps its counters', doc.numbers);
-    ok(doc.img && doc.img.nw === 160 && doc.img.complete && near(doc.img.w, 240, 2), 'the embedded PNG is shown (160×100 at 2.5 in = 240 px)', doc.img);
+    ok(!/RUNNING-HEAD/.test(doc.headers[0] || '') && verdictOf(/^1$/.test(doc.headers[0] || '')), `the title page shows its FIRST-page header only (${JSON.stringify(doc.headers[0])})`);
+    ok(verdictOf(doc.headers.slice(1).every((h) => /RUNNING-HEAD SUPERVISOR SUPPORT AND BURNOUT/.test(h || ''))), 'pages 2–4 show the running head (section 2+ inherit it — Word\'s Link to Previous)', doc.headers);
+    ok(verdictOf(doc.footers.every((f) => f === 'FOOTER-TEXT Example University')), 'the footer on every page', doc.footers);
+    ok(gateOf(/^FOOTNOTE-ONE/.test(doc.footnote || '')) && verdictOf(doc.sup), 'the footnote is rendered on its page, with its reference mark', { fn: doc.footnote, sup: doc.sup });
+    ok(gateOf(doc.td) && doc.td.style === 'solid' && doc.td.w >= 1, 'the table has borders (Table Grid)', doc.td);
+    ok(doc.bullets.length === 3 && verdictOf(doc.bullets.every((c) => c.includes('\u2022') && !/[\uf000-\uf0ff]/.test(c))), `the bulleted list shows • markers (Word's Symbol U+F0B7 mapped): ${JSON.stringify(doc.bullets)}`);
+    ok(doc.numbers.length === 3 && verdictOf(doc.numbers.every((c) => /counter\(/.test(c))), 'the numbered list keeps its counters', doc.numbers);
+    ok(gateOf(doc.img) && doc.img.nw === 160 && gateOf(doc.img.complete) && verdictOf(near(doc.img.w, 240, 2)), 'the embedded PNG is shown (160×100 at 2.5 in = 240 px)', doc.img);
     // TAB_SLACK: docx-preview measures a stop with the em-space still in the tab span, then swaps it for a
     // nbsp + word-spacing, so a right-aligned stop lands (em − nbsp) short — 13.1 px at 12 pt, measured the
     // same at UI scale 100 % and 125 %. Pre-fix the number sat 181 px short (the style's stops ignored).
@@ -279,7 +279,7 @@ try {
     await sleep(200);
     await shot('after-light-apa-page2.png');
     await evalJs('__dx.scroll().scrollTop = 0; true');
-    ok(doc.num && doc.num.rightFromMargin >= -1 && doc.num.rightFromMargin <= TAB_SLACK, `the running head's page number sits at the right margin — the Header style's right-aligned stop (${doc.num && doc.num.rightFromMargin.toFixed(1)} px short; the library's own em/nbsp residual ≤ ${TAB_SLACK})`, doc.num);
+    ok(gateOf(doc.num) && doc.num.rightFromMargin >= -1 && doc.num.rightFromMargin <= TAB_SLACK, `the running head's page number sits at the right margin — the Header style's right-aligned stop (${doc.num && doc.num.rightFromMargin.toFixed(1)} px short; the library's own em/nbsp residual ≤ ${TAB_SLACK})`, doc.num);
 
     console.log('③ the text order = mammoth\'s extraction (the oracle)');
     const rendered = await evalJs(`__dx.pages().map((p) => __dx.bodyText(p)).join(' ').replace(/\\s+/g, ' ')`);
@@ -298,35 +298,35 @@ try {
       sw: sc.scrollWidth, cw: sc.clientWidth, left: d.rect(pg[3]).x - d.rect(sc).x, pref: localStorage.getItem('vibespace.docx-zoom'), dpr: devicePixelRatio, vv: visualViewport.scale }; })()`);
   const press = async (id) => { const c = await evalJs(`__dx.center(__dx.btn('${id}'))`); await click(c.x, c.y); await sleep(250); };
   let s = await zstate();
-  ok(s.fitPressed === 'true' && near(s.wMax, s.paneInner, 1.5), `default = Fit width: the widest page fills the pane minus 2×24 px (${s.wMax.toFixed(1)} vs ${s.paneInner})`, s);
+  ok(s.fitPressed === 'true' && verdictOf(near(s.wMax, s.paneInner, 1.5)), `default = Fit width: the widest page fills the pane minus 2×24 px (${s.wMax.toFixed(1)} vs ${s.paneInner})`, s);
   ok(s.label === Model.zoomLabel(Model.fitWidthScale(s.paneInner + 48, 1056)) && s.sw <= s.cw, `the label is the model's fit scale (${s.label}); no horizontal scroll at fit`, s);
   await press('actual'); s = await zstate();
-  ok(s.T === 1 && near(s.w0, 816, 1) && s.label === '100%' && s.actualPressed === 'true' && s.fitPressed === 'false', `100%: a Letter page is 816 px (${s.w0.toFixed(1)})`, s);
+  ok(s.T === 1 && gateOf(near(s.w0, 816, 1)) && s.label === '100%' && s.actualPressed === 'true' && s.fitPressed === 'false', `100%: a Letter page is 816 px (${s.w0.toFixed(1)})`, s);
   await press('in'); s = await zstate();
-  ok(near(s.T, Model.zoomStep(1, 1), 1e-6) && near(s.w0, 816 * 1.1, 1) && s.label === '110%', `+ → the model's next rung 110% (${s.w0.toFixed(1)} px)`, s);
+  ok(gateOf(near(s.T, Model.zoomStep(1, 1), 1e-6)) && gateOf(near(s.w0, 816 * 1.1, 1)) && s.label === '110%', `+ → the model's next rung 110% (${s.w0.toFixed(1)} px)`, s);
   await press('out'); await press('out'); s = await zstate();
-  ok(near(s.T, 0.9, 1e-6) && near(s.w0, 816 * 0.9, 1) && s.label === '90%', `− − → 90% (${s.w0.toFixed(1)} px)`, s);
+  ok(gateOf(near(s.T, 0.9, 1e-6)) && gateOf(near(s.w0, 816 * 0.9, 1)) && s.label === '90%', `− − → 90% (${s.w0.toFixed(1)} px)`, s);
   for (let i = 0; i < 16; i++) await press('in');
   s = await zstate();
   ok(s.T === Model.ZOOM_MAX && s.sw > s.cw && s.label === '400%', `+ to the ceiling (400%): the page is wider than the pane ⇒ horizontal scroll (${s.sw} > ${s.cw})`, s);
   await evalJs(`__dx.scroll().scrollLeft = 0; true`); await sleep(100); s = await zstate();
   ok(s.left >= 0 && s.left <= 24 * 1 + 1, `…and its LEFT edge is reachable (scrollLeft 0 ⇒ the widest page starts ${s.left.toFixed(1)} px inside the pane)`, s);
-  ok(await evalJs(`__dx.btn('in').disabled`), '+ is disabled at the ceiling');
+  ok(verdictOf(await evalJs(`__dx.btn('in').disabled`)), '+ is disabled at the ceiling');
   await press('fit'); s = await zstate();
-  ok(s.fitPressed === 'true' && near(s.wMax, s.paneInner, 1.5) && s.pref === 'fit', 'Fit width returns the widest page to the pane width and is remembered as fit', s);
+  ok(s.fitPressed === 'true' && gateOf(near(s.wMax, s.paneInner, 1.5)) && s.pref === 'fit', 'Fit width returns the widest page to the pane width and is remembered as fit', s);
   // Ctrl + wheel
   await press('actual');
   const before = await zstate();
   const mid = await evalJs(`__dx.center(__dx.scroll())`);
   await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: mid.x, y: mid.y, deltaX: 0, deltaY: -100, modifiers: 2 });
   await sleep(300); s = await zstate();
-  ok(near(s.T, Model.wheelScale(1, -100), 1e-3) && s.label === Model.zoomLabel(Model.wheelScale(1, -100)) && near(s.w0, 816 * Model.wheelScale(1, -100), 1.5), `Ctrl+wheel (one notch in) = the model's wheelScale (${s.label})`, s);
+  ok(gateOf(near(s.T, Model.wheelScale(1, -100), 1e-3)) && s.label === Model.zoomLabel(Model.wheelScale(1, -100)) && verdictOf(near(s.w0, 816 * Model.wheelScale(1, -100), 1.5)), `Ctrl+wheel (one notch in) = the model's wheelScale (${s.label})`, s);
   ok(s.dpr === before.dpr && s.vv === 1, 'the browser itself did not zoom (devicePixelRatio and the visual viewport unchanged)', { before: before.dpr, after: s.dpr, vv: s.vv });
   ok(s.pref === Model.serializeZoomPref('scale', Model.wheelScale(1, -100)), `the zoom is remembered per device (vibespace.docx-zoom = ${s.pref})`);
   await cdp('Page.reload'); await boot();
   await evalJs(`__dx.open(${P('apa-title-page.docx')}, 'apa-title-page.docx')`);
   s = await zstate();
-  ok(s.label === Model.zoomLabel(Model.wheelScale(1, -100)) && s.fitPressed === 'false' && near(s.w0, 816 * Model.parseZoomPref(s.pref).scale, 1.5), `after a reload the page opens at the remembered ${s.label}`, s);
+  ok(s.label === Model.zoomLabel(Model.wheelScale(1, -100)) && s.fitPressed === 'false' && verdictOf(near(s.w0, 816 * Model.parseZoomPref(s.pref).scale, 1.5)), `after a reload the page opens at the remembered ${s.label}`, s);
   await press('fit');
   await cdp('Page.reload'); await boot();
   await evalJs(`__dx.open(${P('apa-title-page.docx')}, 'apa-title-page.docx')`);
@@ -348,11 +348,11 @@ try {
       frame: f && { sandbox: f.getAttribute('sandbox'), src: f.getAttribute('src'), srcdoc: f.hasAttribute('srcdoc'), csp: /Content-Security-Policy/.test(f.__frameDoc || ''), text: /ALTCHUNK-TEXT/.test(f.__frameDoc || '') }, frames: sr.querySelectorAll('iframe').length,
       outline: getComputedStyle(document.body).outlineStyle, bodyOutlineColor: getComputedStyle(document.body).outlineColor,
       href: location.href }; })()`);
-  ok(h.tagText && h.imgs === 0, 'the <img onerror> paragraph is TEXT — no <img> element was made from it', h);
+  ok(gateOf(h.tagText) && h.imgs === 0, 'the <img onerror> paragraph is TEXT — no <img> element was made from it', h);
   ok(h.pwned === null && dialogs.length === 0, 'no script ran: no dialog, window.__docxPwned untouched (the altChunk script, its onerror, the text payload)', { pwned: h.pwned, dialogs });
-  ok(h.js && h.js.href === null && /javascript/.test(h.js.title) && h.data === null, 'the javascript: and data: links lost their href (the text stays, the title says why)', { js: h.js, data: h.data });
-  ok(h.web && h.web.href === 'https://example.com/paper' && h.web.target === '_blank' && /noopener/.test(h.web.rel) && /noreferrer/.test(h.web.rel), 'the web link opens in a NEW tab, noopener noreferrer (it never navigates VibeSpace away)', h.web);
-  ok(h.frames === 1 && h.frame && h.frame.sandbox === 'allow-scripts' && h.frame.src === '/frame-host?kind=docx' && !h.frame.srcdoc && h.frame.csp && h.frame.text, 'the altChunk HTML is shown in a sandboxed iframe at the frame host\'s docx address (nothing of it runs — the host\'s line alone, by its response\'s nonce; lane frame-host-preview) with a no-network CSP meta as well — never srcdoc (the app page\'s policy)', h.frame);
+  ok(gateOf(h.js) && h.js.href === null && gateOf(/javascript/.test(h.js.title)) && h.data === null, 'the javascript: and data: links lost their href (the text stays, the title says why)', { js: h.js, data: h.data });
+  ok(gateOf(h.web) && h.web.href === 'https://example.com/paper' && h.web.target === '_blank' && gateOf(/noopener/.test(h.web.rel)) && verdictOf(/noreferrer/.test(h.web.rel)), 'the web link opens in a NEW tab, noopener noreferrer (it never navigates VibeSpace away)', h.web);
+  ok(h.frames === 1 && gateOf(h.frame) && h.frame.sandbox === 'allow-scripts' && h.frame.src === '/frame-host?kind=docx' && !h.frame.srcdoc && gateOf(h.frame.csp) && verdictOf(h.frame.text), 'the altChunk HTML is shown in a sandboxed iframe at the frame host\'s docx address (nothing of it runs — the host\'s line alone, by its response\'s nonce; lane frame-host-preview) with a no-network CSP meta as well — never srcdoc (the app page\'s policy)', h.frame);
   ok(h.outline === 'none', `the style's CSS injection never reaches the workspace (body outline ${h.outline})`);
   const jsAt = await evalJs(`(() => { const a = [...__dx.sr().querySelectorAll('a')].find((x) => x.textContent.includes('JS-LINK')); a.scrollIntoView({ block: 'center' }); return null; })()`);
   await sleep(200);
@@ -363,7 +363,7 @@ try {
   const anC = await evalJs(`__dx.center([...__dx.sr().querySelectorAll('a')].find((x) => x.textContent.includes('ANCHOR-LINK')))`);
   await click(anC.x, anC.y); await sleep(300);
   const anchor = await evalJs(`(() => { const e = __dx.sr().getElementById('endmark'), sc = __dx.scroll(); const r = e.getBoundingClientRect(), s = sc.getBoundingClientRect(); return { inView: r.top >= s.top && r.bottom <= s.bottom, top: sc.scrollTop, hash: location.hash }; })()`);
-  ok(anchor.inView && anchor.top > 0 && anchor.hash === '', 'the #bookmark link scrolls the document to its target (and leaves location.hash alone)', anchor);
+  ok(gateOf(anchor.inView) && anchor.top > 0 && anchor.hash === '', 'the #bookmark link scrolls the document to its target (and leaves location.hash alone)', anchor);
   // innerHTML negative control: the SAME payload, parsed as HTML, runs
   const neg = await evalJs(`new Promise((res) => { const para = [...__dx.sr().querySelectorAll('p')].find((p) => p.textContent.includes('__docxPwned')); const d = document.createElement('div'); d.innerHTML = para.textContent; setTimeout(() => { const v = window.__docxPwned ?? null; delete window.__docxPwned; res(v); }, 600); })`);
   ok(neg === 1, `NEGATIVE CONTROL: the same paragraph text through innerHTML DOES run its onerror (window.__docxPwned = ${neg}) — the payload is live, the viewer made it text`);
@@ -393,7 +393,7 @@ try {
   await evalJs(`__dx.open(${P('embedded-font.docx')}, 'embedded-font.docx')`);
   const ef = await evalJs(`(() => { const d = __dx, span = [...d.sr().querySelectorAll('span')].find((s) => s.textContent === ${JSON.stringify(EMBED_TEXT)});
     const r = document.createRange(); r.selectNodeContents(span); return { w: r.getBoundingClientRect().width / (d.scale() * d.z()), faces: [...document.fonts].filter((f) => f.family.replace(/["']/g, '') === 'VS Embedded Fixture').map((f) => f.status) }; })()`);
-  ok(near(ef.w, WANT, 2), `the run is set in the embedded font: ${ef.w.toFixed(1)} px = ${EMBED_TEXT.length} monospace advances (${WANT.toFixed(1)})`, ef);
+  ok(verdictOf(near(ef.w, WANT, 2)), `the run is set in the embedded font: ${ef.w.toFixed(1)} px = ${EMBED_TEXT.length} monospace advances (${WANT.toFixed(1)})`, ef);
   ok(ef.faces.length === 1 && ef.faces[0] === 'loaded', 'the face is registered on document.fonts while the document is open', ef.faces);
   await evalJs('__dx.closeAll(); true'); await sleep(300);
   ok((await evalJs(`[...document.fonts].filter((f) => f.family.replace(/["']/g, '') === 'VS Embedded Fixture').length`)) === 0, 'closing the window removes the face');
@@ -417,11 +417,11 @@ try {
   ok(long.pages === 80, `80 pages (${long.pages})`);
   const probe = await evalJs(`new Promise((res) => { const seen = []; const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) seen.push(Math.round(e.duration)); }); po.observe({ type: 'longtask' });
     setTimeout(() => { const t = performance.now(); while (performance.now() - t < 90) { } setTimeout(() => { po.disconnect(); res(seen); }, 150); }, 20); })`);
-  ok(probe.some((d) => d >= 85) && maxTask < 200, `the open held the main thread for no task ≥ 200 ms (longest ${maxTask} ms) — POSITIVE CONTROL: the same observer sees a planted 90 ms task (${JSON.stringify(probe)})`);
+  ok(gateOf(probe.some((d) => d >= 85)) && maxTask < 200, `the open held the main thread for no task ≥ 200 ms (longest ${maxTask} ms) — POSITIVE CONTROL: the same observer sees a planted 90 ms task (${JSON.stringify(probe)})`);
   const firstStatus = long.seen.findIndex((x) => x[0] === 'Rendering…');
   const lastCount = long.seen.at(-1);
   ok(firstStatus >= 0 && long.seen.findIndex((x) => x[1] === '1 / 80') > firstStatus, '"Rendering…" shows first, then the toolbar\'s "1 / 80"', long.seen);
-  ok(lastCount && lastCount[1] === '1 / 80', 'the count reads 1 / 80 when done', lastCount);
+  ok(gateOf(lastCount) && lastCount[1] === '1 / 80', 'the count reads 1 / 80 when done', lastCount);
   ok(long.statusPaint !== null && long.statusPaint - long.statusAt < 250, `the "Rendering…" line is painted before the parse holds the thread (${long.statusPaint - long.statusAt} ms after it entered the DOM)`, long);
   await evalJs(`app.wm.toggleMaximize(__dx.win().id); true`); await sleep(500);
   await shot('after-long-80.png');
@@ -443,8 +443,8 @@ try {
   await evalJs(`__dx.open(${P('apa-title-page.docx')}, 'apa-title-page.docx')`);
   const u = await evalJs(`(() => { const d = __dx, pg = d.pages(), z = d.z(), T = d.scale(); const num = d.numberRect(pg[1]), pr = d.rect(pg[1]);
     return { z, T, w: d.rect(pg[0]).w, num: num && (pr.r - 96 * T * z - num.r) / (T * z) }; })()`);
-  ok(u.z === 1.25 && u.T === 1 && near(u.w, 816 * 1.25, 1.5), `under body zoom 1.25 a 100% page is 816 layout px = ${u.w.toFixed(1)} visual px`, u);
-  ok(u.num !== null && tabAt100 !== null && near(u.num, tabAt100, 0.5), `the tab stop lands in the same place under the UI scale (${u.num?.toFixed(2)} vs ${tabAt100?.toFixed(2)} px at 100 %) — the pass ran at net scale 1`, u);
+  ok(u.z === 1.25 && u.T === 1 && verdictOf(near(u.w, 816 * 1.25, 1.5)), `under body zoom 1.25 a 100% page is 816 layout px = ${u.w.toFixed(1)} visual px`, u);
+  ok(u.num !== null && tabAt100 !== null && verdictOf(near(u.num, tabAt100, 0.5)), `the tab stop lands in the same place under the UI scale (${u.num?.toFixed(2)} vs ${tabAt100?.toFixed(2)} px at 100 %) — the pass ran at net scale 1`, u);
   const sel = await evalJs(`(() => { const d = __dx, p = d.pages()[0]; const tw = document.createTreeWalker(p, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode())) if (n.textContent === 'Jordan A. Example') break;
     n.parentElement.scrollIntoView({ block: 'center' }); const r = document.createRange(); r.selectNodeContents(n); const b = r.getBoundingClientRect(); return { x0: b.left + 1, x1: b.right - 1, y: b.top + b.height / 2 }; })()`);
   await sleep(200);
@@ -456,7 +456,7 @@ try {
   await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: sel2.x1, y: sel2.y, button: 'left', buttons: 0, clickCount: 1 });
   await sleep(150);
   const selected = await evalJs(`(__dx.sr().getSelection ? __dx.sr().getSelection() : document.getSelection()).toString()`);
-  ok(/Jordan A\. Exampl/.test(selected), `a mouse drag across "Jordan A. Example" selects exactly that text under zoom + transform ("${selected}")`);
+  ok(verdictOf(/Jordan A\. Exampl/.test(selected)), `a mouse drag across "Jordan A. Example" selects exactly that text under zoom + transform ("${selected}")`);
   await evalJs(`__dx.scroll().scrollTop = 0; true`);
   const wc = await evalJs(`__dx.center(__dx.scroll())`);
   await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wc.x, y: wc.y, deltaX: 0, deltaY: 600 });
@@ -473,7 +473,7 @@ try {
   const o = await evalJs(`(() => { const d = __dx, sc = d.scroll(), pg = d.pages(), s0 = d.rect(pg[0]), sr = d.rect(sc);
     const probes = [0.05, 0.5, 0.95].map((f) => document.elementFromPoint(s0.x + s0.w * f, s0.y - 6)?.className || null);
     return { probes, left: s0.x - sr.x, over: Math.max(...pg.map((p) => d.rect(p).r)) - (sr.x + sc.clientWidth), sw: sc.scrollWidth, cw: sc.clientWidth, label: d.txt('.docx-zoom') }; })()`);
-  ok(o.probes.every((c) => c === 'docx-scroll') && o.left >= 0 && o.over <= 0.5 && o.sw <= o.cw, `fit width: no band, the whole page inside the ${o.cw} px pane at ${o.label}`, o);
+  ok(gateOf(o.probes.every((c) => c === 'docx-scroll')) && o.left >= 0 && o.over <= 0.5 && o.sw <= o.cw, `fit width: no band, the whole page inside the ${o.cw} px pane at ${o.label}`, o);
   await shot('after-owner-shape-fit.png');
   await press('actual');
   const oc = await evalJs(`(() => { const d = __dx, sc = d.scroll(), p = d.pages()[0], s0 = d.rect(p), sr = d.rect(sc); return { mid: (s0.x + s0.r) / 2 - (sr.x + sc.clientWidth / 2), sl: sc.scrollLeft }; })()`);
@@ -493,7 +493,7 @@ try {
   const nm = path.join(repo, 'node_modules');
   await evalJs(fs.readFileSync(path.join(nm, 'jszip/dist/jszip.min.js'), 'utf8') + '\n;true');
   await evalJs(fs.readFileSync(path.join(nm, 'docx-preview/dist/docx-preview.js'), 'utf8') + '\n;true');
-  ok(await evalJs('typeof window.docx?.renderAsync === "function"'), 'the library\'s own build is loaded (window.docx)');
+  ok(verdictOf(await evalJs('typeof window.docx?.renderAsync === "function"')), 'the library\'s own build is loaded (window.docx)');
   const rawRender = (file, opts, { shadow = false, transform = '', inherit = false, styleTabs = false } = {}) => evalJs(`(async () => {
     const buf = await (await fetch('/api/file/raw?path=' + encodeURIComponent(${P(file)}))).arrayBuffer();
     const host = document.createElement('div'); host.className = '__dxraw'; host.style.cssText = 'position:absolute;left:0;top:0;width:1400px;' + ${JSON.stringify(transform ? 'transform:' + transform + ';transform-origin:0 0;' : '')};
@@ -519,7 +519,7 @@ try {
   await rawRender('hostile.docx', MASTER_OPTS);
   const rc = await evalJs(`({ pwned: window.__docxPwned ?? null, outline: getComputedStyle(document.body).outlineStyle + ' ' + getComputedStyle(document.body).outlineColor, sandbox: document.querySelector('.__dxraw iframe')?.getAttribute('sandbox') ?? null, js: [...document.querySelectorAll('.__dxraw a')].find((a) => a.textContent.includes('JS-LINK'))?.getAttribute('href') })`);
   ok(rc.pwned >= 1 && rc.sandbox === null, `CONTROL: the master render runs the altChunk's script in an unsandboxed same-origin iframe (window.__docxPwned = ${rc.pwned})`, rc);
-  ok(/solid rgb\(255, 0, 255\)/.test(rc.outline), `CONTROL: …and the style's CSS injection restyles the WORKSPACE's <body> (${rc.outline})`, rc);
+  ok(verdictOf(/solid rgb\(255, 0, 255\)/.test(rc.outline)), `CONTROL: …and the style's CSS injection restyles the WORKSPACE's <body> (${rc.outline})`, rc);
   ok(rc.js === 'javascript:alert(1)', 'CONTROL: …and keeps href="javascript:alert(1)"', rc);
   // the library's same-origin srcdoc frame inherits the APP page's policy ⇒ its script and handler are reported: taken
   const libReports = await takeCspReports((r) => r.document === 'about', { ms: 3000, want: Infinity });
@@ -527,9 +527,9 @@ try {
   await cleanRaw();
   await rawRender('apa-title-page.docx', { ...MASTER_OPTS });
   const rh = await evalJs(`(() => { const pg = [...document.querySelectorAll('.__dxraw section.docx')]; return pg.map((p) => p.querySelector(':scope > header')?.textContent.trim() ?? null); })()`);
-  ok(rh.length === 4 && rh[0] === '1' && rh.slice(1).every((x) => x === null), 'CONTROL: the library alone shows NO running head on pages 2–4 (the inheritance is ours)', rh);
+  ok(rh.length === 4 && rh[0] === '1' && verdictOf(rh.slice(1).every((x) => x === null)), 'CONTROL: the library alone shows NO running head on pages 2–4 (the inheritance is ours)', rh);
   const rb = await evalJs(`[...document.querySelectorAll('.__dxraw article p')].filter((p) => /^Survey of/.test(p.textContent)).map((p) => getComputedStyle(p, '::before').content)`);
-  ok(rb.length === 1 && rb[0].includes('\uf0b7'), `CONTROL: the library alone writes the bullet as Symbol's private-use U+F0B7 (${JSON.stringify(rb)}) — nothing a browser without the Symbol font can draw`);
+  ok(rb.length === 1 && verdictOf(rb[0].includes('\uf0b7')), `CONTROL: the library alone writes the bullet as Symbol's private-use U+F0B7 (${JSON.stringify(rb)}) — nothing a browser without the Symbol font can draw`);
   await cleanRaw();
   const rawTab = async (scale, styleTabs = false) => {
     await rawRender('apa-title-page.docx', { ...MASTER_OPTS, experimental: true }, { inherit: true, styleTabs, transform: scale === 1 ? '' : `scale(${scale})` });
@@ -539,7 +539,7 @@ try {
   };
   const rt1 = await rawTab(1), st1 = await rawTab(1, true), st05 = await rawTab(0.5, true);
   ok(rt1 !== null && rt1 > 100, `CONTROL: the library alone ignores the Header style's stops — its page number sits ${rt1?.toFixed(1)} px short of the margin (the style-tab fix is ours)`);
-  ok(st1 !== null && near(st1, tabAt100, 0.5), `CONTROL: the library WITH the style's stops at net scale 1 lands where the viewer does (${st1?.toFixed(2)} vs ${tabAt100?.toFixed(2)} px — the residual is the library's own)`);
+  ok(st1 !== null && verdictOf(near(st1, tabAt100, 0.5)), `CONTROL: the library WITH the style's stops at net scale 1 lands where the viewer does (${st1?.toFixed(2)} vs ${tabAt100?.toFixed(2)} px — the residual is the library's own)`);
   ok(st05 === null || Math.abs(st05 - st1) > 20, `CONTROL: the same pass under a 0.5 transform lands elsewhere (${st05 === null ? 'no number line' : st05.toFixed(1) + ' px'} vs ${st1?.toFixed(1)} px) — the net-scale-1 hold is needed`);
   await rawRender('embedded-font.docx', { ...MASTER_OPTS, ignoreFonts: false }, { shadow: true });
   const rf = await evalJs(`(() => { const sr = document.querySelector('.__dxraw').shadowRoot; const span = [...sr.querySelectorAll('span')].find((s) => s.textContent === ${JSON.stringify(EMBED_TEXT)}); const r = document.createRange(); r.selectNodeContents(span); return r.getBoundingClientRect().width; })()`);
@@ -547,7 +547,7 @@ try {
   await cleanRaw();
   await rawRender('embedded-font.docx', { ...MASTER_OPTS, ignoreFonts: false });
   const rl = await evalJs(`(() => { const span = [...document.querySelectorAll('.__dxraw span')].find((s) => s.textContent === ${JSON.stringify(EMBED_TEXT)}); const r = document.createRange(); r.selectNodeContents(span); return r.getBoundingClientRect().width; })()`);
-  ok(near(rl, WANT, 2), `POSITIVE CONTROL: the same font via the library in the light DOM measures ${rl.toFixed(1)} px — the expected width is the font's, not a guess`);
+  ok(verdictOf(near(rl, WANT, 2)), `POSITIVE CONTROL: the same font via the library in the light DOM measures ${rl.toFixed(1)} px — the expected width is the font's, not a guess`);
   await cleanRaw();
 
   // ── ⑫ "Open in LibreOffice" ──
@@ -575,9 +575,9 @@ try {
   await cdp('Page.reload'); await boot();
   await evalJs(`__dx.open(${P('apa-title-page.docx')}, 'apa-title-page.docx')`);
   const b1 = await evalJs(`(() => { const b = __dx.btn('office'); if (!b) return null; const r = b.getBoundingClientRect(); return { aria: b.getAttribute('aria-label'), title: b.title, svg: !!b.querySelector('svg'), words: b.querySelector('.docx-tool-label')?.textContent || null, disabled: b.disabled, pressed: b.getAttribute('aria-pressed'), inBar: !!b.closest('.docx-toolbar'), w: r.width, h: r.height }; })()`);
-  ok(!!b1 && b1.aria === 'Open in LibreOffice' && b1.svg && b1.words === 'Open in LibreOffice' && b1.title.includes('apa-title-page.docx') && !b1.disabled && b1.pressed === null && b1.inBar && b1.w > 0 && b1.h > 0, 'the toolbar carries "Open in LibreOffice": an SVG icon + its words, named by title + aria-label, enabled, not a toggle', b1);
+  ok(!!b1 && b1.aria === 'Open in LibreOffice' && gateOf(b1.svg) && b1.words === 'Open in LibreOffice' && gateOf(b1.title.includes('apa-title-page.docx')) && !b1.disabled && b1.pressed === null && gateOf(b1.inBar) && b1.w > 0 && b1.h > 0, 'the toolbar carries "Open in LibreOffice": an SVG icon + its words, named by title + aria-label, enabled, not a toggle', b1);
   await shot('after-office-button.png');
-  ok(await evalJs(DOOR_SPY), 'the door is on the App (the mediator) — spied, then called through');
+  ok(verdictOf(await evalJs(DOOR_SPY)), 'the door is on the App (the mediator) — spied, then called through');
   await spyOn();
   const bc = await evalJs(`__dx.center(__dx.btn('office'))`);
   await click(bc.x, bc.y);
@@ -585,7 +585,7 @@ try {
   { const t0 = Date.now(); while (Date.now() - t0 < 10000 && !spied.length) await sleep(100); }
   ok(!!got && got.length === 1 && got[0].catalogId === 'libreoffice-writer' && got[0].file === DOCX12 && got[0].host === null, 'a trusted click reaches THE DOOR once, with the office-open verdict\'s app (libreoffice-writer), the fixture\'s REAL path and the file\'s machine (this one)', got);
   let posted = null; try { posted = JSON.parse(spied[0]?.body || 'null'); } catch { posted = null; }
-  ok(spied.length === 1 && /\/api\/desktop\/apps$/.test(spied[0].url) && !!posted && posted.appId === 'libreoffice-writer' && posted.file === DOCX12 && posted.fileHost === 'local' && !('host' in posted), 'the door\'s ONE launch POST carries the same app + path + the file\'s machine (the route spied — nothing launched)', { spied: spied.map((x) => x.url), posted });
+  ok(spied.length === 1 && gateOf(/\/api\/desktop\/apps$/.test(spied[0].url)) && !!posted && posted.appId === 'libreoffice-writer' && posted.file === DOCX12 && posted.fileHost === 'local' && !('host' in posted), 'the door\'s ONE launch POST carries the same app + path + the file\'s machine (the route spied — nothing launched)', { spied: spied.map((x) => x.url), posted });
   const said = await waitFor(`(document.getElementById('global-toasts')?.textContent || '').includes(${JSON.stringify(SPY_WORDS)})`, 5000);
   ok(!!said && !(await evalJs(`!!document.querySelector('.office-offer')`)), 'the door said the route\'s refusal as a toast (never silent); no absent-machine offer on a machine that has Writer');
   await spyOff();
@@ -596,7 +596,7 @@ try {
   srv = bootSrv(LO_ABSENT);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); up = true; } catch { await sleep(250); } }
-  ok(up, 'the server rebooted on the machine WITHOUT LibreOffice Writer');
+  ok(verdictOf(up), 'the server rebooted on the machine WITHOUT LibreOffice Writer');
   const v2 = await verdictAt();
   ok(v2.ok === false && v2.code === 'app-absent' && v2.remedy?.what === 'libreoffice-writer', 'that machine\'s verdict route says app-absent with the install remedy (what the viewer is about to be told)', v2);
   await cdp('Page.reload'); await boot();
@@ -609,8 +609,8 @@ try {
   await click(bc2.x, bc2.y);
   const offer = await waitFor(`(() => { const p = document.querySelector('.office-offer'); if (!p) return null; const n = p.querySelector('[data-key="office-note"]'), i = p.querySelector('[data-key="office-install"]'), br = __dx.btn('office').getBoundingClientRect(), pr = p.getBoundingClientRect();
     return { note: n?.textContent ?? null, noteCls: n?.className ?? null, noteRole: n?.getAttribute('role') ?? null, noteOpacity: n ? getComputedStyle(n).opacity : null, inst: i?.textContent ?? null, instCls: i?.className ?? null, instRole: i?.getAttribute('role') ?? null, open: !!p.querySelector('[data-key="office-open"]'), below: pr.top >= br.bottom - 1 }; })()`, 10000);
-  ok(!!offer && offer.note === 'LibreOffice Writer is not installed on this machine' && /context-menu-note/.test(offer.noteCls) && offer.noteRole === 'note' && Number(offer.noteOpacity) === 1
-    && offer.inst === 'Install LibreOffice on this machine…' && /context-menu-item/.test(offer.instCls) && offer.instRole === 'menuitem' && !offer.open && offer.below,
+  ok(!!offer && offer.note === 'LibreOffice Writer is not installed on this machine' && gateOf(/context-menu-note/.test(offer.noteCls)) && offer.noteRole === 'note' && Number(offer.noteOpacity) === 1
+    && offer.inst === 'Install LibreOffice on this machine…' && gateOf(/context-menu-item/.test(offer.instCls)) && offer.instRole === 'menuitem' && !offer.open && verdictOf(offer.below),
   'the click shows the explorer row\'s plain sentence + "Install LibreOffice on this machine…" under the button (a note and a real menu item — never a greyed button)', offer);
   await sleep(300);
   const doorCalls = await evalJs('window.__doorCalls.length');
@@ -619,7 +619,7 @@ try {
   const ic = await evalJs(`__dx.center(document.querySelector('.office-offer [data-key="office-install"]'))`);
   await click(ic.x, ic.y);
   const dlg = await waitFor(`(() => { const d = document.getElementById('desktop-install-dialog'); return d ? (d.querySelector('h3')?.textContent || d.textContent.slice(0, 160)) : null; })()`, 10000);
-  ok(!!dlg && /Install LibreOffice on this machine/.test(dlg) && !(await evalJs(`!!document.querySelector('.office-offer')`)), 'the offer opens the install dialog (the plan first — the explorer row\'s dialog) and closes itself', dlg);
+  ok(!!dlg && gateOf(/Install LibreOffice on this machine/.test(dlg)) && !(await evalJs(`!!document.querySelector('.office-offer')`)), 'the offer opens the install dialog (the plan first — the explorer row\'s dialog) and closes itself', dlg);
   await evalJs(`document.getElementById('desktop-install-dialog')?.remove(); true`);
   await spyOff();
 } catch (e) {
@@ -628,4 +628,4 @@ try {
   try { ws.close(); } catch { }
 }
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'} · ${Math.round((Date.now() - T0) / 1000)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

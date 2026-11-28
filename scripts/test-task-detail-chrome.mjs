@@ -37,7 +37,7 @@ const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome for the client'); process.exit(0); }
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1600) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1600) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const PNG_DIR = process.env.VIBESPACE_TGC_PNG_DIR || null;
@@ -102,7 +102,7 @@ try {
   check('the legacy group\'s folders[] + contextDir came back as Context rows (文件名 · 自动发现会话 / 记笔记)', !!leg && JSON.stringify(leg.ctx.map((r) => [r.path, r.tell, r.tags])) === JSON.stringify([[H('work/legacy'), 'names', ['discover']], [H('work/legacy/notes'), 'names', ['notes']]]) && leg.contextDir === H('work/legacy/notes'), leg && leg.ctx);
   const disk = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'task-groups.json'), 'utf8')).tasks['T-261001-legacy'];
   const ledger = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'migrations.json'), 'utf8'));
-  check('the file keeps the old fields one release beside the rows; the ledger records the run once', Array.isArray(disk.ctx) && disk.folders.length === 1 && disk.contextDir === H('work/legacy/notes') && !!ledger.applied['2026-10-task-group-context-rows'], { disk, ledger: Object.keys(ledger.applied || {}).slice(-3) });
+  check('the file keeps the old fields one release beside the rows; the ledger records the run once', gateOf(Array.isArray(disk.ctx)) && disk.folders.length === 1 && disk.contextDir === H('work/legacy/notes') && !!ledger.applied['2026-10-task-group-context-rows'], { disk, ledger: Object.keys(ledger.applied || {}).slice(-3) });
 
   // the groups the window edits
   const co = (await api('POST', '/api/tasks', { title: '公司', ctx: [{ path: '~/work/company/术语表.md', note: '术语表（谁都可以补）', share: 'rw' }] })).task;
@@ -167,22 +167,22 @@ try {
     const more = el.querySelector('.task-detail-more > summary'); const foot = el.querySelector('.task-detail-footer');
     const pre = el.querySelector('.task-detail-preview');
     return pre && !/^加载/.test(pre.textContent) && labels.length >= 4 ? { tabs, labels, more: more ? [...more.querySelectorAll('.ctx-chip')].map((c) => c.textContent.replace(/\\s+/g, ' ').trim()) : null, foot: foot ? foot.textContent.replace(/\\s+/g, ' ').trim() : null, rows: el.querySelectorAll('.ctx-row:not(.ctx-headrow)').length, par: (() => { const s = el.querySelector('.task-detail-settings > .task-parents'); if (!s) return null; const h = s.querySelector('.task-parents-list .task-detail-hint'), a = s.querySelector('.task-parent-add'); return { chips: s.querySelectorAll('.task-parent-chip').length, hint: h ? h.textContent.trim() : null, add: a ? a.textContent.trim() : null }; })() } : null; })()`), 20000);   // lane lg-group-parents (r600 (4)): + the 父组 section's own facts
-  check('the tabs: 设置 · Backlog (1) · 活动记录 · 成员 (1), 设置 open', !!shape && JSON.stringify(shape.tabs.map((x) => x.t)) === JSON.stringify(['设置', '搁置区 (1)', '活动记录', '成员 (1)']) && shape.tabs[0].on, shape && shape.tabs);
+  check('the tabs: 设置 · Backlog (1) · 活动记录 · 成员 (1), 设置 open', !!shape && JSON.stringify(shape.tabs.map((x) => x.t)) === JSON.stringify(['设置', '搁置区 (1)', '活动记录', '成员 (1)']) && verdictOf(shape.tabs[0].on), shape && shape.tabs);
   check('设置, top to bottom: 名称 → 父组 → 说明 / 常驻指令 → 上下文表 → 新对话会收到 → 更多选项', !!shape && JSON.stringify(shape.labels) === JSON.stringify(['名称', '父组', '说明 / 常驻指令', '上下文表', '新对话会收到']) && !!shape.more, shape && shape.labels);   // lane lg-group-parents (r600 (4)): 父组 is the second primary section (U5a: under the name)
   check('父组 of a group with no parent: no chip, «没有父组» and the «＋ 添加父组…» link (its one way to add a parent)', !!shape && !!shape.par && shape.par.chips === 0 && shape.par.hint === '没有父组' && shape.par.add === '＋ 添加父组…', shape && shape.par);
-  check('更多选项 carries its values on the chips (通知 继承 · 外部 封闭 · 浏览器配置 默认 · 颜色 自动 · 导出 / 导入)', !!shape && shape.more && JSON.stringify(shape.more) === JSON.stringify(['通知 继承', '外部 封闭', '浏览器配置 默认', '颜色 自动', '导出 / 导入']), shape && shape.more);
-  check('the footer: 改动即时保存 + 归档', !!shape && /改动即时保存（路径行离开字段就生效，回车也行）/.test(shape.foot) && /归档/.test(shape.foot), shape && shape.foot);
+  check('更多选项 carries its values on the chips (通知 继承 · 外部 封闭 · 浏览器配置 默认 · 颜色 自动 · 导出 / 导入)', !!shape && gateOf(shape.more) && JSON.stringify(shape.more) === JSON.stringify(['通知 继承', '外部 封闭', '浏览器配置 默认', '颜色 自动', '导出 / 导入']), shape && shape.more);
+  check('the footer: 改动即时保存 + 归档', !!shape && gateOf(/改动即时保存（路径行离开字段就生效，回车也行）/.test(shape.foot)) && verdictOf(/归档/.test(shape.foot)), shape && shape.foot);
   check('the Context table: four rows', !!shape && shape.rows === 4, shape && shape.rows);
   const rowFacts = await D.ev(`(() => [...(${W(ir.id)}).element.querySelectorAll('.ctx-row:not(.ctx-headrow)')].map((r) => ({ path: (r.querySelector('.ctx-path-input') || {}).value, note: (r.querySelector('.ctx-note-input') || {}).value, tell: [...r.querySelectorAll('.ctx-tell .ctx-seg-btn')].map((b) => b.textContent + (b.classList.contains('active') ? '*' : '')).join('|'), tags: [...r.querySelectorAll('.ctx-tag.on')].map((b) => b.textContent).join('|'), res: (r.querySelector('.ctx-res') || {}).textContent, plan: (r.querySelector('.ctx-plan') || {}).textContent })))()`);
   check('a folder row offers the FOUR levels (its default 文件名 + 关键文件内容), a file row three (its default 内容)', rowFacts[0].tell === '只说明|文件名|文件名 + 关键文件内容*|内容' && rowFacts[2].tell === '只说明|文件名|内容*', rowFacts.map((r) => r.tell));
   check('the verbs are words on the row (自动发现会话 · agent 在这里记笔记)', rowFacts[0].tags === '自动发现会话' && rowFacts[1].tags === 'agent 在这里记笔记', rowFacts.map((r) => r.tags));
-  check('a relative row keeps its text as typed and says where it resolved (按本表上一行解析)', rowFacts[1].path === '共享资料' && rowFacts[1].res.includes('= ~/work/ir/共享资料') && rowFacts[1].res.includes('按本表上一行解析'), rowFacts[1]);
+  check('a relative row keeps its text as typed and says where it resolved (按本表上一行解析)', rowFacts[1].path === '共享资料' && gateOf(rowFacts[1].res.includes('= ~/work/ir/共享资料')) && verdictOf(rowFacts[1].res.includes('按本表上一行解析')), rowFacts[1]);
   const ctx0 = await api('GET', `/api/tasks/${ir.id}/context`);
   const pv0 = await preview(D, ir.id);
-  check('「新对话会收到」 IS the renderer\'s output (GET /api/tasks/:id/context block, byte for byte)', pv0 === ctx0.block && pv0.includes('负责投资人沟通。\n对外一律不提供应商名和价格。') && pv0.includes('Always cite the figures table.'), { pv0: (pv0 || '').slice(0, 300) });
-  check('the big folder steps down and SAYS so — on its row (超出…退到「只说明」) and in the budget bar', /只说明/.test(rowFacts[3].plan) && /太大|超出注入预算/.test(rowFacts[3].plan) && await D.ev(`!!(${W(ir.id)}).element.querySelector('.ctx-budget-warn:not([hidden])')`), rowFacts[3]);
+  check('「新对话会收到」 IS the renderer\'s output (GET /api/tasks/:id/context block, byte for byte)', pv0 === ctx0.block && gateOf(pv0.includes('负责投资人沟通。\n对外一律不提供应商名和价格。')) && verdictOf(pv0.includes('Always cite the figures table.')), { pv0: (pv0 || '').slice(0, 300) });
+  check('the big folder steps down and SAYS so — on its row (超出…退到「只说明」) and in the budget bar', gateOf(/只说明/.test(rowFacts[3].plan)) && gateOf(/太大|超出注入预算/.test(rowFacts[3].plan)) && verdictOf(await D.ev(`!!(${W(ir.id)}).element.querySelector('.ctx-budget-warn:not([hidden])')`)), rowFacts[3]);
   const budgetWords = await D.ev(`(${W(ir.id)}).element.querySelector('.ctx-budget-words').textContent`);
-  check(`the budget bar names what was used of what (${budgetWords})`, /^新对话一开始会收到 [\d.]+ (KB|B)（上限 [\d.]+ KB）/.test(budgetWords || ''), budgetWords); // lane ui-plain-words (task-groups-6): the face in plain words
+  check(`the budget bar names what was used of what (${budgetWords})`, verdictOf(/^新对话一开始会收到 [\d.]+ (KB|B)（上限 [\d.]+ KB）/.test(budgetWords || '')), budgetWords); // lane ui-plain-words (task-groups-6): the face in plain words
   await shot(D.S, 'desk-settings.png');
 
   // 告诉 agent: a real press on 文件名 for the IR folder ⇒ the preview lists, no key file contents
@@ -196,7 +196,7 @@ try {
   const added = await until(async () => { const g = await groupOf(ir.id); return g.ctx.length === 5 ? g.ctx[4] : null; }, 10000);
   check('a relative path typed into ＋ 添加路径… takes effect on BLUR: a row, its text as typed (a file: 内容, no auto-join)', !!added && added.path === '共享资料/进度.md' && added.tags.length === 0, added);
   const toastAdd = await until(() => D.ev("window.__toastTexts().find((x) => /已添加第 5 行/.test(x)) || null"), 5000);
-  check(`…and the toast says what it became (${toastAdd})`, !!toastAdd && /告诉 agent「内容」/.test(toastAdd), toastAdd);
+  check(`…and the toast says what it became (${toastAdd})`, !!toastAdd && verdictOf(/告诉 agent「内容」/.test(toastAdd)), toastAdd);
   // …one that does not resolve: keeps its text, says 未生效, adds nothing
   await typeInto(D, IN(ir.id, '.ctx-add-input'), 'nowhere-zz');
   await blurAway(D, ir.id);
@@ -206,28 +206,28 @@ try {
   await api('PATCH', `/api/tasks/${ir.id}`, { color: '#61afef' });
   await sleep(800);
   const kept = await D.ev(`(() => { const el = (${W(ir.id)}).element; const i = el.querySelector('.ctx-add-input'); return { v: i && i.value, said: el.querySelector('.ctx-add').textContent }; })()`);
-  check('…a repaint from a broadcast keeps the typed text and the 未生效 words', kept.v === 'nowhere-zz' && /未生效/.test(kept.said), kept);
+  check('…a repaint from a broadcast keeps the typed text and the 未生效 words', kept.v === 'nowhere-zz' && verdictOf(/未生效/.test(kept.said)), kept);
   // an existing row's path edited to nowhere: the row keeps its old path
   await typeInto(D, `JS:(${W(ir.id)}).element.querySelectorAll('.ctx-row:not(.ctx-headrow)')[2].querySelector('.ctx-path-input')`, 'gone-zz.md');
   await blurAway(D, ir.id);
   await sleep(1200);
   const g2 = await groupOf(ir.id);
   const rowSaid = await D.ev(`(() => { const r = (${W(ir.id)}).element.querySelectorAll('.ctx-row:not(.ctx-headrow)')[2]; return { v: r.querySelector('.ctx-path-input').value, said: r.textContent }; })()`);
-  check('an existing row edited to a path that does not resolve keeps its old path (未生效), the typed text stays', g2.ctx[2].path === 'handbook.md' && rowSaid.v === 'gone-zz.md' && /未生效/.test(rowSaid.said), { stored: g2.ctx[2].path, rowSaid });
+  check('an existing row edited to a path that does not resolve keeps its old path (未生效), the typed text stays', g2.ctx[2].path === 'handbook.md' && rowSaid.v === 'gone-zz.md' && verdictOf(/未生效/.test(rowSaid.said)), { stored: g2.ctx[2].path, rowSaid });
 
   // the objective: blur saves; the preview says it verbatim
   await typeInto(D, IN(ir.id, '.task-detail-objective'), '负责投资人沟通。\n周五前把 Q3 材料发给董事会。');
   await blurAway(D, ir.id);
   const pvObj = await until(async () => { const p = await preview(D, ir.id); return p && p.includes('周五前把 Q3 材料发给董事会。') ? p : null; }, 10000);
-  check('说明 / 常驻指令 saves on blur and the preview tells it verbatim', !!pvObj && (await groupOf(ir.id)).objective.includes('周五前把 Q3 材料发给董事会。'));
+  check('说明 / 常驻指令 saves on blur and the preview tells it verbatim', !!pvObj && verdictOf((await groupOf(ir.id)).objective.includes('周五前把 Q3 材料发给董事会。')));
 
   // ＋ 引用另一个任务组…
   await press(D, IN(ir.id, '.ctx-ref-add'));
   const menu = await until(() => D.ev("(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); return m ? [...m.querySelectorAll('.context-menu-item')].map((n) => n.textContent.trim()) : null; })()"), 5000);
-  check('＋ 引用另一个任务组… lists the other groups with what they share', !!menu && menu.some((x) => /^公司 — 1 行可引用$/.test(x)), menu);
+  check('＋ 引用另一个任务组… lists the other groups with what they share', !!menu && verdictOf(menu.some((x) => /^公司 — 1 行可引用$/.test(x))), menu);
   await press(D, "JS:[...[...document.querySelectorAll('.context-menu')].pop().querySelectorAll('.context-menu-item')].find((n) => /^公司/.test(n.textContent.trim()))");
   const pvRef = await until(async () => { const p = await preview(D, ir.id); return p && p.includes('公司') && p.includes('ARR = 年度经常性收入。') ? p : null; }, 10000);
-  check('the reference row is added; the preview tells the company\'s shared row LAST, editable here (shared 可写)', !!pvRef && pvRef.lastIndexOf('ARR = 年度经常性收入。') > pvRef.indexOf('共享笔记') && /you may edit it/.test(pvRef) && (await groupOf(ir.id)).ctx.some((r) => r.ref === co.id), (await preview(D, ir.id) || '').slice(-700));
+  check('the reference row is added; the preview tells the company\'s shared row LAST, editable here (shared 可写)', !!pvRef && pvRef.lastIndexOf('ARR = 年度经常性收入。') > pvRef.indexOf('共享笔记') && gateOf(/you may edit it/.test(pvRef)) && verdictOf((await groupOf(ir.id)).ctx.some((r) => r.ref === co.id)), (await preview(D, ir.id) || '').slice(-700));
   await shot(D.S, 'desk-ref.png');
 
   // a fold chip opens 更多选项 on its row
@@ -245,7 +245,7 @@ try {
     await D.ev(`(() => { const f = (${W(ir.id)}).element.querySelector('.task-detail-more'); if (f) f.open = true; return true; })()`);
     const pre = await D.ev(`(() => { const r = ${expRow}; const i = r && r.querySelector('input.task-detail-input'); return i ? i.value : null; })()`);
     const preFile = pre ? onDisk(pre) : '';
-    check(`B-5736 follow: the export box is prefilled with the product's suggestion, a file not there yet (${pre})`, !!pre && /\.md$/.test(pre) && !fs.existsSync(preFile), { pre, exists: !!preFile && fs.existsSync(preFile) });
+    check(`B-5736 follow: the export box is prefilled with the product's suggestion, a file not there yet (${pre})`, !!pre && gateOf(/\.md$/.test(pre)) && !fs.existsSync(preFile), { pre, exists: !!preFile && fs.existsSync(preFile) });
     const exportBtn = `JS:[...${expRow}.querySelectorAll('.task-detail-btn')].find((b) => b.textContent.trim() === '导出')`;
     await press(D, exportBtn);
     const wrote = await until(() => (preFile && fs.existsSync(preFile) ? true : null), 8000, 100);
@@ -256,7 +256,7 @@ try {
     const nImp = ((await D.ev('window.__toastTexts()')) || []).length;
     await press(D, `JS:[...${expRow}.querySelectorAll('.task-detail-btn')].find((b) => b.textContent.trim() === '导入')`);
     const imp = await until(() => D.ev(`(() => { const t = window.__toastTexts().slice(${nImp}); return t.find((x) => /已导入|没有可导入的文件/.test(x)) || null; })()`), 8000, 100);
-    check(`B-5736 follow: an Import right after the export takes the file it wrote (${imp}), never «there is no file»`, !!imp && /已导入/.test(imp), imp);
+    check(`B-5736 follow: an Import right after the export takes the file it wrote (${imp}), never «there is no file»`, !!imp && verdictOf(/已导入/.test(imp)), imp);
     // a path the PERSON typed keeps the tick rule
     const typed = H('work/ir/typed-export-zz.md');
     await typeInto(D, `JS:${expRow}.querySelector('input.task-detail-input')`, typed);
@@ -282,7 +282,7 @@ try {
   // Backlog — the full viewer, its box saves on blur
   await press(D, IN(ir.id, '.task-detail-tabs .sidebar-subtab[data-tab="backlog"]'));
   const blView = await until(() => D.ev(`(() => { const el = (${W(ir.id)}).element; const v = el.querySelector('.task-log-embedded'); return v && v.querySelector('.task-log-add') && /季度会前对齐数字口径/.test(v.textContent) ? { tabs: !!v.querySelector('.task-log-tabs'), search: !!v.querySelector('.task-log-search') } : null; })()`), 10000);
-  check('the Backlog tab IS the full viewer (its search + list), without a second tab strip', !!blView && blView.search && !blView.tabs, blView);
+  check('the Backlog tab IS the full viewer (its search + list), without a second tab strip', !!blView && gateOf(blView.search) && !blView.tabs, blView);
   await typeInto(D, `JS:(${W(ir.id)}).element.querySelector('.task-log-embedded .task-log-add')`, '下周补投资人名单');
   await press(D, `JS:(${W(ir.id)}).element.querySelector('.task-log-embedded .task-log-search')`);
   const blSaved = await until(async () => ((await groupOf(ir.id)).backlog || []).some((b) => b.text === '下周补投资人名单'), 10000);
@@ -298,7 +298,7 @@ try {
   await D.ev(`(() => { ${EMB}.querySelector('.task-log-edit[data-bl-id]').__vsMark = 1; return true; })()`);   // the rebuild draws a NEW form
   await api('POST', `/api/tasks/${ir.id}/progress`, { note: '另一处写入的记录（重建）' });
   const edKept = await until(() => D.ev(`(() => { const f = ${EMB}.querySelector('.task-log-edit[data-bl-id]'); if (!f || f.__vsMark) return null; return { text: f.querySelector('input').value, focus: document.activeElement === f.querySelector('input') }; })()`), 10000);
-  check('an OPEN EDITOR keeps what was typed across a rebuild a group update causes (a new form, the same words, the caret back)', edPressed === true && !!edKept && edKept.text === '季度会前对齐数字口径（重建时打的字）' && edKept.focus, { edPressed, edKept });
+  check('an OPEN EDITOR keeps what was typed across a rebuild a group update causes (a new form, the same words, the caret back)', edPressed === true && !!edKept && edKept.text === '季度会前对齐数字口径（重建时打的字）' && verdictOf(edKept.focus), { edPressed, edKept });
   await D.ev(`(() => { const f = ${EMB}.querySelector('.task-log-edit[data-bl-id]'); const c = f && [...f.querySelectorAll('button')].find((b) => b.classList.contains('task-detail-btn')); if (c) c.click(); return !!c; })()`);   // Cancel: the editor closes, nothing written
   await until(() => D.ev(`!${EMB}.querySelector('.task-log-edit')`), 5000);   // a DOM query in the page, not a pin on the source — stale-pins: kept
   await typeInto(D, `JS:${EMB}.querySelector('.task-log-add')`, '重建时打在添加框的字');
@@ -310,7 +310,7 @@ try {
   const addKept = await until(() => D.ev(`(() => { const a = ${EMB}.querySelector('.task-log-add'); if (!a || a.__vsMark) return null; return { text: a.value, focus: document.activeElement === a }; })()`), 10000);
   const handed = await D.ev('window.__vsBlAdds');   // the fact: no add was handed through the re-draw
   const addRows = ((await groupOf(ir.id)).backlog || []).filter((b) => /重建时打在添加框的字/.test(b.text)).length;
-  check('the ADD BOX keeps what was typed across a rebuild (the caret back), and the box the rebuild removed saved NOTHING on its blur (no add handed to the store, none stored)', !!addKept && addKept.text === '重建时打在添加框的字' && addKept.focus && handed === 0 && addRows === 0, { addKept, handed, addRows });
+  check('the ADD BOX keeps what was typed across a rebuild (the caret back), and the box the rebuild removed saved NOTHING on its blur (no add handed to the store, none stored)', !!addKept && addKept.text === '重建时打在添加框的字' && gateOf(addKept.focus) && handed === 0 && addRows === 0, { addKept, handed, addRows });
   await D.ev(`(() => { const a = ${EMB}.querySelector('.task-log-add'); a.value = ''; return true; })()`);   // left empty: the next steps leave the tab (a blur parks a box that holds words)
   await shot(D.S, 'desk-backlog.png');
   // 活动记录 — the viewer, its note box (Enter)
@@ -326,7 +326,7 @@ try {
   await D.ev(`(() => { window.__nsd = null; const o = app.showNewSessionDialog.bind(app); app.showNewSessionDialog = (a) => { window.__nsd = a || {}; }; return true; })()`);
   await press(D, IN(ir.id, '.task-detail-tabs .sidebar-subtab[data-tab="members"]'));
   const mem = await until(() => D.ev(`(() => { const el = (${W(ir.id)}).element; const rows = [...el.querySelectorAll('.task-detail-member')]; return rows.length ? rows.map((r) => ({ key: r.dataset.key, buttons: [...r.querySelectorAll('button')].map((b) => b.textContent + (b.disabled ? '(off)' : '')) })) : null; })()`), 5000);
-  check('成员 lists the member with ★ 标常驻 and 移出', !!mem && mem.length === 1 && mem[0].key === 'claude:aaaaaaaa-1111-4000-8000-000000000001' && mem[0].buttons.some((b) => /标常驻/.test(b)) && mem[0].buttons.some((b) => /^移出/.test(b)), mem);
+  check('成员 lists the member with ★ 标常驻 and 移出', !!mem && mem.length === 1 && mem[0].key === 'claude:aaaaaaaa-1111-4000-8000-000000000001' && gateOf(mem[0].buttons.some((b) => /标常驻/.test(b))) && verdictOf(mem[0].buttons.some((b) => /^移出/.test(b))), mem);
   await press(D, IN(ir.id, '.task-detail-member-start .task-detail-primary'));
   const nsd = await until(() => D.ev('window.__nsd'), 5000);
   check('「在这里开始对话」 opens New Session for this group, its first folder as the folder', !!nsd && nsd.taskId === ir.id && nsd.cwd === H('work/ir'), nsd);
@@ -356,7 +356,7 @@ try {
     window.__spw = app.openSessionProps(s);
     return { groups: gs.length, win: !!window.__spw };
   })()`);
-  check('setup: a live session in every Task Group (≥ 4), config overrides, a browser block and a status history', !!sp && sp.win && sp.groups >= 4, sp);
+  check('setup: a live session in every Task Group (≥ 4), config overrides, a browser block and a status history', !!sp && gateOf(sp.win) && sp.groups >= 4, sp);
   const SPB = `window.__spw.content.querySelector('.session-props > .task-detail-body')`;
   await until(() => D.ev(`(() => { const b = ${SPB}; return !!b && b.querySelectorAll('.session-history-item').length >= 3 && b.querySelectorAll('.session-props-group input:checked').length >= 4 && !!b.querySelector('.session-props-browser'); })()`), 15000);
   await sleep(600);
@@ -376,8 +376,8 @@ try {
   check('Session Properties opens at 440 × 620 with EVERY section in ONE .task-detail-body under the .task-detail root (none on the root)', !!g0 && g0.win[0] === 440 && g0.win[1] === 620 && g0.onBody >= 8 && g0.onRoot === 0, g0);
   check(`the owner's shape is taller than the window and the body scrolls (scrollHeight ${g0 && g0.sH} > clientHeight ${g0 && g0.cH})`, !!g0 && g0.sH > g0.cH + 200, g0);
   check(`the first section label sits inside the padding (${g0 && g0.headL} px from the content's left edge, ${g0 && g0.headT} px from its top; ≥ 10 / ≥ 8)`, !!g0 && g0.headL >= 10 && g0.headT >= 8, g0);
-  check(`«更改…» ends inside the padding (${g0 && g0.chgR} px from the content's right edge, ≥ 10) and the 任务组 checkboxes start ≥ 10 px in (${g0 && g0.cbs.join(',')})`, !!g0 && g0.chgR >= 10 && g0.cbs.length >= 4 && g0.cbs.every((x) => x >= 10), g0);
-  check(`consecutive sections are ≥ 8 px apart (${g0 && g0.gaps.join(',')})`, !!g0 && g0.gaps.length >= 7 && g0.gaps.every((x) => x >= 8), g0);
+  check(`«更改…» ends inside the padding (${g0 && g0.chgR} px from the content's right edge, ≥ 10) and the 任务组 checkboxes start ≥ 10 px in (${g0 && g0.cbs.join(',')})`, !!g0 && g0.chgR >= 10 && g0.cbs.length >= 4 && verdictOf(g0.cbs.every((x) => x >= 10)), g0);
+  check(`consecutive sections are ≥ 8 px apart (${g0 && g0.gaps.join(',')})`, !!g0 && g0.gaps.length >= 7 && verdictOf(g0.gaps.every((x) => x >= 8)), g0);
   check(`the label column is ONE declared width (${g0 && g0.labels.join(',')} px) and every value starts on one line x (${g0 && g0.values.join(',')})`, !!g0 && g0.labels.length === 1 && g0.labels[0] === 72 && g0.values.length === 1, g0);
   const st400 = await D.ev(`(() => { const b = ${SPB}; b.scrollTop = 400; return b.scrollTop; })()`);
   check(`setting scrollTop = 400 moves it (${st400})`, st400 === 400, st400);
@@ -386,7 +386,7 @@ try {
   await D.S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: wpt.x, y: wpt.y });
   await D.S('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wpt.x, y: wpt.y, deltaX: 0, deltaY: 300 });
   const wheeled = await until(() => D.ev(`${SPB}.scrollTop > 0 ? ${SPB}.scrollTop : null`), 3000, 100);
-  check(`a real mouse wheel over the body scrolls it (scrollTop ${wheeled})`, wpt.inside && wheeled >= 100, { wpt, wheeled });
+  check(`a real mouse wheel over the body scrolls it (scrollTop ${wheeled})`, gateOf(wpt.inside) && wheeled >= 100, { wpt, wheeled });
   await shot(D.S, 'desk-session-props.png');
   // the window re-renders on every broadcast (a working session ⇒ every few seconds): the reader keeps their place
   const spKept = await D.ev(`(async () => { const b = ${SPB}; b.scrollTop = 400; const i = document.createElement('i'); i.id = 'sp-body-sentinel'; b.appendChild(i);
@@ -394,7 +394,7 @@ try {
     await new Promise((r) => setTimeout(r, 900));
     const at = b.scrollTop; await new Promise((r) => setTimeout(r, 1200));
     return { rebuilt: !document.getElementById('sp-body-sentinel'), at, later: b.scrollTop, same: b === ${SPB} }; })()`);
-  check(`a broadcast re-render rebuilds the body (the sentinel is gone) and keeps the reader at 400 (${spKept && spKept.at} → ${spKept && spKept.later})`, !!spKept && spKept.rebuilt && spKept.same && Math.abs(spKept.at - 400) <= 1 && Math.abs(spKept.later - 400) <= 1, spKept);
+  check(`a broadcast re-render rebuilds the body (the sentinel is gone) and keeps the reader at 400 (${spKept && spKept.at} → ${spKept && spKept.later})`, !!spKept && gateOf(spKept.rebuilt) && gateOf(spKept.same) && Math.abs(spKept.at - 400) <= 1 && Math.abs(spKept.later - 400) <= 1, spKept);
   // …and when the history answers SLOWLY (the rebuilt window is laid out before the list refills — on .345 the list shrank to
   // «Loading history…» at that moment and the view under it jumped by the list's height, 160 px in ja): the old height is held
   const spSlow = await D.ev(`(async () => {
@@ -414,7 +414,7 @@ try {
     } finally { window.fetch = realFetch; }
   })()`);
   check(`a re-render whose history answers 700 ms late keeps the view still (the 任务组 header ${spSlow && spSlow.before} → ${spSlow && spSlow.mid} → ${spSlow && spSlow.after} px): the refilling list holds its old height (${spSlow && spSlow.h0} → ${spSlow && spSlow.hMid}) and lets go once it paints`,
-    !!spSlow && spSlow.slowed >= 1 && spSlow.loading && spSlow.mid === spSlow.before && Math.abs(spSlow.after - spSlow.before) <= 1 && spSlow.hMid === spSlow.h0 && spSlow.held === '', spSlow);
+    !!spSlow && spSlow.slowed >= 1 && gateOf(spSlow.loading) && spSlow.mid === spSlow.before && Math.abs(spSlow.after - spSlow.before) <= 1 && spSlow.hMid === spSlow.h0 && spSlow.held === '', spSlow);
   // NEGATIVE CONTROL: the same window with the body's class taken off — the 2.369.348 shape — fails the same measures
   const ctl = await D.ev(`(async () => { const b = ${SPB}; b.className = ''; await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const root = window.__spw.content.querySelector('.session-props'); const c = window.__spw.content.getBoundingClientRect();
@@ -435,7 +435,7 @@ try {
   const phone = await until(() => P.ev(`(() => { const w = ${W(ir.id)}; if (!w) return null; const el = w.element.querySelector('.task-detail'); const rows = [...el.querySelectorAll('.ctx-row:not(.ctx-headrow)')]; if (!rows.length) return null;
     const over = [...el.querySelectorAll('.ctx-row, .ctx-cell, .task-detail-preview, .ctx-add-input')].filter((n) => n.getBoundingClientRect().right > innerWidth + 1).length;
     return { narrow: el.classList.contains('narrow'), head: getComputedStyle(el.querySelector('.ctx-headrow')).display, cols: getComputedStyle(rows[0]).gridTemplateColumns.split(' ').length, over, vw: innerWidth }; })()`), 20000);
-  check('phone: one card per Context row (the narrow layout, no column header), nothing wider than the viewport', !!phone && phone.narrow && phone.head === 'none' && phone.cols === 2 && phone.over === 0, phone);
+  check('phone: one card per Context row (the narrow layout, no column header), nothing wider than the viewport', !!phone && gateOf(phone.narrow) && phone.head === 'none' && phone.cols === 2 && phone.over === 0, phone);
   await shot(P.S, 'phone.png');
 
   // ════ THE STORE HELD UNREAD (lane bl-windows, 主开发's MUST 3) ════
@@ -455,7 +455,7 @@ try {
     const list = await api('GET', '/api/tasks');
     const made = await fetch(`http://127.0.0.1:${PORT}/api/tasks`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'x' }) });
     const madeBody = await made.json().catch(() => ({}));
-    check('held: the list says `unread` (damaged, the file named) with no groups; a create answers 503 TASK_GROUPS_UNREAD; the bytes are untouched', Array.isArray(list.tasks) && list.tasks.length === 0 && !!list.unread && list.unread.damaged === true && list.unread.file === 'task-groups.json' && made.status === 503 && madeBody.code === 'TASK_GROUPS_UNREAD' && fs.readFileSync(TGF, 'utf8') === '{"version":1,"tasks":{"T-', { unread: list.unread, status: made.status, code: madeBody.code });
+    check('held: the list says `unread` (damaged, the file named) with no groups; a create answers 503 TASK_GROUPS_UNREAD; the bytes are untouched', gateOf(Array.isArray(list.tasks)) && list.tasks.length === 0 && !!list.unread && list.unread.damaged === true && list.unread.file === 'task-groups.json' && made.status === 503 && madeBody.code === 'TASK_GROUPS_UNREAD' && fs.readFileSync(TGF, 'utf8') === '{"version":1,"tasks":{"T-', { unread: list.unread, status: made.status, code: madeBody.code });
     const HOLD = '任务组暂时无法读取——这个窗口保留，读取恢复后会自动填充';
     const winText = (P) => P.ev(`(() => { const w = ${W(ir.id)}; return w ? w.element.textContent : null; })()`);
     // the RECONNECT road: the open window stays, its body says the hold
@@ -471,7 +471,7 @@ try {
     await D.ev(`(app.openTaskDetail(${JSON.stringify(ir.id)}), true)`);
     await sleep(600);
     const toasts = await D.ev('window.__toastTexts()');
-    check('held · open: the person\'s open of the group is not refused «未找到任务组»', Array.isArray(toasts) && !toasts.some((x) => x.includes('未找到任务组')), toasts);
+    check('held · open: the person\'s open of the group is not refused «未找到任务组»', gateOf(Array.isArray(toasts)) && !toasts.some((x) => x.includes('未找到任务组')), toasts);
     await shot(D.S, 'desk-held.png');
     // the backup door: the good bytes in place ⇒ the read tried again lifts the hold; its broadcast fetches the list again
     fs.writeFileSync(TGF, good);
@@ -487,4 +487,4 @@ try {
   cleanup();
 }
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

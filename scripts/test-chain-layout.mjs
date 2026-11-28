@@ -70,7 +70,7 @@ const MODEL = 'src/lib/chain-layout.js';
 const SRC = fs.readFileSync(path.join(REPO, MODEL), 'utf8');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
 const J = (x) => JSON.stringify(x);
 
 /** Every invariant a normalized chain owes (null = holds, else the broken one). */
@@ -95,7 +95,7 @@ function invariantBroken(c) {
 /** THE LEGS, run on a model module `C`; returns the failed leg names. */
 function legs(C, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const F = (n) => (typeof C[n] === 'function' ? C[n] : () => { throw new Error('missing export ' + n); });
   const run = (fn) => { try { return fn(); } catch (e) { return e; } };
 
@@ -347,19 +347,19 @@ function legs(C, { quiet = false } = {}) {
     const owner = { tabs: ['A', 'B', 'E'], active: 2, layout: 'split', order: ['A', 'B', 'E'], split: { pair: ['A', 'E'], ratio: 0.55, dir: 'row', left: ['A'], right: ['B', 'E'] } };
     const before = J(owner);
     const o = run(() => wm_(owner, ['E']));
-    leg(o && o.layout === 'split' && J(o.tabs) === J(['A', 'B']) && J(o.split.pair) === J(['A', 'B']) && J(o.split.left) === J(['A']) && J(o.split.right) === J(['B']) && o.split.ratio === 0.55, '⑭ the owner\'s record minus the closed editor = [A | B] still SPLIT (the right side shows its neighbour), the ratio kept — the pre-fix reconcile rebuilt it around the gone pane and flattened it to tabs', J(o));
-    leg(o && key(o) === key(local(owner, ['E'])) && key(o) === key({ tabs: ['A', 'B'], active: 0, layout: 'split', split: { pair: ['A', 'B'], ratio: 0.5, left: ['A'], right: ['B'] } }), '⑭ …its key IS the key of the chain the local close left (removeTab on the live chain) — the remote apply finds the local chain and changes nothing');
+    leg(gateOf(o) && o.layout === 'split' && J(o.tabs) === J(['A', 'B']) && J(o.split.pair) === J(['A', 'B']) && J(o.split.left) === J(['A']) && J(o.split.right) === J(['B']) && o.split.ratio === 0.55, '⑭ the owner\'s record minus the closed editor = [A | B] still SPLIT (the right side shows its neighbour), the ratio kept — the pre-fix reconcile rebuilt it around the gone pane and flattened it to tabs', J(o));
+    leg(gateOf(o) && key(o) === key(local(owner, ['E'])) && key(o) === key({ tabs: ['A', 'B'], active: 0, layout: 'split', split: { pair: ['A', 'B'], ratio: 0.5, left: ['A'], right: ['B'] } }), '⑭ …its key IS the key of the chain the local close left (removeTab on the live chain) — the remote apply finds the local chain and changes nothing');
     leg(J(owner) === before, '⑭ …the record itself is never mutated (a clone)');
     const host = { tabs: ['E', 'A', 'B'], active: 0, layout: 'tabs', order: ['E', 'A', 'B'] };
     const h = run(() => wm_(host, ['E']));
-    leg(h && J(h.tabs) === J(['A', 'B']) && key(h) === key(local(host, ['E'])) && h.tabs[h.active] === 'A', '⑭ the closed window was the HOST ⇒ the next tab is promoted and shown, exactly as the local close did', J(h));
+    leg(gateOf(h) && J(h.tabs) === J(['A', 'B']) && key(h) === key(local(host, ['E'])) && h.tabs[h.active] === 'A', '⑭ the closed window was the HOST ⇒ the next tab is promoted and shown, exactly as the local close did', J(h));
     leg(run(() => wm_({ tabs: ['A', 'E'], active: 1, layout: 'split', split: { pair: ['A', 'E'], ratio: 0.5, left: ['A'], right: ['E'] } }, ['E'])) === null && run(() => wm_({ tabs: ['A', 'E'], active: 0 }, ['E'])) === null, '⑭ one tab left ⇒ null (no chain — the survivor stands alone, as locally)');
     const three = { tabs: ['A', 'B', 'C'], active: 1, layout: 'tabs', order: ['A', 'B', 'C'] };
     const t3 = run(() => wm_(three, ['C']));
-    leg(t3 && t3.tabs[t3.active] === 'B' && key(t3) === key(local(three, ['C'])), '⑭ a tabs chain minus a hidden member ⇒ the same window stays on show', J(t3));
+    leg(gateOf(t3) && t3.tabs[t3.active] === 'B' && key(t3) === key(local(three, ['C'])), '⑭ a tabs chain minus a hidden member ⇒ the same window stays on show', J(t3));
     leg(key(run(() => wm_(owner, ['X', 'Y']))) === key(owner), '⑭ ids that are not members change nothing (same key)');
     const two = run(() => wm_({ tabs: ['A', 'B', 'E', 'F'], active: 3, layout: 'split', split: { pair: ['A', 'F'], ratio: 0.5, left: ['A', 'B'], right: ['E', 'F'] } }, ['F', 'E']));
-    leg(two && two.layout === 'tabs' && J(two.tabs) === J(['A', 'B']) && two.tabs[two.active] === 'A', '⑭ two held closes empty the right side ⇒ the split ends, the left side\'s shown pane keeps the focus (removeTab\'s rule, in the order given)', J(two));
+    leg(gateOf(two) && two.layout === 'tabs' && J(two.tabs) === J(['A', 'B']) && two.tabs[two.active] === 'A', '⑭ two held closes empty the right side ⇒ the split ends, the left side\'s shown pane keeps the focus (removeTab\'s rule, in the order given)', J(two));
     leg(run(() => wm_(null, ['E'])) === null && run(() => wm_({}, ['E'])) === null, '⑭ no record ⇒ null');
   }
   // ⑮ THE TAB DRAG'S CLASSIFICATION (inc-muly2izg-cks3, userW on the Stage: "Browser 拖不出来"): the first 8 px pick
@@ -470,13 +470,13 @@ const MUTANTS = [
 ];
 for (const m of MUTANTS) {
   const found = SRC.includes(m.find);
-  ok(found, `control ${m.tag}: the patched line exists in the model (the control judges the current source)`);
+  ok(verdictOf(found), `control ${m.tag}: the patched line exists in the model (the control judges the current source)`);
   if (!found) continue;
   const Mod = M.load(MODEL, SRC.replace(m.find, m.repl), m.tag);
   const f = legs(Mod, { quiet: true });
-  ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its leg RED (${f.length} legs failed: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+  ok(verdictOf(f.some((n) => m.expect.test(n))), `control ${m.tag}: the patched copy turns its leg RED (${f.length} legs failed: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
 }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(verdictOf(r.pass), r.name, r.detail);
 
 // ⑮ WIRING (inc-muly2izg-cks3): the tab drag asks the ONE rule every move, with the host's title bar as the band, and a
 // reorder that tears off drops its marker and detaches at once — no second, inline classification left in tab-group.js
@@ -485,10 +485,10 @@ console.log('— ⑮ wiring: src/lib/tab-group.js classifies the tab drag throug
   const TG = fs.readFileSync(path.join(REPO, 'src/lib/tab-group.js'), 'utf8');
   const body = (() => { const i = TG.indexOf('  _setupTabDrag(tabEl, winId, chain) {'); const j = TG.indexOf('\n  _detachFromChain(', i); return i >= 0 && j > i ? TG.slice(i, j) : ''; })();
   ok(body.length > 2000, `⑮ _setupTabDrag found (${body.length} chars)`);
-  ok(/import \{[^}]*\btabDragMode\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG), '⑮ tab-group.js imports tabDragMode from the PURE model');
-  ok(/tabDragMode\(\{ mode, dx: e\.clientX - startX, dy: e\.clientY - startY, y: e\.clientY, band, reorderable: this\._stripReorderable\(\) \}\)/.test(body), '⑮ processMove asks tabDragMode with the travel, the pointer y, the band and the phone rule');
-  ok(/const band = mode === 'reorder' && hostNow && hostNow\._tabChain === chain \? hostNow\.titleBar\.getBoundingClientRect\(\) : null;/.test(body), '⑮ …the band is the host\'s title bar (the strip), read while a reorder runs');
-  ok(/if \(tore\) endReorder\(\);/.test(body) && /if \(!detached && \(tore \|\| Math\.abs\(e\.clientY - startY\) > 30\)\)/.test(body), '⑮ …a tear drops the insertion marker and detaches on that frame');
+  ok(verdictOf(/import \{[^}]*\btabDragMode\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG)), '⑮ tab-group.js imports tabDragMode from the PURE model');
+  ok(verdictOf(/tabDragMode\(\{ mode, dx: e\.clientX - startX, dy: e\.clientY - startY, y: e\.clientY, band, reorderable: this\._stripReorderable\(\) \}\)/.test(body)), '⑮ processMove asks tabDragMode with the travel, the pointer y, the band and the phone rule');
+  ok(verdictOf(/const band = mode === 'reorder' && hostNow && hostNow\._tabChain === chain \? hostNow\.titleBar\.getBoundingClientRect\(\) : null;/.test(body)), '⑮ …the band is the host\'s title bar (the strip), read while a reorder runs');
+  ok(gateOf(/if \(tore\) endReorder\(\);/.test(body)) && verdictOf(/if \(!detached && \(tore \|\| Math\.abs\(e\.clientY - startY\) > 30\)\)/.test(body)), '⑮ …a tear drops the insertion marker and detaches on that frame');
   ok(!/Math\.abs\(dx0\) > Math\.abs\(dy0\)/.test(body) && !/mode = .*\? 'reorder' : 'detach'/.test(body), '⑮ no inline first-8-px classification left beside it (the rule lives in one place)');
 }
 
@@ -518,13 +518,13 @@ console.log('— ⑰ wiring: src/lib/tab-group.js picks a default side through s
   const TG = fs.readFileSync(path.join(REPO, 'src/lib/tab-group.js'), 'utf8');
   const fnAt = (head) => { const i = TG.indexOf(head); const j = TG.indexOf('\n  },\n', i); return i >= 0 && j > i ? TG.slice(i, j) : ''; };
   const sa = fnAt('  splitActive(chain, { announce = false } = {}) {'), um = fnAt('  _afterUserMerge(chain, '), words = fnAt('  _splitBtnWords(chain) {');
-  ok(/import \{[^}]*\bsplitSideFor\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG), '⑰ tab-group.js imports splitSideFor from the PURE model');
+  ok(verdictOf(/import \{[^}]*\bsplitSideFor\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG)), '⑰ tab-group.js imports splitSideFor from the PURE model');
   const rt = fnAt('  restoreTabChain(tabIds, activeIndex, { layout, split, order } = {}) {'), fc = fnAt('  _focusChainFrame(focus) {');
-  ok(/import \{[^}]*\bchainFocusOf\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG) && /this\._focusChainFrame\(chainFocusOf\(chain, this\.activeWindowId\)\);/.test(rt) && /this\.windows\.get\(focus\.frame\)\.element\.classList\.add\('window-active'/.test(fc) && /this\.activeWindowId = focus\.active;/.test(fc) && rt.indexOf('chainFocusOf(') < rt.indexOf('this._applyChainLayout(chain)'), '⑰ B-9cd4 restoreTabChain marks the frame chainFocusOf names (_focusChainFrame), before the layout syncs the hidden views', rt.slice(0, 200));
-  ok(/const at = splitSideFor\(chain, anchor\.id, guest\.id\);/.test(sa) && /side: at \? at\.side : 'right'/.test(sa) && !/side: 'right', announce/.test(sa), '⑰ splitActive (the button, `v`, the merge toast) takes the side from splitSideFor — no literal right left', sa.slice(0, 300));
-  ok(/splitSideFor\(chain, anchor\.id, draggedWin\.id\)/.test(um) && /side: at\.side, announce: true/.test(um), '⑰ the merge drop under mergeDropLayout = split (F3) keeps the dragged window on the side it was dropped on', um.slice(0, 300));
-  ok(/splitSideFor\(chain, chain\.tabs\[chain\.active\], partner\?\.id\)\?\.side === 'left'/.test(words) && /\{name\} on the left, this tab on the right/.test(words), '⑰ the button\'s words name the side the click WILL give (a partner on the left is named on the left)', words);
+  ok(gateOf(/import \{[^}]*\bchainFocusOf\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG)) && gateOf(/this\._focusChainFrame\(chainFocusOf\(chain, this\.activeWindowId\)\);/.test(rt)) && gateOf(/this\.windows\.get\(focus\.frame\)\.element\.classList\.add\('window-active'/.test(fc)) && gateOf(/this\.activeWindowId = focus\.active;/.test(fc)) && rt.indexOf('chainFocusOf(') < rt.indexOf('this._applyChainLayout(chain)'), '⑰ B-9cd4 restoreTabChain marks the frame chainFocusOf names (_focusChainFrame), before the layout syncs the hidden views', rt.slice(0, 200));
+  ok(gateOf(/const at = splitSideFor\(chain, anchor\.id, guest\.id\);/.test(sa)) && gateOf(/side: at \? at\.side : 'right'/.test(sa)) && !/side: 'right', announce/.test(sa), '⑰ splitActive (the button, `v`, the merge toast) takes the side from splitSideFor — no literal right left', sa.slice(0, 300));
+  ok(gateOf(/splitSideFor\(chain, anchor\.id, draggedWin\.id\)/.test(um)) && verdictOf(/side: at\.side, announce: true/.test(um)), '⑰ the merge drop under mergeDropLayout = split (F3) keeps the dragged window on the side it was dropped on', um.slice(0, 300));
+  ok(gateOf(/splitSideFor\(chain, chain\.tabs\[chain\.active\], partner\?\.id\)\?\.side === 'left'/.test(words)) && verdictOf(/\{name\} on the left, this tab on the right/.test(words)), '⑰ the button\'s words name the side the click WILL give (a partner on the left is named on the left)', words);
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail || realFailed.length ? 1 : 0);
+process.exit(fail || realFailed.length ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

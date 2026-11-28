@@ -30,7 +30,7 @@ const require = createRequire(import.meta.url);
 const T0 = Date.now();
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 1500) : '')); } };
 const waitFor = async (fn, ms = 20000, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch { } await sleep(step); } return null; };
 
 // ── the fake `ssh`: the machine the graduation installs onto ──
@@ -107,7 +107,7 @@ try {
   console.log('① pairing via the route, the device started the installer\'s way (dial.json + an argless daemon)');
   const p1 = (await api('POST', '/api/device/dial-pair', { deviceId: 'sink1', base: BASE })).j;
   note(p1.dialToken, p1.hostToken);
-  ok(/^vsdt_[0-9a-f]{36}$/.test(p1.dialToken || '') && /^vsht_[0-9a-f]{48}$/.test(p1.hostToken || ''), 'the route minted a dial token + a host token (the sentinels)', { d: p1.dialToken, h: p1.hostToken });
+  ok(gateOf(/^vsdt_[0-9a-f]{36}$/.test(p1.dialToken || '')) && verdictOf(/^vsht_[0-9a-f]{48}$/.test(p1.hostToken || '')), 'the route minted a dial token + a host token (the sentinels)', { d: p1.dialToken, h: p1.hostToken });
   const D1 = path.join(devDir, 'sink1');
   fs.mkdirSync(path.join(D1, 'state'), { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(D1, 'state', 'token'), p1.hostToken, { mode: 0o600 });
@@ -117,11 +117,11 @@ try {
   const row1 = await waitFor(async () => { const h = await W.hostRow('sink1'); return h && h.online ? h : null; }, 20000);
   ok(!!row1, 'the device dialed in (the row reads online)');
   const st = await api('GET', `/api/hosts/${row1 && row1.id}/dial-status`);
-  ok(st.status === 200 && st.j.status && st.j.status.last && st.j.status.last.outcome === 'connected', 'the dial-status route answers the device\'s own record', st);
+  ok(st.status === 200 && gateOf(st.j.status) && gateOf(st.j.status.last) && st.j.status.last.outcome === 'connected', 'the dial-status route answers the device\'s own record', st);
   // a knock carrying the REAL dial token under a name that is not its pairing: the refusal frame echoes nothing
   const wsMin = require(path.join(REPO, 'src/agentd/ws-min.js'));
   const knock = await new Promise((resolve) => { const c = wsMin.connect(`${BASE.replace('http', 'ws')}/api/device-dial?device=not-sink1`, { headers: { 'x-vibespace-dial-token': p1.dialToken } }); c.on('error', (e) => resolve({ status: e.status, refusal: e.refusal, body: String(e.body || '') })); c.on('open', () => { c.close?.(); resolve({ opened: true }); }); setTimeout(() => resolve({ timeout: true }), 5000); });
-  ok(knock.status === 401 && knock.body && !knock.body.includes(p1.dialToken.slice(5)), 'a knock with the real token under another name: 401, the frame carries no token', knock);
+  ok(knock.status === 401 && gateOf(knock.body) && !knock.body.includes(p1.dialToken.slice(5)), 'a knock with the real token under another name: 401, the frame carries no token', knock);
 
   // ── ② "Generate a new command" with the in-place push (B8's opt-in) ──
   console.log('② "Generate a new command" + the in-place push');
@@ -130,26 +130,26 @@ try {
   ok(p2.updatedInPlace === true, 'the rotated dial config was pushed to the connected device', { updatedInPlace: p2.updatedInPlace, inPlace: p2.inPlace });
   const pushed = await waitFor(() => { try { return JSON.parse(fs.readFileSync(path.join(D1, 'state', 'dial.json'), 'utf8')).token === p2.dialToken; } catch { return false; } }, 5000);
   const mode1 = fs.statSync(path.join(D1, 'state', 'dial.json')).mode & 0o777;
-  ok(pushed && mode1 === 0o600, `the device's dial.json holds the new token, mode ${mode1.toString(8)} (0600)`);
-  ok(serverLog.join('').includes("[device] 'sink1': the rotated dial config pushed in place (place-secret)"), 'verify-r3 (the door census): the push went through the device\'s place-secret op (0600 at open, atomic) — never fsWrite-then-chmod', serverLog.join('').split('\n').filter((l) => /pushed in place/.test(l)));
+  ok(gateOf(pushed) && mode1 === 0o600, `the device's dial.json holds the new token, mode ${mode1.toString(8)} (0600)`);
+  ok(verdictOf(serverLog.join('').includes("[device] 'sink1': the rotated dial config pushed in place (place-secret)")), 'verify-r3 (the door census): the push went through the device\'s place-secret op (0600 at open, atomic) — never fsWrite-then-chmod', serverLog.join('').split('\n').filter((l) => /pushed in place/.test(l)));
   const back = await waitFor(async () => { const h = await W.hostRow('sink1'); return h && h.online && h.dial && h.dial.lastAccept ? h : null; }, 45000);
   ok(!!back, 'the device dialed back in on the pushed token');
 
   // ── ③ "Upgrade to dial-out" (graduate-dial) over the fake ssh ──
   console.log('③ graduate-dial over a fake ssh on the server\'s PATH');
   const add = await api('POST', '/api/hosts', { name: 'gbox', user: 'u', host: 'gbox.invalid' });
-  ok(add.status === 200 && add.j.id, 'an ssh machine row', add);
+  ok(add.status === 200 && verdictOf(add.j.id), 'an ssh machine row', add);
   const gr = await api('POST', `/api/hosts/${add.j.id}/graduate-dial`, { base: BASE });
   ok(gr.status === 200 && gr.j.success === true && gr.j.dialedIn === true, 'the graduation installed the device (the fake machine) and it dialed in', gr);
   const calls = fs.readFileSync(path.join(FAKE, 'calls.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const inst = calls.find((c) => /^bash -s\b/.test(c.cmd));
   const parsed = fs.existsSync(path.join(DEV2, 'parsed')) ? fs.readFileSync(path.join(DEV2, 'parsed'), 'utf8').split('\n') : [];
   note(parsed[1], parsed[2]);
-  ok(/^vsdt_/.test(parsed[1] || '') && /^vsht_/.test(parsed[2] || '') && /\/api\/device-dial\?device=grad-/.test(parsed[0] || ''), 'the installer\'s own argument parsing received the dial url + both tokens', parsed);
+  ok(gateOf(/^vsdt_/.test(parsed[1] || '')) && gateOf(/^vsht_/.test(parsed[2] || '')) && verdictOf(/\/api\/device-dial\?device=grad-/.test(parsed[0] || '')), 'the installer\'s own argument parsing received the dial url + both tokens', parsed);
   const leakedArgv = calls.filter((c) => TOKEN_RE.test(c.argv.join(' '))).map((c) => c.cmd.slice(0, 200));
   TOKEN_RE.lastIndex = 0;
-  ok(inst && leakedArgv.length === 0, 'verify-r3 B-grad: NO ssh invocation the hub made carries a token in its argv (the local ssh\'s argv and the remote shell\'s command line are readable by every user of each machine)', leakedArgv);
-  ok(inst && /^set -- /.test(inst.input) && inst.input.includes(parsed[1]) && inst.input.includes(parsed[2]), 'verify-r3 B-grad: the tokens rode the ssh STDIN (a `set --` line bash reads before the installer)', inst && inst.input.slice(0, 200));
+  ok(gateOf(inst) && leakedArgv.length === 0, 'verify-r3 B-grad: NO ssh invocation the hub made carries a token in its argv (the local ssh\'s argv and the remote shell\'s command line are readable by every user of each machine)', leakedArgv);
+  ok(gateOf(inst) && gateOf(/^set -- /.test(inst.input)) && gateOf(inst.input.includes(parsed[1])) && verdictOf(inst.input.includes(parsed[2])), 'verify-r3 B-grad: the tokens rode the ssh STDIN (a `set --` line bash reads before the installer)', inst && inst.input.slice(0, 200));
   // lane mirror-331-reds-security: THE SSH ROAD'S ENV, at runtime — every ssh the hub spawned through these flows got
   // hosts.sshEnv() (src/agent-env.js serviceEnv + SSH_ENV_KEEP: judged by that helper itself) and nothing of the hub's
   // own (the planted VIBESPACE_SINKS_CANARY), no token in a value: a multiplexed call's ssh forks the ControlMaster,
@@ -159,7 +159,7 @@ try {
     const env = c.env || {}, kept = AE.serviceEnv(env, { keep: AE.SSH_ENV_KEEP }), text = JSON.stringify(env);
     return { cmd: String(c.cmd).slice(0, 60), extra: Object.keys(env).filter((k) => !(k in kept)), canary: text.includes(HUB_CANARY) || 'VIBESPACE_SINKS_CANARY' in env, token: /vs[dh]t_[0-9a-f]{16,}/.test(text) };
   }).filter((x) => x.extra.length || x.canary || x.token);
-  ok(inst && calls.length >= 2 && calls.every((c) => c.env && typeof c.env === 'object' && c.env.PATH) && envBad.length === 0, `the ssh road's env: every ssh the hub spawned (${calls.length}) got the ssh allowlist only — no hub name (the planted canary), no token in a value (the tokens ride stdin; a ControlMaster keeps its env 10 min)`, envBad);
+  ok(gateOf(inst) && calls.length >= 2 && gateOf(calls.every((c) => c.env && typeof c.env === 'object' && c.env.PATH)) && envBad.length === 0, `the ssh road's env: every ssh the hub spawned (${calls.length}) got the ssh allowlist only — no hub name (the planted canary), no token in a value (the tokens ride stdin; a ControlMaster keeps its env 10 min)`, envBad);
 
   // ── ④ the sinks ──
   console.log('④ the sinks');
@@ -172,9 +172,9 @@ try {
   const argvHits = S.filter((t) => seenArgv.has(t)).map((t) => ({ t: t.slice(0, 9), where: seenArgv.get(t) }));
   ok(argvHits.length === 0, 'no process on this machine showed a sentinel in its argv (sampled every 40 ms through every flow)', argvHits);
   const log = serverLog.join('');
-  ok(S.every((t) => !log.includes(t)), 'the hub\'s journal (stdout + stderr) names no sentinel', S.filter((t) => log.includes(t)).map((t) => t.slice(0, 9)));
+  ok(verdictOf(S.every((t) => !log.includes(t))), 'the hub\'s journal (stdout + stderr) names no sentinel', S.filter((t) => log.includes(t)).map((t) => t.slice(0, 9)));
   const fr = frames.join('\n');
-  ok(frames.length > 0 && S.every((t) => !fr.includes(t)), `no ws broadcast carries a sentinel (${frames.length} frames)`, S.filter((t) => fr.includes(t)).map((t) => t.slice(0, 9)));
+  ok(frames.length > 0 && verdictOf(S.every((t) => !fr.includes(t))), `no ws broadcast carries a sentinel (${frames.length} frames)`, S.filter((t) => fr.includes(t)).map((t) => t.slice(0, 9)));
   // every file under the hub's data/: hashes only, except the host-token store
   const walk = (d, out = []) => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return out; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, out); else if (e.isFile()) out.push(p); } return out; };
   const hubFiles = walk(path.join(wt, 'data'));
@@ -184,10 +184,10 @@ try {
     for (const t of S) if (b.includes(t)) (/\/data\/agentd\/host-[\w-]+\.token$/.test(f) && t.startsWith('vsht_') ? holders : leaks).push({ f: path.relative(wt, f), t: t.slice(0, 9), mode: (fs.statSync(f).mode & 0o777).toString(8) });
   }
   ok(leaks.length === 0, `no file under the hub's data/ holds a sentinel but the host-token store (${hubFiles.length} files)`, leaks);
-  ok(holders.length >= 1 && holders.every((h) => h.mode === '600'), 'the host-token store holds the host tokens at 0600', holders);
+  ok(holders.length >= 1 && verdictOf(holders.every((h) => h.mode === '600')), 'the host-token store holds the host tokens at 0600', holders);
   const hostsJson = fs.readFileSync(path.join(wt, 'data', 'hosts.json'), 'utf8');
   const hashOf = (t) => require('crypto').createHash('sha256').update(t).digest('hex');
-  ok(hostsJson.includes(hashOf(p2.dialToken)) && !hostsJson.includes(hashOf(p1.dialToken)), 'hosts.json holds the CURRENT dial token\'s hash (the rotated one is gone)');
+  ok(gateOf(hostsJson.includes(hashOf(p2.dialToken))) && !hostsJson.includes(hashOf(p1.dialToken)), 'hosts.json holds the CURRENT dial token\'s hash (the rotated one is gone)');
   // the device's files: dial.json + state/token are the holders (0600); nothing else
   const devLeaks = [], devHolders = [];
   for (const root of [D1, DEV2]) for (const f of walk(root)) {
@@ -197,15 +197,15 @@ try {
     for (const t of S) if (b.includes(t)) (/^state\/(dial\.json|token)$/.test(rel) ? devHolders : devLeaks).push({ f: rel, t: t.slice(0, 9), mode: (fs.statSync(f).mode & 0o777).toString(8) });
   }
   ok(devLeaks.length === 0, 'the device\'s own files (its log, its dial history, its socket witness, its sessions) hold no token', devLeaks);
-  ok(devHolders.length >= 4 && devHolders.every((h) => h.mode === '600'), 'state/dial.json + state/token hold them at 0600', devHolders);
+  ok(devHolders.length >= 4 && verdictOf(devHolders.every((h) => h.mode === '600')), 'state/dial.json + state/token hold them at 0600', devHolders);
   const st2 = await api('GET', `/api/hosts/${row1 && row1.id}/dial-status`);
-  ok(S.every((t) => !JSON.stringify(st2.j).includes(t)), 'the dial-status answers name no token');
+  ok(verdictOf(S.every((t) => !JSON.stringify(st2.j).includes(t))), 'the dial-status answers name no token');
 
   // ── ⑤ THE VAULT (lane vault-e2e-password-fix-r2, design q-042 D1): the host tokens become its entries ──
   console.log('⑤ the vault set up: the host-token store is sealed; LOCKED ⇒ a pairing is refused by name');
   const SO = { 'sec-fetch-site': 'same-origin' };   // a person on this page (the vault's doors are the page's only)
   const su = await api('POST', '/api/vault/setup', { password: 'sinks second password 1' }, SO);
-  ok(su.status === 200 && su.j.ok, 'the second password set (the setup + its open sweep)', { status: su.status, code: su.j && su.j.code });
+  ok(su.status === 200 && verdictOf(su.j.ok), 'the second password set (the setup + its open sweep)', { status: su.status, code: su.j && su.j.code });
   const leaks2 = [];
   for (const f of walk(path.join(wt, 'data'))) {
     let b = ''; try { b = fs.readFileSync(f, 'latin1'); } catch { continue; }
@@ -217,10 +217,10 @@ try {
   const hashBefore = fs.readFileSync(path.join(wt, 'data', 'hosts.json'), 'utf8');
   const lk = await api('POST', '/api/vault/lock', {}, SO);
   const pr = await api('POST', '/api/device/dial-pair', { deviceId: 'sink1', base: BASE });
-  ok(lk.status === 200 && pr.status === 423 && pr.j.code === 'vault_locked' && /the vault is locked/.test(pr.j.error || '') && fs.readFileSync(path.join(wt, 'data', 'hosts.json'), 'utf8') === hashBefore,
+  ok(lk.status === 200 && pr.status === 423 && pr.j.code === 'vault_locked' && gateOf(/the vault is locked/.test(pr.j.error || '')) && fs.readFileSync(path.join(wt, 'data', 'hosts.json'), 'utf8') === hashBefore,
     'LOCKED: "Generate a new command" is refused BY NAME (423 vault_locked) before a dial token is minted or the pairing rotated', { lock: lk.status, pair: pr.status, code: pr.j && pr.j.code });
   const log2 = serverLog.join('');
-  ok(S.every((t) => !log2.includes(t)), 'the hub\'s journal still names no sentinel after the seal and the lock');
+  ok(verdictOf(S.every((t) => !log2.includes(t))), 'the hub\'s journal still names no sentinel after the seal and the lock');
 } catch (e) {
   fail++; console.error('  ✗ threw:', e.stack || e.message);
 } finally {
@@ -230,4 +230,4 @@ try {
   W.cleanup();
 }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

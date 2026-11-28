@@ -54,7 +54,7 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const BL = require(path.join(REPO, 'src/bridge-liveness.js'));
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -202,11 +202,11 @@ setTimeout(() => {
   const old = JSON.parse(fs.readFileSync(path.join(ROOT, 'old.json'), 'utf8'));
   await sleep(2500);
   const clientPts = ptsIndexOfStdout(old.client);
-  ok(clientPts != null && ptmxIndexes(old.holder).includes(clientPts),
+  ok(clientPts != null && verdictOf(ptmxIndexes(old.holder).includes(clientPts)),
     `① THE LEAK: a child spawned AFTER the attach holds the attach's pty master (holder ${old.holder} holds ptmx tty-index ${clientPts}) — node-pty's forkpty master has no FD_CLOEXEC`,
     `holder ptmx: ${JSON.stringify(ptmxIndexes(old.holder))}, client pts: ${clientPts}`);
   const pp = ppidOf(old.client);
-  ok(alive(old.client) && pp !== null,
+  ok(gateOf(alive(old.client)) && pp !== null,
     `② THE ORPHAN: the old server died by SIGKILL and its dtach -a client lives on (pid ${old.client}, reparented to ${pp} ${commOf(pp)}) — the master it writes to never hung up`);
   const v = BL.orphanAttachVerdict({ argv: argvOf(old.client), ppid: pp, parentComm: commOf(pp), ttyNr: ttyNrOf(old.client), socketsDir: ROOT, selfPid: process.pid });
   ok(v.orphan === true && v.socket === sock, `…and the PURE verdict on its REAL /proc row says orphan (${v.why})`, JSON.stringify(v));
@@ -222,7 +222,7 @@ setTimeout(() => {
   // THE CURE'S ORDER: the attach is already connected — end the orphan now.
   process.kill(old.client, 'SIGKILL');
   const flowed = await until(() => fresh.maxN() > frozenAt + 50, 5000);
-  ok(flowed, `⑤ attach FIRST, then end the orphan: the stuck attach is freed (records ${fresh.minN()}…${fresh.maxN()}, the writer was frozen at ${frozenAt})`);
+  ok(verdictOf(flowed), `⑤ attach FIRST, then end the orphan: the stuck attach is freed (records ${fresh.minN()}…${fresh.maxN()}, the writer was frozen at ${frozenAt})`);
   // The master held ONE read (≤ 4096 bytes) when the orphan died and drops it — that read is OLDER than everything still
   // in the pty's buffer, so what the writer wrote up to the freeze and after it arrives whole and in order.
   ok(fresh.minN() > 0 && fresh.minN() <= frozenAt && fresh.gaps().length <= 1,
@@ -261,7 +261,7 @@ setTimeout(() => {
   await sleep(2500);
   const typed = (mark) => { try { return (fs.readFileSync(INLOG, 'utf8').match(new RegExp(mark, 'g')) || []).length; } catch { return 0; } };
   const c1 = attach(sock); await sleep(1000);
-  ok(c1.bytes() <= 6 && alive(old3.client), `⑥ setup: a fresh attach is connected but not attached (${c1.bytes()} bytes) while the orphan ${old3.client} holds the master — the stuck-master shape`);
+  ok(c1.bytes() <= 6 && verdictOf(alive(old3.client)), `⑥ setup: a fresh attach is connected but not attached (${c1.bytes()} bytes) while the orphan ${old3.client} holds the master — the stuck-master shape`);
   c1.p.write('VSTYPED-once\r'); await sleep(2000);           // the detector's 5 s: no ack, no byte…
   c1.p.write('VSTYPED-two\r'); c1.p.write('{"type":"_frame_file","path":"/x/VSPTR.json"}\r'); await sleep(3000);   // verify r2: a second message and an image paste's pointer line typed INSIDE the window
   ok(typed('VSTYPED-once') === 0 && typed('VSTYPED-two') === 0 && typed('VSPTR') === 0, '⑥ setup: 5 s later none of the three inputs has reached the program (the master never read the unattached client)');
@@ -272,7 +272,7 @@ setTimeout(() => {
   if (!(await until(() => typed('VSTYPED-once') >= 1 && typed('VSTYPED-two') >= 1 && typed('VSPTR') >= 1, 15000))) ok(false, '⑥ harness: the dead client\'s queued inputs never reached the program within 15 s of the heal');
   ok(typed('VSTYPED-once') === 1, `⑥ the queued input landed ONCE through the dead client's socket queue (${typed('VSTYPED-once')}×) — nothing to re-send`);
   const inOrder = (() => { try { return fs.readFileSync(INLOG, 'utf8').replace(/\r/g, '\n'); } catch { return ''; } })();
-  ok(typed('VSTYPED-two') === 1 && typed('VSPTR') === 1 && /VSTYPED-once\nVSTYPED-two\n\{"type":"_frame_file","path":"\/x\/VSPTR.json"\}\n/.test(inOrder),
+  ok(typed('VSTYPED-two') === 1 && typed('VSPTR') === 1 && verdictOf(/VSTYPED-once\nVSTYPED-two\n\{"type":"_frame_file","path":"\/x\/VSPTR.json"\}\n/.test(inOrder)),
     `⑥ …and so did the second message and the frame-file pointer line, in order, once each (two=${typed('VSTYPED-two')}× ptr=${typed('VSPTR')}×) — one image, not two`, JSON.stringify(inOrder.slice(0, 160)));
   // PLACED (law 1): the program HELD (its block flag: it reads no stdin) — the OLD 1.5 s wait reads the re-send not landed
   fs.writeFileSync(RAWBLOCK, '1');
@@ -319,8 +319,8 @@ setTimeout(() => {
     try { b2.p.write('VSSENT-B\r'); } catch { }   // an ORDER FACT: everything typed before it lands before it
     if (!(await until(() => sentB(), 15000))) ok(false, `⑦ harness (${tag}): the order mark typed after the hold never reached the program within 15 s`);
     const streams = await until(() => b2.maxN() > 0, 15000);
-    if (!resend) ok(quietSetup && typedB() === 1 && streams, `⑦ a HEALTHY master, the wrapper blocked (writer ${f1}→${f2}, nothing typed reached it in 5 s): the fix's sequence lands the input ONCE (${typedB()}×) and the new attach streams`);
-    else ok(quietSetup && typedB() === 2, `⑦ CONTROL: the old re-send through the new attach lands it TWICE here too (${typedB()}×) — the rule is right in both shapes`);
+    if (!resend) ok(gateOf(quietSetup) && typedB() === 1 && verdictOf(streams), `⑦ a HEALTHY master, the wrapper blocked (writer ${f1}→${f2}, nothing typed reached it in 5 s): the fix's sequence lands the input ONCE (${typedB()}×) and the new attach streams`);
+    else ok(gateOf(quietSetup) && typedB() === 2, `⑦ CONTROL: the old re-send through the new attach lands it TWICE here too (${typedB()}×) — the rule is right in both shapes`);
     b2.kill(); for (const p of attachClientsOf(sockB)) { try { process.kill(p, 'SIGKILL'); } catch { } }
     try { execFileSync('pkill', ['-9', '-f', sockB]); } catch { }
   }
@@ -341,7 +341,7 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
     'const replay = takeHeldInputs(session);', 'const replay = resend != null ? [resend] : [];', "src/server/session-stdout.js");
   const preUI = editAnchor(UI_SRC, /(Broken pty stdin detected \(\$\{neverSpoke[^\n]*?\}\))`\);/, '$1`, { resend: neverSpoke ? payloadLine : null });', "src/server/user-input.js");
   const noPaint = editAnchor(SS_SRC, /^\s*repaintFromBuf\(id, session\);[^\n]*\n/m, '', "src/server/session-stdout.js");
-  ok(/resend != null \? \[resend\]/.test(preSS) && /\{ resend: neverSpoke \? payloadLine : null \}/.test(preUI) && noPaint !== SS_SRC, 'control setup: the pre-fix copies re-send the detector\'s OWN input only (b924041f\'s rule), the no-repaint copy lost exactly the healer\'s repaint line');
+  ok(gateOf(/resend != null \? \[resend\]/.test(preSS)) && gateOf(/\{ resend: neverSpoke \? payloadLine : null \}/.test(preUI)) && noPaint !== SS_SRC, 'control setup: the pre-fix copies re-send the detector\'s OWN input only (b924041f\'s rule), the no-repaint copy lost exactly the healer\'s repaint line');
   const BUFS = path.join(ROOT, 'c20d-bufs'); fs.mkdirSync(BUFS, { recursive: true });
   const makeEng = (mod) => {
     const activeSessions = new Map(), frames = [];
@@ -381,10 +381,10 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
     return out;
   };
   const fx = await twoMessages(require(path.join(REPO, 'src/server/session-stdout.js')), require(path.join(REPO, 'src/server/user-input.js')), 'fix');
-  ok(fx.sent && fx.deadGot === 2 && fx.healed, `⑧ setup: both messages went into a bridge that never spoke (${fx.deadGot} writes swallowed) and the detector healed it`, JSON.stringify(fx));
-  ok(fx.one === 1 && fx.two === 1 && fx.inOrder, `⑧ B-c20d: the heal replays EVERY input the never-spoke bridge was handed — the second message typed inside the first one's 5 s lands too, once each, in order (one=${fx.one}× two=${fx.two}×)`, JSON.stringify(fx));
+  ok(gateOf(fx.sent) && fx.deadGot === 2 && verdictOf(fx.healed), `⑧ setup: both messages went into a bridge that never spoke (${fx.deadGot} writes swallowed) and the detector healed it`, JSON.stringify(fx));
+  ok(fx.one === 1 && fx.two === 1 && verdictOf(fx.inOrder), `⑧ B-c20d: the heal replays EVERY input the never-spoke bridge was handed — the second message typed inside the first one's 5 s lands too, once each, in order (one=${fx.one}× two=${fx.two}×)`, JSON.stringify(fx));
   const ct = await twoMessages(MUT.load('src/server/session-stdout.js', preSS, 'pre'), MUT.load('src/server/user-input.js', preUI, 'pre'), 'ctl');
-  ok(ct.sent && ct.healed && ct.one === 1 && ct.two === 0, `⑧ CONTROL (b924041f's rule): the detector re-sends only its own input — the second message is LOST (one=${ct.one}× two=${ct.two}×)`, JSON.stringify(ct));
+  ok(gateOf(ct.sent) && gateOf(ct.healed) && ct.one === 1 && ct.two === 0, `⑧ CONTROL (b924041f's rule): the detector re-sends only its own input — the second message is LOST (one=${ct.one}× two=${ct.two}×)`, JSON.stringify(ct));
   const repaint = async (SSmod, tag) => {
     const sock = path.join(ROOT, 'cw-c20dt-' + tag);
     execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, path.join(ROOT, 'c20dt-' + tag + '.prog'), '600000']);
@@ -404,9 +404,9 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
     return out;
   };
   const rp = await repaint(require(path.join(REPO, 'src/server/session-stdout.js')), 'fix');
-  ok(rp.healed && rp.painted && rp.buffer, '⑨ B-c20d: a terminal heal repaints the .buf tail to its clients (clear + the hole the dead client swallowed) and re-seeds session.buffer — no reload needed', JSON.stringify(rp));
+  ok(gateOf(rp.healed) && gateOf(rp.painted) && verdictOf(rp.buffer), '⑨ B-c20d: a terminal heal repaints the .buf tail to its clients (clear + the hole the dead client swallowed) and re-seeds session.buffer — no reload needed', JSON.stringify(rp));
   const rc = await repaint(MUT.load('src/server/session-stdout.js', noPaint, 'nopaint'), 'ctl');
-  ok(rc.healed && !rc.painted && !rc.buffer, '⑨ CONTROL: without the repaint the clients keep the hole until a reload (the pre-fix healer)', JSON.stringify(rc));
+  ok(gateOf(rc.healed) && !rc.painted && !rc.buffer, '⑨ CONTROL: without the repaint the clients keep the hole until a reload (the pre-fix healer)', JSON.stringify(rc));
   // ⑩ verify r1: a never-spoke bridge that EXITS on its own (a device link that died before its preamble) — the onExit
   // ladder re-attaches at 1 s, and the inputs it was holding ride that re-attach. CONTROL: a copy without the carry (the
   // lane's first cut) re-attaches and the held message is gone.
@@ -435,9 +435,9 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
     return out;
   };
   const xf = await exitLadder(require(path.join(REPO, 'src/server/session-stdout.js')), 'fix');
-  ok(xf.sent && xf.reattached && xf.one === 1, `⑩ verify r1: a never-spoke bridge that EXITS hands its held input to the onExit ladder's re-attach — it lands once (one=${xf.one}×)`, JSON.stringify(xf));
+  ok(gateOf(xf.sent) && gateOf(xf.reattached) && xf.one === 1, `⑩ verify r1: a never-spoke bridge that EXITS hands its held input to the onExit ladder's re-attach — it lands once (one=${xf.one}×)`, JSON.stringify(xf));
   const xc = await exitLadder(MUT.load('src/server/session-stdout.js', noCarry, 'nocarry'), 'ctl');
-  ok(SS_SRC.length - noCarry.length > 200 && xc.sent && xc.reattached && xc.one === 0, `⑩ CONTROL (no carry — the lane's first cut): the ladder re-attaches and the held message is LOST (one=${xc.one}×)`, JSON.stringify(xc));
+  ok(SS_SRC.length - noCarry.length > 200 && gateOf(xc.sent) && gateOf(xc.reattached) && xc.one === 0, `⑩ CONTROL (no carry — the lane's first cut): the ladder re-attaches and the held message is LOST (one=${xc.one}×)`, JSON.stringify(xc));
   // ⑪ verify r1: a heal racing the bridge's first byte — a real attach connects and forwards the input during a 6 s
   // event-loop stall, and the loop's next turn runs the TIMERS phase before the poll phase that reads its preamble.
   // The detector's confirm stage judges after that poll phase. CONTROL: a copy that judges at once replays the input
@@ -464,9 +464,9 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
     return out;
   };
   const sf = await stall(require(path.join(REPO, 'src/server/user-input.js')), 'fix');
-  ok(sf.sent && !sf.healed && sf.one === 1, `⑪ verify r1: after a 6 s stall the detector judges once the bridge's preamble is read — no heal, the input reaches the CLI once (one=${sf.one}×)`, JSON.stringify(sf));
+  ok(gateOf(sf.sent) && !sf.healed && sf.one === 1, `⑪ verify r1: after a 6 s stall the detector judges once the bridge's preamble is read — no heal, the input reaches the CLI once (one=${sf.one}×)`, JSON.stringify(sf));
   const sc = await stall(MUT.load('src/server/user-input.js', noConfirm, 'noconfirm'), 'ctl');
-  ok(noConfirm !== UI_SRC && /\}\)\(\); \}, 5000\);/.test(noConfirm) && sc.sent && sc.healed && sc.one === 2, `⑪ CONTROL (judged in the timers phase, no confirm): the heal replays an input the bridge already forwarded — the CLI got it TWICE (one=${sc.one}×)`, JSON.stringify(sc));
+  ok(noConfirm !== UI_SRC && gateOf(/\}\)\(\); \}, 5000\);/.test(noConfirm)) && gateOf(sc.sent) && gateOf(sc.healed) && sc.one === 2, `⑪ CONTROL (judged in the timers phase, no confirm): the heal replays an input the bridge already forwarded — the CLI got it TWICE (one=${sc.one}×)`, JSON.stringify(sc));
 }
 
 // ═══ the worktree server + the stub CLI (§2–§4) ═══════════════════════════════
@@ -621,17 +621,17 @@ console.log('\n§2 a real server, a stub CLI streaming stamped records, SIGKILL 
 let SID = null, SOCK = null;
 e2e: {
   setMinutes(3);
-  let A = boot(); if (!ok(await ready(A), 'boot A: the post-fix worktree server is Ready', A.jr.slice(-1500))) break e2e;
+  let A = boot(); if (!ok(verdictOf(await ready(A)), 'boot A: the post-fix worktree server is Ready', A.jr.slice(-1500))) break e2e;
   let c1 = await connect();
   c1.ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: PROJ, cols: 120, rows: 30, reqId: 'r1' }));
   const created = await until(() => c1.frames.find((f) => f.type === 'created'), 20000);
   SID = created ? c1.frames.find((f) => f.type === 'created').sessionId : null;
   if (!ok(!!SID, `setup: a chat session was created (${SID})`, JSON.stringify(c1.frames.slice(0, 20)))) break e2e;
   c1.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
-  ok(await until(() => c1.maxRec >= 40, 20000), `setup: the server streams the stub's records live (${c1.maxRec} seen)`);
+  ok(verdictOf(await until(() => c1.maxRec >= 40, 20000)), `setup: the server streams the stub's records live (${c1.maxRec} seen)`);
   SOCK = path.join(sockDir, fs.readdirSync(sockDir).find((f) => f.startsWith('cw-')));
   const env = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'stub.env'), 'utf8')); } catch { return {}; } })();
-  ok(env.otel && env.api && env.token, `setup: the CLI was spawned with the OTel exporter + the agent API (its witness and its job door) — ${JSON.stringify(env)}`);
+  ok(gateOf(env.otel) && gateOf(env.api) && verdictOf(env.token), `setup: the CLI was spawned with the OTel exporter + the agent API (its witness and its job door) — ${JSON.stringify(env)}`);
   // the long-lived process the server spawns AFTER the attach — a Background Work job, as in production
   const metaFile = fs.readdirSync(path.join(wt, 'data', 'session-meta')).find((f) => f.startsWith(path.basename(SOCK)));
   const token = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'session-meta', metaFile), 'utf8')).agentToken;
@@ -656,32 +656,32 @@ e2e: {
     ok(!!st0 && pts0 != null && !ptmxIndexes(st0).includes(pts0), `THE NEW LAW (r5405): the hub's starter ${st0} (found by its argv; its birth not assumed) holds no master of the attach (tty ${pts0})`);
     const jp = await startHolder('plain-a');
     const named = jp && jp.job ? await markedOf(jp.job.id) : [];
-    ok(named.length > 0 && named.every((p) => !ptmxIndexes(p).includes(pts0)), `THE NEW LAW: a PLAIN job started through the starter holds no master of the attach — its own processes, named by its mark (${jp && jp.job && jp.job.id}: ${named.map((p) => `${p} ${commOf(p)}`).join(', ') || 'none found'}), hold none of tty ${pts0}`);
+    ok(named.length > 0 && verdictOf(named.every((p) => !ptmxIndexes(p).includes(pts0))), `THE NEW LAW: a PLAIN job started through the starter holds no master of the attach — its own processes, named by its mark (${jp && jp.job && jp.job.id}: ${named.map((p) => `${p} ${commOf(p)}`).join(', ') || 'none found'}), hold none of tty ${pts0}`);
     const anchor0 = stubN();
     c1.ws.close(); await stop(A, 'SIGKILL');
-    ok(client0 != null && await until(() => !alive(client0), 10000), `THE NEW LAW: the hub killed, its attach client ${client0} ENDS with it (no orphan; waited on the fact, 10 s ceiling)`);
+    ok(client0 != null && verdictOf(await until(() => !alive(client0), 10000)), `THE NEW LAW: the hub killed, its attach client ${client0} ENDS with it (no orphan; waited on the fact, 10 s ceiling)`);
     A = boot(FIXED_SERVER, FORK_JOBS);   // the restart, on THE RED COPY (only src/jobs.js differs: a job's start forks the hub again)
-    if (!ok(await ready(A), 'boot A′ (the fork-the-hub copy of src/jobs.js) is Ready', A.jr.slice(-1500))) break e2e;
+    if (!ok(verdictOf(await ready(A)), 'boot A′ (the fork-the-hub copy of src/jobs.js) is Ready', A.jr.slice(-1500))) break e2e;
     c1 = await connect(); c1.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
-    ok(await until(() => c1.maxRec > anchor0 + 20, 20000) && !/\[bridge\] boot: ended \d+ orphaned/.test(A.jr), `THE NEW LAW: the restart streams with no boot-sweep line — nothing was orphaned (record ${c1.maxRec}, past ${anchor0} read at the kill)`);
+    ok(gateOf(await until(() => c1.maxRec > anchor0 + 20, 20000)) && !/\[bridge\] boot: ended \d+ orphaned/.test(A.jr), `THE NEW LAW: the restart streams with no boot-sweep line — nothing was orphaned (record ${c1.maxRec}, past ${anchor0} read at the kill)`);
     const clientR = attachClientsOf(SOCK).find((p) => ppidOf(p) === A.pid), ptsR = clientR ? ptsIndexOfStdout(clientR) : null;
     const jr = await startHolder('plain-red');
     const namedR = jr && jr.job ? await markedOf(jr.job.id) : [];
-    ok(ptsR != null && namedR.some((p) => ptmxIndexes(p).includes(ptsR)), `RED (the fork-the-hub copy: the starter's hand-off line cut): its plain job's own processes HOLD the attach master (tty ${ptsR}: ${namedR.filter((p) => ptmxIndexes(p).includes(ptsR)).map((p) => `${p} ${commOf(p)}`).join(', ') || 'none'})`);
+    ok(ptsR != null && verdictOf(namedR.some((p) => ptmxIndexes(p).includes(ptsR))), `RED (the fork-the-hub copy: the starter's hand-off line cut): its plain job's own processes HOLD the attach master (tty ${ptsR}: ${namedR.filter((p) => ptmxIndexes(p).includes(ptsR)).map((p) => `${p} ${commOf(p)}`).join(', ') || 'none'})`);
     c1.ws.close(); await stop(A, 'SIGTERM');   // a clean stop ends the red hub's own attach (no orphan for the scene below)
-    A = boot(); if (!ok(await ready(A), 'boot A″ (the post-fix server) is Ready', A.jr.slice(-1500))) break e2e;
+    A = boot(); if (!ok(verdictOf(await ready(A)), 'boot A″ (the post-fix server) is Ready', A.jr.slice(-1500))) break e2e;
     c1 = await connect(); c1.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
-    ok(await until(() => c1.maxRec > stubN() - 200 && c1.maxRec > 0, 20000), `setup: A″ streams the restored session (record ${c1.maxRec})`);
+    ok(verdictOf(await until(() => c1.maxRec > stubN() - 200 && c1.maxRec > 0, 20000)), `setup: A″ streams the restored session (record ${c1.maxRec})`);
   }
   const killedA = await faultStarter(A.pid);   // THE PLANT (r5387): one fault of A's starter after the attach — the job's start replaces it
   const j1 = await startHolder('holder-a');
-  ok(j1 && j1.job && j1.job.id, `setup: the server started a long-lived job after the attach (${j1 && j1.job && j1.job.id})`, JSON.stringify(j1).slice(0, 300));
+  ok(gateOf(j1) && gateOf(j1.job) && verdictOf(j1.job.id), `setup: the server started a long-lived job after the attach (${j1 && j1.job && j1.job.id})`, JSON.stringify(j1).slice(0, 300));
   await sleep(1500);
   const clientA = attachClientsOf(SOCK).find((p) => ppidOf(p) === A.pid);
   const ptsA = clientA ? ptsIndexOfStdout(clientA) : null;
   const plantA = plantInForce(A.pid, killedA, ptsA);
   if (!plantA.inForce) { skip(`§2–§4 SCENE NOT FORMED (r5387, law 1): the plant was not in force — A's starter ${killedA || '(none found)'} ended, its replacement ${plantA.starter || '(none)'} ${plantA.starter ? `holds ${JSON.stringify(ptmxIndexes(plantA.starter))}, not the attach's tty ${ptsA}` : 'never started'}`); SID = null; await stop(A, 'SIGTERM'); break e2e; }
-  ok(plantA.inForce, `PLANT IN FORCE (the witness): A's starter ${killedA} ended after the attach; its replacement ${plantA.starter}, born after it, holds the attach master (tty ${ptsA})`);
+  ok(verdictOf(plantA.inForce), `PLANT IN FORCE (the witness): A's starter ${killedA} ended after the attach; its replacement ${plantA.starter}, born after it, holds the attach master (tty ${ptsA})`);
   const holders = fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)).map(Number).filter((p) => p !== A.pid && ptsA != null && ptmxIndexes(p).includes(ptsA));
   ok(holders.length > 0, `THE LEAK in the product: the server's attach pty master (tty ${ptsA}) is held by ${holders.length} other process(es) it started after the attach — the starter replaced after a fault, and the job it started (${holders.slice(0, 4).map((p) => `${p} ${commOf(p)}`).join(', ')})`);
   const before = c1.maxRec;
@@ -692,7 +692,7 @@ e2e: {
   c1.ws.close();
   await stop(A, 'SIGKILL');
   await sleep(9000);   // the OLD wait (the orphan's buffers fill at ~35 KB/s at the CLI's full pace)
-  ok(clientA && alive(clientA) && ppidOf(clientA) !== A.pid, `after SIGKILL the old attach client ${clientA} is an ORPHAN (alive, reparented to ${ppidOf(clientA)} ${commOf(ppidOf(clientA))})`);
+  ok(gateOf(clientA) && gateOf(alive(clientA)) && ppidOf(clientA) !== A.pid, `after SIGKILL the old attach client ${clientA} is an ORPHAN (alive, reparented to ${ppidOf(clientA)} ${commOf(ppidOf(clientA))})`);
   const s1 = stubN(); await sleep(1500); const s2 = stubN();
   ok(s2 > s1, `…and the CLI keeps WORKING meanwhile (the stub's record ${s1} → ${s2}) — its non-blocking stdout queues in memory`);
   { const p1 = bufMtime(BUF, '§2 placed'); await sleep(2500); const p2 = bufMtime(BUF, '§2 placed');
@@ -706,13 +706,13 @@ e2e: {
   ok(bufM1 != null && bufM1 === bufM2, 'MEASURED: the wrapper\'s buffer FILE is frozen while the master stalls (its synchronous TTY write blocks its whole event loop — the .buf witness is blind to THIS shape; the OTel witness is not)');
 
   const B = boot();
-  ok(await ready(B), 'boot B (post-fix) is Ready');
+  ok(verdictOf(await ready(B)), 'boot B (post-fix) is Ready');
   const swept = await until(() => /\[bridge\] boot: ended \d+ orphaned dtach attach client/.test(B.jr), 8000);
-  ok(swept && !alive(clientA), `the BOOT SWEEP ended the orphan ${clientA} (journal: ${JSON.stringify((B.jr.match(/\[bridge\] boot:[^\n]*/) || [''])[0].slice(0, 160))})`);
+  ok(gateOf(swept) && !alive(clientA), `the BOOT SWEEP ended the orphan ${clientA} (journal: ${JSON.stringify((B.jr.match(/\[bridge\] boot:[^\n]*/) || [''])[0].slice(0, 160))})`);
   const c2 = await connect();
   c2.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
   const flows = await until(() => streamsPast(c2, [before, s2, sStall]), 15000);
-  ok(flows, `THE FIX: the restored session streams with ZERO input (record ${c2.maxRec}, past ${Math.max(before, s2, sStall)}: the kill, and the stall — its history slab holds nothing past it)`);
+  ok(verdictOf(flows), `THE FIX: the restored session streams with ZERO input (record ${c2.maxRec}, past ${Math.max(before, s2, sStall)}: the kill, and the stall — its history slab holds nothing past it)`);
   c2.ws.close();
 
   // ═══ §3 the CONTROL: the same restart on the pre-fix copy stays dark ═══
@@ -720,32 +720,32 @@ e2e: {
   const sEarly3 = stubN();   // r4510: an EARLY anchor (read before the stall, B still live: every record from here to the stall is in the slab)
   const killedB = await faultStarter(B.pid);   // THE PLANT (r5387), for B as for A: its starter faulted once after its attach
   const j2 = await startHolder('holder-b');   // B's own attach master must outlive B too (a job B started after its attach)
-  ok(j2 && j2.job, 'control setup: server B started its own long-lived job after its attach');
+  ok(gateOf(j2) && verdictOf(j2.job), 'control setup: server B started its own long-lived job after its attach');
   await sleep(1200);
   const clientB = attachClientsOf(SOCK).find((p) => ppidOf(p) === B.pid);
   const plantB = plantInForce(B.pid, killedB, clientB ? ptsIndexOfStdout(clientB) : null);
   if (!plantB.inForce) { skip(`§3–§4 SCENE NOT FORMED (r5387, law 1): the plant was not in force for B — its starter ${killedB || '(none found)'} ended, its replacement ${plantB.starter || '(none)'} holds no master of B's attach`); SID = null; await stop(B, 'SIGTERM'); break e2e; }
-  ok(plantB.inForce, `control PLANT IN FORCE (the witness): B's starter ${killedB} ended after its attach; its replacement ${plantB.starter} holds B's attach master`);
+  ok(verdictOf(plantB.inForce), `control PLANT IN FORCE (the witness): B's starter ${killedB} ended after its attach; its replacement ${plantB.starter} holds B's attach master`);
   await stop(B, 'SIGKILL');
   await stallOf(path.join(wt, 'data', 'session-buffers', SID + '.buf'), '§3 (B\'s orphan)');
   const sStall3 = stubN();   // …and the one read after it   // r4456: the control's dark restore needs the stall itself, never a fixed 9 s
-  ok(clientB && alive(clientB), `control setup: B's attach client ${clientB} is an orphan too`);
+  ok(gateOf(clientB) && verdictOf(alive(clientB)), `control setup: B's attach client ${clientB} is an orphan too`);
   const C = boot(CONTROL_SERVER);
-  ok(await ready(C), 'boot C (the pre-fix copy) is Ready');
+  ok(verdictOf(await ready(C)), 'boot C (the pre-fix copy) is Ready');
   const c3 = await connect();
   c3.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
   await sleep(4000);                               // the attach slab (history from the wrapper's buffer file) lands first
   // r4510 RED CONTROL (THE FIX's anchor, over this DARK restore — the pre-fix copy never streams): judged by the early anchor alone,
   // the history slab passes it — «streams» read green with the session dark; judged by THE FIX's rule (an anchor after the stall), RED
-  ok(streamsPast(c3, [sEarly3]) && !streamsPast(c3, [sEarly3, sStall3]), `RED CONTROL (THE FIX's anchor): over a restore that never streams, the slab alone passes the early anchor (${c3.maxRec} > ${sEarly3} + 20) and never the anchor read after the stall (${c3.maxRec} ≤ ${sStall3} + 20)`, JSON.stringify({ slabMax: c3.maxRec, sEarly3, sStall3 }));
+  ok(gateOf(streamsPast(c3, [sEarly3])) && !streamsPast(c3, [sEarly3, sStall3]), `RED CONTROL (THE FIX's anchor): over a restore that never streams, the slab alone passes the early anchor (${c3.maxRec} > ${sEarly3} + 20) and never the anchor read after the stall (${c3.maxRec} ≤ ${sStall3} + 20)`, JSON.stringify({ slabMax: c3.maxRec, sEarly3, sStall3 }));
   // the precondition is EVIDENCE, not a sleep: the stub writes 500 more records (≤ 25 s), and the silence is judged over that span
   const n0 = stubN(), live0 = c3.maxRec, t0 = Date.now();
   const wrote = await until(() => stubN() > n0 + 500, 25000, 250);
   const n1 = stubN(), span = ((Date.now() - t0) / 1000).toFixed(1), dark = c3.maxRec;
-  ok(wrote, wrote ? `control precondition: the stub CLI keeps writing while the bridge is dark (record ${n0} → ${n1} in ${span} s)`
+  ok(verdictOf(wrote), wrote ? `control precondition: the stub CLI keeps writing while the bridge is dark (record ${n0} → ${n1} in ${span} s)`
     : `control precondition: the stub CLI STOPPED writing while the bridge is dark (record ${n0} → ${n1} in ${span} s) — ${stubState()}`);
   ok(dark <= live0, `THE CONTROL: over those ${span} s the pre-fix restore delivers NO new record (${dark} seen, ${live0} before)`);
-  ok(attachClientsOf(SOCK).includes(clientB), `THE CONTROL: the orphan ${clientB} still holds the master`);
+  ok(verdictOf(attachClientsOf(SOCK).includes(clientB)), `THE CONTROL: the orphan ${clientB} still holds the master`);
   c3.ws.close();
   await stop(C, 'SIGTERM');   // the clean shutdown ends C's own attach pty (no new orphan); B's orphan stays for §4's sweep
   ok(!/\[bridge\]/.test(C.jr), 'control: the pre-fix copy never swept or healed anything');
@@ -757,11 +757,11 @@ watch: {
   if (!SID || !SOCK) { skip('§4 needs §2\'s session'); break watch; }
   setMinutes(2.1);
   const D = boot();
-  if (!ok(await ready(D), 'boot D (post-fix) is Ready')) break watch;
+  if (!ok(verdictOf(await ready(D)), 'boot D (post-fix) is Ready')) break watch;
   await until(() => /\[bridge\] boot: ended/.test(D.jr), 6000);
   const c4 = await connect();
   c4.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
-  ok(await until(() => c4.maxRec > stubN() - 200 && c4.maxRec > 0, 20000), `D swept B's orphan and streams (record ${c4.maxRec})`);
+  ok(verdictOf(await until(() => c4.maxRec > stubN() - 200 && c4.maxRec > 0, 20000)), `D swept B's orphan and streams (record ${c4.maxRec})`);
   c4.ws.close();
   // A PERSON'S OWN ATTACH that stops reading (its parent — this process — is alive: the sweep must leave it alone)
   const paused = attach(SOCK, { paused: true });
@@ -769,28 +769,28 @@ watch: {
   await stop(D, 'SIGTERM');   // the clean shutdown ends D's attach: the paused client is the only one left, and it fills
   await stallOf(path.join(wt, 'data', 'session-buffers', SID + '.buf'), '§4 (the paused client)');   // r4456: the stall itself, never a fixed 12 s
   const w1 = stubN();
-  ok(alive(paused.pid) && w1 > 0, `setup: the paused client ${paused.pid} is attached and full; the CLI keeps writing (record ${w1})`);
+  ok(gateOf(alive(paused.pid)) && w1 > 0, `setup: the paused client ${paused.pid} is attached and full; the CLI keeps writing (record ${w1})`);
   const E = boot();
-  if (!ok(await ready(E), 'boot E (post-fix, session.deadBridgeMinutes = 2.1) is Ready')) break watch;
+  if (!ok(verdictOf(await ready(E)), 'boot E (post-fix, session.deadBridgeMinutes = 2.1) is Ready')) break watch;
   const eReady = Date.now();
   const c5 = await connect();
   c5.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
   await sleep(20000);
-  ok(!/\[bridge\] boot: ended/.test(E.jr) && alive(paused.pid), 'the boot sweep left the paused client alone (its parent lives — a person\'s attach is never ended)');
+  ok(!/\[bridge\] boot: ended/.test(E.jr) && verdictOf(alive(paused.pid)), 'the boot sweep left the paused client alone (its parent lives — a person\'s attach is never ended)');
   const darkMax = c5.maxRec;
   ok(stubN() > w1 + 500 && darkMax < w1, `the restored bridge is DEAD: 20 s after Ready no new record reached the server (${darkMax} seen, the CLI is at ${stubN()})`);
   const healed = await until(() => /dead bridge: no output for/.test(E.jr), 2.1 * 60e3 + 60000, 500);
   const healLine = (E.jr.match(/\[[^\]]*\] dead bridge:[^\n]*/) || [''])[0];
-  ok(healed && /API request/.test(healLine), `THE WATCH healed it ${Math.round((Date.now() - eReady) / 1000)} s after Ready, on the OTel witness: ${JSON.stringify(healLine.slice(0, 200))}`);
+  ok(gateOf(healed) && verdictOf(/API request/.test(healLine)), `THE WATCH healed it ${Math.round((Date.now() - eReady) / 1000)} s after Ready, on the OTel witness: ${JSON.stringify(healLine.slice(0, 200))}`);
   const flowed = await until(() => c5.maxRec > w1 + 1000, 20000);
-  ok(flowed, `…and the backlog flows (record ${c5.maxRec}; the CLI wrote ${w1} before the restart)`);
+  ok(verdictOf(flowed), `…and the backlog flows (record ${c5.maxRec}; the CLI wrote ${w1} before the restart)`);
   const late = await until(() => /records arriving [^\n]* late — a stalled bridge's backlog/.test(E.jr), 15000);
-  ok(late, `THE LATE GATE (lane-hot-switch): the backlog was judged late — ${JSON.stringify((E.jr.match(/\[stream\][^\n]*stalled bridge's backlog[^\n]*/) || [''])[0].slice(0, 200))}`);
+  ok(verdictOf(late), `THE LATE GATE (lane-hot-switch): the backlog was judged late — ${JSON.stringify((E.jr.match(/\[stream\][^\n]*stalled bridge's backlog[^\n]*/) || [''])[0].slice(0, 200))}`);
   const settled = await until(() => /\[bridge\] [^\n]*: heal caught up \d+ record/.test(E.jr), 40000, 500);
   const cu = (E.jr.match(/\[bridge\] [^\n]*: heal caught up (\d+) record\(s\) \/ \d+ byte\(s\) — (\d+) of them stamped/) || []);
-  ok(settled && Number(cu[1]) > 1000 && Number(cu[2]) > 100, `THE CATCH-UP was counted through the late rule: ${cu[1]} record(s), ${cu[2]} stamped > 2 min before they arrived`);
+  ok(gateOf(settled) && Number(cu[1]) > 1000 && Number(cu[2]) > 100, `THE CATCH-UP was counted through the late rule: ${cu[1]} record(s), ${cu[2]} stamped > 2 min before they arrived`);
   const card = (E.jr.match(/\[bridge\] [^\n]*: card — ([^\n]*)/) || [])[1] || '';
-  ok(/^The connection to this conversation's output was lost at \d\d:\d\d and restored at \d\d:\d\d — \d+ records caught up \(they are shown, not re-run\)\.$/.test(card), `THE CARD: ${JSON.stringify(card)}`);
+  ok(verdictOf(/^The connection to this conversation's output was lost at \d\d:\d\d and restored at \d\d:\d\d — \d+ records caught up \(they are shown, not re-run\)\.$/.test(card)), `THE CARD: ${JSON.stringify(card)}`);
   ok(c5.cards.length >= 1 || c5.lagged > 0, `…and it reached the chat (${c5.cards.length} card frame(s)${c5.lagged ? `; the client was told it lagged ${c5.lagged}×` : ''})`);
   const after = c5.maxRec; await sleep(4000);
   ok(c5.maxRec > after, `after the catch-up the bridge STAYS live with the paused client still attached (${after} → ${c5.maxRec})`);
@@ -800,4 +800,4 @@ watch: {
   await stop(E, 'SIGTERM');
 }
 
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

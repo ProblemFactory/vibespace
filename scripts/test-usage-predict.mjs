@@ -27,7 +27,7 @@ const UP = require(path.join(REPO, 'src/usage-predict.js'));
 // an unbuilt checkout is refused by name, never a row green with nothing judged
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 let pass = 0, fail = 0;
-function ok(cond, name, detail) {
+function ok(cond, name, detail) { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); }
 }
@@ -58,11 +58,11 @@ const RULE_ROWS = [
   ['equal at the mean is OFF (better means LOWER, by the margin)', Array.from({ length: 100 }, (_, i) => ({ lane: 'sevenDay', t: 1000 + i, stale: i >= 98 ? 3 : 1, proj: i === 99 ? 54.5 : 0.5 })), 'off'],
 ];
 const ruleTable = (mod) => RULE_ROWS.map(([name, pairs, want]) => { const v = mod.verdictOf(pairs); return { name: `rule: ${name}`, good: v.state === want && v.n === pairs.length, v }; });
-for (const r of ruleTable(UP)) ok(r.good, r.name, r.v);
+for (const r of ruleTable(UP)) ok(verdictOf(r.good), r.name, r.v);
 {
   const src = fs.readFileSync(path.join(REPO, 'src/usage-predict.js'), 'utf8');
   const KEYS = ['STEP_MS', 'WINDOW_MS', 'WALK_MS', 'KEEP_MS', 'ON_ENTER_N', 'ON_STAY_N', 'PROV_ENTER_N', 'PROV_STAY_N', 'ENTER_MEAN', 'WORSE_P90', 'WORSE_P99', 'DWELL_STEPS', 'RING_MAX'];
-  ok(Object.isFrozen(C) && JSON.stringify(Object.keys(C)) === JSON.stringify(KEYS) && KEYS.every((k) => new RegExp(`${k}: [^,]+, +// .{20,}`).test(src)),
+  ok(gateOf(Object.isFrozen(C)) && JSON.stringify(Object.keys(C)) === JSON.stringify(KEYS) && verdictOf(KEYS.every((k) => new RegExp(`${k}: [^,]+, +// .{20,}`).test(src))),
     `ONE TABLE of the constants (${KEYS.length}), frozen, each with its reason beside it — and nothing more`, Object.keys(C));
   ok(C.KEEP_MS === C.WALK_MS + C.WINDOW_MS && C.ON_STAY_N < C.ON_ENTER_N && C.PROV_STAY_N < C.PROV_ENTER_N && C.ENTER_MEAN < 1 && C.WORSE_P90 > 1 && C.WORSE_P99 > 1 && C.DWELL_STEPS * C.STEP_MS === DAY,
     'the walk keeps exactly what it reads (42 d = 28 d walked + a 14-d window); 30 in / 20 out; 5 in / 4 out; the margins on both sides; the dwell a day');
@@ -75,7 +75,7 @@ const srcTable = (mod) => [
   ["Claude's own kinds are Claude's", ['org:made', 'email:a@b.invalid', 'acct:__global__', 'org_made-3'].every((k) => mod.sourceOf(k) === 'claude') && mod.sourceOf(null) === 'claude'],
   ['a harness the estimator does not learn is ITS source, and not a known one', mod.sourceOf('made-acp:email:a@b.invalid') === 'made-acp' && !mod.knownSource('made-acp') && mod.knownSource('claude') && mod.knownSource('codex') && mod.knownSource('antigravity')],
 ].map(([name, good]) => ({ name: `source: ${name}`, good }));
-for (const r of srcTable(UP)) ok(r.good, r.name);
+for (const r of srcTable(UP)) ok(verdictOf(r.good), r.name);
 {
   const line = { fetchedAt: 5000, calib: { sevenDay: { pred: 0.42, act: 0.4, u0: 0.35 }, fiveHour: { pred: 0.1, act: 0.12, u0: 0.12 }, 'scoped:made': { act: 0.5 } } };
   const ps = UP.pairsOf(line);
@@ -90,8 +90,8 @@ console.log('— ③ the gate: the pool and every surface keep ON lanes; a PROVI
   const est = { estimated: true, fiveHour: { utilization: 0.2 }, sevenDay: { utilization: 0.5 }, scopedWeekly: [{ name: 'Made', utilization: 0.7 }] };
   const states = { fiveHour: 'off', sevenDay: 'provisional', 'scoped:made': 'on' };
   const on = UP.gateEstimate(est, (k) => states[k], (s) => s === 'on'), prov = UP.gateEstimate(est, (k) => states[k], (s) => s === 'provisional');
-  ok(on && on.fiveHour === null && on.sevenDay === null && on.scopedWeekly.length === 1, 'the ON view (the pool, the rings, the menu, the chip) keeps the ON lane only', on);
-  ok(prov && prov.sevenDay && prov.fiveHour === null && prov.scopedWeekly.length === 0, 'the PROVISIONAL view (the popup alone) keeps the provisional lane only', prov);
+  ok(gateOf(on) && on.fiveHour === null && on.sevenDay === null && on.scopedWeekly.length === 1, 'the ON view (the pool, the rings, the menu, the chip) keeps the ON lane only', on);
+  ok(gateOf(prov) && gateOf(prov.sevenDay) && prov.fiveHour === null && prov.scopedWeekly.length === 0, 'the PROVISIONAL view (the popup alone) keeps the provisional lane only', prov);
   ok(UP.gateEstimate(est, () => 'learning', (s) => s === 'on') === null && UP.gateEstimate(null, () => 'on', () => true) === null && est.sevenDay.utilization === 0.5, 'nothing left is no estimate at all; the estimate given is not changed');
 }
 
@@ -118,7 +118,7 @@ const slug = (k) => k.replace(/[^\w.@-]/g, '_').slice(0, 80);
   const made = { estimated: true, fiveHour: { utilization: 0.4 }, sevenDay: { utilization: 0.6 }, scopedWeekly: [] };
   est.estimateFor = () => made;
   const pc = est.poolEstimateFor('acct-c', null, now), px = est.poolEstimateFor('acct-x', null, now);
-  ok(pc && pc.sevenDay && pc.fiveHour === null && px === null, "the POOL's estimate keeps the ON lane only — Claude's week (on) is overlaid, its 5h (off) and codex's (learning) are read raw", { pc, px });
+  ok(gateOf(pc) && gateOf(pc.sevenDay) && pc.fiveHour === null && px === null, "the POOL's estimate keeps the ON lane only — Claude's week (on) is overlaid, its 5h (off) and codex's (learning) are read raw", { pc, px });
   est.burnFor = () => ({ fiveHour: 0.002, sevenDay: 0.0005 });
   const bc = est.poolBurnFor('acct-c', now), bx = est.poolBurnFor('acct-x', now);
   ok(JSON.stringify(bc) === JSON.stringify({ sevenDay: 0.0005 }) && JSON.stringify(bx) === '{}', "law B3: the POOL's burn (the projection's lead) keeps ON lanes only — the learned rate of an off or learning lane moves nothing", { bc, bx });
@@ -127,33 +127,33 @@ const slug = (k) => k.replace(/[^\w.@-]/g, '_').slice(0, 80);
   ep.predictVerdict = (src, lane) => ({ state: lane === 'sevenDay' ? 'provisional' : 'on', n: 12 });
   ep.estimateFor = () => made; ep.burnFor = () => ({ fiveHour: 0.002, sevenDay: 0.0005 });
   const pp = ep.poolEstimateFor('acct-p', null, now), bp = ep.poolBurnFor('acct-p', now);
-  ok(pp && pp.fiveHour && pp.sevenDay === null && JSON.stringify(bp) === JSON.stringify({ fiveHour: 0.002 }), 'a PROVISIONAL lane: the pool reads neither its estimate nor its burn (the ON lane beside it is read)', { pp, bp });
+  ok(gateOf(pp) && gateOf(pp.fiveHour) && pp.sevenDay === null && JSON.stringify(bp) === JSON.stringify({ fiveHour: 0.002 }), 'a PROVISIONAL lane: the pool reads neither its estimate nor its burn (the ON lane beside it is read)', { pp, bp });
   const st = est.predictStatesFor('acct-x', made, now);
-  ok(st.sevenDay && st.sevenDay.state === 'learning' && st.sevenDay.n === 3 && st.fiveHour.state === 'learning', 'each lane of an account says its state and its count (the popup shows the count of readings on this hub)', st);
+  ok(gateOf(st.sevenDay) && st.sevenDay.state === 'learning' && st.sevenDay.n === 3 && st.fiveHour.state === 'learning', 'each lane of an account says its state and its count (the popup shows the count of readings on this hub)', st);
 }
 
 console.log('— ⑤ the wiring: the pool door, the route, the popup\'s words');
 {
   const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
   const door = eng.slice(eng.indexOf('function poolReadCache('), eng.indexOf('\n}\n', eng.indexOf('function poolReadCache(')));
-  ok(/usageEstimator\.poolEstimateFor\(id, raw, now\)/.test(door), "the pool's ONE decision door (poolReadCache) overlays poolEstimateFor — the estimate held to ON lanes");
+  ok(verdictOf(/usageEstimator\.poolEstimateFor\(id, raw, now\)/.test(door)), "the pool's ONE decision door (poolReadCache) overlays poolEstimateFor — the estimate held to ON lanes");
   const routes = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
   const block = routes.slice(routes.indexOf('estimates: (() => {'), routes.indexOf('})(),', routes.indexOf('estimates: (() => {')));
-  ok(/const screen = \(id, est\) =>/.test(block) && (block.match(/screen\([^)]*e\.estimateFor\(/g) || []).length === 3 && /const drawn = UP\.gateEstimate\(est, \(k\) => \(st\[k\] \|\| \{\}\)\.state, \(x\) => x === 'on'\);/.test(block)
-    && /const prov = UP\.gateEstimate\(est, \(k\) => \(st\[k\] \|\| \{\}\)\.state, \(x\) => x === 'provisional'\);/.test(block) && /provisional: prov \?/.test(block) && /predict: st/.test(block),
+  ok(gateOf(/const screen = \(id, est\) =>/.test(block)) && (block.match(/screen\([^)]*e\.estimateFor\(/g) || []).length === 3 && gateOf(/const drawn = UP\.gateEstimate\(est, \(k\) => \(st\[k\] \|\| \{\}\)\.state, \(x\) => x === 'on'\);/.test(block))
+    && gateOf(/const prov = UP\.gateEstimate\(est, \(k\) => \(st\[k\] \|\| \{\}\)\.state, \(x\) => x === 'provisional'\);/.test(block)) && gateOf(/provisional: prov \?/.test(block)) && verdictOf(/predict: st/.test(block)),
     '/api/usage: every estimate (Claude accounts, the global login, codex) carries its ON lanes — what every surface draws — and its PROVISIONAL lanes apart, in `provisional`');
   const meter = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');
   const stat = meter.slice(meter.indexOf('const estStat = '), meter.indexOf('\n    };\n', meter.indexOf('const estStat = ')));
-  ok(/t\('about \{pct\}% · from \{n\} readings on this hub'/.test(stat) && /t\('about \{pct\}%'/.test(stat) && /t\('\{n\} requests here since'/.test(stat) && !/up to/.test(stat) && !/est \{pct\}%/.test(stat),
+  ok(gateOf(/t\('about \{pct\}% · from \{n\} readings on this hub'/.test(stat)) && gateOf(/t\('about \{pct\}%'/.test(stat)) && gateOf(/t\('\{n\} requests here since'/.test(stat)) && !/up to/.test(stat) && !/est \{pct\}%/.test(stat),
     "law B4: the popup's words claim no bound — «about Y%», a provisional band «· from N readings on this hub», a lane that draws nothing «N requests here since»");
-  ok(/const estPop = popupEst\(estSel\);/.test(meter) && /const cEstPop = popupEst\(cEstSel\);/.test(meter) && !/(estSel|cEstSel) = popupEst\(/.test(meter) && !/provisional/.test(meter.replace(/export function popupEst[\s\S]*?\n\}\n/, '').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').replace(/'[^'\n]*'/g, "''")),
+  ok(gateOf(/const estPop = popupEst\(estSel\);/.test(meter)) && gateOf(/const cEstPop = popupEst\(cEstSel\);/.test(meter)) && !/(estSel|cEstSel) = popupEst\(/.test(meter) && !/provisional/.test(meter.replace(/export function popupEst[\s\S]*?\n\}\n/, '').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').replace(/'[^'\n]*'/g, "''")),
     'only the popup reads the provisional field (popupEst, into estPop / cEstPop beside the ON-only selections); nothing else in the client names it');
   const MU = await import(path.join(REPO, 'src/lib/usage-meter.js'));
   const pe = MU.popupEst({ fiveHour: null, sevenDay: { utilization: 0.5 }, scopedWeekly: [], provisional: { fiveHour: { utilization: 0.2 }, sevenDay: null, scopedWeekly: [{ name: 'Made' }] } });
   ok(pe.fiveHour.utilization === 0.2 && pe.sevenDay.utilization === 0.5 && pe.scopedWeekly.length === 1, 'popupEst merges a provisional lane in beside the ON ones (an ON lane is never replaced)', pe);
   const dict = (f) => fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8');
   const WORDS = ['about {pct}%', 'about {pct}% · from {n} readings on this hub', "An estimate, not a bound: the last reading plus this hub's use since, at this account's learned rate.", '{n} requests here since'];
-  ok(['i18n-zh.js', 'i18n-ja.js'].every((f) => WORDS.every((w) => dict(f).includes(JSON.stringify(w) + ':')) && !dict(f).includes('"up to {pct}%')), 'the words are in the Chinese and the Japanese dictionaries (约 / 約), and «up to» is gone from both');
+  ok(verdictOf(['i18n-zh.js', 'i18n-ja.js'].every((f) => WORDS.every((w) => dict(f).includes(JSON.stringify(w) + ':')) && !dict(f).includes('"up to {pct}%'))), 'the words are in the Chinese and the Japanese dictionaries (约 / 約), and «up to» is gone from both');
 }
 
 console.log('— ⑥ THE HOLD: a walk over fixed boundaries — the verdict does not flap');
@@ -228,7 +228,7 @@ console.log('— ⑧ THE POOL\'S READS OF THE ESTIMATOR (law B3): every one a ro
   const unrowed = census.flatMap(([f, ms]) => ms.filter((m) => !ROWS[m] || (m === 'estimateFor' && f !== 'src/server/auto-cli-loop.js')).map((m) => f + ': ' + m));
   ok(!unrowed.length, `every read of the estimator in the pool's files is a row (${census.map(([f, ms]) => f.split('/').pop() + ' ' + ms.join(',')).join(' · ')})`, unrowed);
   const planted = fs.readFileSync(path.join(REPO, POOL_FILES[0]), 'utf8').replace('const burn = usageEstimator.poolBurnFor(memberId, nowMs)', 'const burn = usageEstimator.burnFor(memberId, nowMs)');
-  ok(reads(planted).includes('burnFor') && !ROWS.burnFor, 'CONTROL: the learned burn read raw (the lead projection before this cure) is a member with no row — RED by the same census');
+  ok(gateOf(reads(planted).includes('burnFor')) && !ROWS.burnFor, 'CONTROL: the learned burn read raw (the lead projection before this cure) is a member with no row — RED by the same census');
 }
 
 console.log('— ⑨ mutant copies (a weakened rule must turn named rows red)');
@@ -261,9 +261,9 @@ console.log('— ⑨ mutant copies (a weakened rule must turn named rows red)');
     ok(src.split(c.needle).length === 2, `control "${c.what}": the needle is in the shipped source once`);
     const mod = M.load('src/usage-predict.js', editAnchor(src, c.needle, c.repl, "src/usage-predict.js"), c.what.replace(/\W+/g, '-').slice(0, 24));
     const red = all(mod).filter((r) => !r.good).map((r) => r.name);
-    ok(c.reds.every((n) => red.includes(n)), `control "${c.what}": the named rows go RED on the weakened copy (${red.length} red)`, red);
+    ok(verdictOf(c.reds.every((n) => red.includes(n))), `control "${c.what}": the named rows go RED on the weakened copy (${red.length} red)`, red);
   }
-  for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: CONTROLS.length })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: CONTROLS.length })) ok(verdictOf(row.pass), row.name, row.detail);
   // the estimator's own gates, weakened in memory: the pool reading a PROVISIONAL lane; the old keep of one window
   const Module = require('node:module');
   const estMut = (from, to) => { const f = path.join(REPO, 'src/usage-estimator.js'), t = fs.readFileSync(f, 'utf8'); if (!t.includes(from)) throw new Error('needle gone: ' + from.slice(0, 50)); const m = new Module(f, null); m.filename = f; m.paths = Module._nodeModulePaths(path.dirname(f)); m._compile(t.split(from).join(to), f); return m.exports; };
@@ -274,7 +274,7 @@ console.log('— ⑨ mutant copies (a weakened rule must turn named rows red)');
     const e = new EM.UsageEstimator({ anchorsDir: path.join(dir, 'anchors'), usageHistory: null, resolveIdentity: () => ({ identityKey: 'org_made-p' }), priorsFor: () => null, lagS: 0 });
     e.lines('org_made-p'); e.estimateFor = () => ({ estimated: true, fiveHour: null, sevenDay: { utilization: 0.6 }, scopedWeekly: [] });
     const v = e.predictVerdict('claude', 'sevenDay', T0 + HOUR), pe = e.poolEstimateFor('x', null, T0 + HOUR);
-    ok(v.state === 'provisional' && pe && pe.sevenDay, 'CONTROL: a copy of the estimator whose pool admits PROVISIONAL overlays a 10-pair lane — the shipped gate (④) does not', { v: v.state, pe });
+    ok(v.state === 'provisional' && gateOf(pe) && verdictOf(pe.sevenDay), 'CONTROL: a copy of the estimator whose pool admits PROVISIONAL overlays a 10-pair lane — the shipped gate (④) does not', { v: v.state, pe });
   }
   {
     const EB = estMut(".state === 'on') out[lane] = v;", ".state !== 'off') out[lane] = v;");
@@ -295,18 +295,18 @@ console.log('— ⑩ THE ADAPTERS (pick 3): a source\'s facts are its adapter\'s
   const found = CORE.map((f) => [f, hits(readT(f))]).filter(([, h]) => h.length);
   ok(!found.length, `the core (${CORE.length} files) spells none of six Claude facts: the sizes 1730 / 875, CLAUDE_MAX_PRIOR, PRIOR_5H_, the family-list literal, a by-name codex prior (the ledger's per-family cost split is test-claude-update-needs-nothing's estimator-buckets row; behaviour is test-usage-estimator ①'s)`, JSON.stringify(found));
   const planted = readT('src/usage-estimator.js').replace('const PRIOR_WEIGHT_DU = 0.15;', "const PRIOR_WEIGHT_DU = 0.15;\nconst BACK = { sevenDay: 1730 };");
-  ok(planted.includes('BACK') && hits(planted).length === 1, 'CONTROL: a Claude size typed back into the core is RED by the same read');
+  ok(gateOf(planted.includes('BACK')) && hits(planted).length === 1, 'CONTROL: a Claude size typed back into the core is RED by the same read');
   const CL = require(path.join(REPO, 'src/harnesses/claude-predict.js'));
   ok(UP.priorsForIdentity('org:made') === CL.prior && UP.priorsForIdentity('email:a@b.invalid') === CL.prior, 'an identity of Claude\'s (org:, email:) reads Claude\'s prior');
   ok(UP.priorsForIdentity('codex:email:a@b.invalid') === null && UP.priorsForIdentity('antigravity:acct:agy-x') === null, 'codex and Antigravity identities read NONE (Antigravity was handed Claude\'s before this pick)');
-  ok(UP.sourceOf('made-acp:email:a@b.invalid') === 'made-acp' && UP.priorsForIdentity('made-acp:email:a@b.invalid') === null && ['org:x', 'email:a@b.invalid', 'acct:__global__', 'org_made'].every((k) => UP.sourceOf(k) === 'claude'),
+  ok(UP.sourceOf('made-acp:email:a@b.invalid') === 'made-acp' && UP.priorsForIdentity('made-acp:email:a@b.invalid') === null && verdictOf(['org:x', 'email:a@b.invalid', 'acct:__global__', 'org_made'].every((k) => UP.sourceOf(k) === 'claude')),
     'an identity of a harness the core has no adapter for is ITS source and reads no prior — never Claude\'s; Claude\'s own kinds (org:, email:, acct:) stay Claude\'s');
   const { UsageEstimator } = require(path.join(REPO, 'src/usage-estimator.js'));
   const est = new UsageEstimator({ anchorsDir: scratch('usage-predict-adapters'), usageHistory: { *_events() { }, _cost: () => 0 }, resolveIdentity: () => null, lagS: 0 });
   ok(est.priorsFor('org:made') === CL.prior && est.priorsFor('antigravity:acct:x') === null, 'the estimator\'s default prior is the identity\'s source\'s (no Claude default for every key)');
   const goodBad = [[{ none: 'states no quota' }, 0], [{ unit: 'tokens', prior: { none: 'learn first' } }, 0], [{ unit: 'usd-api', prior: { sevenDay: 10, classes5h: { cw: 1, cr: 2, fresh: 3 } } }, 0],
     [null, 1], [{ none: '  ' }, 1], [{ unit: 'usd', prior: { none: 'x' } }, 1], [{ unit: 'tokens', prior: {} }, 1], [{ unit: 'tokens', prior: { sevenDay: 0 } }, 1], [{ unit: 'tokens', prior: { sevenDay: 5, weekly: 3 } }, 1], [{ unit: 'tokens', prior: { sevenDay: 5, classes5h: { cw: 1 } } }, 1]];
-  ok(goodBad.every(([p, bad]) => (UP.checkPredict(p).length > 0) === !!bad), 'checkPredict: three good shapes pass, seven bad ones are each refused', JSON.stringify(goodBad.map(([p]) => UP.checkPredict(p))));
+  ok(verdictOf(goodBad.every(([p, bad]) => (UP.checkPredict(p).length > 0) === !!bad)), 'checkPredict: three good shapes pass, seven bad ones are each refused', JSON.stringify(goodBad.map(([p]) => UP.checkPredict(p))));
 }
 
 console.log('— ⑪ THE SURFACES (the closure check S1): a PROVISIONAL lane is drawn in the popup alone; the taskbar\'s rings and the phone\'s chip draw the reading');
@@ -338,13 +338,13 @@ console.log('— ⑪ THE SURFACES (the closure check S1): a PROVISIONAL lane is 
   try { prov = render('provisional'); on = render('on'); } catch (e) { err = e; }
   for (const [k, v] of Object.entries(keep)) { if (k === 'document') globalThis.document = v; }
   globalThis.requestAnimationFrame = keep.raf; globalThis.cancelAnimationFrame = keep.caf; globalThis.getComputedStyle = keep.gcs; globalThis.matchMedia = keep.mm;
-  ok(!err && prov && prov.taskbar.length > 0 && prov.chip.length > 0, 'the real meter renders the taskbar row, the popup and the phone\'s chip over a page stub', err && err.message);
+  ok(!err && gateOf(prov) && prov.taskbar.length > 0 && prov.chip.length > 0, 'the real meter renders the taskbar row, the popup and the phone\'s chip over a page stub', err && err.message);
   const has65 = (h) => /\b65\s*%|\b65%/.test(h), has59 = (h) => /\b59\s*%|\b59%/.test(h);
-  ok(prov && !has65(prov.taskbar) && has59(prov.taskbar) && !/\b65\b/.test(prov.chip) && /\b59\b/.test(prov.chip),
+  ok(gateOf(prov) && !has65(prov.taskbar) && gateOf(has59(prov.taskbar)) && !/\b65\b/.test(prov.chip) && verdictOf(/\b59\b/.test(prov.chip)),
     'a PROVISIONAL-only estimate (reading 59 %, estimate 65 % from 12 pairs): the taskbar\'s rings and the phone\'s chip draw the READING, never 65', prov && { taskbar: prov.taskbar.slice(0, 300), chip: prov.chip });
-  ok(prov && /about 65% · from 12 readings on this hub/.test(prov.popup), '…the popup draws it, MARKED «about 65% · from 12 readings on this hub»', prov && prov.popup.slice(0, 200));
-  ok(on && (has65(on.taskbar) || /\b65\b/.test(on.chip)), 'CONTROL: the same estimate ON — the rings or the chip draw it (the leg can see an estimate where one is earned)', on && { chip: on.chip });
+  ok(gateOf(prov) && verdictOf(/about 65% · from 12 readings on this hub/.test(prov.popup)), '…the popup draws it, MARKED «about 65% · from 12 readings on this hub»', prov && prov.popup.slice(0, 200));
+  ok(gateOf(on) && (verdictOf(has65(on.taskbar)) || verdictOf(/\b65\b/.test(on.chip))), 'CONTROL: the same estimate ON — the rings or the chip draw it (the leg can see an estimate where one is earned)', on && { chip: on.chip });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

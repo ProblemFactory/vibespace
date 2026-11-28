@@ -41,7 +41,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUT = mutantCopies('live-bar-layout', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -163,7 +163,7 @@ console.log('§2 properties over 3000 seeded random bars');
   const Mmore = await import(pathToFileURL(MUT.write('src/lib/live-bar-layout.js', noMore, 'nomore', { esm: true })).href);
   const Mfloor = await import(pathToFileURL(MUT.write('src/lib/live-bar-layout.js', floorNoMore, 'floornomore', { esm: true })).href);
   const bp = judgeTables(Mpos), bm = judgeTables(Mmore), bf = judgeTables(Mfloor);
-  ok(bf.length >= 4 && bf.every((b) => /floor|fits:false/.test(b.name)), `NEGATIVE CONTROL: a floor that forgets the ⋯ (the width a pane must keep to reach the folded items) fails the floor rows (${bf.length}: ${bf.map((b) => b.name).slice(0, 2).join(' / ')})`);
+  ok(bf.length >= 4 && verdictOf(bf.every((b) => /floor|fits:false/.test(b.name))), `NEGATIVE CONTROL: a floor that forgets the ⋯ (the width a pane must keep to reach the folded items) fails the floor rows (${bf.length}: ${bf.map((b) => b.name).slice(0, 2).join(' / ')})`);
   ok(bp.length >= 2, `NEGATIVE CONTROL: a fold by POSITION (priority ignored) fails the tables (${bp.length}: ${bp.map((b) => b.name).slice(0, 3).join(' / ')})`);
   ok(bm.length >= 2, `NEGATIVE CONTROL: forgetting the ⋯ button's width fails the tables (${bm.length}: ${bm.map((b) => b.name).slice(0, 3).join(' / ')})`);
 }
@@ -173,8 +173,8 @@ console.log('§3 the short mode badge');
 const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
 {
   const w = [L.shortModeBadge({ mode: 'watch' }), L.shortModeBadge({ mode: 'takeover', mine: true }), L.shortModeBadge({ mode: 'takeover', mine: false }), L.shortModeBadge({})];
-  ok(same(w, ['Agent is driving', 'You are driving', 'Another viewer is driving', 'Agent is driving']), 'three short states (watch / mine / another viewer) — the "— agent asked to pause" clause is the tooltip', w);
-  ok(w.every((k) => zh[k] && ja[k]), 'each short badge has zh + ja entries', w.map((k) => `${k} → ${zh[k]} / ${ja[k]}`).join(' ; '));
+  ok(verdictOf(same(w, ['Agent is driving', 'You are driving', 'Another viewer is driving', 'Agent is driving'])), 'three short states (watch / mine / another viewer) — the "— agent asked to pause" clause is the tooltip', w);
+  ok(verdictOf(w.every((k) => zh[k] && ja[k])), 'each short badge has zh + ja entries', w.map((k) => `${k} → ${zh[k]} / ${ja[k]}`).join(' ; '));
 }
 
 // ── §4 the cascade-tie census ──
@@ -196,10 +196,10 @@ const tieCensus = (texts, css) => {
 };
 {
   const c = tieCensus(libTexts, cssText);
-  ok(c.co.size >= 20 && c.props.includes('width') && c.props.includes('color'), `census scope is non-vacuous (${c.co.size} classes co-occur with file-tool-btn; the icon rule sets ${c.props.join(' ')})`);
+  ok(c.co.size >= 20 && gateOf(c.props.includes('width')) && verdictOf(c.props.includes('color')), `census scope is non-vacuous (${c.co.size} classes co-occur with file-tool-btn; the icon rule sets ${c.props.join(' ')})`);
   ok(c.bad.length === 0, `no (0,1,0) style.css rule on a file-tool-btn companion class sets a property the icon rule wins (${c.bad.length})`, c.bad.join('\n    '));
   const planted = tieCensus(libTexts, cssText + '\n.browser-live-open { width: auto; padding: 0 8px; font-size: 10px; }\n');
-  ok(planted.bad.length === 1 && /browser-live-open/.test(planted.bad[0]), 'NEGATIVE CONTROL: the pre-fix rule (`.browser-live-open { width: auto }`, the audit\'s D1) planted into a patched listing is caught', planted.bad);
+  ok(planted.bad.length === 1 && verdictOf(/browser-live-open/.test(planted.bad[0])), 'NEGATIVE CONTROL: the pre-fix rule (`.browser-live-open { width: auto }`, the audit\'s D1) planted into a patched listing is caught', planted.bad);
 }
 
 // ── §4b the worded-icon-box census ──
@@ -373,7 +373,7 @@ const W = (() => {
   const sheets = order.map((name) => ({ name, text: read('public/' + name) }));
   const srcFiles = { ...Object.fromEntries(Object.entries(libTexts).map(([f, t]) => ['src/lib/' + f, t])), 'public/index.html': idxHtml };
   const c = W.census({ sheets, srcFiles });
-  ok(same(order, ['style.css', 'viewers.css', 'chat.css', 'theme-editor.css']) && c.iconSet.has('file-tool-btn') && c.iconSet.size >= 10, `the icon-box set, in index.html's cascade order (${order.join(' → ')}), holds file-tool-btn among ${c.iconSet.size} single-class ≤ 40 px rules`);
+  ok(gateOf(same(order, ['style.css', 'viewers.css', 'chat.css', 'theme-editor.css'])) && gateOf(c.iconSet.has('file-tool-btn')) && c.iconSet.size >= 10, `the icon-box set, in index.html's cascade order (${order.join(' → ')}), holds file-tool-btn among ${c.iconSet.size} single-class ≤ 40 px rules`);
   ok(c.worded.length >= 30, `the census scope is non-vacuous: ${c.sites.length} icon-class button sites, ${c.worded.length} of them WORDED (46 before the rebuilt dialog removed its eight — the floor sits under both)`);
   ok(c.flagged.length === 0, `every WORDED button on an icon-box class is reached by a width:auto rule of its own classes, or of a parent the same file builds and appends it to (${c.flagged.length} flagged)`, c.flagged.join('\n    '));
   console.log(`  (report only) worded icon-class sites with no white-space: nowrap in reach: ${c.noNowrap.length}${c.noNowrap.length ? ' — ' + c.noNowrap.slice(0, 8).join(', ') : ''}`);
@@ -382,7 +382,7 @@ const W = (() => {
     'CONTROL: the classifier — words (t(), a literal word, an unresolved TEXT variable, escHtml) vs icons (an escaped glyph, one letter, a markup variable, an SVG literal, an ALL_CAPS constant)');
   const fx = (src, css) => W.census({ sheets: [{ name: 'style.css', text: css || '' }, { name: 'viewers.css', text: '.file-tool-btn { width: 24px; height: 24px; }' }], srcFiles: { 'fx.js': src } });
   const planted = W.census({ sheets, srcFiles: { ...srcFiles, 'src/lib/zz-planted.js': "const x = el('button', 'file-tool-btn', t('Remember'));\n" } });
-  ok(planted.flagged.length === 1 && /zz-planted\.js:1/.test(planted.flagged[0]), 'NEGATIVE CONTROL: a planted `el(\'button\', \'file-tool-btn\', t(\'Remember\'))` in a patched listing is the ONE flagged site', planted.flagged);
+  ok(planted.flagged.length === 1 && verdictOf(/zz-planted\.js:1/.test(planted.flagged[0])), 'NEGATIVE CONTROL: a planted `el(\'button\', \'file-tool-btn\', t(\'Remember\'))` in a patched listing is the ONE flagged site', planted.flagged);
   const inline = fx("const b = document.createElement('button');\nb.className = 'file-tool-btn';\nb.textContent = t('Save');\nb.style.width = 'auto';\n");
   const ownR = fx("const b = document.createElement('button');\nb.className = 'file-tool-btn x-save';\nb.textContent = t('Save');\n", '.file-tool-btn.x-save { width: auto; }');
   const ownTie = fx("const b = document.createElement('button');\nb.className = 'file-tool-btn x-save';\nb.textContent = t('Save');\n", '.x-save { width: auto; }');
@@ -397,7 +397,7 @@ const W = (() => {
   // (`.browser-live-bar > .file-tool-btn`) lost its `width: auto` must name all five — a copy of style.css, in memory.
   {
     const barRule = /\.browser-live-bar > \.file-tool-btn \{ width: auto;/;
-    ok(barRule.test(sheets[0].text), 'the live bar\'s worded buttons are reached by `.browser-live-bar > .file-tool-btn { width: auto; … }` (the rule the control strips)');
+    ok(verdictOf(barRule.test(sheets[0].text)), 'the live bar\'s worded buttons are reached by `.browser-live-bar > .file-tool-btn { width: auto; … }` (the rule the control strips)');
     const stripped = sheets.map((sh) => (sh.name === 'style.css' ? { ...sh, text: sh.text.replace(barRule, '.browser-live-bar > .file-tool-btn { ') } : sh));
     const c2 = W.census({ sheets: stripped, srcFiles });
     const far = ['tabsBtn', 'consBtn', 'traceBtn', 'backendBtn', 'fitChip'];
@@ -442,14 +442,14 @@ const deadTokens = (sheets, jsTexts) => {
   const walkJs = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkJs(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const JS = [...walkJs(path.join(repo, 'src')), path.join(repo, 'public/index.html')].map((f) => fs.readFileSync(f, 'utf8'));
   const d = deadTokens(SHEETS, JS);
-  ok(d.defined.has('--bg-dialog') && d.defined.has('--bg-window') && !d.defined.has('--bg-secondary') && d.uses.length >= 10, `census scope is non-vacuous (${d.defined.size} tokens defined; --bg-secondary is not one of them; ${d.uses.length} dead uses product-wide)`);
+  ok(gateOf(d.defined.has('--bg-dialog')) && gateOf(d.defined.has('--bg-window')) && !d.defined.has('--bg-secondary') && d.uses.length >= 10, `census scope is non-vacuous (${d.defined.size} tokens defined; --bg-secondary is not one of them; ${d.uses.length} dead uses product-wide)`);
   ok(d.floating.length === 0, 'no floating surface (pop / popover / menu / dropdown / tooltip) takes its background from a dead token', d.floating.map((u) => `${u.file}: ${u.sel} → ${u.token}`).join('\n    '));
   ok(d.lane.length === 0, 'the browser dialogs\' own surfaces (.brp / .brsw / .bwho / the cap popover / the blocked banner / the who cell) use no dead token', d.lane.map((u) => `${u.sel} → ${u.token}`).join('\n    '));
   ok(d.uses.length <= DEAD_TOKEN_CEILING, `THE RATCHET: ${d.uses.length} dead-token uses product-wide ≤ ${DEAD_TOKEN_CEILING} (a new one fails; fixing an old one lowers the count)`, d.uses.slice(0, 8).map((u) => `${u.file}: ${u.sel} → ${u.token}`).join('\n    '));
   // NEGATIVE CONTROLS over patched listings: the pre-fix popover rule, and a planted new dead use
   const sheetsWith = (edit) => SHEETS.map((x) => (x.name === 'public/style.css' ? { ...x, text: edit(x.text) } : x));
   const pre = deadTokens(sheetsWith((t0) => t0.replace('.browser-live-cap-pop { min-width: 240px; max-width: 360px; padding: 8px 10px; background: var(--bg-dialog);', '.browser-live-cap-pop { min-width: 240px; max-width: 360px; padding: 8px 10px; background: var(--bg-secondary);')), JS);
-  ok(pre.floating.some((u) => /browser-live-cap-pop/.test(u.sel)) && pre.lane.some((u) => /browser-live-cap-pop/.test(u.sel)) && pre.uses.length === d.uses.length + 1, 'NEGATIVE CONTROL: the pre-fix cap popover (`background: var(--bg-secondary)`) is flagged as a floating surface AND as a browser-dialog surface');
+  ok(gateOf(pre.floating.some((u) => /browser-live-cap-pop/.test(u.sel))) && gateOf(pre.lane.some((u) => /browser-live-cap-pop/.test(u.sel))) && pre.uses.length === d.uses.length + 1, 'NEGATIVE CONTROL: the pre-fix cap popover (`background: var(--bg-secondary)`) is flagged as a floating surface AND as a browser-dialog surface');
   const planted = deadTokens(sheetsWith((t0) => t0 + '\n.vs-planted-card { color: var(--text-primary); }\n'), JS);
   ok(planted.uses.length === d.uses.length + 1 && (d.uses.length < DEAD_TOKEN_CEILING || planted.uses.length > DEAD_TOKEN_CEILING), 'NEGATIVE CONTROL: a planted new dead use grows the count past the ratchet');
 }
@@ -465,10 +465,10 @@ console.log('§5 wiring pins');
   ok(stMin > 0 && stMin === cssMin('.desktop-bar > .desktop-status'), `the desktop status's minimum is ONE number: DESK_STATUS_MIN_PX ${stMin} = the CSS min-width ${cssMin('.desktop-bar > .desktop-status')}`);
   const P = /export const LIVE_BAR_PRIORITY = Object\.freeze\((\{[^}]*\})\)/.exec(lw);
   const pri = P ? Function(`return ${P[1]}`)() : null;
-  ok(pri && pri.take === 0 && pri.handback === 0 && pri.reconnect === 0 && pri.badge > 0 && Object.entries(pri).every(([k, v]) => v === 0 || k === 'badge' || k === 'bind' || k === 'agentBrowser' || v > pri.badge) && pri.bind === pri.badge && pri.agentBrowser === pri.badge && pri.bind < pri.url && pri.backend > pri.viewers && pri.tabs > pri.backend && pri.tabs === pri.console && pri.console === pri.trace, 'the live view\'s priorities: the ONE toggle and Reconnect never fold; the badge folds LAST (lane I verify r1) and bind at its rank, after the URL (lane live-bind-door), the «Agent browser…» door at it too (B-8703 follow); Tabs / Console / Actions first', pri);
-  ok(/onLayout: \(v\) => \{ renderMore\(\); floorPane\(v\); \}/.test(lw) && /app\.wm\.setPaneMinWidth\?\.\(winInfo\.id, v\.floor \+ chrome\)/.test(lw) && /const chrome = Math\.max\(0, \(winInfo\.content\.offsetWidth \|\| 0\) - v\.widthPx\)/.test(lw), 'THE SPLIT FLOOR: after every fold the live view keeps its pane at ≥ its bar\'s floor + the chrome around the bar (WindowManager.setPaneMinWidth)');
-  ok(/if \(key === 'badge'\) rows\.push\(\{ caption: modeBadge\.title \|\| modeBadge\.textContent, title: modeBadge\.title \}\)/.test(lw) && /moreBtn\.dataset\.badge = want/.test(lw) && /moreBtn\.dataset\.mode = !taken \? 'watch' : st\.mine \? 'takeover' : 'other'/.test(lw) && /\.browser-live-bar > \.browser-live-more\[data-badge="folded"\]\[data-mode="takeover"\]/.test(cssText), 'a FOLDED badge rides the ⋯: its sentence is the first ⋯ row (a caption — lane ui-controls-and-bugs: words, not a greyed row), the ⋯ wears its colour per mode (style.css) and names it in its tooltip');
-  ok(/createBarFold\(bar, \{\s*more: moreBtn,/.test(lw) && /priority: key === 'kbd' && st\.claimed && \(ky\.yielded \|\| ky\.dialogHolds\) \? LIVE_BAR_PRIORITY\.badge : LIVE_BAR_PRIORITY\[key\], flexMin: key === 'url' \? URL_MIN_PX : undefined/.test(lw) && /signal: winInfo\._listenerCtl\?\.signal/.test(lw.slice(lw.indexOf('createBarFold(bar'))), 'the live view folds its bar through createBarFold (the ⋯, the priority table — the keyboard chip at the badge\'s rank while its keys are yielded to a text box the user pressed, lane takeover-keyboard, or held by a dialog he opened, lane dialog-keys — the URL minimum, the window\'s AbortSignal)');
+  ok(gateOf(pri) && pri.take === 0 && pri.handback === 0 && pri.reconnect === 0 && pri.badge > 0 && gateOf(Object.entries(pri).every(([k, v]) => v === 0 || k === 'badge' || k === 'bind' || k === 'agentBrowser' || v > pri.badge)) && pri.bind === pri.badge && pri.agentBrowser === pri.badge && pri.bind < pri.url && pri.backend > pri.viewers && pri.tabs > pri.backend && pri.tabs === pri.console && pri.console === pri.trace, 'the live view\'s priorities: the ONE toggle and Reconnect never fold; the badge folds LAST (lane I verify r1) and bind at its rank, after the URL (lane live-bind-door), the «Agent browser…» door at it too (B-8703 follow); Tabs / Console / Actions first', pri);
+  ok(gateOf(/onLayout: \(v\) => \{ renderMore\(\); floorPane\(v\); \}/.test(lw)) && gateOf(/app\.wm\.setPaneMinWidth\?\.\(winInfo\.id, v\.floor \+ chrome\)/.test(lw)) && verdictOf(/const chrome = Math\.max\(0, \(winInfo\.content\.offsetWidth \|\| 0\) - v\.widthPx\)/.test(lw)), 'THE SPLIT FLOOR: after every fold the live view keeps its pane at ≥ its bar\'s floor + the chrome around the bar (WindowManager.setPaneMinWidth)');
+  ok(gateOf(/if \(key === 'badge'\) rows\.push\(\{ caption: modeBadge\.title \|\| modeBadge\.textContent, title: modeBadge\.title \}\)/.test(lw)) && gateOf(/moreBtn\.dataset\.badge = want/.test(lw)) && gateOf(/moreBtn\.dataset\.mode = !taken \? 'watch' : st\.mine \? 'takeover' : 'other'/.test(lw)) && verdictOf(/\.browser-live-bar > \.browser-live-more\[data-badge="folded"\]\[data-mode="takeover"\]/.test(cssText)), 'a FOLDED badge rides the ⋯: its sentence is the first ⋯ row (a caption — lane ui-controls-and-bugs: words, not a greyed row), the ⋯ wears its colour per mode (style.css) and names it in its tooltip');
+  ok(gateOf(/createBarFold\(bar, \{\s*more: moreBtn,/.test(lw)) && gateOf(/priority: key === 'kbd' && st\.claimed && \(ky\.yielded \|\| ky\.dialogHolds\) \? LIVE_BAR_PRIORITY\.badge : LIVE_BAR_PRIORITY\[key\], flexMin: key === 'url' \? URL_MIN_PX : undefined/.test(lw)) && verdictOf(/signal: winInfo\._listenerCtl\?\.signal/.test(lw.slice(lw.indexOf('createBarFold(bar')))), 'the live view folds its bar through createBarFold (the ⋯, the priority table — the keyboard chip at the badge\'s rank while its keys are yielded to a text box the user pressed, lane takeover-keyboard, or held by a dialog he opened, lane dialog-keys — the URL minimum, the window\'s AbortSignal)');
   { // B-8703 unit 2's own catch: the «Agent browser…» door joined the bar but not the fold, so a narrow bar (overflow: hidden)
     // clipped it and the ⋯ after it — every child the live bar appends is a fold item, but the ⋯ itself
     const census = (text) => {
@@ -478,7 +478,7 @@ console.log('§5 wiring pins');
       return { kids, missing: kids.filter((k) => k !== 'moreBtn' && !els.has(k)) };
     };
     const c = census(lw);
-    ok(c.kids.length >= 20 && c.kids.includes('abBtn') && c.missing.length === 0 && pri && pri.agentBrowser === pri.badge, `every child of the live bar but the ⋯ is a fold item (${c.kids.length} children${c.missing.length ? '; missing: ' + c.missing.join(', ') : ''}); the «Agent browser…» door folds at the badge's rank (${pri && pri.agentBrowser})`);
+    ok(c.kids.length >= 20 && gateOf(c.kids.includes('abBtn')) && c.missing.length === 0 && gateOf(pri) && pri.agentBrowser === pri.badge, `every child of the live bar but the ⋯ is a fold item (${c.kids.length} children${c.missing.length ? '; missing: ' + c.missing.join(', ') : ''}); the «Agent browser…» door folds at the badge's rank (${pri && pri.agentBrowser})`);
     const planted = census(lw.replace(', agentBrowser: abBtn };', ' };'));
     ok(planted.missing.length === 1 && planted.missing[0] === 'abBtn', 'NEGATIVE CONTROL: the pre-cure fold (the door appended to the bar, never listed) is named missing', planted.missing);
   }
@@ -493,15 +493,15 @@ console.log('§5 wiring pins');
     const f = pri ? [at(en, pri, W314), at(ja, pri, W314)] : [], u = [at(en, unit, W314), at(ja, unit, W314)];
     const door = (v) => (v.shown.includes('agentBrowser') ? 'bar' : v.overflow.includes('agentBrowser') ? 'overflow' : 'gone');
     console.log('    the door at the split floor (296 px of bar content), the facts judged: ' + JSON.stringify({ follow: f.map((v) => ({ fits: v.fits, need: v.need, floor: v.floor, door: door(v), overflow: v.overflow })), unit: u.map((v) => ({ fits: v.fits, need: v.need, floor: v.floor })) }));
-    ok(f.length === 2 && f.every((v) => v.fits && v.floor <= W314 && door(v) !== 'gone'), 'B-8703 follow: at the split pane\'s 314 px floor (en and ja, a person\'s own window, «stopped starting» up) nothing is cut and the ⋯ stays whole — the door on the bar or folded into the ⋯', f);
-    ok(u.every((v) => !v.fits && v.floor > W314), 'RED CONTROL: the unit\'s rank 0 on the same inputs — the never-fold set passes the bar (the ⋯, its last child, cut first)', u);
-    ok(/const out = fold\.folded\(\);\n    const rows = \[\];\n    const check = [^\n]*\n    if \(out\.includes\('agentBrowser'\)\) rows\.push\(\{ label: abBtn\.textContent, action: \(\) => abBtn\.onclick\(\) \}\);/.test(lw), 'B-8703 follow: folded, the door is the ⋯\'s FIRST row (ahead of the loop over the folded keys, which has no row for it)');
+    ok(f.length === 2 && verdictOf(f.every((v) => v.fits && v.floor <= W314 && door(v) !== 'gone')), 'B-8703 follow: at the split pane\'s 314 px floor (en and ja, a person\'s own window, «stopped starting» up) nothing is cut and the ⋯ stays whole — the door on the bar or folded into the ⋯', f);
+    ok(verdictOf(u.every((v) => !v.fits && v.floor > W314)), 'RED CONTROL: the unit\'s rank 0 on the same inputs — the never-fold set passes the bar (the ⋯, its last child, cut first)', u);
+    ok(verdictOf(/const out = fold\.folded\(\);\n    const rows = \[\];\n    const check = [^\n]*\n    if \(out\.includes\('agentBrowser'\)\) rows\.push\(\{ label: abBtn\.textContent, action: \(\) => abBtn\.onclick\(\) \}\);/.test(lw)), 'B-8703 follow: folded, the door is the ⋯\'s FIRST row (ahead of the loop over the folded keys, which has no row for it)');
   }
-  ok(/showContextMenu\(r\.left, r\.bottom \+ 2, rows\)/.test(lw) && /const foldedRows = \(\) =>/.test(lw) && /check\('tabs', tabsBtn\)/.test(lw), 'the ⋯ opens showContextMenu with one row per folded item, the pane rows carrying their live counts');
-  ok(!/watchBtn/.test(lw) && /takeBtn\.style\.display = taken \? 'none' : ''/.test(lw) && /handBtn\.style\.display = taken \? '' : 'none'/.test(lw), 'ONE mode toggle: Take over while the agent drives, Hand back while anybody does (the Watch button — a second Hand back — is gone)');
-  ok(/takeBtn\.style\.display = show && m\.mode !== 'takeover' \? '' : 'none';/.test(dw) && /handBtn\.style\.display = show && m\.mode === 'takeover' \? '' : 'none';/.test(dw) && /modeBadge\.textContent = t\(shortModeBadge\(m\)\)/.test(dw), "the desktop strip's window-live form: the same ONE toggle and the same short badge (the sentence in its tooltip)");
-  ok(/openBtn\.innerHTML = UI_ICONS\.globe;/.test(lw) && !/UI_ICONS\.web\b/.test(lw), 'the web-view hand-off wears UI_ICONS.globe — never the missing UI_ICONS.web that printed "undefined"');
-  ok(/bindBtn\.innerHTML = BIND_SVG;/.test(lw) && /bindBtn\.setAttribute\('aria-label', label\)/.test(lw), 'the bind button is icon-only (its label names the session — unbounded) with the label as its accessible name');
+  ok(gateOf(/showContextMenu\(r\.left, r\.bottom \+ 2, rows\)/.test(lw)) && gateOf(/const foldedRows = \(\) =>/.test(lw)) && verdictOf(/check\('tabs', tabsBtn\)/.test(lw)), 'the ⋯ opens showContextMenu with one row per folded item, the pane rows carrying their live counts');
+  ok(!/watchBtn/.test(lw) && gateOf(/takeBtn\.style\.display = taken \? 'none' : ''/.test(lw)) && verdictOf(/handBtn\.style\.display = taken \? '' : 'none'/.test(lw)), 'ONE mode toggle: Take over while the agent drives, Hand back while anybody does (the Watch button — a second Hand back — is gone)');
+  ok(gateOf(/takeBtn\.style\.display = show && m\.mode !== 'takeover' \? '' : 'none';/.test(dw)) && gateOf(/handBtn\.style\.display = show && m\.mode === 'takeover' \? '' : 'none';/.test(dw)) && verdictOf(/modeBadge\.textContent = t\(shortModeBadge\(m\)\)/.test(dw)), "the desktop strip's window-live form: the same ONE toggle and the same short badge (the sentence in its tooltip)");
+  ok(gateOf(/openBtn\.innerHTML = UI_ICONS\.globe;/.test(lw)) && !/UI_ICONS\.web\b/.test(lw), 'the web-view hand-off wears UI_ICONS.globe — never the missing UI_ICONS.web that printed "undefined"');
+  ok(gateOf(/bindBtn\.innerHTML = BIND_SVG;/.test(lw)) && verdictOf(/bindBtn\.setAttribute\('aria-label', label\)/.test(lw)), 'the bind button is icon-only (its label names the session — unbounded) with the label as its accessible name');
   { // THE STRIP'S CHIP CENSUS (2.369.181 — lanes D + E met lane I's fold): every control the desktop strip adds carries a
     // fold priority unless it is one of the never-fold set (the mode badge, Take over / Hand back, the ⋯ itself) — a chip
     // added without one keys as a shell item (priority 0) and could never fold, so the bar overflows at a narrow width
@@ -513,23 +513,23 @@ console.log('§5 wiring pins');
       return { names, missing: names.filter((n) => !NEVER.has(n) && !prio.has(n)) };
     };
     const c = census(dw);
-    ok(c.names.length >= 14 && c.names.includes('shareChip') && c.names.includes('scaleChip') && c.missing.length === 0, `every desktop-strip control but the never-fold set has a fold priority (${c.names.length} controls${c.missing.length ? '; missing: ' + c.missing.join(', ') : ''})`);
+    ok(c.names.length >= 14 && gateOf(c.names.includes('shareChip')) && gateOf(c.names.includes('scaleChip')) && c.missing.length === 0, `every desktop-strip control but the never-fold set has a fold priority (${c.names.length} controls${c.missing.length ? '; missing: ' + c.missing.join(', ') : ''})`);
     const planted = census(dw.replace('const controls = [', 'const controls = [lateChip, '));
     ok(planted.missing.length === 1 && planted.missing[0] === 'lateChip', 'NEGATIVE CONTROL: a control added to the strip without a priority (planted into a copy of the text) is named missing');
   }
-  ok(/barFold = createBarFold\(bar, \{\s*more: moreBtn,\s*moreAlways: \(\) => !!rec && \(cap\(rec, 'seamless'\) \|\| cap\(rec, 'scales'\) \|\| shareable\(\) \|\| !!aboutWindowText\(rec\)\),/.test(dw) && !/moreBtn\.style\.display =/.test(dw) && /DESK_BAR_PRIORITY\.get\(el\) \|\| 0/.test(dw) && /barFold\?\.dispose\(\); barFold = null;/.test(dw), 'the desktop strip folds through createBarFold (⋯ kept for xpra, — lane E — for a shareable app on every rung, and — design 009 §B2 — whenever it has the About this window line; the shell\'s own items never fold, a retarget disposes the fold)');
-  ok(/import \{ barLadder \} from '\.\/live-bar-layout\.js';/.test(bf) && /new ResizeObserver\(schedule\)/.test(bf) && /requestAnimationFrame\(\(\) => \{ raf = 0; layoutNow\(\); \}\)/.test(bf) && /signal\.addEventListener\('abort', stop, \{ once: true \}\)/.test(bf) && /strip\(r\.oldValue\) === strip\(r\.target\.className\)/.test(bf), 'bar-fold.js: the PURE verdict, a ResizeObserver, ONE layout per frame, the AbortSignal lifecycle, its own fold toggles never re-trigger it');
+  ok(gateOf(/barFold = createBarFold\(bar, \{\s*more: moreBtn,\s*moreAlways: \(\) => !!rec && \(cap\(rec, 'seamless'\) \|\| cap\(rec, 'scales'\) \|\| shareable\(\) \|\| !!aboutWindowText\(rec\)\),/.test(dw)) && !/moreBtn\.style\.display =/.test(dw) && gateOf(/DESK_BAR_PRIORITY\.get\(el\) \|\| 0/.test(dw)) && verdictOf(/barFold\?\.dispose\(\); barFold = null;/.test(dw)), 'the desktop strip folds through createBarFold (⋯ kept for xpra, — lane E — for a shareable app on every rung, and — design 009 §B2 — whenever it has the About this window line; the shell\'s own items never fold, a retarget disposes the fold)');
+  ok(gateOf(/import \{ barLadder \} from '\.\/live-bar-layout\.js';/.test(bf)) && gateOf(/new ResizeObserver\(schedule\)/.test(bf)) && gateOf(/requestAnimationFrame\(\(\) => \{ raf = 0; layoutNow\(\); \}\)/.test(bf)) && gateOf(/signal\.addEventListener\('abort', stop, \{ once: true \}\)/.test(bf)) && verdictOf(/strip\(r\.oldValue\) === strip\(r\.target\.className\)/.test(bf)), 'bar-fold.js: the PURE verdict, a ResizeObserver, ONE layout per frame, the AbortSignal lifecycle, its own fold toggles never re-trigger it');
   ok(!/^import /m.test(read('src/lib/live-bar-layout.js')) && !/\bdocument\b|\bwindow\./.test(read('src/lib/live-bar-layout.js').replace(/\/\/.*$/gm, '')), 'live-bar-layout.js is PURE (imports nothing, no DOM)');
   const rule = (sel) => new RegExp(sel.replace(/[.>*]/g, (x) => '\\' + x) + '\\s*\\{([^}]*)\\}').exec(cssText)?.[1] || '';
-  ok(/flex: 0 0 auto; white-space: nowrap;/.test(rule('.browser-live-bar > *')) && /flex: 0 0 auto; white-space: nowrap;/.test(rule('.desktop-bar > *')), 'CSS: every child of both bars is nowrap + no-shrink');
-  ok(/width: auto;/.test(rule('.browser-live-bar > .file-tool-btn')) && /width: auto;/.test(rule('.desktop-bar > .file-tool-btn')) && /display: none !important/.test(rule('.browser-live-bar > .bar-folded, .desktop-bar > .bar-folded')), 'CSS: the bars\' text buttons are width:auto at (0,2,0) (beating viewers.css\'s 24 px icon box); the fold class hides');
-  ok(/overflow: hidden;/.test(rule('.browser-live-bar')) && /visibility: hidden;/.test(rule('.bar-ruler-host')), 'CSS: the live bar clips (defense in depth), the ruler is invisible');
+  ok(gateOf(/flex: 0 0 auto; white-space: nowrap;/.test(rule('.browser-live-bar > *'))) && verdictOf(/flex: 0 0 auto; white-space: nowrap;/.test(rule('.desktop-bar > *'))), 'CSS: every child of both bars is nowrap + no-shrink');
+  ok(gateOf(/width: auto;/.test(rule('.browser-live-bar > .file-tool-btn'))) && gateOf(/width: auto;/.test(rule('.desktop-bar > .file-tool-btn'))) && verdictOf(/display: none !important/.test(rule('.browser-live-bar > .bar-folded, .desktop-bar > .bar-folded'))), 'CSS: the bars\' text buttons are width:auto at (0,2,0) (beating viewers.css\'s 24 px icon box); the fold class hides');
+  ok(gateOf(/overflow: hidden;/.test(rule('.browser-live-bar'))) && verdictOf(/visibility: hidden;/.test(rule('.bar-ruler-host'))), 'CSS: the live bar clips (defense in depth), the ruler is invisible');
   // the window menu (the owner looked for the live view on the chat window's own menu)
-  ok(/registerCommand\(\{ id: 'window\.browserLive', title: \(\) => t\('Agent browser — live view'\), run: \(c\) => c\.app\.openBrowserLiveBeside\(c\.win, c\.s\.webuiId\) \}\)/.test(tb) && /registerMenuItem\(\{ menu: M, group: '2_session', order: 35, command: 'window\.browserLive', kind: 'browser-live', when: hasBrowser \}\)/.test(tb), "the 'window' menu (title bar / tab / taskbar / phone) offers 'Agent browser — live view', opening it BOUND beside the window");
-  ok(/c\.s\.browserProfileActive != null \|\| !!c\.s\.browserInput/.test(tb), 'gated on a conversation that HAS a browser (running now, or used since its start)');
-  ok(/registerMenuItem\(\{ menu: M, group: '3_admin', order: 16, command: 'session\.browserLive'/.test(libTexts['session-card.js']), 'the sidebar card keeps its own entry');
-  ok(/when: \(c\) => !!\(c\.win && c\.win\.type === 'browser-live' && c\.win\._browserLive && !c\.win\._browserLive\.isBound\(\)\)/.test(lw), "a BOUND live pane's menu drops its own Unbind — the chain's Unsplit is the one word for that act (the audit's D7)");
-  ok(/export function openBrowserLiveBeside\(app, hostWin, sessionId\)/.test(lw) && /intoChain: \{ hostId: host\.id, split: true, side: 'right' \}/.test(lw) && /app\.wm\.bindSplit\(host, existing, \{ side: 'right', announce: true \}\)/.test(lw), 'openBrowserLiveBeside: born in the window\'s chain as a split, or the existing view bound beside (announced) — never a second viewer');
+  ok(gateOf(/registerCommand\(\{ id: 'window\.browserLive', title: \(\) => t\('Agent browser — live view'\), run: \(c\) => c\.app\.openBrowserLiveBeside\(c\.win, c\.s\.webuiId\) \}\)/.test(tb)) && verdictOf(/registerMenuItem\(\{ menu: M, group: '2_session', order: 35, command: 'window\.browserLive', kind: 'browser-live', when: hasBrowser \}\)/.test(tb)), "the 'window' menu (title bar / tab / taskbar / phone) offers 'Agent browser — live view', opening it BOUND beside the window");
+  ok(verdictOf(/c\.s\.browserProfileActive != null \|\| !!c\.s\.browserInput/.test(tb)), 'gated on a conversation that HAS a browser (running now, or used since its start)');
+  ok(verdictOf(/registerMenuItem\(\{ menu: M, group: '3_admin', order: 16, command: 'session\.browserLive'/.test(libTexts['session-card.js'])), 'the sidebar card keeps its own entry');
+  ok(verdictOf(/when: \(c\) => !!\(c\.win && c\.win\.type === 'browser-live' && c\.win\._browserLive && !c\.win\._browserLive\.isBound\(\)\)/.test(lw)), "a BOUND live pane's menu drops its own Unbind — the chain's Unsplit is the one word for that act (the audit's D7)");
+  ok(gateOf(/export function openBrowserLiveBeside\(app, hostWin, sessionId\)/.test(lw)) && gateOf(/intoChain: \{ hostId: host\.id, split: true, side: 'right' \}/.test(lw)) && verdictOf(/app\.wm\.bindSplit\(host, existing, \{ side: 'right', announce: true \}\)/.test(lw)), 'openBrowserLiveBeside: born in the window\'s chain as a split, or the existing view bound beside (announced) — never a second viewer');
   // i18n: every t() literal in the three touched client modules has zh + ja
   const lits = (src) => [...src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
   const missing = [...new Set([...lits(lw), ...lits(tb), ...lits(dw)])].filter((k) => !zh[k] || !ja[k]);
@@ -551,15 +551,15 @@ console.log('§r600 chipLineLayout — the who cell\'s first row is never folded
   const v700 = scene(L, 172, two), vLong = scene(L, 172, long), v12 = scene(L, 260, twelve), vWide = scene(L, 400, two), vTight = scene(L, 100, two);
   const pick = (v) => ({ shown: v.shown, overflow: v.overflow, compact: v.compact, squeezed: v.squeezed, fits: v.fits });
   for (const [n, v] of [['700 px (the hosted widths)', v700], ['a long first name', vLong], ['twelve Task Groups, 260 px', v12], ['wide, 400 px', vWide], ['too narrow for even the minimum, 100 px', vTight]]) console.log(`    judged (${n}): ${JSON.stringify(pick(v))}`);
-  ok(same(v700.shown, ['0', '2']) && same(v700.overflow, ['1']) && same(v700.compact, ['0']) && v700.squeezed === null,
+  ok(gateOf(same(v700.shown, ['0', '2'])) && gateOf(same(v700.overflow, ['1'])) && gateOf(same(v700.compact, ['0'])) && v700.squeezed === null,
     'at 700 px the first Task Group chip is SHOWN by name without its reach words (compact), the second folds into «+1» — never «+2» with no name', pick(v700));
-  ok(same(vLong.shown, ['0', '2']) && same(vLong.overflow, ['1']) && vLong.squeezed === '0' && vLong.compact.includes('0'),
+  ok(gateOf(same(vLong.shown, ['0', '2'])) && gateOf(same(vLong.overflow, ['1'])) && vLong.squeezed === '0' && verdictOf(vLong.compact.includes('0')),
     'a first chip too wide even without its words is SQUEEZED (its name ellipsized) rather than folded whole; every other chip folds', pick(vLong));
-  ok(v12.shown.includes('0') && v12.shown.length + v12.overflow.length === 13 && v12.overflow.length >= 1 && v12.compact.includes('0'),
+  ok(gateOf(v12.shown.includes('0')) && v12.shown.length + v12.overflow.length === 13 && v12.overflow.length >= 1 && verdictOf(v12.compact.includes('0')),
     'twelve Task Groups: the first is shown by name, the rest fold into «+N» (shown + folded = all twelve and Change…)', pick(v12));
-  ok(same(vWide.shown, ['0', '1', '2']) && !vWide.overflow.length && !vWide.compact.length && vWide.squeezed === null,
+  ok(gateOf(same(vWide.shown, ['0', '1', '2'])) && !vWide.overflow.length && !vWide.compact.length && vWide.squeezed === null,
     'a line that holds every chip whole keeps each chip\'s reach words and squeezes nothing (minimal)', pick(vWide));
-  ok(same(vTight.shown, ['2']) && vTight.squeezed === null && same(vTight.overflow, ['0', '1']),
+  ok(gateOf(same(vTight.shown, ['2'])) && vTight.squeezed === null && verdictOf(same(vTight.overflow, ['0', '1'])),
     'a line narrower than Change… + the first chip\'s minimum + the pill folds the first too — honestly «+2», never a cut chip', pick(vTight));
   // RED CONTROLS: (a) the release's fit (barLayout over the natural widths, the cure B4's chips); (b) the model without its squeeze
   const rel = L.barLayout({ widthPx: 172, gapPx: 4, overflowPx: 16, items: [C('0', 130), C('1', 130), CHANGE('2')] });
@@ -567,15 +567,15 @@ console.log('§r600 chipLineLayout — the who cell\'s first row is never folded
   const Mno = await import(pathToFileURL(MUT.write('src/lib/live-bar-layout.js', anchored(read('src/lib/live-bar-layout.js'), SQ, '  return { ...v, squeezed: null };\n', 'chip-line-no-squeeze'), 'chip-line-no-squeeze', { esm: true })).href);
   const vNo = scene(Mno, 172, long);
   console.log(`    judged (RED: the release's fit at 700 px): ${JSON.stringify({ shown: rel.shown, overflow: rel.overflow })} · (RED: no squeeze, a long first name): ${JSON.stringify(pick(vNo))}`);
-  ok(same(rel.shown, ['2']) && same(rel.overflow, ['0', '1']), 'RED CONTROL (a): the release\'s fit over the reach-word chips folds BOTH at 700 px — «+2» and no name (the hosted ⑤ red)', rel);
-  ok(same(vNo.shown, ['2']) && vNo.squeezed === null, 'RED CONTROL (b): the model without its first-chip squeeze folds a long first name whole — the cell shows no name', pick(vNo));
+  ok(gateOf(same(rel.shown, ['2'])) && verdictOf(same(rel.overflow, ['0', '1'])), 'RED CONTROL (a): the release\'s fit over the reach-word chips folds BOTH at 700 px — «+2» and no name (the hosted ⑤ red)', rel);
+  ok(gateOf(same(vNo.shown, ['2'])) && vNo.squeezed === null, 'RED CONTROL (b): the model without its first-chip squeeze folds a long first name whole — the cell shows no name', pick(vNo));
   // the DOM half: the who cell hands the rule to the fit; the chip's own CSS draws compact / squeezed
   const tv = read('src/lib/browser-trace-view.js'), css = read('public/style.css');
-  ok(/const folded = fitLine\(line, items, more, \(n\) => '\+' \+ \(n \+ countRest\.length\), chipFit\);/.test(tv) && /chipLineLayout\(\{ widthPx: width, items: rows,/.test(tv)
-    && /\.bprof-who-chip\.is-compact \.bprof-who-reach \{ display: none; \}/.test(css) && /\.bprof-who-chip\.is-squeezed \{ flex: 0 1 auto; \}/.test(css),
+  ok(gateOf(/const folded = fitLine\(line, items, more, \(n\) => '\+' \+ \(n \+ countRest\.length\), chipFit\);/.test(tv)) && gateOf(/chipLineLayout\(\{ widthPx: width, items: rows,/.test(tv))
+    && gateOf(/\.bprof-who-chip\.is-compact \.bprof-who-reach \{ display: none; \}/.test(css)) && verdictOf(/\.bprof-who-chip\.is-squeezed \{ flex: 0 1 auto; \}/.test(css)),
     'the who cell hands its chips to the fit as a CHIP line (chipLineLayout), and the chip\'s own rule draws «compact» (no reach words) and «squeezed» (it shrinks)');
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

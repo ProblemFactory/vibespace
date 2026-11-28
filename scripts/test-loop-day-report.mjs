@@ -37,7 +37,7 @@ const CEN = require(path.join(REPO, 'src/loop-census.js'));
 const TEL = require(path.join(REPO, 'src/telemetry.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -87,18 +87,18 @@ const fixedRep = (h) => ({ kind: 'hour', hour: h, toMs: T0 + 3600000, busy: 0.37
 const LINE = '[loop-hour] hour=2026-11-16T20Z span=3600s held=9.2s holds=4 longest=4.0s boot-held=0.0s boot-holds=0 lost-holds=0 no-ours-holds=0 no-ours-held=0.0s busy=37.3% top="src/channel-store.js:275 5.5s; src/normalizers.js:812 2.5s; waiting for a CPU 1.2s" engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; native 5%; outside 12%" census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 census-asks=812 census-paid=0.37s hub-up=26.5h hub-heap=312MB/4096MB hub-rss=640MB cli=2/1200MB wrapper=2/160MB browser=3/900MB agentd=1/80MB other=4/40MB procs-by=service conversations=12 turn-running=2 turn-waiting=1 idle-under-1h=3 idle-1-2h=1 idle-2-4h=2 idle-over-4h=4 turn-unknown=1 ages-read=12/12 browsers-ready=3 browsers-idle-1h=2 page-sockets=3 device-links=1 ws-in=1203 ws-out=5402 parsed=12.3M creates=2 resumes=1 writes=350 write-max=1.2s vault-direct-starts=? program-starts=?';
 const got = L.line(fixedRep(Object.assign(fixedHour(), { lost: 0 })));
 ok(got === LINE, '① the fixed hour prints the fixed line (held 9.2 s over 4 holds, the top three by cause, the longest, busy, the engines in their order, memory by kind, the sizes)', { got, want: LINE });
-ok(L.LINE_RE.test(got) && L.causesOk(got) && (typeof L.enginesOk === 'function' && L.enginesOk(got)), '① the line passes its own shape check (LINE_RE) and names only causes and engines it may');
+ok(gateOf(L.LINE_RE.test(got)) && gateOf(L.causesOk(got)) && (typeof L.enginesOk === 'function' && verdictOf(L.enginesOk(got))), '① the line passes its own shape check (LINE_RE) and names only causes and engines it may');
 { // B-91aa: the timer sites' programs — the small starter, or the old road in force since when (said every hour, not once in a day's journal)
   const withS = (st) => L.line(Object.assign(fixedRep(Object.assign(fixedHour(), { lost: 0 })), { starter: st }));
   const dS = withS({ direct: true, directSince: Date.UTC(2026, 10, 16, 19, 42) }), sS = withS({ direct: false }), uS = withS(null);
-  ok(L.LINE_RE.test(dS) && dS.endsWith(' program-starts=direct-since-2026-11-16T19:42Z') && L.LINE_RE.test(sS) && sS.endsWith(' program-starts=starter') && uS.endsWith(' program-starts=?'),
+  ok(gateOf(L.LINE_RE.test(dS)) && gateOf(dS.endsWith(' program-starts=direct-since-2026-11-16T19:42Z')) && gateOf(L.LINE_RE.test(sS)) && gateOf(sS.endsWith(' program-starts=starter')) && verdictOf(uS.endsWith(' program-starts=?')),
     'the line names the timer sites\' starts: «starter», «direct-since-<minute>Z» while the old road is in force, «?» when not told — each passes LINE_RE', { dS: dS.slice(-60), sS: sS.slice(-40) });
   // B-91aa's remainder (r4591 (A)): the hour's vault jobs started on the hub's own road, by number — «?» when the starter told none
   const vS = L.line(Object.assign(fixedRep(Object.assign(fixedHour(), { lost: 0 })), { starter: { direct: false }, vaultDirect: 3 }));
-  ok(L.LINE_RE.test(vS) && vS.endsWith(' vault-direct-starts=3 program-starts=starter') && uS.includes(' vault-direct-starts=? '), 'the line counts the hour\'s VAULT job starts on the hub\'s own road (vault-direct-starts=3) before program-starts; «?» untold — each passes LINE_RE', { vS: vS.slice(-70) });
+  ok(gateOf(L.LINE_RE.test(vS)) && gateOf(vS.endsWith(' vault-direct-starts=3 program-starts=starter')) && verdictOf(uS.includes(' vault-direct-starts=? ')), 'the line counts the hour\'s VAULT job starts on the hub\'s own road (vault-direct-starts=3) before program-starts; «?» untold — each passes LINE_RE', { vS: vS.slice(-70) });
 }
 const unread = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: null, engines: null, mem: null, sizes: {} });
-ok(L.LINE_RE.test(unread) && /engines="\?" census-ticks=\? busy-ticks=\? held-ticks=\? idle-ticks=\? stopped-ticks=\? not-sampled=\? via-helper=\? deep=\? census-asks=\? census-paid=\? hub-up=\? /.test(unread) && /cli=\?\/\? /.test(unread) && / top="none" /.test(unread) && / writes=\? /.test(unread) && / turn-running=\? /.test(unread) && / lost-holds=\? /.test(unread) && / browsers-ready=\? /.test(unread), '① a value never read prints «?», never 0 (an hour whose census and process table did not answer)', unread);
+ok(gateOf(L.LINE_RE.test(unread)) && gateOf(/engines="\?" census-ticks=\? busy-ticks=\? held-ticks=\? idle-ticks=\? stopped-ticks=\? not-sampled=\? via-helper=\? deep=\? census-asks=\? census-paid=\? hub-up=\? /.test(unread)) && gateOf(/cli=\?\/\? /.test(unread)) && gateOf(/ top="none" /.test(unread)) && gateOf(/ writes=\? /.test(unread)) && gateOf(/ turn-running=\? /.test(unread)) && gateOf(/ lost-holds=\? /.test(unread)) && verdictOf(/ browsers-ready=\? /.test(unread)), '① a value never read prints «?», never 0 (an hour whose census and process table did not answer)', unread);
 
 console.log('② the shape is stable and names nothing');
 {
@@ -112,17 +112,17 @@ console.log('② the shape is stable and names nothing');
   const h = L.newHour(T0); for (const x of nasty) L.holdAdd(h, x);
   const line = L.line({ kind: 'exit', hour: h, toMs: T0 + 900000, busy: 0.5, engines: null, mem: null, sizes: {} });
   const bad = ['/home', 'data/', '.vibespace', 'acct-9', 'people.json', 'Alice', 'alice', 'quarterly', '@', 'secret', '..', 'quoted'].filter((w) => line.includes(w));
-  ok(L.LINE_RE.test(line) && L.causesOk(line) && !bad.length && line.startsWith('[loop-exit] '), '② a hold whose frame or verdict carries a data path, an account, a name or a quote prints a fixed verdict / «(other)» / «(no cause recorded)» — nothing of them', { line, bad });
+  ok(gateOf(L.LINE_RE.test(line)) && gateOf(L.causesOk(line)) && !bad.length && verdictOf(line.startsWith('[loop-exit] ')), '② a hold whose frame or verdict carries a data path, an account, a name or a quote prints a fixed verdict / «(other)» / «(no cause recorded)» — nothing of them', { line, bad });
   ok(L.causeOf({ verdict: 'JavaScript', frame: 'fold (src/server/channels-engine.js:2580)' }) === 'src/server/channels-engine.js:2580' && L.causeOf({ verdict: 'JavaScript', frame: 'tick (server.js:973)' }) === 'server.js:973', '② a frame of the hub\'s own code is its code location (src/…:line, server.js:line)');
   // the census's family ids are the only words in engines="…": a fold that carried another word is not printed
   const odd = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 1, busy: 0, engines: { busyTicks: 10, sampledTicks: 10, notSampled: { ticks: 0 }, cost: {}, shares: [{ family: 'conv-of-alice', share: 1 }] }, mem: null, sizes: {} });
-  ok(!odd.includes('alice') && /engines="interface 0%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; conversation 0%; native 0%; outside 0%"/.test(odd), '② engines="…" prints the seven owners + native + outside in their fixed order — a word the fold carried that is not one of them never prints', odd);
+  ok(!odd.includes('alice') && verdictOf(/engines="interface 0%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; conversation 0%; native 0%; outside 0%"/.test(odd)), '② engines="…" prints the seven owners + native + outside in their fixed order — a word the fold carried that is not one of them never prints', odd);
 }
 
 console.log('③ the verdict words are the hold book\'s own');
 {
   const V = Object.values(LH.V || {});
-  ok(V.length > 0 && V.length === L.VERDICTS.length && V.every((w) => L.VERDICTS.includes(w)), `③ src/loop-day-report.js VERDICTS = src/loop-hold.js V (${V.length} words) — a new verdict there is red here until it is copied`, { V, mine: L.VERDICTS });
+  ok(V.length > 0 && V.length === L.VERDICTS.length && verdictOf(V.every((w) => L.VERDICTS.includes(w))), `③ src/loop-day-report.js VERDICTS = src/loop-hold.js V (${V.length} words) — a new verdict there is red here until it is copied`, { V, mine: L.VERDICTS });
 }
 
 console.log('④ the ORCH: fold as they come, cut first, counts taken, census «?», exit line, day');
@@ -144,15 +144,15 @@ console.log('④ the ORCH: fold as they come, cut first, counts taken, census «
   wall = T0 + 3600000;
   const r1 = await R.tick();
   ok(now0.holds === 5002 && r1.hour.holds === 5002 && Object.keys(r1.hour.by).length === 2 && !Object.values(r1.hour).some(Array.isArray), '④ 5 002 holds folded AS THEY CAME into one entry per cause (2 entries — never a list of rows); a hold of the boot is apart (boot-held)', { holds: r1.hour.holds, by: r1.hour.by });
-  ok(/^\[loop-hour\] hour=2026-11-16T20Z span=3300s held=5005\.5s holds=5002 longest=4\.0s boot-held=9\.0s boot-holds=1 lost-holds=\? no-ours-holds=0 no-ours-held=0\.0s busy=25\.0% top="src\/normalizers\.js:812 5000\.0s; src\/channel-store\.js:275 5\.5s" engines="interface 20%;/.test(r1.line) && / ws-in=7 ws-out=9 parsed=0\.0M creates=1 resumes=0 writes=0 write-max=0\.8s vault-direct-starts=(\d+|\?) program-starts=(starter|\?)$/.test(r1.line) && lines[0] === r1.line,
+  ok(gateOf(/^\[loop-hour\] hour=2026-11-16T20Z span=3300s held=5005\.5s holds=5002 longest=4\.0s boot-held=9\.0s boot-holds=1 lost-holds=\? no-ours-holds=0 no-ours-held=0\.0s busy=25\.0% top="src\/normalizers\.js:812 5000\.0s; src\/channel-store\.js:275 5\.5s" engines="interface 20%;/.test(r1.line)) && gateOf(/ ws-in=7 ws-out=9 parsed=0\.0M creates=1 resumes=0 writes=0 write-max=0\.8s vault-direct-starts=(\d+|\?) program-starts=(starter|\?)$/.test(r1.line)) && lines[0] === r1.line,
     '④ the cut prints ONE line: the hour from the start (20:05Z, 3300 s), the counts taken, the census folded, the busy share between the two cuts', r1.line);
   ok(R.hours().now.holds === 1 && R.hours().now.heldMs === 3000 && LC.peek().wsIn === 0, '④ the cut swapped the hour FIRST: a hold booked while the cut read the census counts in the NEXT hour, and the counts were taken', R.hours().now);
   R.onHold({ ms: 2000, verdict: 'waiting for a CPU', frame: null });
   wall = T0 + 2 * 3600000;
   const r2 = await R.tick();
-  ok(/ engines="\?" census-ticks=\? /.test(r2.line) && / held=5\.0s holds=2 /.test(r2.line), '④ a census that did not answer prints «?» — never a guess', r2.line);
+  ok(gateOf(/ engines="\?" census-ticks=\? /.test(r2.line)) && verdictOf(/ held=5\.0s holds=2 /.test(r2.line)), '④ a census that did not answer prints «?» — never a guess', r2.line);
   const ex = R.exitLine(); const ex2 = R.exitLine();
-  ok(ex && ex.line.startsWith('[loop-exit] hour=2026-11-16T22Z span=0s held=0.0s holds=0 longest=0.0s boot-held=0.0s boot-holds=0 lost-holds=? ') && ex2 === null && lines.length === 3, '④ the exit line: the same shape over the hour so far, said ONCE', ex && ex.line);
+  ok(gateOf(ex) && gateOf(ex.line.startsWith('[loop-exit] hour=2026-11-16T22Z span=0s held=0.0s holds=0 longest=0.0s boot-held=0.0s boot-holds=0 lost-holds=? ')) && ex2 === null && lines.length === 3, '④ the exit line: the same shape over the hour so far, said ONCE', ex && ex.line);
   const hs = R.hours();
   ok(hs.hours.length === 2 && hs.hours[0].from === T0 + 3600000 && hs.day.hours === 2 && hs.day.holds === 5004 && !!hs.day.boot && hs.day.boot.holds === 1 && hs.day.longestMs === 4000 && hs.day.top[0].cause === 'src/normalizers.js:812', '④ ⚙ Diagnostics reads the hours kept (newest first) and their day', { n: hs.hours.length, day: hs.day });
   const many = O.create({ log: quietLog([]), wallNow: () => wall, kids: async () => null, census: async () => null, keepHours: 24 });
@@ -191,9 +191,9 @@ console.log('⑤ the report holds nothing: a REAL cut makes zero synchronous fs 
     kids = rep.mem && rep.mem.kids;
   } finally { for (const k of names) fs[k] = orig[k]; }
   const shp = (shapes || []).map((k) => k && `${k.how}: ${L.KIDS.map((n) => `${n} ${k[n].n}`).join(', ')}`);
-  ok(calls === 0 && shp.length === 3 && shapes.every(Boolean) && shapes[0].how === 'service' && shapes[0].browser.n === 2 && shapes[1].how === 'tree' && shapes[1].cli.n === 2 && shapes[2].how === 'container',
+  ok(calls === 0 && shp.length === 3 && gateOf(shapes.every(Boolean)) && shapes[0].how === 'service' && shapes[0].browser.n === 2 && shapes[1].how === 'tree' && shapes[1].cli.n === 2 && shapes[2].how === 'container',
     `⑤ a real cut — the census asked, the process table read (${kids ? kids.how : 'none'}: ${kids ? L.KIDS.map((k) => `${k} ${kids[k].n}`).join(', ') : '—'}), the line made — AND the walk over stand-in trees of the three group shapes (${shp.join(' · ')}: the keeper browser's start time, the dtach masters' command lines, the container's marker) made ZERO synchronous fs calls (${calls})`, { seen, shp });
-  ok(rep && L.LINE_RE.test(rep.line) && kids && Number.isFinite(rep.mem.rss), '⑤ …and its line is whole: memory read, the processes counted by kind', rep && rep.line);
+  ok(gateOf(rep) && gateOf(L.LINE_RE.test(rep.line)) && gateOf(kids) && verdictOf(Number.isFinite(rep.mem.rss)), '⑤ …and its line is whole: memory read, the processes counted by kind', rep && rep.line);
 }
 
 console.log('⑥ processes by kind; the counts wired where they leave');
@@ -202,11 +202,11 @@ console.log('⑥ processes by kind; the counts wired where they leave');
     && O.kindOf('node', 'node /usr/lib/node_modules/@openai/codex/bin/codex.js') === 'cli' && O.kindOf('node', 'node /x/chat-wrapper.js') === 'wrapper' && O.kindOf('dtach') === 'other', '⑥ a process\'s kind: agent CLIs, browsers, the device agent, the rest (a node process told apart by its command line — never kept)');
   const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const ws = src('src/ws-handler.js'), sw = src('src/store-writer.js'), so = src('src/server/stdout/index.js'), wc = src('src/ws-create.js'), lh = src('src/server/loop-holds.js'), sv = src('server.js');
-  ok(/ws\.send = \(d, o, cb\) => \{ LC\.inc\('wsOut'\); return send0\(d, o, cb\); \};/.test(ws) && /ws\.on\('message', async \(raw\) => \{\n\s*LC\.inc\('wsIn'\);/.test(ws), '⑥ page-socket messages: in at the handler, out at the socket\'s own send');
-  ok(/^const LC = require\('\.\/server\/loop-counts\.js'\);/m.test(ws) && (ws.match(/loop-counts\.js/g) || []).length === 1, '⑫ R2: a bump on the hot path is an ADD — ws-handler binds the counter module ONCE at load (no require per message)');
-  ok((sw.match(/LC\.inc\('writes'\);/g) || []).length === 1 && /function post\(l, s, p, since\) \{[^]*?LC\.inc\('writes'\);/.test(sw) && /if \(!onMain\) LC\.max\('writeMaxMs', ms\);/.test(sw), '⑥ store writes: counted at the ONE post to a lane\'s thread (the writer unit: the timer\'s road and the synchronous road both post through post()), the longest at its finish');
-  ok(/ptyProcess\.onData\(\(o\) => LC\.inc\('parsedChars'/.test(so) && /inc\(data && \(data\.resumeId \|\| data\.resume\) \? 'resumes' : 'creates'\)/.test(wc), '⑥ conversation output handed to a parser (the registry\'s attach) and creates / resumes (the create handler)');
-  ok(/for \(const f of each\) \{ try \{ f\(\{ ms: h\.ms, verdict: h\.fold\.verdict, frame: h\.fold\.frame, boot: !!h\.boot, noOurs: !!h\.fold\.noOurs \}\); \} catch \{ \} \}/.test(lh) && /hourly: hourly \?/.test(lh) && /loop-day-report\.js'\)\.wire\(\{ witness: syncFs, sessions: \(\) => activeSessions\.entries\(\), socketsDir: SOCKETS_DIR, buffersDir: BUFFERS_DIR, sizes: /.test(sv) && /book\.onEach\(\(h\) => r\.onHold\(h\)\); book\.setHourly\(\(\) => r\.hours\(\)\);/.test(src('src/server/loop-day-report.js')), '⑥ the hold book hands each hold to the hour; server.js starts the report and Diagnostics reads its hours');
+  ok(gateOf(/ws\.send = \(d, o, cb\) => \{ LC\.inc\('wsOut'\); return send0\(d, o, cb\); \};/.test(ws)) && verdictOf(/ws\.on\('message', async \(raw\) => \{\n\s*LC\.inc\('wsIn'\);/.test(ws)), '⑥ page-socket messages: in at the handler, out at the socket\'s own send');
+  ok(gateOf(/^const LC = require\('\.\/server\/loop-counts\.js'\);/m.test(ws)) && (ws.match(/loop-counts\.js/g) || []).length === 1, '⑫ R2: a bump on the hot path is an ADD — ws-handler binds the counter module ONCE at load (no require per message)');
+  ok((sw.match(/LC\.inc\('writes'\);/g) || []).length === 1 && gateOf(/function post\(l, s, p, since\) \{[^]*?LC\.inc\('writes'\);/.test(sw)) && verdictOf(/if \(!onMain\) LC\.max\('writeMaxMs', ms\);/.test(sw)), '⑥ store writes: counted at the ONE post to a lane\'s thread (the writer unit: the timer\'s road and the synchronous road both post through post()), the longest at its finish');
+  ok(gateOf(/ptyProcess\.onData\(\(o\) => LC\.inc\('parsedChars'/.test(so)) && verdictOf(/inc\(data && \(data\.resumeId \|\| data\.resume\) \? 'resumes' : 'creates'\)/.test(wc)), '⑥ conversation output handed to a parser (the registry\'s attach) and creates / resumes (the create handler)');
+  ok(gateOf(/for \(const f of each\) \{ try \{ f\(\{ ms: h\.ms, verdict: h\.fold\.verdict, frame: h\.fold\.frame, boot: !!h\.boot, noOurs: !!h\.fold\.noOurs \}\); \} catch \{ \} \}/.test(lh)) && gateOf(/hourly: hourly \?/.test(lh)) && gateOf(/loop-day-report\.js'\)\.wire\(\{ witness: syncFs, sessions: \(\) => activeSessions\.entries\(\), socketsDir: SOCKETS_DIR, buffersDir: BUFFERS_DIR, sizes: /.test(sv)) && verdictOf(/book\.onEach\(\(h\) => r\.onHold\(h\)\); book\.setHourly\(\(\) => r\.hours\(\)\);/.test(src('src/server/loop-day-report.js'))), '⑥ the hold book hands each hold to the hour; server.js starts the report and Diagnostics reads its hours');
 }
 
 console.log('⑦ R1 / R4: the census\'s paid cost printed; the engines and native add to 100 % of the busy ticks; each field counts what it says');
@@ -215,9 +215,9 @@ try {
   const F = CEN.censusFold(TAKE);
   const sum = [...F.shares.map((x) => x.share), F.native.share].reduce((a, b) => a + b, 0);
   const pcts = (/engines="([^"]*)"/.exec(LINE)[1]).split('; ').map((p) => Number(p.split(' ')[1].replace('%', '')));
-  ok(CEN.DISPATCH_MS === 0.3 && F.cost.paidMs === 121.8 + 812 * 0.3 && / census-asks=812 census-paid=0\.37s /.test(LINE),
+  ok(CEN.DISPATCH_MS === 0.3 && F.cost.paidMs === 121.8 + 812 * 0.3 && verdictOf(/ census-asks=812 census-paid=0\.37s /.test(LINE)),
     '⑦ R1: census-paid = each ask\'s own run, measured live (121.8 ms over 812 asks), + the inspector\'s dispatch of each ask at the MEASURED 0.3 ms ⇒ 0.37 s — the price the main thread pays, never the in-sample part alone', F.cost);
-  ok(Math.abs(sum - 1) < 1e-12 && pcts.length === 9 && Math.abs(pcts.reduce((a, b) => a + b, 0) - 100) <= 4 && / census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 /.test(LINE),
+  ok(Math.abs(sum - 1) < 1e-12 && pcts.length === 9 && Math.abs(pcts.reduce((a, b) => a + b, 0) - 100) <= 4 && verdictOf(/ census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 /.test(LINE)),
     `⑦ R4: the nine engine fields (seven owners + native + outside) are shares of the busy ticks and add to 100 % (printed ${pcts.join('+')}); census-ticks = every tick (3 040 = 1 000 busy + 2 000 idle + 10 held + 30 not sampled), busy-ticks = booked on a family or native, not-sampled = not asked`, { sum, pcts });
 } catch (e) { ok(false, '⑦ R1 / R4: the leg threw on this tree', (e && e.message) || String(e)); }
 }
@@ -227,7 +227,7 @@ console.log('⑧ R3: an hour no watchdog watched prints «?» — never a clean 
 try {
   const h = L.newHour(T0, { watched: false }); L.holdAdd(h, { ms: 3000, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
   const ln = L.line({ kind: 'hour', hour: h, toMs: T0 + 3600000, busy: 0.2, engines: null, mem: null, sizes: {} });
-  ok(L.LINE_RE.test(ln) && / held=\? holds=\? longest=\? boot-held=\? boot-holds=\? lost-holds=\? no-ours-holds=\? no-ours-held=\? busy=20\.0% top="\?" /.test(ln), '⑧ an unwatched hour: held, holds, longest, the boot\'s and top print «?» (busy is the loop\'s own reading and stays)', ln);
+  ok(gateOf(L.LINE_RE.test(ln)) && verdictOf(/ held=\? holds=\? longest=\? boot-held=\? boot-holds=\? lost-holds=\? no-ours-holds=\? no-ours-held=\? busy=20\.0% top="\?" /.test(ln)), '⑧ an unwatched hour: held, holds, longest, the boot\'s and top print «?» (busy is the loop\'s own reading and stays)', ln);
   let alive = true;
   const R = O.create({ log: quietLog([]), wallNow: () => T0 + 7200000, census: async () => null, kids: async () => null, watched: () => alive });
   R.onHold({ ms: 1500, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
@@ -235,7 +235,7 @@ try {
   const r = await R.tick();
   const R0 = O.create({ log: quietLog([]), wallNow: () => T0 + 7200000, census: async () => null, kids: async () => null });
   const r0 = await R0.tick();
-  ok(/ held=\? holds=\? /.test(r.line) && / held=0\.0s holds=0 /.test(r0.line), '⑧ the ORCH: a watchdog gone at the cut ⇒ «?»; a watched hour with no hold ⇒ 0 (a clean hour is only ever a watched one)', { r: r.line.slice(0, 120), r0: r0.line.slice(0, 120) });
+  ok(gateOf(/ held=\? holds=\? /.test(r.line)) && verdictOf(/ held=0\.0s holds=0 /.test(r0.line)), '⑧ the ORCH: a watchdog gone at the cut ⇒ «?»; a watched hour with no hold ⇒ 0 (a clean hour is only ever a watched one)', { r: r.line.slice(0, 120), r0: r0.line.slice(0, 120) });
 } catch (e) { ok(false, '⑧ R3: the leg threw on this tree', (e && e.message) || String(e)); }
 }
 
@@ -315,7 +315,7 @@ console.log('⑪ M6 + S4: the conversations by turn and idle age — the age rea
     const mk = () => O.create({ log: quietLog([]), wallNow: () => t, census: async () => null, kids: async () => null, sessions: () => S, buffersDir: BUF, upMs: () => 0.2 * H, browsers: () => ({ ready: 3, idle1h: 2 }) });
     const r1 = await mk().tick(), r2 = await mk().tick();
     const want = / turn-running=1 turn-waiting=1 idle-under-1h=1 idle-1-2h=1 idle-2-4h=1 idle-over-4h=2 turn-unknown=2 ages-read=9\/9 browsers-ready=3 browsers-idle-1h=2 /;
-    ok(want.test(r1.line) && want.test(r2.line) && / hub-up=0\.2h /.test(r2.line) && L.LINE_RE.test(r2.line), '⑪ S4: a hub restarted 12 minutes ago still reads «idle over 4 h» = 2 (the files\' times survive it), and prints its own uptime (hub-up) beside them', r2.line.slice(0, 400));
+    ok(gateOf(want.test(r1.line)) && gateOf(want.test(r2.line)) && gateOf(/ hub-up=0\.2h /.test(r2.line)) && verdictOf(L.LINE_RE.test(r2.line)), '⑪ S4: a hub restarted 12 minutes ago still reads «idle over 4 h» = 2 (the files\' times survive it), and prints its own uptime (hub-up) beside them', r2.line.slice(0, 400));
   } finally { fs.rmSync(BUF, { recursive: true, force: true }); }
 } catch (e) { ok(false, '⑪ M6: the leg threw on this tree', (e && e.message) || String(e)); } }
 
@@ -324,23 +324,23 @@ console.log('⑫b S2: the line\'s engines from the REAL census fold — the futu
   const F = CEN.censusFold({ ...TAKE, families: { interface: 200, channels: 410, money: 100, conversation: 120, outside: 120, native: 50 }, viaHelper: 140, deep: 7 });
   const ln = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.3, engines: F, mem: null, sizes: {} });
   const SPL = (CEN.SPLIT || []).map((x) => `${x.short}* 0%; `).join('');
-  ok(SPL.length > 0 && new RegExp(` engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; ${SPL.replace(/\*/g, '\\*')}native 5%; outside 12%" `).test(ln) && / busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 /.test(ln) && L.LINE_RE.test(ln) && L.enginesOk(ln),
+  ok(SPL.length > 0 && gateOf(new RegExp(` engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; ${SPL.replace(/\*/g, '\\*')}native 5%; outside 12%" `).test(ln)) && gateOf(/ busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 /.test(ln)) && gateOf(L.LINE_RE.test(ln)) && verdictOf(L.enginesOk(ln)),
     '⑫b the real fold (src/loop-census.js) prints the seven OWNERS in their order, then EVERY split file\'s own bucket in the census\'s list order (none booked here: 0 %), native and outside, and its helper / deep counts', ln.slice(0, 700));
   // cure r3 (T1): a sample booked on a split file's bucket by the REAL fold prints under that file's short name, never on an owner
   const F2 = CEN.censusFold({ ...TAKE, families: { interface: 100, 'split:ws-handler': 100, channels: 410, money: 100, conversation: 120, outside: 120, native: 50 } });
   const ln2 = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.3, engines: F2, mem: null, sizes: {} });
   const pcts = (/engines="([^"]*)"/.exec(ln2)[1]).split('; ').map((p) => Number(p.split(' ')[1].replace('%', '')));
-  ok(/ engines="interface 10%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; ws-handler\* 10%; server\* 0%; /.test(ln2) && L.enginesOk(ln2) && Math.abs(pcts.reduce((a, b) => a + b, 0) - 100) <= pcts.length / 2,
+  ok(gateOf(/ engines="interface 10%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; ws-handler\* 10%; server\* 0%; /.test(ln2)) && gateOf(L.enginesOk(ln2)) && Math.abs(pcts.reduce((a, b) => a + b, 0) - 100) <= pcts.length / 2,
     '⑫b cure r3: the real fold\'s split bucket (a tick inside the page handler\'s own body) prints as «ws-handler* 10%» after the seven owners — the interface keeps only its own 10 %; the fields add to 100 % up to rounding', ln2.slice(0, 700));
 } catch (e) { ok(false, '⑫b S2: the leg threw on this tree', (e && e.message) || String(e)); } }
 
 console.log('⑬ S1: the census\'s ticks add up and say where held time went; a paused census prints «?»');
 { try {
   const k = (n) => Number(new RegExp(` ${n}=(\\d+)`).exec(LINE)[1]);
-  ok(k('busy-ticks') + k('held-ticks') + k('idle-ticks') + k('stopped-ticks') + k('not-sampled') === k('census-ticks') && /the shares|SHARES/.test(fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8')) && /THEY LEAVE OUT\s*\n?\s*\*?\s*HELD TIME/.test(fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8')),
+  ok(k('busy-ticks') + k('held-ticks') + k('idle-ticks') + k('stopped-ticks') + k('not-sampled') === k('census-ticks') && gateOf(/the shares|SHARES/.test(fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8'))) && verdictOf(/THEY LEAVE OUT\s*\n?\s*\*?\s*HELD TIME/.test(fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8'))),
     '⑬ busy + held + idle + stopped + not-sampled = census-ticks (1 000 + 10 + 2 000 + 0 + 30 = 3 040); the words say the shares leave out held time and that the holds name it', { busy: k('busy-ticks'), held: k('held-ticks'), idle: k('idle-ticks'), total: k('census-ticks') });
   const paused = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.1, engines: { busyTicks: 0, sampledTicks: 3000, shares: [], native: { ticks: 0, share: null }, held: { ticks: 0 }, idle: { ticks: 0 }, stopped: { ticks: 0 }, notSampled: { ticks: 3600, paused: 3600 }, cost: { asks: 0, paidMs: 0 } }, mem: null, sizes: {} });
-  ok(/ engines="\?" /.test(paused) && L.LINE_RE.test(paused), '⑬ an hour whose census was PAUSED prints engines «?» — never «none»', paused.slice(0, 260));
+  ok(gateOf(/ engines="\?" /.test(paused)) && verdictOf(L.LINE_RE.test(paused)), '⑬ an hour whose census was PAUSED prints engines «?» — never «none»', paused.slice(0, 260));
 } catch (e) { ok(false, '⑬ S1: the leg threw on this tree', (e && e.message) || String(e)); } }
 
 console.log('⑭ S3: a process is counted once, under its own kind — by its program and its script');
@@ -367,10 +367,10 @@ console.log('⑭ S3: a process is counted once, under its own kind — by its pr
     mk(600, 'kernel-x', 500, 1111); mk(601, 'kernel-x-gpu', 600); mk(602, 'zygote', 601);
     mk(700, 'kernel-y', 500, 3333); mk(701, 'kernel-y-gpu', 700);   // the record says 700 started at 2222: the pid now names ANOTHER process
     const k = await O.procKids({ self: 500, procRoot: P, cgroupRoot: path.join(ROOT, 'cg'), browserPids: [{ pid: 600, starttime: 1111 }, { pid: 700, starttime: 2222 }] });
-    ok(k && k.browser.n === 3 && k.other.n === 2, '⑭ a browser the keeper runs (its {pid, start time} from the keeper\'s records — any engine, whatever its program is called) and every process under it are browsers; cure r3: a recorded pid whose start time is NOT the record\'s (a reused pid) is not that browser — it and its child are the rest', k && { browser: k.browser.n, other: k.other.n });
+    ok(gateOf(k) && k.browser.n === 3 && k.other.n === 2, '⑭ a browser the keeper runs (its {pid, start time} from the keeper\'s records — any engine, whatever its program is called) and every process under it are browsers; cure r3: a recorded pid whose start time is NOT the record\'s (a reused pid) is not that browser — it and its child are the rest', k && { browser: k.browser.n, other: k.other.n });
     // the keeper hands both the daemon's and the browser's identity (src/server/browser-keeper.js browserPids)
     const kp = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    ok(/browserPids: \(\) => \{[^\n]*out\.push\(\{ pid: x\.pid, starttime: Number\(x\.starttime\) \}\)[^\n]*add\(r\); add\(r\.browser\);/.test(kp), '⑭ the keeper\'s browserPids hands {pid, starttime} for the daemon AND its browser, as its records hold them — never a bare pid');
+    ok(verdictOf(/browserPids: \(\) => \{[^\n]*out\.push\(\{ pid: x\.pid, starttime: Number\(x\.starttime\) \}\)[^\n]*add\(r\); add\(r\.browser\);/.test(kp)), '⑭ the keeper\'s browserPids hands {pid, starttime} for the daemon AND its browser, as its records hold them — never a bare pid');
   } finally { fs.rmSync(ROOT, { recursive: true, force: true }); }
   // cure r3: a CLI is counted ONCE — a launcher (a node shim running the CLI's script) and the native CLI it starts are one CLI
   const R2 = fs.mkdtempSync(path.join(fs.realpathSync(require('node:os').tmpdir()), 'ldr-cli-'));
@@ -379,7 +379,7 @@ console.log('⑭ S3: a process is counted once, under its own kind — by its pr
     const E = world('tree', '/user.slice/user-1000.slice/session-3.scope', [[3000, { name: 'node', kids: [3001, 3003] }],
       [3001, { name: 'node', kb: 100, cmd: ['node', '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js'], kids: [3002] }], [3002, { name: 'claude', kb: 2000 }], [3003, { name: 'codex', kb: 500 }]]);
     const k = await O.procKids({ self: 3000, ...E, socketsDir: '/srv/hub/data/sockets' });
-    ok(k && k.how === 'tree' && k.cli.n === 2 && k.cli.rss === (100 + 2000 + 500) * 1024, '⑭ cure r3: a launcher CLI and the native CLI it starts count as ONE CLI (its child adds memory, not a count) — two CLIs here, never three', k && { cli: k.cli });
+    ok(gateOf(k) && k.how === 'tree' && k.cli.n === 2 && k.cli.rss === (100 + 2000 + 500) * 1024, '⑭ cure r3: a launcher CLI and the native CLI it starts count as ONE CLI (its child adds memory, not a count) — two CLIs here, never three', k && { cli: k.cli });
   } finally { fs.rmSync(R2, { recursive: true, force: true }); }
 } catch (e) { ok(false, '⑭ S3: the leg threw on this tree', (e && e.message) || String(e)); } }
 
@@ -391,14 +391,14 @@ console.log('⑮ the smalls: the day leaves out an unwatched hour; lost holds; t
   ok(day.hours === 2 && day.unwatched === 1 && day.heldMs === 2000 && day.holds === 1 && !day.by['src/b.js:2'], '⑮ an hour nobody watched is LEFT OUT of the day\'s sums, and the day says how many hours that was (1)', day);
   let lost = 5; const RL = O.create({ log: quietLog([]), wallNow: () => T0 + 3600000, census: async () => null, kids: async () => null, lost: () => lost });
   lost = 8; const rl = await RL.tick();
-  ok(/ lost-holds=3 /.test(rl.line), '⑮ the holds the watchdog\'s ring dropped in the hour are said (lost-holds = 8 − 5)', rl.line.slice(0, 200));
+  ok(verdictOf(/ lost-holds=3 /.test(rl.line)), '⑮ the holds the watchdog\'s ring dropped in the hour are said (lost-holds = 8 − 5)', rl.line.slice(0, 200));
   // the walk: ONE at a time; its time-out ends it (cancelled) and no second walk starts while one runs
   let calls = 0, sig = null, release = null;
   const RW = O.create({ log: quietLog([]), wallNow: () => T0 + 3600000, census: async () => null, walkWaitMs: 60, kids: (signal) => { calls++; sig = signal; return new Promise((r) => { release = r; }); } });
   const keep = setInterval(() => { }, 1000);   // the walk's time-out timer is unref'd (in the hub the loop is held by the server) — hold it here
   const w1 = await RW.tick(); const w2 = await RW.tick();
   clearInterval(keep);
-  ok(calls === 1 && sig && sig.cancelled === true && /procs-by=\?/.test(w1.line) && /procs-by=\?/.test(w2.line), '⑮ the process walk is ONE at a time: its time-out CANCELS it, and a cut while it still runs starts no second walk (both print «?»)', { calls, cancelled: sig && sig.cancelled });
+  ok(calls === 1 && gateOf(sig) && sig.cancelled === true && gateOf(/procs-by=\?/.test(w1.line)) && verdictOf(/procs-by=\?/.test(w2.line)), '⑮ the process walk is ONE at a time: its time-out CANCELS it, and a cut while it still runs starts no second walk (both print «?»)', { calls, cancelled: sig && sig.cancelled });
   if (release) release(null);
   // THE BOOT MARK by the REAL hold book's writer (src/server/loop-holds.js), read back by the day
   const LB = require(path.join(REPO, 'src/server/loop-holds.js')); const recs = [];
@@ -407,7 +407,7 @@ console.log('⑮ the smalls: the day leaves out an unwatched hour; lost holds; t
   try { book.stop?.(); } catch { }
   const Tel = TEL.Telemetry || TEL;
   const dd = Tel.heldDays(recs.map((r) => ({ ...r, kind: 'metric', name: 'srv-loop-hold-ms' })), T0 + 3600000).today;
-  ok(recs.length === 2 && /· \(the boot\)$/.test(recs[0].detail) && !/\(the boot\)/.test(recs[1].detail) && dd.boot.count === 1 && dd.boot.ms === 2500 && dd.count === 1 && dd.ms === 1500,
+  ok(recs.length === 2 && gateOf(/· \(the boot\)$/.test(recs[0].detail)) && !/\(the boot\)/.test(recs[1].detail) && dd.boot.count === 1 && dd.boot.ms === 2500 && dd.count === 1 && dd.ms === 1500,
     '⑮ the boot mark is written by the REAL hold book (its row ends « · (the boot)») and the day reads it apart', { details: recs.map((r) => r.detail), today: dd });
 } catch (e) { ok(false, '⑮ the smalls: the leg threw on this tree', (e && e.message) || String(e)); } }
 
@@ -427,13 +427,13 @@ console.log('⑯ T2: the age pass — ONE at a time, ended at its time-out; the 
   const keep = setInterval(() => { }, 1000);   // the time-out timer is unref'd (the hub's server holds the loop) — hold it here
   const r1 = await R.tick(); wall += H; const r2 = await R.tick(); wall += H; const r3 = await R.tick();
   clearInterval(keep);
-  ok(/ idle-under-1h=2 idle-1-2h=0 idle-2-4h=0 idle-over-4h=2 turn-unknown=0 ages-read=5\/5 /.test(r1.line) && L.LINE_RE.test(r1.line), '⑯ a pass that finished: the ages, and ages-read = 5 of 5', r1.line.slice(300, 560));
-  ok(/ turn-running=1 turn-waiting=0 idle-under-1h=\? idle-1-2h=\? idle-2-4h=\? idle-over-4h=\? turn-unknown=0 ages-read=2\/5 /.test(r2.line) && sig && sig.cancelled === true && L.LINE_RE.test(r2.line),
+  ok(gateOf(/ idle-under-1h=2 idle-1-2h=0 idle-2-4h=0 idle-over-4h=2 turn-unknown=0 ages-read=5\/5 /.test(r1.line)) && verdictOf(L.LINE_RE.test(r1.line)), '⑯ a pass that finished: the ages, and ages-read = 5 of 5', r1.line.slice(300, 560));
+  ok(gateOf(/ turn-running=1 turn-waiting=0 idle-under-1h=\? idle-1-2h=\? idle-2-4h=\? idle-over-4h=\? turn-unknown=0 ages-read=2\/5 /.test(r2.line)) && gateOf(sig) && sig.cancelled === true && verdictOf(L.LINE_RE.test(r2.line)),
     '⑯ a pass that ran out of time is CANCELLED and the hour prints the idle ages «?» with how many it read (2 of 5) — never the previous hour\'s times (2 / 0 / 0 / 2)', { line: r2.line.slice(300, 560), cancelled: sig && sig.cancelled });
-  ok(calls === 2 && / idle-under-1h=\? .* ages-read=0\/5 /.test(r3.line), '⑯ while that pass is still ending, the next hour starts NO second pass beside it: «?» and 0 read', { calls, line: r3.line.slice(300, 560) });
+  ok(calls === 2 && verdictOf(/ idle-under-1h=\? .* ages-read=0\/5 /.test(r3.line)), '⑯ while that pass is still ending, the next hour starts NO second pass beside it: «?» and 0 read', { calls, line: r3.line.slice(300, 560) });
   for (const r of hang) r(null);
   const ex = R.exitLine();
-  ok(ex && / idle-under-1h=\? idle-1-2h=\? idle-2-4h=\? idle-over-4h=\? turn-unknown=0 ages-read=0\/5 /.test(ex.line) && L.LINE_RE.test(ex.line), '⑯ the exit line reads nothing: its idle ages are «?» (0 read)', ex && ex.line.slice(300, 560));
+  ok(gateOf(ex) && gateOf(/ idle-under-1h=\? idle-1-2h=\? idle-2-4h=\? idle-over-4h=\? turn-unknown=0 ages-read=0\/5 /.test(ex.line)) && verdictOf(L.LINE_RE.test(ex.line)), '⑯ the exit line reads nothing: its idle ages are «?» (0 read)', ex && ex.line.slice(300, 560));
   const real = await O.outputTimes([['x', {}], ['y', {}]], '/srv/no-such/buffers', { signal: { cancelled: true } });
   ok(real === null, '⑯ the real pass, cancelled, answers null (it says it ran out) — never a partial map', real);
 } catch (e) { ok(false, '⑯ T2: the leg threw on this tree', (e && e.message) || String(e)); } }
@@ -443,7 +443,7 @@ console.log('⑰ cure r3: a split file\'s own bucket in the line; ⚙ Diagnostic
   const fold = { busyTicks: 1000, sampledTicks: 3010, shares: [{ family: 'interface', share: 0.2 }, { family: 'split:ws-handler', share: 0.3, order: 0 }, { family: 'split:server', share: 0.1, order: 1 }, { family: 'split:Not A Name', share: 0 }, { family: 'outside', share: 0.3 }],
     native: { ticks: 100, share: 0.1 }, held: { ticks: 10 }, idle: { ticks: 2000 }, stopped: { ticks: 0 }, notSampled: { ticks: 30, paused: 0 }, viaHelper: { ticks: 0 }, deep: { ticks: 0 }, cost: { asks: 9, paidMs: 5 } };
   const ln = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.3, engines: fold, mem: null, sizes: {} });
-  ok(/ engines="interface 20%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; conversation 0%; ws-handler\* 30%; server\* 10%; native 10%; outside 30%" /.test(ln) && L.enginesOk(ln) && L.LINE_RE.test(ln) && !/Not A Name/.test(ln),
+  ok(gateOf(/ engines="interface 20%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; conversation 0%; ws-handler\* 30%; server\* 10%; native 10%; outside 30%" /.test(ln)) && gateOf(L.enginesOk(ln)) && gateOf(L.LINE_RE.test(ln)) && !/Not A Name/.test(ln),
     '⑰ a split file is a bucket of its own after the seven owners, by its short name marked «*», in the census\'s list order; a name not of the plain shape never prints', ln.slice(200, 480));
   ok(!L.enginesOk('engines="interface 20%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; ws-handler* 30%; conversation 0%; native 10%; outside 30%"') && !L.enginesOk('engines="interface 20%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; conversation 0%; a b* 3%; native 10%; outside 30%"'),
     '⑰ enginesOk: a split bucket only AFTER the seven owners, and only a plain short name');
@@ -483,8 +483,8 @@ console.log('⑱ a hold with NO FRAME OF OURS is counted apart — booked under 
     return { h, line: LDR.line(fixedRep(h)), day: LDR.dayFold([{ hour: h, toMs: T0 + 3600000, busy: 0.1 }]) };
   };
   const r = book(L);
-  ok(L.LINE_RE.test(r.line) && L.causesOk(r.line) && / holds=3 /.test(r.line) && / no-ours-holds=2 no-ours-held=2\.7s /.test(r.line) && / boot-holds=1 /.test(r.line)
-    && /top="\(no frame of ours\) 2\.7s; src\/agy-store-fs\.js:24 2\.5s"/.test(r.line) && r.day.noOurs.holds === 2 && r.day.noOurs.heldMs === 2700 && r.day.by[L.NO_OURS] === 2700 && !r.day.by.JavaScript,
+  ok(gateOf(L.LINE_RE.test(r.line)) && gateOf(L.causesOk(r.line)) && gateOf(/ holds=3 /.test(r.line)) && gateOf(/ no-ours-holds=2 no-ours-held=2\.7s /.test(r.line)) && gateOf(/ boot-holds=1 /.test(r.line))
+    && gateOf(/top="\(no frame of ours\) 2\.7s; src\/agy-store-fs\.js:24 2\.5s"/.test(r.line)) && r.day.noOurs.holds === 2 && r.day.noOurs.heldMs === 2700 && r.day.by[L.NO_OURS] === 2700 && !r.day.by.JavaScript,
     '⑱ two holds with no frame of ours: no-ours-holds=2 no-ours-held=2.7s, booked in top under «(no frame of ours)» and in the day the same — never under «JavaScript»; the boot\'s own stays apart', { line: r.line.slice(0, 260), day: r.day.noOurs, by: r.day.by });
   { // …and THE DAY TABLE (Telemetry.heldDays, ⚙ Diagnostics) books it the same: the hold book's record carries the mark
     const Tel = TEL.Telemetry || TEL;
@@ -498,9 +498,9 @@ console.log('⑱ a hold with NO FRAME OF OURS is counted apart — booked under 
   const m = { exports: {} };
   if (SRC.split(CUT).length === 2) vm.compileFunction(editAnchor(SRC, CUT, '', "src/loop-day-report.js"), ['module', 'exports', 'require'], { filename: 'loop-day-report-no-mark.js' })(m, m.exports, require);
   const red = m.exports.newHour ? book(m.exports) : null;
-  ok(red && /top="JavaScript 2\.7s; src\/agy-store-fs\.js:24 2\.5s"/.test(red.line) && !red.line.includes('(no frame of ours)'),
+  ok(gateOf(red) && gateOf(/top="JavaScript 2\.7s; src\/agy-store-fs\.js:24 2\.5s"/.test(red.line)) && !red.line.includes('(no frame of ours)'),
     '⑱ RED CONTROL: the release\'s cause (no mark) books those holds under the verdict «JavaScript» — mixed with every JavaScript hold of the hour', red && red.line.slice(0, 260));
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -13,7 +13,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 const { SESSION_FIELDS } = require(path.join(REPO, 'src/session-schema.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? ' — ' + extra : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? ' — ' + extra : '')); } };
 
 // The server-side files that hold session objects. Client-side (src/lib) uses
 // its own window/session mirrors — different objects, not in scope.
@@ -96,12 +96,12 @@ ok(true, 'every schema row carries owner + persisted');
 // keeper's per-conversation `caps` is what a resume reads. `_browserHelpers` (the helper-naming witness) is in memory.
 const bc = SESSION_FIELDS._browserCap, bh = SESSION_FIELDS._browserHelpers;
 const src = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf-8'); } catch { return ''; } };
-ok(bc && bc.persisted === 'meta' && bc.owner === 'ws' && writes.has('_browserCap')
-  && /browserCap: Number\.isInteger\(session\._browserCap\)/.test(src('src/ws-create.js'))
+ok(gateOf(bc) && bc.persisted === 'meta' && bc.owner === 'ws' && gateOf(writes.has('_browserCap'))
+  && gateOf(/browserCap: Number\.isInteger\(session\._browserCap\)/.test(src('src/ws-create.js')))
   && (src('src/server/boot-restore.js').match(/_browserCap: Number\.isInteger\(meta\.browserCap\)/g) || []).length === 1
   && (src('src/server/boot-restore.js').match(/= sessionFromMeta\(meta, \{/g) || []).length === 3,
   '_browserCap: registered (owner ws, persisted meta), written to the session meta at spawn and restored by sessionFromMeta, which all three boot-restore paths call');
-ok(bh && bh.persisted === null && bh.owner === 'stdout' && writes.has('_browserHelpers') && [...writes.get('_browserHelpers')].includes('src/server/browser-helpers.js'),
+ok(gateOf(bh) && bh.persisted === null && bh.owner === 'stdout' && gateOf(writes.has('_browserHelpers')) && verdictOf([...writes.get('_browserHelpers')].includes('src/server/browser-helpers.js')),
   '_browserHelpers: registered (in memory), written only by src/server/browser-helpers.js (the stdout witness + the new-child mint)');
 
 // ── THE RESUME CARRIER CENSUS (lane-pool-pin verify r2) ─────────────────────────────────────────
@@ -130,7 +130,7 @@ ok(bh && bh.persisted === null && bh.owner === 'stdout' && writes.has('_browserH
   const badRow = Object.entries(SESSION_FIELDS).filter(([, v]) => v.config && (typeof v.config.key !== 'string' || !v.config.key || !('example' in v.config))).map(([k]) => k);
   ok(badRow.length === 0, 'every `config` is {key, example}', badRow.join(', '));
   const staleOnly = Object.entries(SESSION_CONFIG_ONLY).filter(([k, v]) => !src(v.reader).includes(k)).map(([k]) => k);
-  ok(staleOnly.length === 0 && Object.values(SESSION_CONFIG_ONLY).every((v) => v.why), `every SESSION_CONFIG_ONLY key is still read by the module it names, with a reason (${Object.keys(SESSION_CONFIG_ONLY).length})`, staleOnly.join(', '));
+  ok(staleOnly.length === 0 && verdictOf(Object.values(SESSION_CONFIG_ONLY).every((v) => v.why)), `every SESSION_CONFIG_ONLY key is still read by the module it names, with a reason (${Object.keys(SESSION_CONFIG_ONLY).length})`, staleOnly.join(', '));
 
   // what the CLIENT carries — derived from the code: the resume's reads and every writer's keys
   const carrierKeys = (texts) => {
@@ -158,7 +158,7 @@ ok(bh && bh.persisted === null && bh.owner === 'stdout' && writes.has('_browserH
   const libTexts = {};
   for (const f of fs.readdirSync(path.join(REPO, 'src/lib')).filter((x) => x.endsWith('.js'))) libTexts['src/lib/' + f] = src('src/lib/' + f);
   const carried = carrierKeys(libTexts);
-  ok(carried.size >= 10 && ['poolPin', 'account', 'worktree', 'groupManager', 'outputStyle'].every((k) => carried.has(k)), `the carrier's keys are read off the client code (${carried.size}: ${[...carried].sort().join(', ')})`);
+  ok(carried.size >= 10 && verdictOf(['poolPin', 'account', 'worktree', 'groupManager', 'outputStyle'].every((k) => carried.has(k))), `the carrier's keys are read off the client code (${carried.size}: ${[...carried].sort().join(', ')})`);
   const undeclared = [...carried].filter((k) => !declared.has(k));
   ok(undeclared.length === 0, 'CENSUS: every key the resume reads or a writer writes is declared in src/session-schema.js (a row\'s `config`, or SESSION_CONFIG_ONLY)', undeclared.join(', '));
 
@@ -212,4 +212,4 @@ ok(bh && bh.persisted === null && bh.owner === 'stdout' && writes.has('_browserH
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -34,7 +34,7 @@ const wt = scratch('chrome-marks-wt'), FIXTURE = scratch('chrome-marks-canonical
 const PNG = process.env.CHROME_MARKS_PNG ? path.resolve(process.env.CHROME_MARKS_PNG) : scratch('chrome-marks-shots');
 fs.mkdirSync(FIXTURE, { recursive: true }); fs.mkdirSync(PNG, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SIGN_IN = 'chrome-marks-sign-in-7', SECOND = 'chrome marks second password';
 // the owner's shape of the chrome (the arrangement and the two fixed springs), as the setting holds it
@@ -168,7 +168,7 @@ async function arrange(P, arr, springs) {
 
 try {
   startServer();
-  check('the hub boots (sign-in password on)', await ready());
+  check('the hub boots (sign-in password on)', verdictOf(await ready()));
   const P0 = await launch(FACES[0], CDP_PORTS[0]);
   await P0.cdp('Page.navigate', { url: URL + 'login' });
   await P0.until(`document.readyState === 'complete'`);
@@ -179,7 +179,7 @@ try {
   const setup = await P0.ev(`fetch('/api/vault/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SECOND)} }) }).then((r) => r.status)`);
   check('the vault is set up (a second password)', setup === 200, setup);
   await stopServer(); startServer();
-  check('the hub is back — the vault LOCKED (no auto-unlock)', await ready());
+  check('the hub is back — the vault LOCKED (no auto-unlock)', verdictOf(await ready()));
   const cookies = (await P0.cdp('Network.getAllCookies').catch(() => ({ cookies: [] }))).cookies || [];
 
   const pages = [P0];
@@ -261,4 +261,4 @@ try {
 finally { for (const c of chromes) { try { c.kill('SIGKILL'); } catch { } } await stopServer().catch(() => {}); }
 console.log(`PNGs + marks.json: ${PNG}`);
 console.log(`\ntest-chrome-marks-chrome: ${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

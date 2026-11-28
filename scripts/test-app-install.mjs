@@ -41,7 +41,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const IMAGE = 'node:22-bookworm-slim';
 const T0 = Date.now();
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 2500) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 2500) : ''}`); } };
 const skip = (why) => { skipped++; console.log(`  ⊘ SKIP ${why}`); };
 const finish = () => { console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${skipped ? `, ${skipped} skipped` : ''}) in ${Math.round((Date.now() - T0) / 1000)} s`); process.exit(fail ? 1 : 0); };
 
@@ -149,41 +149,41 @@ const S1 = byStep(c1);
 const need1 = ['plan', 'inst', 'steer', 'steerPre', 'srcTaken', 'srcTakenPre', 'deb', 'local', 'drift', 'adopt', 'adoptNo', 'stNo', 'rmNo', 'driftDpkg', 'driftDpkgPre', 'xterm', 'removed', 'after', 'refresh', 'parity', 'helloAfter', 'foreign'];
 if (c1.error || need1.some((k) => !S1[k])) { ok(false, `the first container answered every step (exit ${c1.code}${c1.error ? `, ${c1.error.message}` : ''}; missing: ${need1.filter((k) => !S1[k]).join(' ')})`, (c1.stderr || '').slice(-3000) + '\n' + c1.stdout.slice(-3000)); finish(); }
 const { plan, inst, deb, local, drift, adopt, xterm, removed, after, refresh, parity, helloAfter } = S1;
-ok(plan.ok && plan.plan.ok && plan.plan.mode === 'install' && plan.plan.downloadBytes > 0 && plan.plan.argv && plan.plan.argv[0] === 'sudo', 'the plan, simulated as the user: ok, a real download size, the argv under sudo -n (the user is not root)', plan.plan && { code: plan.plan.code, error: plan.plan.error });
-ok(inst.ok && inst.result.done && inst.result.entryId === 'hello' && /= run hello [0-9a-f]+ install/.test(inst.log) && /= ok/.test(inst.log), `install hello through the slot (sudo -n sh -c THE script): done in ${Math.round((inst.ms || 0) / 1000)} s`, inst.ok ? inst.log.slice(-1500) : inst);
-ok(STEER_LINE && steerText.includes(STEER_LINE) && !fs.readFileSync(steerFile, 'utf8').includes(STEER_LINE), 'CONTROL (F1): the patched copy really ignores root\'s records in the entry-id choice');
-ok(S1.steer.ok && S1.steer.entryId === 'sl' && S1.steer.argvId === 'sl', `verify-r1 F1: the index edited by an agent so root's entry hello claims sl — the plan of sl still writes under its OWN id (${S1.steer.entryId}), never over hello's root record`, S1.steer);
-ok(S1.srcTaken.ok && S1.srcTaken.plan.ok === false && S1.srcTaken.plan.code === 'bad_source' && /already added/.test(S1.srcTaken.plan.error), 'verify-r1 F1: a package source ROOT holds (sys/sources/vendor.sources) is "already added" though the index does not list it — never re-added over root\'s files', S1.srcTaken);
-ok(S1.srcTakenPre.ok && S1.srcTakenPre.plan.ok === false && !/already added/.test(S1.srcTakenPre.plan.error), 'CONTROL (F1): the index-only rule goes on to fetch the key — it would replace root\'s source', S1.srcTakenPre && S1.srcTakenPre.plan);
-ok(S1.steerPre.ok && S1.steerPre.entryId === 'hello' && S1.steerPre.digest === S1.steer.digest, 'CONTROL (F1): the pre-fix rule (the index alone) names hello — root would replace hello\'s record with sl, and the digest the user approved is the same', S1.steerPre);
-ok(deb.ok && deb.result.done && deb.result.kind === 'deb' && deb.result.entryId === 'sl' && /= run sl [0-9a-f]+ deb/.test(deb.log) && /= ok/.test(deb.log), `a .deb file the user had (sl): planned, approved, installed — copied into the repository (${Math.round((deb.ms || 0) / 1000)} s)`, deb.ok ? deb.log.slice(-2000) : deb);
-ok(local.ok && local.result.done && local.result.entryId === 'capp-localonly' && /= ok/.test(local.log), 'a package built here, in NO archive (capp-localonly): installed from its .deb, kept in the repository', local.ok ? local.log.slice(-1500) : local);
-ok(drift.ok && drift.status.drift.drift === true && drift.status.drift.added.some((x) => x.package === 'cowsay'), 'cowsay installed OUTSIDE VibeSpace (a plain sudo apt-get) — the tripwire says so: drift, cowsay among the added', drift.status && drift.status.drift);
-ok(drift.ok && !drift.status.drift.added.some((x) => x.package === 'sudo'), 'verify-r1 F5: the HELD image package (sudo) is never "installed outside VibeSpace" — root\'s list and the reader agree it was there', drift.status && drift.status.drift.added.map((x) => x.package));
-ok(driftText.includes(HOOK_ONLY) && !fs.readFileSync(driftFile, 'utf8').includes(HOOK_ONLY), 'CONTROL (F7): the patched copy reads the tripwire from the apt hook alone');
-ok(S1.driftDpkg.ok && S1.driftDpkg.status.drift.drift === true && S1.driftDpkg.status.drift.added.some((x) => x.package === 'capp-dpkgi'), 'verify-r1 F7: a plain dpkg -i outside VibeSpace (the apt hook never ran) is "installed outside VibeSpace" too', S1.driftDpkg.status && S1.driftDpkg.status.drift);
-ok(S1.driftDpkgPre.ok && !(S1.driftDpkgPre.status.drift.added || []).some((x) => x.package === 'capp-dpkgi'), 'CONTROL (F7): the hook-only tripwire never sees the dpkg -i install', S1.driftDpkgPre.status && S1.driftDpkgPre.status.drift);
+ok(gateOf(plan.ok) && gateOf(plan.plan.ok) && plan.plan.mode === 'install' && plan.plan.downloadBytes > 0 && gateOf(plan.plan.argv) && plan.plan.argv[0] === 'sudo', 'the plan, simulated as the user: ok, a real download size, the argv under sudo -n (the user is not root)', plan.plan && { code: plan.plan.code, error: plan.plan.error });
+ok(gateOf(inst.ok) && gateOf(inst.result.done) && inst.result.entryId === 'hello' && gateOf(/= run hello [0-9a-f]+ install/.test(inst.log)) && verdictOf(/= ok/.test(inst.log)), `install hello through the slot (sudo -n sh -c THE script): done in ${Math.round((inst.ms || 0) / 1000)} s`, inst.ok ? inst.log.slice(-1500) : inst);
+ok(gateOf(STEER_LINE) && gateOf(steerText.includes(STEER_LINE)) && !fs.readFileSync(steerFile, 'utf8').includes(STEER_LINE), 'CONTROL (F1): the patched copy really ignores root\'s records in the entry-id choice');
+ok(gateOf(S1.steer.ok) && S1.steer.entryId === 'sl' && S1.steer.argvId === 'sl', `verify-r1 F1: the index edited by an agent so root's entry hello claims sl — the plan of sl still writes under its OWN id (${S1.steer.entryId}), never over hello's root record`, S1.steer);
+ok(gateOf(S1.srcTaken.ok) && S1.srcTaken.plan.ok === false && S1.srcTaken.plan.code === 'bad_source' && verdictOf(/already added/.test(S1.srcTaken.plan.error)), 'verify-r1 F1: a package source ROOT holds (sys/sources/vendor.sources) is "already added" though the index does not list it — never re-added over root\'s files', S1.srcTaken);
+ok(gateOf(S1.srcTakenPre.ok) && S1.srcTakenPre.plan.ok === false && !/already added/.test(S1.srcTakenPre.plan.error), 'CONTROL (F1): the index-only rule goes on to fetch the key — it would replace root\'s source', S1.srcTakenPre && S1.srcTakenPre.plan);
+ok(gateOf(S1.steerPre.ok) && S1.steerPre.entryId === 'hello' && S1.steerPre.digest === S1.steer.digest, 'CONTROL (F1): the pre-fix rule (the index alone) names hello — root would replace hello\'s record with sl, and the digest the user approved is the same', S1.steerPre);
+ok(gateOf(deb.ok) && gateOf(deb.result.done) && deb.result.kind === 'deb' && deb.result.entryId === 'sl' && gateOf(/= run sl [0-9a-f]+ deb/.test(deb.log)) && verdictOf(/= ok/.test(deb.log)), `a .deb file the user had (sl): planned, approved, installed — copied into the repository (${Math.round((deb.ms || 0) / 1000)} s)`, deb.ok ? deb.log.slice(-2000) : deb);
+ok(gateOf(local.ok) && gateOf(local.result.done) && local.result.entryId === 'capp-localonly' && verdictOf(/= ok/.test(local.log)), 'a package built here, in NO archive (capp-localonly): installed from its .deb, kept in the repository', local.ok ? local.log.slice(-1500) : local);
+ok(gateOf(drift.ok) && drift.status.drift.drift === true && verdictOf(drift.status.drift.added.some((x) => x.package === 'cowsay')), 'cowsay installed OUTSIDE VibeSpace (a plain sudo apt-get) — the tripwire says so: drift, cowsay among the added', drift.status && drift.status.drift);
+ok(gateOf(drift.ok) && !drift.status.drift.added.some((x) => x.package === 'sudo'), 'verify-r1 F5: the HELD image package (sudo) is never "installed outside VibeSpace" — root\'s list and the reader agree it was there', drift.status && drift.status.drift.added.map((x) => x.package));
+ok(gateOf(driftText.includes(HOOK_ONLY)) && !fs.readFileSync(driftFile, 'utf8').includes(HOOK_ONLY), 'CONTROL (F7): the patched copy reads the tripwire from the apt hook alone');
+ok(gateOf(S1.driftDpkg.ok) && S1.driftDpkg.status.drift.drift === true && verdictOf(S1.driftDpkg.status.drift.added.some((x) => x.package === 'capp-dpkgi')), 'verify-r1 F7: a plain dpkg -i outside VibeSpace (the apt hook never ran) is "installed outside VibeSpace" too', S1.driftDpkg.status && S1.driftDpkg.status.drift);
+ok(gateOf(S1.driftDpkgPre.ok) && !(S1.driftDpkgPre.status.drift.added || []).some((x) => x.package === 'capp-dpkgi'), 'CONTROL (F7): the hook-only tripwire never sees the dpkg -i install', S1.driftDpkgPre.status && S1.driftDpkgPre.status.drift);
 const ent = (id) => ((S1.stNo.status && S1.stNo.status.entries) || []).find((e) => e.id === id) || {};
-ok(S1.adoptNo.ok && S1.adoptNo.result.done && (S1.adoptNo.result.run.missing || []).some((x) => x.package === 'capp-nosave'), 'verify-r1 F6: Adopt of a package whose .deb is in no archive and no cache — the run NAMES it missing (the dialog says it will not come back)', S1.adoptNo.result && S1.adoptNo.result.run);
-ok(S1.stNo.ok && JSON.stringify(ent('capp-nosave').uncached) === '["capp-nosave"]' && JSON.stringify(ent('cowsay').uncached) === '[]', 'verify-r1 F6: the status says it per entry — capp-nosave uncached (its row: "it will not come back after this machine is rebuilt"), cowsay kept', { nosave: ent('capp-nosave'), cowsay: ent('cowsay') });
-ok(S1.rmNo.ok && S1.rmNo.result.done, 'the unsaved entry removed again (the rebuilt machine below replays the rest)', S1.rmNo.error);
-ok(adopt.ok && adopt.result.done && adopt.result.entryId === 'cowsay', 'Adopt: cowsay is kept — its .deb saved, an entry recorded', adopt);
+ok(gateOf(S1.adoptNo.ok) && gateOf(S1.adoptNo.result.done) && verdictOf((S1.adoptNo.result.run.missing || []).some((x) => x.package === 'capp-nosave')), 'verify-r1 F6: Adopt of a package whose .deb is in no archive and no cache — the run NAMES it missing (the dialog says it will not come back)', S1.adoptNo.result && S1.adoptNo.result.run);
+ok(gateOf(S1.stNo.ok) && JSON.stringify(ent('capp-nosave').uncached) === '["capp-nosave"]' && JSON.stringify(ent('cowsay').uncached) === '[]', 'verify-r1 F6: the status says it per entry — capp-nosave uncached (its row: "it will not come back after this machine is rebuilt"), cowsay kept', { nosave: ent('capp-nosave'), cowsay: ent('cowsay') });
+ok(gateOf(S1.rmNo.ok) && verdictOf(S1.rmNo.result.done), 'the unsaved entry removed again (the rebuilt machine below replays the rest)', S1.rmNo.error);
+ok(gateOf(adopt.ok) && gateOf(adopt.result.done) && adopt.result.entryId === 'cowsay', 'Adopt: cowsay is kept — its .deb saved, an entry recorded', adopt);
 const xrows = (xterm.result && xterm.result.rows) || [];
-ok(xterm.ok && xterm.result.done && xrows.some((r) => r.id === 'app.xterm' && r.label === 'XTerm') && xrows.some((r) => /^app\.xterm\./.test(r.id)), `xterm: its desktop files are catalog rows — the primary app.xterm (XTerm) + ${xrows.length - 1} more`, xrows);
-ok(removed.ok && removed.result.done && removed.result.kind === 'remove', 'remove hello: done', removed.error);
+ok(gateOf(xterm.ok) && gateOf(xterm.result.done) && gateOf(xrows.some((r) => r.id === 'app.xterm' && r.label === 'XTerm')) && verdictOf(xrows.some((r) => /^app\.xterm\./.test(r.id))), `xterm: its desktop files are catalog rows — the primary app.xterm (XTerm) + ${xrows.length - 1} more`, xrows);
+ok(gateOf(removed.ok) && gateOf(removed.result.done) && removed.result.kind === 'remove', 'remove hello: done', removed.error);
 const entries = (after.status && after.status.manifest.entries || []).map((e) => e.id).sort();
-ok(after.ok && JSON.stringify(entries) === JSON.stringify(['capp-localonly', 'cowsay', 'sl', 'xterm']) && after.status.manifest.entries.find((e) => e.id === 'sl').kind === 'deb' && after.status.manifest.entries.find((e) => e.id === 'sl').deb.sha256.length === 64, 'the index: capp-localonly, cowsay, sl (kind deb, its sha256), xterm — hello gone', entries);
-ok(helloAfter && helloAfter.hello === false, 'hello is really removed from the machine');
-ok(refresh.ok && refresh.result.done && refresh.result.kind === 'refresh' && refresh.result.state && refresh.result.state.refreshedAt > 0, 'Refresh (the user\'s press — never automatic): `install --only-upgrade` through the slot; "last refreshed" stamped', refresh.ok ? refresh.result : refresh);
+ok(gateOf(after.ok) && JSON.stringify(entries) === JSON.stringify(['capp-localonly', 'cowsay', 'sl', 'xterm']) && after.status.manifest.entries.find((e) => e.id === 'sl').kind === 'deb' && after.status.manifest.entries.find((e) => e.id === 'sl').deb.sha256.length === 64, 'the index: capp-localonly, cowsay, sl (kind deb, its sha256), xterm — hello gone', entries);
+ok(gateOf(helloAfter) && helloAfter.hello === false, 'hello is really removed from the machine');
+ok(gateOf(refresh.ok) && gateOf(refresh.result.done) && refresh.result.kind === 'refresh' && gateOf(refresh.result.state) && refresh.result.state.refreshedAt > 0, 'Refresh (the user\'s press — never automatic): `install --only-upgrade` through the slot; "last refreshed" stamped', refresh.ok ? refresh.result : refresh);
 
-ok(after.status.rows.some((r) => r.id === 'app.xterm'), 'the catalog rows are read back from what ROOT recorded');
+ok(verdictOf(after.status.rows.some((r) => r.id === 'app.xterm')), 'the catalog rows are read back from what ROOT recorded');
 
 console.log('§2 the repository root wrote');
-ok(parity.ok && (parity.rows || []).length >= 20 && parity.rows.every((r) => r.same), `every stanza root wrote is byte-identical to the PURE packagesStanza (${parity.rows.length} debs)`, parity.rows && parity.rows.filter((r) => !r.same));
-ok(parity.rows.every((r) => r.nameOk && !/%/.test(r.f)), 'every cached file is named debFileName — no %3a (an epoch package among them)', parity.rows && parity.rows.filter((r) => !r.nameOk));
+ok(gateOf(parity.ok) && (parity.rows || []).length >= 20 && verdictOf(parity.rows.every((r) => r.same)), `every stanza root wrote is byte-identical to the PURE packagesStanza (${parity.rows.length} debs)`, parity.rows && parity.rows.filter((r) => !r.same));
+ok(verdictOf(parity.rows.every((r) => r.nameOk && !/%/.test(r.f))), 'every cached file is named debFileName — no %3a (an epoch package among them)', parity.rows && parity.rows.filter((r) => !r.nameOk));
 ok(parity.index === true, 'the Packages index = the PURE packagesIndex of the stanzas');
-ok(parity.base && parity.base === parity.baseNode, 'the base sha root recorded = the PURE reader\'s over the same status file', { base: parity.base, node: parity.baseNode });
-ok(/= run hello abcdefgh9 install\n= refused apps-dir-not-the-users/.test(S1.foreign.out) && !/= ok/.test(S1.foreign.out), 'root REFUSES an apps dir that is not the invoking user\'s own (SUDO_UID names another user): nothing is installed from someone else\'s cache', S1.foreign.out);
+ok(gateOf(parity.base) && parity.base === parity.baseNode, 'the base sha root recorded = the PURE reader\'s over the same status file', { base: parity.base, node: parity.baseNode });
+ok(gateOf(/= run hello abcdefgh9 install\n= refused apps-dir-not-the-users/.test(S1.foreign.out)) && !/= ok/.test(S1.foreign.out), 'root REFUSES an apps dir that is not the invoking user\'s own (SUDO_UID names another user): nothing is installed from someone else\'s cache', S1.foreign.out);
 ok(parity.owners.debs.uid === 0 && parity.owners.debs.mode === '755' && parity.owners.sys.uid === 0 && parity.owners.entries.uid === 0 && parity.owners.manifest.uid === uid && parity.owners.manifest.mode === '600', 'debs/ and sys/ are root:root 0755 (what root reinstalls from); manifest.json is the user\'s, 0600 (written by VibeSpace, never by root)', parity.owners);
 
 console.log('§3 THE REBUILT MACHINE — a fresh root filesystem, no network, the same home');
@@ -206,11 +206,11 @@ const need2 = ['pre', 'st2', 'rep1', 'rep2', 'have', 'st3'];
 if (c2.error || need2.some((k) => !S2[k])) { ok(false, `the fresh container answered every step (exit ${c2.code}; missing: ${need2.filter((k) => !S2[k]).join(' ')})`, (c2.stderr || '').slice(-3000) + '\n' + c2.stdout.slice(-3000)); finish(); }
 const { pre, st2, rep1, rep2, have, st3 } = S2;
 ok(pre.have.trim() === '', 'a FRESH root filesystem: none of the apps is there', pre);
-ok(st2.ok && st2.status.replay.decision.run === true && st2.status.replay.decision.rung === 1 && st2.status.replay.decision.why === 'fresh-rootfs', 'its status: the replay marker is gone and the image is the one the cache knows → rung 1 (offline)', st2.status && st2.status.replay);
-ok(rep1.ok && rep1.result.ran === true && rep1.result.failed.length === 0 && !rep1.result.error, `the boot replay put every entry back OFFLINE in ${((rep1.ms || 0) / 1000).toFixed(1)} s (no network in this container)`, rep1);
-ok(have && /xterm/.test(have.have) && /\bsl\b/.test(have.have) && /cowsay/.test(have.have) && /capp-localonly/.test(have.have) && !/hello/.test(have.have), `xterm, sl, cowsay and the local-only package are back; hello (removed) is not: [${have && have.have.trim()}]`, have);
-ok(rep2.ok && rep2.result.ran === false && rep2.result.why === 'replayed' && rep2.ms < 5000, `the next boot is the marker hit: nothing runs (${rep2.ms} ms in the driver, the status read included)`, rep2);
-ok(st3.ok && st3.status.rows.some((r) => r.id === 'app.xterm'), 'the catalog row app.xterm is there again (a launchable app after the rebuild)');
+ok(gateOf(st2.ok) && st2.status.replay.decision.run === true && st2.status.replay.decision.rung === 1 && st2.status.replay.decision.why === 'fresh-rootfs', 'its status: the replay marker is gone and the image is the one the cache knows → rung 1 (offline)', st2.status && st2.status.replay);
+ok(gateOf(rep1.ok) && rep1.result.ran === true && rep1.result.failed.length === 0 && !rep1.result.error, `the boot replay put every entry back OFFLINE in ${((rep1.ms || 0) / 1000).toFixed(1)} s (no network in this container)`, rep1);
+ok(gateOf(have) && gateOf(/xterm/.test(have.have)) && gateOf(/\bsl\b/.test(have.have)) && gateOf(/cowsay/.test(have.have)) && gateOf(/capp-localonly/.test(have.have)) && !/hello/.test(have.have), `xterm, sl, cowsay and the local-only package are back; hello (removed) is not: [${have && have.have.trim()}]`, have);
+ok(gateOf(rep2.ok) && rep2.result.ran === false && rep2.result.why === 'replayed' && rep2.ms < 5000, `the next boot is the marker hit: nothing runs (${rep2.ms} ms in the driver, the status read included)`, rep2);
+ok(gateOf(st3.ok) && verdictOf(st3.status.rows.some((r) => r.id === 'app.xterm')), 'the catalog row app.xterm is there again (a launchable app after the rebuild)');
 
 console.log('§4 control: without the saved packages, nothing comes back offline');
 const c3 = container({
@@ -222,8 +222,8 @@ const c3 = container({
   ],
 });
 const { ctlRep, ctlHave } = byStep(c3);
-ok(ctlRep && ctlRep.ok && ctlRep.result.ran === true && (ctlRep.result.failed.length >= 1 || ctlRep.result.error), 'CONTROL: an empty repository — the offline rung cannot put the entries back, rung 2 has no network: the run says so (failed entries / the error), never a quiet success', ctlRep);
-ok(ctlHave && !/xterm|sl/.test(ctlHave.have), 'CONTROL: …and nothing is installed — §3\'s success was the saved packages, not a cached image', ctlHave);
+ok(gateOf(ctlRep) && gateOf(ctlRep.ok) && ctlRep.result.ran === true && (ctlRep.result.failed.length >= 1 || verdictOf(ctlRep.result.error)), 'CONTROL: an empty repository — the offline rung cannot put the entries back, rung 2 has no network: the run says so (failed entries / the error), never a quiet success', ctlRep);
+ok(gateOf(ctlHave) && !/xterm|sl/.test(ctlHave.have), 'CONTROL: …and nothing is installed — §3\'s success was the saved packages, not a cached image', ctlHave);
 
 console.log('§5 THE IMAGE CHANGED: a fresh root filesystem whose base the cache does not know → rung 2, online');
 const c4 = container({
@@ -238,10 +238,10 @@ const c4 = container({
   ],
 });
 const { online0, online, onHave, onParity } = byStep(c4);
-ok(online0 && online0.ok && online0.status.replay.decision.run && online0.status.replay.decision.rung === 2 && online0.status.replay.decision.why === 'base-changed', 'a fresh root filesystem whose image the cache does not know (the stored base sha differs) → rung 2 (online), never the offline rung', online0 && online0.status && online0.status.replay);
-ok(online && online.ok && online.result.ran === true && online.result.failed.length === 0 && !online.result.error, `rung 2 put every entry back ONLINE (${(((online && online.ms) || 0) / 1000).toFixed(1)} s)`, online);
-ok(onHave && /xterm/.test(onHave.have) && /\bsl\b/.test(onHave.have) && /cowsay/.test(onHave.have) && /capp-localonly/.test(onHave.have), `…xterm, sl, cowsay — and the package in NO archive (rung 2 carries the local repository too) — are there: [${onHave && onHave.have.trim()}]`, onHave);
-ok(onParity && onParity.ok && onParity.base === onParity.baseNode && /^[0-9a-f]{64}$/.test(onParity.base) && !/^0+$/.test(onParity.base) && onParity.rows.every((r) => r.same), 'the base is RE-TAKEN from this image (the identity root records = the PURE reader\'s again) and the repository is still byte-consistent', onParity && { base: onParity.base, node: onParity.baseNode });
+ok(gateOf(online0) && gateOf(online0.ok) && gateOf(online0.status.replay.decision.run) && online0.status.replay.decision.rung === 2 && online0.status.replay.decision.why === 'base-changed', 'a fresh root filesystem whose image the cache does not know (the stored base sha differs) → rung 2 (online), never the offline rung', online0 && online0.status && online0.status.replay);
+ok(gateOf(online) && gateOf(online.ok) && online.result.ran === true && online.result.failed.length === 0 && !online.result.error, `rung 2 put every entry back ONLINE (${(((online && online.ms) || 0) / 1000).toFixed(1)} s)`, online);
+ok(gateOf(onHave) && gateOf(/xterm/.test(onHave.have)) && gateOf(/\bsl\b/.test(onHave.have)) && gateOf(/cowsay/.test(onHave.have)) && verdictOf(/capp-localonly/.test(onHave.have)), `…xterm, sl, cowsay — and the package in NO archive (rung 2 carries the local repository too) — are there: [${onHave && onHave.have.trim()}]`, onHave);
+ok(gateOf(onParity) && gateOf(onParity.ok) && onParity.base === onParity.baseNode && gateOf(/^[0-9a-f]{64}$/.test(onParity.base)) && !/^0+$/.test(onParity.base) && verdictOf(onParity.rows.every((r) => r.same)), 'the base is RE-TAKEN from this image (the identity root records = the PURE reader\'s again) and the repository is still byte-consistent', onParity && { base: onParity.base, node: onParity.baseNode });
 
 // CONTROL for §5: a patched copy of the modules whose rung 2 reads ONLY the machine's own sources (the line that adds the
 // local repository removed) — the package in no archive cannot come back; §5's success was that line, not the archive
@@ -251,7 +251,7 @@ const pm = path.join(preDir, 'src', 'app-manifest.js');
 const LOCAL_LINE = /^.*vibespace-local\.list.*\n/m;
 const pmText = fs.readFileSync(pm, 'utf8');
 fs.writeFileSync(pm, pmText.replace(LOCAL_LINE, ''));
-ok(LOCAL_LINE.test(pmText) && !LOCAL_LINE.test(fs.readFileSync(pm, 'utf8')), 'CONTROL: the patched copy really lacks the local repository in rung 2 (the line was there, and is gone)');
+ok(gateOf(LOCAL_LINE.test(pmText)) && !LOCAL_LINE.test(fs.readFileSync(pm, 'utf8')), 'CONTROL: the patched copy really lacks the local repository in rung 2 (the line was there, and is gone)');
 const c5 = container({
   prep: NOSUDO_PREP,
   steps: [
@@ -261,8 +261,8 @@ const c5 = container({
   ],
 });
 const { preOnline, preHave } = byStep(c5);
-ok(preOnline && preOnline.ok && preOnline.result.ran === true && preOnline.result.failed.some((f) => /capp-localonly/.test(JSON.stringify(f))), 'CONTROL: without the local repository in rung 2, the package in no archive is a FAILED entry, named', preOnline);
-ok(preHave && /xterm/.test(preHave.have) && !/capp-localonly/.test(preHave.have), `CONTROL: …the archive's packages came back, the local-only one did not: [${preHave && preHave.have.trim()}]`, preHave);
+ok(gateOf(preOnline) && gateOf(preOnline.ok) && preOnline.result.ran === true && verdictOf(preOnline.result.failed.some((f) => /capp-localonly/.test(JSON.stringify(f)))), 'CONTROL: without the local repository in rung 2, the package in no archive is a FAILED entry, named', preOnline);
+ok(gateOf(preHave) && gateOf(/xterm/.test(preHave.have)) && !/capp-localonly/.test(preHave.have), `CONTROL: …the archive's packages came back, the local-only one did not: [${preHave && preHave.have.trim()}]`, preHave);
 
 console.log('§6 verify-r1 F4 — the replay marker means every entry is back');
 // the pre-fix rule as a patched copy: every run's finish() writes the marker
@@ -291,11 +291,11 @@ const c6 = container({
   ],
 });
 const S6 = byStep(c6);
-ok(S6.r6a && S6.r6a.ok && S6.r6a.result.ran && S6.r6a.result.failed.includes('sl'), 'a fresh root filesystem, sl\'s .debs gone, no network: the boot replay names sl as not put back', S6.r6a);
-ok(S6.r6b && S6.r6b.ok && S6.r6b.result.ran === true && S6.r6b.result.failed.includes('sl'), 'the NEXT boot (a server restart on the same root filesystem) tries again — a partial replay never marks it replayed', S6.r6b);
-ok(S6.s6 && S6.s6.ok && S6.s6.status.replay.decision.run && (S6.s6.status.replay.missing || []).includes('sl') && !(S6.s6.status.replay.missing || []).includes('xterm'), 'its status names what is missing (sl — xterm is back): the dialog\'s Put back door', S6.s6 && S6.s6.status.replay);
-ok(S6.r6c && S6.r6c.ok && S6.r6c.result.done && S6.r6c.result.kind === 'replay', 'the cache has sl again: the user\'s Put back (a replay request through the slot) is done', S6.r6c);
-ok(S6.r6d && S6.r6d.ok && S6.r6d.result.ran === false && S6.r6d.result.why === 'replayed' && S6.h6 && /\bsl\b/.test(S6.h6.have) && /xterm/.test(S6.h6.have), `…and only now is the root filesystem marked replayed; sl and xterm are here: [${S6.h6 && S6.h6.have.trim()}]`, { r6d: S6.r6d, h6: S6.h6 });
+ok(gateOf(S6.r6a) && gateOf(S6.r6a.ok) && gateOf(S6.r6a.result.ran) && verdictOf(S6.r6a.result.failed.includes('sl')), 'a fresh root filesystem, sl\'s .debs gone, no network: the boot replay names sl as not put back', S6.r6a);
+ok(gateOf(S6.r6b) && gateOf(S6.r6b.ok) && S6.r6b.result.ran === true && verdictOf(S6.r6b.result.failed.includes('sl')), 'the NEXT boot (a server restart on the same root filesystem) tries again — a partial replay never marks it replayed', S6.r6b);
+ok(gateOf(S6.s6) && gateOf(S6.s6.ok) && gateOf(S6.s6.status.replay.decision.run) && gateOf((S6.s6.status.replay.missing || []).includes('sl')) && !(S6.s6.status.replay.missing || []).includes('xterm'), 'its status names what is missing (sl — xterm is back): the dialog\'s Put back door', S6.s6 && S6.s6.status.replay);
+ok(gateOf(S6.r6c) && gateOf(S6.r6c.ok) && gateOf(S6.r6c.result.done) && S6.r6c.result.kind === 'replay', 'the cache has sl again: the user\'s Put back (a replay request through the slot) is done', S6.r6c);
+ok(gateOf(S6.r6d) && gateOf(S6.r6d.ok) && S6.r6d.result.ran === false && S6.r6d.result.why === 'replayed' && gateOf(S6.h6) && gateOf(/\bsl\b/.test(S6.h6.have)) && verdictOf(/xterm/.test(S6.h6.have)), `…and only now is the root filesystem marked replayed; sl and xterm are here: [${S6.h6 && S6.h6.have.trim()}]`, { r6d: S6.r6d, h6: S6.h6 });
 const c6c = container({
   net: false, prep: NOSUDO_PREP,
   steps: [
@@ -306,7 +306,7 @@ const c6c = container({
   ],
 });
 const P6 = byStep(c6c);
-ok(P6.p6a && P6.p6a.result && P6.p6a.result.failed.includes('sl') && P6.p6b && P6.p6b.result && P6.p6b.result.ran === false && P6.p6b.result.why === 'replayed', 'CONTROL (F4): under the pre-fix rule the partial replay marked the root filesystem replayed — the next boot never tried sl again', { p6a: P6.p6a && P6.p6a.result, p6b: P6.p6b && P6.p6b.result });
+ok(gateOf(P6.p6a) && gateOf(P6.p6a.result) && gateOf(P6.p6a.result.failed.includes('sl')) && gateOf(P6.p6b) && gateOf(P6.p6b.result) && P6.p6b.result.ran === false && P6.p6b.result.why === 'replayed', 'CONTROL (F4): under the pre-fix rule the partial replay marked the root filesystem replayed — the next boot never tried sl again', { p6a: P6.p6a && P6.p6a.result, p6b: P6.p6b && P6.p6b.result });
 // (b) an install BEFORE the boot replay on a fresh root filesystem (network on: figlet comes from the archive)
 const c7 = container({
   prep: NOSUDO_PREP,
@@ -318,8 +318,8 @@ const c7 = container({
   ],
 });
 const S7 = byStep(c7);
-ok(S7.i7 && S7.i7.ok && S7.i7.result.done && S7.s7 && S7.s7.status.replay.decision.run === true && (S7.s7.status.replay.missing || []).includes('xterm'), 'a NEW app installed on a fresh root filesystem before the boot replay: the status still says the other apps must be put back (xterm among them)', S7.s7 && S7.s7.status.replay);
-ok(S7.r7 && S7.r7.ok && S7.r7.result.ran === true && S7.h7 && /xterm/.test(S7.h7.have) && /\bsl\b/.test(S7.h7.have) && /figlet/.test(S7.h7.have), `…and the replay puts them back: [${S7.h7 && S7.h7.have.trim()}]`, { r7: S7.r7, h7: S7.h7 });
+ok(gateOf(S7.i7) && gateOf(S7.i7.ok) && gateOf(S7.i7.result.done) && gateOf(S7.s7) && S7.s7.status.replay.decision.run === true && verdictOf((S7.s7.status.replay.missing || []).includes('xterm')), 'a NEW app installed on a fresh root filesystem before the boot replay: the status still says the other apps must be put back (xterm among them)', S7.s7 && S7.s7.status.replay);
+ok(gateOf(S7.r7) && gateOf(S7.r7.ok) && S7.r7.result.ran === true && gateOf(S7.h7) && gateOf(/xterm/.test(S7.h7.have)) && gateOf(/\bsl\b/.test(S7.h7.have)) && verdictOf(/figlet/.test(S7.h7.have)), `…and the replay puts them back: [${S7.h7 && S7.h7.have.trim()}]`, { r7: S7.r7, h7: S7.h7 });
 const c7c = container({
   prep: NOSUDO_PREP,
   steps: [
@@ -329,7 +329,7 @@ const c7c = container({
   ],
 });
 const P7 = byStep(c7c);
-ok(P7.pr7 && P7.pr7.result && P7.pr7.result.ran === false && P7.pr7.result.why === 'replayed' && P7.ph7 && !/xterm/.test(P7.ph7.have), `CONTROL (F4): under the pre-fix rule the install marked the root filesystem replayed — the boot replay never ran, xterm is not here: [${P7.ph7 && P7.ph7.have.trim()}]`, { pr7: P7.pr7, ph7: P7.ph7 });
+ok(gateOf(P7.pr7) && gateOf(P7.pr7.result) && P7.pr7.result.ran === false && P7.pr7.result.why === 'replayed' && gateOf(P7.ph7) && !/xterm/.test(P7.ph7.have), `CONTROL (F4): under the pre-fix rule the install marked the root filesystem replayed — the boot replay never ran, xterm is not here: [${P7.ph7 && P7.ph7.have.trim()}]`, { pr7: P7.pr7, ph7: P7.ph7 });
 
 console.log('§8 verify-r1 H1 — an approved third-party source is PINNED: its newer build of an installed package never wins');
 // a signed https repository (a fixture: our own CA + OpenPGP key, built in a throwaway container) serving a NEWER build
@@ -383,17 +383,17 @@ if (!byStep(fxBuild).fx) {
   ];
   const c8 = container({ homeDir: home8, prep: FX_PREP, steps: steps8('', 's8') });
   const S8 = byStep(c8);
-  ok(S8.s8hello && S8.s8hello.ok && S8.s8src && S8.s8src.ok && S8.s8third && S8.s8third.ok, 'hello (Debian) installed, the signed https source approved, capp-third installed FROM it', { hello: S8.s8hello && (S8.s8hello.error || S8.s8hello.ok), src: S8.s8src && (S8.s8src.error || S8.s8src.slotLog || S8.s8src.ok), third: S8.s8third && (S8.s8third.error || S8.s8third.slotLog || S8.s8third.ok) });
+  ok(gateOf(S8.s8hello) && gateOf(S8.s8hello.ok) && gateOf(S8.s8src) && gateOf(S8.s8src.ok) && gateOf(S8.s8third) && verdictOf(S8.s8third.ok), 'hello (Debian) installed, the signed https source approved, capp-third installed FROM it', { hello: S8.s8hello && (S8.s8hello.error || S8.s8hello.ok), src: S8.s8src && (S8.s8src.error || S8.s8src.slotLog || S8.s8src.ok), third: S8.s8third && (S8.s8third.error || S8.s8third.slotLog || S8.s8third.ok) });
   const p1 = S8.s8pin1;
-  ok(p1 && p1.ok && p1.etc === p1.want && p1.sys === p1.want && p1.host === 'vs-fixture.test' && same(p1.pin, { packages: ['capp-third'] }), 'THE PIN as apt reads it (/etc/apt/preferences.d) and root\'s copy (sys/sources/fx.pref) = the PURE sourcePin: everything from vs-fixture.test at 1, capp-third (approved from it) at 500; the index records the allow-list', p1);
-  ok(p1 && /2\.10-99 1\n\s+1 https:\/\/vs-fixture\.test:8443\/repo /.test(p1.policy) && /\*\*\* 1\.0 500\n\s+1 https:\/\/vs-fixture\.test:8443\/repo /.test(p1.policy), 'apt\'s own policy: the source\'s hello 2.10-99 at priority 1, capp-third (approved from it) at 500 — `Pin: origin` matched the bare host of an https://host:PORT source', p1 && p1.policy);
+  ok(gateOf(p1) && gateOf(p1.ok) && p1.etc === p1.want && p1.sys === p1.want && p1.host === 'vs-fixture.test' && verdictOf(same(p1.pin, { packages: ['capp-third'] })), 'THE PIN as apt reads it (/etc/apt/preferences.d) and root\'s copy (sys/sources/fx.pref) = the PURE sourcePin: everything from vs-fixture.test at 1, capp-third (approved from it) at 500; the index records the allow-list', p1);
+  ok(gateOf(p1) && gateOf(/2\.10-99 1\n\s+1 https:\/\/vs-fixture\.test:8443\/repo /.test(p1.policy)) && verdictOf(/\*\*\* 1\.0 500\n\s+1 https:\/\/vs-fixture\.test:8443\/repo /.test(p1.policy)), 'apt\'s own policy: the source\'s hello 2.10-99 at priority 1, capp-third (approved from it) at 500 — `Pin: origin` matched the bare host of an https://host:PORT source', p1 && p1.policy);
   const pl = S8.s8plan && S8.s8plan.plan;
   const ups = (pl && pl.updates) || [];
-  ok(pl && ups.some((u) => u.package === 'capp-third' && u.to === '1.1' && u.origin === 'fx' && u.source === 'fx') && !ups.some((u) => u.package === 'hello'), 'the Refresh card: capp-third 1.0 → 1.1 named FROM fx; the source\'s newer hello is not an update at all', ups);
+  ok(gateOf(pl) && gateOf(ups.some((u) => u.package === 'capp-third' && u.to === '1.1' && u.origin === 'fx' && u.source === 'fx')) && !ups.some((u) => u.package === 'hello'), 'the Refresh card: capp-third 1.0 → 1.1 named FROM fx; the source\'s newer hello is not an update at all', ups);
   const p2 = S8.s8pin2;
-  ok(S8.s8refresh && S8.s8refresh.ok && p2 && p2.versions.hello === '2.10-3' && p2.versions['capp-third'] === '1.1', `after Refresh: hello stays Debian's 2.10-3, capp-third is 1.1 (got hello ${p2 && p2.versions.hello}, capp-third ${p2 && p2.versions['capp-third']})`, { refresh: S8.s8refresh && (S8.s8refresh.error || S8.s8refresh.ok), p2 });
+  ok(gateOf(S8.s8refresh) && gateOf(S8.s8refresh.ok) && gateOf(p2) && p2.versions.hello === '2.10-3' && p2.versions['capp-third'] === '1.1', `after Refresh: hello stays Debian's 2.10-3, capp-third is 1.1 (got hello ${p2 && p2.versions.hello}, capp-third ${p2 && p2.versions['capp-third']})`, { refresh: S8.s8refresh && (S8.s8refresh.error || S8.s8refresh.ok), p2 });
   const again = S8.s8again && S8.s8again.plan;
-  ok(again && again.ok && !(again.closure || []).some((c) => c.package === 'hello' && c.version === '2.10-99'), 'a later install of hello takes nothing from the source (its 2.10-99 never wins)', again && again.closure);
+  ok(gateOf(again) && gateOf(again.ok) && !(again.closure || []).some((c) => c.package === 'hello' && c.version === '2.10-99'), 'a later install of hello takes nothing from the source (its 2.10-99 never wins)', again && again.closure);
   // CONTROL: the same steps through a patched copy whose pins() writes nothing
   const nopinDir = path.join(share, 'nopin');
   fs.cpSync(path.join(repo, 'src'), path.join(nopinDir, 'src'), { recursive: true });
@@ -405,9 +405,9 @@ if (!byStep(fxBuild).fx) {
   const c8c = container({ homeDir: home8c, prep: FX_PREP, steps: steps8('VS_REPO=/share/nopin ', 'c8') });
   const C8 = byStep(c8c);
   const cp2 = C8.c8pin2;
-  ok(C8.c8third && C8.c8third.ok && cp2 && cp2.etc === null && cp2.versions.hello === '2.10-99', `CONTROL (no-pin): the same Refresh took the source's hello 2.10-99 over Debian's (got ${cp2 && cp2.versions.hello})`, { third: C8.c8third && (C8.c8third.error || C8.c8third.ok), cp2 });
+  ok(gateOf(C8.c8third) && gateOf(C8.c8third.ok) && gateOf(cp2) && cp2.etc === null && cp2.versions.hello === '2.10-99', `CONTROL (no-pin): the same Refresh took the source's hello 2.10-99 over Debian's (got ${cp2 && cp2.versions.hello})`, { third: C8.c8third && (C8.c8third.error || C8.c8third.ok), cp2 });
   const cplan = C8.c8plan && C8.c8plan.plan;
-  ok(cplan && ((cplan.updates || []).some((u) => u.package === 'hello' && u.to === '2.10-99' && u.origin === 'fx')), 'CONTROL (no-pin): …and its Refresh card listed hello → 2.10-99 from fx', cplan && cplan.updates);
+  ok(gateOf(cplan) && (verdictOf((cplan.updates || []).some((u) => u.package === 'hello' && u.to === '2.10-99' && u.origin === 'fx'))), 'CONTROL (no-pin): …and its Refresh card listed hello → 2.10-99 from fx', cplan && cplan.updates);
   // verify r1 — a source on a host the machine's OWN apt sources use is refused (its pin would hold their updates at 1);
   // a source approved before .203 (no pin anywhere) is pinned BEFORE the first Refresh's apt runs. CONTROL: the pre-fix
   // order (a patched copy: no re-pin before the dispatch, the source live before its pin, no shared-host check)
@@ -416,15 +416,15 @@ if (!byStep(fxBuild).fx) {
   const pof = path.join(preDir8, 'src', 'app-manifest.js');
   const poText = fs.readFileSync(pof, 'utf8');
   fs.writeFileSync(pof, poText.replace("  'pins',\n  'case $MODE in',", "  'case $MODE in',").replace('"$R/sources/$ID.sources"; pins; install', '"$R/sources/$ID.sources"; install').replace(/\n {2}'  h=\$\(printf[^\n]*shared-host[^\n]*/, ''));
-  ok(!/shared-host/.test(fs.readFileSync(pof, 'utf8')) && /shared-host/.test(poText), 'CONTROL (pre-order): the patched copy has no shared-host check, no re-pin, the old source order');
+  ok(!/shared-host/.test(fs.readFileSync(pof, 'utf8')) && verdictOf(/shared-host/.test(poText)), 'CONTROL (pre-order): the patched copy has no shared-host check, no re-pin, the old source order');
   // the machine's own source: another path on the SAME host (one URI with two Signed-By would be apt's own refusal)
   const OWN_PREP = `${FX_PREP} && install -d -m 0755 /etc/apt/keyrings && install -m 0644 ${FX}/A/key.asc /etc/apt/keyrings/own.asc && ln -sfn . ${FX}/A/own && printf 'Types: deb\\nURIs: https://vs-fixture.test:8443/repo/own\\nSuites: stable\\nComponents: main\\nSigned-By: /etc/apt/keyrings/own.asc\\n' > /etc/apt/sources.list.d/own.sources`;
   const LEFT = { root: 'if [ -e /etc/apt/sources.list.d/vibespace-fx.sources ]; then l=yes; else l=no; fi; echo "@@RESULT {\\"step\\":\\"left\\",\\"live\\":\\"$l\\"}"' };
   const shared = (pre, homeDir) => byStep(container({ homeDir, prep: OWN_PREP, steps: [{ user: 'NODE_EXTRA_CA_CERTS=/etc/apt/vsfx-ca.pem ' + pre + drv('run', { request: { kind: 'source', source: FXSRC } }, 'shs') }, LEFT] }));
   const home8s = scratchDir('app-install-h1s'), home8sc = scratchDir('app-install-h1sc');
   const SH = shared('', home8s), SHC = shared('VS_REPO=/share/pre-order ', home8sc);
-  ok(SH.shs && !SH.shs.ok && /shared-host vs-fixture\.test/.test(JSON.stringify(SH.shs)) && SH.left && SH.left.live === 'no', 'a source on the host of one of the machine\'s own sources is refused (shared-host) and nothing of it is live', { shs: SH.shs && (SH.shs.error || SH.shs.ok), left: SH.left });
-  ok(SHC.shs && SHC.shs.ok && SHC.left && SHC.left.live === 'yes', 'CONTROL (pre-order): the same source was approved — its pin would hold the machine\'s own source at 1', { shs: SHC.shs && (SHC.shs.error || SHC.shs.ok), left: SHC.left });
+  ok(gateOf(SH.shs) && !SH.shs.ok && gateOf(/shared-host vs-fixture\.test/.test(JSON.stringify(SH.shs))) && gateOf(SH.left) && SH.left.live === 'no', 'a source on the host of one of the machine\'s own sources is refused (shared-host) and nothing of it is live', { shs: SH.shs && (SH.shs.error || SH.shs.ok), left: SH.left });
+  ok(gateOf(SHC.shs) && gateOf(SHC.shs.ok) && gateOf(SHC.left) && SHC.left.live === 'yes', 'CONTROL (pre-order): the same source was approved — its pin would hold the machine\'s own source at 1', { shs: SHC.shs && (SHC.shs.error || SHC.shs.ok), left: SHC.left });
   const HELLO = { root: 'echo "@@RESULT {\\"step\\":\\"hv\\",\\"hello\\":\\"$(dpkg-query -W -f=\'${Version}\' hello)\\"}"' };
   const legacy = (pre, homeDir) => byStep(container({ homeDir, prep: FX_PREP, steps: [
     { user: pre + drv('run', { request: { kind: 'apt', packages: ['hello'] } }, 'uh') },
@@ -433,8 +433,8 @@ if (!byStep(fxBuild).fx) {
     { user: pre + drv('run', { request: { kind: 'refresh' } }, 'ur') }, HELLO] }));
   const home8u = scratchDir('app-install-h1u'), home8uc = scratchDir('app-install-h1uc');
   const LG = legacy('', home8u), LGC = legacy('VS_REPO=/share/pre-order ', home8uc);
-  ok(LG.us && LG.us.ok && LG.ur && LG.ur.ok && LG.hv && LG.hv.hello === '2.10-3', `a source approved before .203 (no pin): the first Refresh pins it BEFORE apt runs — hello stays Debian's 2.10-3 (got ${LG.hv && LG.hv.hello})`, { us: LG.us && (LG.us.error || LG.us.ok), ur: LG.ur && (LG.ur.error || LG.ur.ok) });
-  ok(LGC.ur && LGC.ur.ok && LGC.hv && LGC.hv.hello === '2.10-99', `CONTROL (pre-order): the same first Refresh took the source's hello 2.10-99 (got ${LGC.hv && LGC.hv.hello})`, { ur: LGC.ur && (LGC.ur.error || LGC.ur.ok) });
+  ok(gateOf(LG.us) && gateOf(LG.us.ok) && gateOf(LG.ur) && gateOf(LG.ur.ok) && gateOf(LG.hv) && LG.hv.hello === '2.10-3', `a source approved before .203 (no pin): the first Refresh pins it BEFORE apt runs — hello stays Debian's 2.10-3 (got ${LG.hv && LG.hv.hello})`, { us: LG.us && (LG.us.error || LG.us.ok), ur: LG.ur && (LG.ur.error || LG.ur.ok) });
+  ok(gateOf(LGC.ur) && gateOf(LGC.ur.ok) && gateOf(LGC.hv) && LGC.hv.hello === '2.10-99', `CONTROL (pre-order): the same first Refresh took the source's hello 2.10-99 (got ${LGC.hv && LGC.hv.hello})`, { ur: LGC.ur && (LGC.ur.error || LGC.ur.ok) });
   for (const h of [home8s, home8sc, home8u, home8uc]) spawnSync('docker', ['run', '--rm', '-v', `${h}:/h`, IMAGE, 'sh', '-c', 'rm -rf /h/.vibespace /h/.cache'], { stdio: 'ignore' });
   for (const h of [home8, home8c]) spawnSync('docker', ['run', '--rm', '-v', `${h}:/h`, IMAGE, 'sh', '-c', 'rm -rf /h/.vibespace /h/.cache'], { stdio: 'ignore' });
 }
@@ -465,14 +465,14 @@ console.log('§9 design 009 — an agent PROPOSES an installer by file: a real .
   ] });
   const R9 = byStep(c9);
   const pd = R9.propDeb && R9.propDeb.proposal;
-  ok(pd && pd.kind === 'deb' && pd.app.name === 'Capp Chat' && pd.app.labels && pd.app.labels.zh === '卡普聊天' && /\/icon$/.test(pd.app.icon || '') && pd.details.packages.includes('capp-vendor') && R9.stgDeb && R9.stgDeb.ls[STG].some((n) => n.endsWith('.deb')), 'a REAL .deb proposed by file: dpkg-deb lists it, its own desktop file (Name + Name[zh_CN]) and icon are read out WITHOUT installing it; the copy sits in staging', { pd, stg: R9.stgDeb });
-  ok(pd && R9.sizeDeb && pd.bytes.download === Number(R9.sizeDeb.out), 'apps-joint r1 F5: the card\'s download size of a .deb with nothing else to fetch = its file (apt\'s --print-uris lists the local file; never counted twice)', { bytes: pd && pd.bytes, size: R9.sizeDeb && R9.sizeDeb.out });
+  ok(gateOf(pd) && pd.kind === 'deb' && pd.app.name === 'Capp Chat' && gateOf(pd.app.labels) && pd.app.labels.zh === '卡普聊天' && gateOf(/\/icon$/.test(pd.app.icon || '')) && gateOf(pd.details.packages.includes('capp-vendor')) && gateOf(R9.stgDeb) && verdictOf(R9.stgDeb.ls[STG].some((n) => n.endsWith('.deb'))), 'a REAL .deb proposed by file: dpkg-deb lists it, its own desktop file (Name + Name[zh_CN]) and icon are read out WITHOUT installing it; the copy sits in staging', { pd, stg: R9.stgDeb });
+  ok(gateOf(pd) && gateOf(R9.sizeDeb) && pd.bytes.download === Number(R9.sizeDeb.out), 'apps-joint r1 F5: the card\'s download size of a .deb with nothing else to fetch = its file (apt\'s --print-uris lists the local file; never counted twice)', { bytes: pd && pd.bytes, size: R9.sizeDeb && R9.sizeDeb.out });
   const st = R9.stDeb && R9.stDeb.status;
   const ent = st && st.manifest.entries.find((e) => e.kind === 'deb');
-  ok(R9.runDeb && R9.runDeb.ok && R9.runDeb.result.done && R9.dpkgDeb && /Status: install ok installed/.test(R9.dpkgDeb.out) && ent && ent.deb.package === 'capp-vendor' && st.rows.some((r) => r.app === ent.id && r.labels && r.labels.zh === '卡普聊天'), 'the click: apt-get installs ./the staged .deb through the ONE slot (root checks the sha256), the row carries the localized label', { run: R9.runDeb && (R9.runDeb.error || R9.runDeb.log), ent, rows: st && st.rows });
+  ok(gateOf(R9.runDeb) && gateOf(R9.runDeb.ok) && gateOf(R9.runDeb.result.done) && gateOf(R9.dpkgDeb) && gateOf(/Status: install ok installed/.test(R9.dpkgDeb.out)) && gateOf(ent) && ent.deb.package === 'capp-vendor' && verdictOf(st.rows.some((r) => r.app === ent.id && r.labels && r.labels.zh === '卡普聊天')), 'the click: apt-get installs ./the staged .deb through the ONE slot (root checks the sha256), the row carries the localized label', { run: R9.runDeb && (R9.runDeb.error || R9.runDeb.log), ent, rows: st && st.rows });
   const ls = R9.lsAI && R9.lsAI.ls;
-  ok(R9.propAI && R9.propAI.proposal && R9.propAI.proposal.kind === 'appimage' && R9.runAI && R9.runAI.ok && R9.runAI.cwd === '/tmp/elsewhere' && ls && ls['/tmp/elsewhere'].length === 0 && ls[STG].length === 0 && (ls[AIM + '/root'] || []).includes('AppRun') && !(ls[AIM] || ['x.AppImage']).some((n) => /AppImage$/.test(n)) && /capp-chat runs from/.test(R9.execAI && R9.execAI.out), 'an AppImage (the W4 control): unpacked into appimage/<id>/root with the cwd ELSEWHERE (it stays empty), the AppImage file and every staged file gone, its AppRun runs', { prop: R9.propAI, run: R9.runAI && (R9.runAI.error || R9.runAI.log), ls, exec: R9.execAI });
-  ok(R9.runRm && R9.runRm.ok && R9.lsRm && R9.lsRm.ls[AIM] === null && Array.isArray(R9.lsRm.ls['/home/u/.vibespace/apps']), 'Remove… of an AppImage: exactly its directory goes (no root), the apps directory stays', { rm: R9.runRm, ls: R9.lsRm });
+  ok(gateOf(R9.propAI) && gateOf(R9.propAI.proposal) && R9.propAI.proposal.kind === 'appimage' && gateOf(R9.runAI) && gateOf(R9.runAI.ok) && R9.runAI.cwd === '/tmp/elsewhere' && gateOf(ls) && ls['/tmp/elsewhere'].length === 0 && ls[STG].length === 0 && gateOf((ls[AIM + '/root'] || []).includes('AppRun')) && !(ls[AIM] || ['x.AppImage']).some((n) => /AppImage$/.test(n)) && verdictOf(/capp-chat runs from/.test(R9.execAI && R9.execAI.out)), 'an AppImage (the W4 control): unpacked into appimage/<id>/root with the cwd ELSEWHERE (it stays empty), the AppImage file and every staged file gone, its AppRun runs', { prop: R9.propAI, run: R9.runAI && (R9.runAI.error || R9.runAI.log), ls, exec: R9.execAI });
+  ok(gateOf(R9.runRm) && gateOf(R9.runRm.ok) && gateOf(R9.lsRm) && R9.lsRm.ls[AIM] === null && verdictOf(Array.isArray(R9.lsRm.ls['/home/u/.vibespace/apps'])), 'Remove… of an AppImage: exactly its directory goes (no root), the apps directory stays', { rm: R9.runRm, ls: R9.lsRm });
   spawnSync('docker', ['run', '--rm', '-v', `${home9}:/h`, IMAGE, 'sh', '-c', 'rm -rf /h/.vibespace /h/.cache'], { stdio: 'ignore' });
 }
-finish();
+finish(); import { verdictOf, gateOf } from './lib/check.mjs';

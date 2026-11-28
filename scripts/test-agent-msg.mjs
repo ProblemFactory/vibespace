@@ -18,7 +18,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
 // ── 1. ACL matrix ──
 {
@@ -35,7 +35,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok(A.levelFor(t([]), ['g1'], gs({})) === 'none', 'ungrouped target = singleton, closed');
   ok(A.levelFor(t([], 'visible'), ['g1'], gs({})) === 'visible', 'ungrouped target opened by its own override');
   ok(A.levelFor(t(['g1']), [], gs({ g1: 'visible' })) === 'visible', 'ungrouped SENDER can still see what is externally visible');
-  ok(A.canSee('visible') && !A.canMessage('visible') && A.canMessage('messageable') && !A.canSee('none'), 'rank predicates');
+  ok(gateOf(A.canSee('visible')) && !A.canMessage('visible') && gateOf(A.canMessage('messageable')) && !A.canSee('none'), 'rank predicates');
 }
 
 // ── 2. delivery ladder ──
@@ -63,19 +63,19 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   // local rung
   localPeer = { socketPath: '/tmp/x.sock', name: 'local-sess' };
   const r1 = await D.deliverToConversation('cid-local', 'hi', { fromName: 'sender-A', cardText: 'raw body' });
-  ok(r1.ok && r1.lane === 'message' && r1.peerName === 'local-sess' && calls.local.length === 1, 'local rung delivers via this machine registry', JSON.stringify(r1));
+  ok(gateOf(r1.ok) && r1.lane === 'message' && r1.peerName === 'local-sess' && calls.local.length === 1, 'local rung delivers via this machine registry', JSON.stringify(r1));
   // 2.363.0: a successful post RENDERS THE CARD at the delivery site — the CLI
   // records server-posted injections with a body-less origin, so nothing else can
   ok(cards.length === 1 && cards[0].cid === 'cid-local' && cards[0].fromName === 'sender-A' && cards[0].text === 'raw body', 'ok delivery emits the peer card (fromName + raw cardText)', JSON.stringify(cards));
   // remote rung: no local peer, conversation-index names host-A
   localPeer = null;
   const r2 = await D.deliverToConversation('cid-remote', 'yo');
-  ok(r2.ok && r2.lane === 'remote-message' && r2.hostId === 'host-A' && calls.remote.length === 1 && calls.remote[0].cid === 'cid-remote', 'remote rung routes via the owning machine daemon (transparent id)', JSON.stringify(r2));
+  ok(gateOf(r2.ok) && r2.lane === 'remote-message' && r2.hostId === 'host-A' && calls.remote.length === 1 && calls.remote[0].cid === 'cid-remote', 'remote rung routes via the owning machine daemon (transparent id)', JSON.stringify(r2));
   ok(cards.length === 2 && cards[1].cid === 'cid-remote' && cards[1].text === 'yo', 'remote ok delivery emits the card too (cardText defaults to the posted text)');
   // remote daemon miss → honest fail (caller stashes)
   remoteResult = { ok: false, reason: 'no live inbox on this machine' };
   const r3 = await D.deliverToConversation('cid-remote', 'yo2');
-  ok(!r3.ok && r3.lane === 'remote-message' && r3.reason, 'remote miss reports honestly');
+  ok(!r3.ok && r3.lane === 'remote-message' && verdictOf(r3.reason), 'remote miss reports honestly');
   // B-6721 (round w8g2bt5bs's should; the move check w3pnpw53m's MUST): the remote rung says `unanswered` ONLY when the request LEFT
   // and no answer came — and both «left, no reply» shapes are MADE BY THE CLIENT'S OWN CODE: the REAL DeviceManager (src/agentd/client.js)
   // over the stream transport talks to a stand-in DEVICE on the real Mux, which (a) never answers the peer-post (the client's own
@@ -111,7 +111,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     gate: await throughDevice(DD, () => { }, []),   // (d) no peer-post capability: nothing leaves
   });
   const ua = await uaOf(D);
-  ok(/peer-post timeout/.test(ua.timeout.reason) && /link lost/.test(ua.lost.reason) && ua.timeout.unanswered === true && ua.lost.unanswered === true && !ua.answered.unanswered && !ua.gate.unanswered && Object.values(ua).every((x) => x.ok === false && x.lane === 'remote-message'),
+  ok(gateOf(/peer-post timeout/.test(ua.timeout.reason)) && gateOf(/link lost/.test(ua.lost.reason)) && ua.timeout.unanswered === true && ua.lost.unanswered === true && !ua.answered.unanswered && !ua.gate.unanswered && verdictOf(Object.values(ua).every((x) => x.ok === false && x.lane === 'remote-message')),
     'B-6721: the remote rung says «unanswered» for the CLIENT\'s own «left, no reply» errors — its request bound and its lost link — and never for an error the device answered or a missing capability (the real DeviceManager over the real Mux)', JSON.stringify(ua));
   const CDSRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
   const MCU = mutantCopies('agent-msg-unanswered', REPO);
@@ -142,11 +142,11 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     return { body, pinned: ROADS.every(([, line]) => body.split(line).length === 2), rejects: (body.match(/\breject\(/g) || []).length, awaits: (body.match(/\bawait\b/g) || []).length, returns: (body.match(/\breturn this\._refuseAct\(|\breturn Promise\.reject\(/g) || []).length };
   };
   const census = (src) => { const r = roadsOf(src); return r.pinned && r.rejects === 5 && r.awaits === 2 && r.returns === 2 && src.split("for (const r of pending.values()) { try { r({ error: 'device link lost', linkLost: true }); } catch { } }").length === 2 && src.includes("m.linkLost ? { code: 'link_lost' } : {}") && src.includes("const r = await this._request({ op: 'peer-post', cid, text, timeoutMs: 15000 + wait, by, ...(wait ? { inboxWaitMs: wait } : {}) });"); };
-  ok(census(CLSRC), 'census (B-6721, the MUST): the client\'s request maker ends a request on exactly EIGHT roads, pinned by name — five before the send (B-7f0b D8: a request the Mux will not send), the answer (the lost link\'s own `linkLost` answer among them, code link_lost), the request\'s own bound (`peer-post timeout`); the rung\'s «unanswered» judges the last two', JSON.stringify((() => { const r = roadsOf(CLSRC); return { pinned: r.pinned, rejects: r.rejects, awaits: r.awaits, returns: r.returns }; })()));
+  ok(verdictOf(census(CLSRC)), 'census (B-6721, the MUST): the client\'s request maker ends a request on exactly EIGHT roads, pinned by name — five before the send (B-7f0b D8: a request the Mux will not send), the answer (the lost link\'s own `linkLost` answer among them, code link_lost), the request\'s own bound (`peer-post timeout`); the rung\'s «unanswered» judges the last two', JSON.stringify((() => { const r = roadsOf(CLSRC); return { pinned: r.pinned, rejects: r.rejects, awaits: r.awaits, returns: r.returns }; })()));
   ok(!census(anchored(CLSRC, '      try { conn.mux.control({ ...payload, id }); } catch (e) {', "      if (payload.op === 'x') { conn.pending.delete(id); reject(new Error('x')); return; }\n      try { conn.mux.control({ ...payload, id }); } catch (e) {", 'B-6721: a new way for a request to fail')), 'RED control: a NEW way for a request to end (an added reject) is red until the rung says which side it is on');
   // unknown everywhere
   const r4 = await D.deliverToConversation('cid-nowhere', 'x');
-  ok(!r4.ok && /no live inbox/.test(r4.reason), 'unroutable conversation fails with a named reason');
+  ok(!r4.ok && verdictOf(/no live inbox/.test(r4.reason)), 'unroutable conversation fails with a named reason');
   ok(cards.length === 2, 'failed deliveries emit NO card (the stash drain renders later instead)');
   // stash round trip + persistence across instances
   D.stashFor('cid-nowhere', { source: 'agent', fromName: 'tester', text: 'queued msg' });
@@ -163,39 +163,39 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 {
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
   const ar = read('src/agent-routes.js');
-  ok(ar.includes("app.get('/api/agent/msg/peers'") && ar.includes("app.post('/api/agent/msg/send'"), 'agent-routes exposes msg peers/send');
+  ok(gateOf(ar.includes("app.get('/api/agent/msg/peers'")) && verdictOf(ar.includes("app.post('/api/agent/msg/send'")), 'agent-routes exposes msg peers/send');
   ok(ar.split('INDEPENDENT of the jobs engine').length >= 3, 'msg stash drains at BOTH injection sites OUTSIDE the jobs-ready gate (review-caught coupling)');
   ok(require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.msg === 'msg-manual.md', 'vibespace-docs serves the msg manual');   // lane cli-registry: the topics are the registry's rows
-  ok(ar.includes('vibespace-msg list') && ar.includes('billed turn'), 'tools intro teaches vibespace-msg incl. the cost semantics');
+  ok(gateOf(ar.includes('vibespace-msg list')) && verdictOf(ar.includes('billed turn')), 'tools intro teaches vibespace-msg incl. the cost semantics');
   const jw = read('src/server/jobs-wiring.js');
-  ok(jw.includes('deliver.deliverToConversation') && !jw.includes('peerMsg.findPeer'), 'jobs-wiring consumes the SHARED ladder (no inline twin left)');
+  ok(gateOf(jw.includes('deliver.deliverToConversation')) && !jw.includes('peerMsg.findPeer'), 'jobs-wiring consumes the SHARED ladder (no inline twin left)');
   const sv = read('server.js');
-  ok(sv.includes("require('./src/server/conversation-deliver.js').create") && sv.includes('getJobs: jobsWiring.getJobs, deliver'), 'server wires ONE deliver instance into jobs + agent routes');
-  ok(sv.includes("'/api/sessions/:id/msg-reachability'"), 'per-session reach override API exists');
+  ok(gateOf(sv.includes("require('./src/server/conversation-deliver.js').create")) && verdictOf(sv.includes('getJobs: jobsWiring.getJobs, deliver')), 'server wires ONE deliver instance into jobs + agent routes');
+  ok(verdictOf(sv.includes("'/api/sessions/:id/msg-reachability'")), 'per-session reach override API exists');
   const ad = read('src/agentd/agentd.js');
-  ok(ad.includes("'peer-post'") && ad.includes("msg.op === 'peer-post'"), 'agentd: peer-post op + capability');
+  ok(gateOf(ad.includes("'peer-post'")) && verdictOf(ad.includes("msg.op === 'peer-post'")), 'agentd: peer-post op + capability');
   const cl = read('src/agentd/client.js');
-  ok(cl.includes("m.op === 'peer-post-result'") && cl.includes('daemon lacks peer-post'), 'client: reply routed + capability-gated (old daemons never asked)');
-  ok(fs.existsSync(path.join(REPO, 'data/bin/vibespace-msg')) && read('data/bin/vibespace-msg').includes('/api/agent/msg/send'), 'vibespace-msg CLI present and calls the API');
-  ok(fs.existsSync(path.join(REPO, 'docs/agent/msg-manual.md')), 'msg manual exists');
+  ok(gateOf(cl.includes("m.op === 'peer-post-result'")) && verdictOf(cl.includes('daemon lacks peer-post')), 'client: reply routed + capability-gated (old daemons never asked)');
+  ok(gateOf(fs.existsSync(path.join(REPO, 'data/bin/vibespace-msg'))) && verdictOf(read('data/bin/vibespace-msg').includes('/api/agent/msg/send')), 'vibespace-msg CLI present and calls the API');
+  ok(verdictOf(fs.existsSync(path.join(REPO, 'docs/agent/msg-manual.md'))), 'msg manual exists');
   const sc = read('src/session-schema.js');
-  ok(sc.includes('_msgReachability'), 'session schema registers the override field');
+  ok(verdictOf(sc.includes('_msgReachability')), 'session schema registers the override field');
   // review-caught batch pins
   const cd = read('src/server/conversation-deliver.js');
-  ok(cd.includes('const flush = ') && read('server.js').includes('deliver.flush()'), 'stash flush() wired into the shutdown belt (SIGTERM loses nothing)');
-  ok(cd.includes('deviceBounded'), 'remote rung uses the BOUNDED device connect (no 2.7min request hangs)');
-  ok(/AGENT_TOOLS[^\]]*vibespace-msg/.test(read('src/hosts.js').replace(/\n/g, ' ')), 'vibespace-msg ships to remote hosts (AGENT_TOOLS)');
+  ok(gateOf(cd.includes('const flush = ')) && verdictOf(read('server.js').includes('deliver.flush()')), 'stash flush() wired into the shutdown belt (SIGTERM loses nothing)');
+  ok(verdictOf(cd.includes('deviceBounded')), 'remote rung uses the BOUNDED device connect (no 2.7min request hangs)');
+  ok(verdictOf(/AGENT_TOOLS[^\]]*vibespace-msg/.test(read('src/hosts.js').replace(/\n/g, ' '))), 'vibespace-msg ships to remote hosts (AGENT_TOOLS)');
   // 2.363.0 delivery-site card rendering (server-posted = body-less origin at the CLI)
-  ok(sv.includes('emitPeerCard') && /feedPeerCard\(s, card\)/.test(sv), 'server wires emitPeerCard → feedPeerCard gate → session normalizer injectPeerCard (2.369.16: never a direct injectPeerCard — it wrote mid-history during a rebuild)');
-  ok(ar.includes('cardText: text'), 'msg/send passes the RAW body as the card text');
+  ok(gateOf(sv.includes('emitPeerCard')) && verdictOf(/feedPeerCard\(s, card\)/.test(sv)), 'server wires emitPeerCard → feedPeerCard gate → session normalizer injectPeerCard (2.369.16: never a direct injectPeerCard — it wrote mid-history during a rebuild)');
+  ok(verdictOf(ar.includes('cardText: text')), 'msg/send passes the RAW body as the card text');
   // channel-jump verify r5: the four drain sites are TWO helpers (drainStashUnderCap / drainNotifsUnderCap — the drains fit
   // the inline cap or wait), each the ONE card writer for its store, each called from both hook routes
-  ok(/function drainStashUnderCap[\s\S]{0,3400}?deliver\.emitPeerCard\(cid, \{ fromName: e\.fromName \|\| null, text: e\.text, kind: stashKindOf\(e\) \}\)/.test(ar) && /function drainNotifsUnderCap[\s\S]{0,2600}?deliver\.emitPeerCard\(cid, \{ fromName: 'Background Work · '/.test(ar)
+  ok(gateOf(/function drainStashUnderCap[\s\S]{0,3400}?deliver\.emitPeerCard\(cid, \{ fromName: e\.fromName \|\| null, text: e\.text, kind: stashKindOf\(e\) \}\)/.test(ar)) && gateOf(/function drainNotifsUnderCap[\s\S]{0,2600}?deliver\.emitPeerCard\(cid, \{ fromName: 'Background Work · '/.test(ar))
     && ar.split('= drainStashUnderCap(deliver, ').length === 3 && ar.split('= drainNotifsUnderCap(jm, deliver, ').length === 3,
     'all four stash-drain sites (msg ×2 + jobs ×2) render cards for drained messages — through the two fit-or-wait helpers, each called by task-context AND prompt-context (verify r5)');
-  ok(read('src/jobs.js').includes("fromName: 'Background Work · '"), 'jobs owner-notify labels its card');
-  ok(read('src/message-manager.js').includes('injectPeerCard'), 'normalizer exposes injectPeerCard');
+  ok(verdictOf(read('src/jobs.js').includes("fromName: 'Background Work · '")), 'jobs owner-notify labels its card');
+  ok(verdictOf(read('src/message-manager.js').includes('injectPeerCard')), 'normalizer exposes injectPeerCard');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

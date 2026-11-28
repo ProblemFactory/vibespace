@@ -20,7 +20,7 @@ import { census } from './update-door-census.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : ''}`); }
 };
@@ -45,7 +45,7 @@ console.log('① the update-door census — the ONE road that updates VibeSpace 
   const t0 = Date.now(); const C = census(REPO); const took = Date.now() - t0;
   const problems = judge(C.sites, ROWS);
   ok(`every call that would update VibeSpace's own checkout or bundle — or names its door, update.sh — is a row (${C.sites.length} site(s) over ${C.files} files, ${took} ms) — and the ONE door is ⚙ → Update`, !problems.length && ROWS.filter((r) => r[3] === 'door').length === 1, problems);
-  ok('every row says what it is and why', ROWS.every((r) => ['door'].includes(r[3]) && String(r[4]).length > 40));
+  ok('every row says what it is and why', verdictOf(ROWS.every((r) => ['door'].includes(r[3]) && String(r[4]).length > 40)));
   // CONTROLS — each a plant the census must see (a pull that comes back through a module, async, behind the old guard: the panel's M1c)
   const plant = (rel, src) => judge(census(REPO, { patch: { [rel]: src } }).sites, ROWS).filter((p) => p.startsWith('UNROWED') && p.includes(rel));
   const c1 = plant('src/server/boot-pull.js', "const { execFile } = require('child_process');\nmodule.exports = (dir, env) => execFile('git', ['-C', dir, 'pull', '--ff-only'], { env }, () => { });\n");
@@ -101,7 +101,7 @@ process.exit(2);
   put('1.0.4'); const u3 = update({ STUB_BUILD_FAILS: '1' }); const s3 = state(u3);
   const said = /✗ The update stopped \(exit 1\)\. The files it rewrites \(package-lock\.json, src\/agentd\/version\.js\) were put back/.test(u3.out);
   put('1.0.5'); const b3 = bare();
-  ok('a FAILED build: the update ends non-zero, the tree is CLEAN (the EXIT trap puts back what it rewrote) and it SAYS so — an admin\'s bare pull after it succeeds', s3.rc !== 0 && s3.porc === '' && said && b3 === 0 && g(I, 'log', '-1', '--format=%s') === 'v1.0.5', { s3, said, bare: b3, tail: u3.out.slice(-400) });
+  ok('a FAILED build: the update ends non-zero, the tree is CLEAN (the EXIT trap puts back what it rewrote) and it SAYS so — an admin\'s bare pull after it succeeds', s3.rc !== 0 && s3.porc === '' && gateOf(said) && b3 === 0 && g(I, 'log', '-1', '--format=%s') === 'v1.0.5', { s3, said, bare: b3, tail: u3.out.slice(-400) });
   // round 3: a SIGHUP to the update's bash mid-build (the terminal closed) — the tree put back AND the failure said
   put('1.0.6'); const MARK = path.join(U, 'building');
   const hupped = await new Promise((resolve) => {
@@ -111,10 +111,10 @@ process.exit(2);
     c.on('exit', (code, sig) => { clearInterval(poll); resolve({ code, sig, out }); });
   });
   const s6 = { rc: hupped.code, porc: g(I, 'status', '--porcelain'), said: /✗ The update stopped \(exit 129\)\. The files it rewrites/.test(hupped.out) };
-  ok('a SIGHUP to the update mid-build (the terminal closed): the tree is put back AND the failure is said (exit 129) — the panel saw it silent', s6.rc === 129 && s6.porc === '' && s6.said, { s6, tail: hupped.out.slice(-300) });
+  ok('a SIGHUP to the update mid-build (the terminal closed): the tree is put back AND the failure is said (exit 129) — the panel saw it silent', s6.rc === 129 && s6.porc === '' && verdictOf(s6.said), { s6, tail: hupped.out.slice(-300) });
   const SH = fs.readFileSync(path.join(REPO, 'scripts', 'update.sh'), 'utf8');
   ok('the trap is installed only AFTER the single-flight lock (an «Another update is already running» exit never touches the tree the running one builds)', SH.indexOf('trap on_exit EXIT') > SH.indexOf('flock -n 9') && SH.indexOf('trap on_exit EXIT') < SH.indexOf('if ! git pull --ff-only; then'));
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

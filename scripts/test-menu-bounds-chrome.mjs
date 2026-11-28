@@ -26,7 +26,7 @@ const CHROME = ['/opt/google/chrome/chrome', '/usr/bin/google-chrome', '/usr/bin
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
 const esb = require('esbuild'); const WebSocket = require('ws');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log('  ✓ ' + n); } else { failed++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log('  ✓ ' + n); } else { failed++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const tmp = scratchDir('menu-bounds');   // the suite helper's scratch (test-ci-gate-tiers: no gated suite claims a fixed /tmp path)
@@ -64,15 +64,15 @@ try {
     // ① a short menu
     await ev(`(() => { __menus.showContextMenu(${X}, ${Y}, ${JSON.stringify(ROWS(8, 'Row'))}.map((x) => ({ ...x, action() {} }))); return 1; })()`); await sleep(100);
     const s1 = await ev(READ);
-    check(`${at} ① a short menu opened at the bottom-right corner: the menu and EVERY row inside the viewport`, !!s1 && inside(s1.menu, vw, vh) && s1.rows.every((r) => inside(r, vw, vh)), s1 && { menu: s1.menu, out: s1.rows.filter((r) => !inside(r, vw, vh)).map((r) => r.text) });
+    check(`${at} ① a short menu opened at the bottom-right corner: the menu and EVERY row inside the viewport`, !!s1 && gateOf(inside(s1.menu, vw, vh)) && verdictOf(s1.rows.every((r) => inside(r, vw, vh))), s1 && { menu: s1.menu, out: s1.rows.filter((r) => !inside(r, vw, vh)).map((r) => r.text) });
     // ② a long menu: the session card's shape (groups; the last one 7 rows ending Properties… / Terminate)
     const long = [...ROWS(12, 'Open'), { separator: true }, ...ROWS(8, 'Locate'), { separator: true }, ...ROWS(5, 'Admin'), { label: 'Properties…', action() {} }, { label: 'Terminate', action() {} }];
     await ev(`(() => { __menus.showContextMenu(${X}, ${Y}, ${JSON.stringify(long)}.map((x) => x.separator ? x : ({ ...x, action() {} }))); return 1; })()`); await sleep(150);
     const s2 = await ev(READ);
     const tail2 = s2 && s2.rows.slice(-2);
-    check(`${at} ② a menu taller than the screen stays inside the viewport and scrolls INSIDE`, !!s2 && inside(s2.menu, vw, vh) && s2.scrolls && /auto|scroll/.test(s2.overflowY), s2 && { menu: s2.menu, scrolls: s2.scrolls, overflowY: s2.overflowY });
-    check(`${at} ② its closing rows («Properties…», «Terminate») are in view without a scroll`, !!tail2 && tail2.map((r) => r.text).join('|') === 'Properties…|Terminate' && tail2.every((r) => r.vis && inside(r, vw, vh)), tail2);
-    check(`${at} ② every visible row is inside the viewport (the rest are inside the menu's own scroll)`, !!s2 && s2.rows.filter((r) => r.vis).every((r) => inside(r, vw, vh)), s2 && s2.rows.filter((r) => r.vis && !inside(r, vw, vh)).map((r) => r.text));
+    check(`${at} ② a menu taller than the screen stays inside the viewport and scrolls INSIDE`, !!s2 && gateOf(inside(s2.menu, vw, vh)) && gateOf(s2.scrolls) && verdictOf(/auto|scroll/.test(s2.overflowY)), s2 && { menu: s2.menu, scrolls: s2.scrolls, overflowY: s2.overflowY });
+    check(`${at} ② its closing rows («Properties…», «Terminate») are in view without a scroll`, !!tail2 && tail2.map((r) => r.text).join('|') === 'Properties…|Terminate' && verdictOf(tail2.every((r) => r.vis && inside(r, vw, vh))), tail2);
+    check(`${at} ② every visible row is inside the viewport (the rest are inside the menu's own scroll)`, !!s2 && verdictOf(s2.rows.filter((r) => r.vis).every((r) => inside(r, vw, vh))), s2 && s2.rows.filter((r) => r.vis && !inside(r, vw, vh)).map((r) => r.text));
     // ③ the file explorer's own builder: the file menu's shape, then its office rows patched in AFTER it opened
     const fileMenu = (noObserver) => `(async () => { ${noObserver ? 'const MO = window.MutationObserver; window.MutationObserver = undefined;' : ''}
       document.querySelectorAll('.context-menu').forEach((m) => m.remove());
@@ -94,7 +94,7 @@ try {
     await ev(`(() => { document.querySelectorAll('.context-menu').forEach((m) => m.remove()); __menus.showContextMenu(${X}, ${Y}, [{ label: 'One', action() {} }, { label: 'More', children: Array.from({ length: 9 }, (_, i) => ({ label: 'Sub ' + i, action() {} })) }]); const row = [...document.querySelectorAll('.context-menu > .context-menu-item')].find((e) => /^More/.test(e.textContent)); row.dispatchEvent(new MouseEvent('mouseenter')); return 1; })()`);
     await sleep(200);
     const s4 = await ev(`(() => { const sub = [...document.querySelectorAll('.context-menu .context-menu')].find((e) => e.style.display !== 'none'); if (!sub) return null; const r = sub.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; })()`);
-    check(`${at} ④ a submenu opened at the bottom-right is inside the viewport`, !!s4 && inside(s4, vw, vh), s4);
+    check(`${at} ④ a submenu opened at the bottom-right is inside the viewport`, !!s4 && verdictOf(inside(s4, vw, vh)), s4);
     // ⑤ A MENU THAT PLACES ITSELF IS NEVER MOVED BEHIND ITS BACK (the acceptance reader's must-fix: the desktop list keeps its
     // TOP after a remote change patches its rows — lane desktop-doors-table r4/r5; an observer on every menu re-placed it from
     // its anchor, so its rows moved under the pointer). The desktop list's protocol: opened with `up` from the taskbar, rows
@@ -131,4 +131,4 @@ try {
   // (the ONE-placement source pin: MOVED to the fast scripts/test-menu-bounds-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 } finally { cleanup(); }
 console.log(failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

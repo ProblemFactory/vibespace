@@ -19,7 +19,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 700) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -139,14 +139,14 @@ await sleep(Math.round(500 * 0.6));
 ok(encs(A.ws, mark).length === 0, 'still 300 ms: no change yet (settling)');
 await sleep(400);
 let w = wire(A.ws, mark);
-ok(same(w, [{ t: 'enc', q: 8, c: 2 }, { t: 'req', inc: 0, rect: [1280, 0, 1280, 800] }]) && A.view.quality.rung === 'sharp', 'still ≥ 500 ms ⇒ ONE SetEncodings (8 / 2), then ONE non-incremental request for the SHOWN display (1280,0 1280×800)', w);
+ok(gateOf(same(w, [{ t: 'enc', q: 8, c: 2 }, { t: 'req', inc: 0, rect: [1280, 0, 1280, 800] }])) && A.view.quality.rung === 'sharp', 'still ≥ 500 ms ⇒ ONE SetEncodings (8 / 2), then ONE non-incremental request for the SHOWN display (1280,0 1280×800)', w);
 await sleep(700);
 ok(A.ws.sent.length === mark + 2, 'and nothing more while it stays still');
 // a moving picture: answers (≥ 24 KB) to incremental requests, two inside a second
 mark = A.ws.sent.length;
 for (let i = 0; i < 3; i++) { A.ws.recv(20000); M.fbUpdateRequest(A.rfb._sock, true, 0, 0, 2560, 800); await sleep(60); }
 w = wire(A.ws, mark).filter((m) => m.t === 'enc');
-ok(same(w, [{ t: 'enc', q: 3, c: 1 }]) && A.view.quality.rung === 'fluid', 'a moving picture (updates answering incremental requests, ≥ 24 KB in a second) ⇒ ONE SetEncodings 3 / 1', wire(A.ws, mark));
+ok(gateOf(same(w, [{ t: 'enc', q: 3, c: 1 }])) && A.view.quality.rung === 'fluid', 'a moving picture (updates answering incremental requests, ≥ 24 KB in a second) ⇒ ONE SetEncodings 3 / 1', wire(A.ws, mark));
 await sleep(650);
 ok(A.view.quality.rung === 'sharp' && encs(A.ws, mark).length === 2, 'the picture stops ⇒ sharp again (one more SetEncodings — the refresh that follows does not flip it back)', wire(A.ws, mark));
 // a full refresh answered is not a change; one big answer alone is not a moving picture
@@ -154,7 +154,7 @@ mark = A.ws.sent.length;
 M.fbUpdateRequest(A.rfb._sock, false, 0, 0, 2560, 800); A.ws.recv(400000); M.fbUpdateRequest(A.rfb._sock, true, 0, 0, 2560, 800);
 await sleep(50);
 ok(encs(A.ws, mark).length === 0 && A.view.quality.rung === 'sharp', 'a non-incremental answer (400 KB) is not a moving picture: still sharp');
-ok(same(A.qs.slice(0, 3), ['sharp', 'fluid', 'sharp']), 'onQuality saw every rung (the strip redraws from it)', A.qs);
+ok(verdictOf(same(A.qs.slice(0, 3), ['sharp', 'fluid', 'sharp'])), 'onQuality saw every rung (the strip redraws from it)', A.qs);
 // a slow link (a fresh window): 2 × 40 KB updates, each 600 ms from its first byte to the next request ⇒ ~530 kbps < 2000
 HalfRFB.last = null;
 const S2 = await mount(V);
@@ -166,27 +166,27 @@ for (let i = 0; i < 2; i++) { S2.ws.recv(20000); await sleep(300); S2.ws.recv(20
 await sleep(20);
 const st = S2.view.stats();
 w = encs(S2.ws, mark);
-ok(st.kbps != null && st.kbps < 2000 && S2.view.quality.slow && S2.view.quality.rung === 'lean' && same(w, [{ t: 'enc', q: 6, c: 4 }, { t: 'enc', q: 1, c: 6 }]), `a slow link (measured ${st.kbps} kbps): the first slow update (still) ⇒ balanced 6 / 4, the picture moving ⇒ lean 1 / 6 — one SetEncodings each`, { st, w, q: S2.view.quality });
+ok(st.kbps != null && st.kbps < 2000 && gateOf(S2.view.quality.slow) && S2.view.quality.rung === 'lean' && verdictOf(same(w, [{ t: 'enc', q: 6, c: 4 }, { t: 'enc', q: 1, c: 6 }])), `a slow link (measured ${st.kbps} kbps): the first slow update (still) ⇒ balanced 6 / 4, the picture moving ⇒ lean 1 / 6 — one SetEncodings each`, { st, w, q: S2.view.quality });
 await sleep(650);
 w = encs(S2.ws, mark);
-ok(S2.view.quality.rung === 'balanced' && same(w, [{ t: 'enc', q: 6, c: 4 }, { t: 'enc', q: 1, c: 6 }, { t: 'enc', q: 6, c: 4 }]), 'still on the slow link ⇒ balanced 6 / 4 (one rung under sharp)', w);
+ok(S2.view.quality.rung === 'balanced' && verdictOf(same(w, [{ t: 'enc', q: 6, c: 4 }, { t: 'enc', q: 1, c: 6 }, { t: 'enc', q: 6, c: 4 }])), 'still on the slow link ⇒ balanced 6 / 4 (one rung under sharp)', w);
 S2.view.dispose();
 
 console.log('§2 paste: the page\'s clipboard → ClientCutText, then the V');
 const canvas = A.view.mount; // the listeners sit on the mount, the canvas inside it is the event's target
 mark = A.ws.sent.length;
 let kd = fire(canvas, 'keydown', { key: 'v', code: 'KeyV', ctrlKey: true });
-ok(kd.propagationStopped && !kd.defaultPrevented, 'Ctrl+V: kept from noVNC (stopPropagation) and NOT prevented — the browser\'s own paste must happen');
+ok(gateOf(kd.propagationStopped) && !kd.defaultPrevented, 'Ctrl+V: kept from noVNC (stopPropagation) and NOT prevented — the browser\'s own paste must happen');
 let pe = fire(canvas, 'paste', { clipboardData: { getData: (k) => (k === 'text/plain' ? 'héllo\r\nwörld' : '') } });
 w = wire(A.ws, mark).filter((m) => m.t !== 'enc' && m.t !== 'req');
-ok(pe.defaultPrevented && same(w, [{ t: 'cut', text: 'héllo\nwörld' }, { t: 'key', down: 1, sym: 0x76 }, { t: 'key', down: 0, sym: 0x76 }]), 'the paste event ⇒ ClientCutText "héllo⏎wörld" (CRLF → LF, noVNC\'s Latin-1 bytes), THEN v down / up — in that order on the wire', w);
+ok(gateOf(pe.defaultPrevented) && verdictOf(same(w, [{ t: 'cut', text: 'héllo\nwörld' }, { t: 'key', down: 1, sym: 0x76 }, { t: 'key', down: 0, sym: 0x76 }])), 'the paste event ⇒ ClientCutText "héllo⏎wörld" (CRLF → LF, noVNC\'s Latin-1 bytes), THEN v down / up — in that order on the wire', w);
 const cutBytes = A.ws.sent.slice(mark).find((b) => b[0] === 6);
-ok(!!cutBytes && same([...cutBytes.subarray(0, 8)], [6, 0, 0, 0, 0, 0, 0, 11]) && cutBytes[9] === 0xe9, 'the bytes: type 6, 3 padding, length 11 (u32), é = 0xE9', cutBytes && [...cutBytes]);
+ok(!!cutBytes && gateOf(same([...cutBytes.subarray(0, 8)], [6, 0, 0, 0, 0, 0, 0, 11])) && cutBytes[9] === 0xe9, 'the bytes: type 6, 3 padding, length 11 (u32), é = 0xE9', cutBytes && [...cutBytes]);
 mark = A.ws.sent.length;
 fire(canvas, 'keydown', { key: 'V', code: 'KeyV', ctrlKey: true, shiftKey: true });
 await sleep(120);
 w = wire(A.ws, mark).filter((m) => m.t !== 'enc' && m.t !== 'req');
-ok(same(w, [{ t: 'key', down: 1, sym: 0x56 }, { t: 'key', down: 0, sym: 0x56 }]), 'nothing to paste (no paste event): the V alone after 80 ms (Ctrl+Shift+V ⇒ V)', w);
+ok(verdictOf(same(w, [{ t: 'key', down: 1, sym: 0x56 }, { t: 'key', down: 0, sym: 0x56 }])), 'nothing to paste (no paste event): the V alone after 80 ms (Ctrl+Shift+V ⇒ V)', w);
 mark = A.ws.sent.length;
 const kc = fire(canvas, 'keydown', { key: 'c', code: 'KeyC', ctrlKey: true });
 A.rfb.viewOnly = true;
@@ -198,17 +198,17 @@ ok(!kc.propagationStopped && !kw.propagationStopped && !pw.defaultPrevented && w
 
 console.log('§3 the machine window\'s strip');
 const md = read('src/lib/machine-desktop.js');
-ok(/channel: true,\n\s+ladder: true,[^\n]*\n\s+pasteKeys: true,/.test(md) && /onQuality: \(\) => drawRung\(\),/.test(md), 'the machine window asks for the ladder and the paste chord');
-ok(/c\.requestFullscreen\(\)/.test(md) && !/winInfo\.element \|\| c/.test(md) && /keyboardLockGate\(\{ secure: pageIsSecure\(\), api: hasLock\(\), fullscreen: document\.fullscreenElement === c, want: wantKeys \}\)/.test(md)
-  && /if \(g\.lock && !locked\) \{ locked = true; navigator\.keyboard\.lock\(\)/.test(md) && /document\.removeEventListener\('fullscreenchange', onFull\)/.test(md),
+ok(gateOf(/channel: true,\n\s+ladder: true,[^\n]*\n\s+pasteKeys: true,/.test(md)) && verdictOf(/onQuality: \(\) => drawRung\(\),/.test(md)), 'the machine window asks for the ladder and the paste chord');
+ok(gateOf(/c\.requestFullscreen\(\)/.test(md)) && !/winInfo\.element \|\| c/.test(md) && gateOf(/keyboardLockGate\(\{ secure: pageIsSecure\(\), api: hasLock\(\), fullscreen: document\.fullscreenElement === c, want: wantKeys \}\)/.test(md))
+  && gateOf(/if \(g\.lock && !locked\) \{ locked = true; navigator\.keyboard\.lock\(\)/.test(md)) && verdictOf(/document\.removeEventListener\('fullscreenchange', onFull\)/.test(md)),
   'full screen = the window\'s CONTENT; navigator.keyboard.lock() only through keyboardLockGate with the page\'s isSecureContext (pageIsSecure) and full screen; released on close');
-ok(/if \(g\.why === 'insecure'\) \{ showToast\(t\('Capturing shortcuts needs VibeSpace opened at an https address — this page is http'\)/.test(md), 'on http the ⌨ press says the https words (no lock attempted)');
+ok(verdictOf(/if \(g\.why === 'insecure'\) \{ showToast\(t\('Capturing shortcuts needs VibeSpace opened at an https address — this page is http'\)/.test(md)), 'on http the ⌨ press says the https words (no lock attempted)');
 const zh = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, ja = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
 const block = md.slice(md.indexOf('lane desktop-v2-latency (design q-030 §4): full screen'), md.indexOf('const view = createVncView(pane'));
 const keys = [...new Set([...block.matchAll(/\bt\('([^']+)'/g)].map((m) => m[1]))];
 const missing = keys.filter((k) => !zh[k] || !ja[k]);
 ok(keys.length >= 15 && missing.length === 0, `every new strip word (${keys.length}) is in zh and ja`, missing);
-ok(same(['Sharp', 'Balanced', 'Fluid', 'Lean', 'Slow link', 'Capture shortcuts'].map((k) => zh[k]), ['清晰', '均衡', '流畅', '省流', '慢链路', '捕获快捷键']), 'the zh words: 清晰 · 均衡 · 流畅 · 省流 · 慢链路 · 捕获快捷键');
+ok(verdictOf(same(['Sharp', 'Balanced', 'Fluid', 'Lean', 'Slow link', 'Capture shortcuts'].map((k) => zh[k]), ['清晰', '均衡', '流畅', '省流', '慢链路', '捕获快捷键'])), 'the zh words: 清晰 · 均衡 · 流畅 · 省流 · 慢链路 · 捕获快捷键');
 
 console.log('§4 RED control');
 const src = read('src/lib/vnc-view.js');
@@ -228,4 +228,4 @@ else {
 }
 A.view.dispose();
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

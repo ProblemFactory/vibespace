@@ -81,7 +81,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -144,7 +144,7 @@ else await (async () => {
   let journal = '';
   const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000), 'the worktree server booted (own data/ under ' + ROOT + ')', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000)), 'the worktree server booted (own data/ under ' + ROOT + ')', journal.slice(-800))) return;
   const api = async (p, o) => (await fetch(`http://127.0.0.1:${PORT}${p}`, o)).json();
   const serverIds = async (desk) => ((await api('/api/layouts')).desktops?.[desk]?.autoSave?.windows || []).map((w) => w.winId);
   /** Install a layout the way a user's restore does (the server's own write path; every page told to reload). */
@@ -242,7 +242,7 @@ else await (async () => {
 
     // ── A: THE INCIDENT, fixed ──
     console.log('— A: the drag onto a desktop the page has not opened (userW\'s gesture)');
-    if (want('A') && ok(await fresh('a'), 'A: the page booted on Fin (the fixture installed through the restore path)')) {
+    if (want('A') && ok(verdictOf(await fresh('a')), 'A: the page booted on Fin (the fixture installed through the restore path)')) {
       const clientOnHr = await ev(`[...app.wm.windows.values()].filter((w) => w._desktopId === 'desk-hr').length`);
       ok(await ev('app.desktopManager.activeDesktopId') === 'desk-fin' && clientOnHr === 0, 'A: HR was never opened — the page holds none of its windows (lazy)', J({ clientOnHr }));
       ok(await previewRects('desk-hr') === 3, 'A: HR\'s preview draws its 3 windows before the drop');
@@ -253,8 +253,8 @@ else await (async () => {
       const sentHr = hrSyncsSent().map((m) => (m.state?.windows || []).map((w) => w.winId));
       ok(sentHr.length >= 1 && sortIds(sentHr[0]).join() === sortIds(['win-hr-1-a', 'win-hr-2-a', 'win-hr-3-a', 'win-fin-1-a']).join(), 'A: the page\'s OUTGOING layout-sync after the drop carries HR with 4 windows (CDP webSocketFrameSent)', sent.hr.why || J(sentHr));
       if (sent.fin.got && !sent.atHr.includes(0)) console.log(`  (A: Fin's frame was seen ${sent.fin.ms} ms after HR's — the list held ${J(sent.atHr)} at HR's instant)`);
-      ok(sent.fin.got, 'A: …and Fin\'s with 0 (the window left it — awaited ≤ 3 s, never read at HR\'s instant)', sent.fin.why);
-      ok(await until(async () => (await serverIds('desk-hr')).length === 4, 3000), 'A: the SERVER\'s record of HR = 4 before any switch (2.369.198: HR unchanged until the switch, then 1)', J(await serverIds('desk-hr')));
+      ok(verdictOf(sent.fin.got), 'A: …and Fin\'s with 0 (the window left it — awaited ≤ 3 s, never read at HR\'s instant)', sent.fin.why);
+      ok(verdictOf(await until(async () => (await serverIds('desk-hr')).length === 4, 3000)), 'A: the SERVER\'s record of HR = 4 before any switch (2.369.198: HR unchanged until the switch, then 1)', J(await serverIds('desk-hr')));
       await clickPreview('desk-hr');
       const shown = await ev(SHOWN);
       ok(await ev('app.desktopManager.activeDesktopId') === 'desk-hr' && J(shown) === J(sortIds(['win-hr-1-a', 'win-hr-2-a', 'win-hr-3-a', 'win-fin-1-a'])), 'A: a real click on HR\'s preview ⇒ HR SHOWS its 3 windows and the moved one (2.369.198: the moved one alone)', J(shown));
@@ -267,34 +267,34 @@ else await (async () => {
       const hist = (await api('/api/layout-history')).entries || [];
       const has = (d, a, b) => hist.some((e) => (e.change || []).some(([n, x, y]) => n === d && x === a && y === b));
       const lossRow = hist.find((e) => (e.change || []).some(([n, a, b]) => n === 'HR' && b < a));
-      ok(!lossRow && has('HR', 3, 4) && has('Fin', 1, 0), 'A: the rollback points the move wrote read "Then: HR 3 → 4" and "Then: Fin 1 → 0" (the target first — never a moment with the window on no desktop); no point reads HR shrinking', J(hist.slice(0, 5).map((e) => e.change)));
+      ok(!lossRow && gateOf(has('HR', 3, 4)) && verdictOf(has('Fin', 1, 0)), 'A: the rollback points the move wrote read "Then: HR 3 → 4" and "Then: Fin 1 → 0" (the target first — never a moment with the window on no desktop); no point reads HR shrinking', J(hist.slice(0, 5).map((e) => e.change)));
     }
 
     // ── A0: RED CONTROL of A's read (CI .358) — Fin's frame held in the page ──
     console.log('— A0: CONTROL — Fin\'s outgoing frame held 1.2 s in the page (the runner\'s order, scripted)');
-    if (want('A0') && ok(await fresh('a0'), 'A0: fresh fixture, the page booted')) {
+    if (want('A0') && ok(verdictOf(await fresh('a0')), 'A0: fresh fixture, the page booted')) {
       // the page's ONE socket door: a Fin layout-sync leaves 1.2 s late, everything else at once (the product's records unchanged)
       await ev(`(() => { const ws = app.ws, send = ws.send.bind(ws); ws.send = (d) => (d && d.type === 'layout-sync' && d.desktopId === 'desk-fin' ? setTimeout(() => send(d), 1200) : send(d)); return true; })()`);
       await dropOnto('win-fin-1-a0', 'desk-hr');
       const sent = await sentAfterDrop();
-      ok(sent.hr.got && !sent.atHr.includes(0), 'A0: the pre-.358 read — Fin\'s list taken at the instant HR\'s frame is seen — misses the 0 (the runner\'s ✗, `[]`)', sent.hr.why || J(sent.atHr));
-      ok(sent.fin.got, 'A0: …the awaited read finds Fin\'s with 0 within the 3 s bound', sent.fin.why);
-      ok(await until(async () => (await serverIds('desk-fin')).length === 0 && (await serverIds('desk-hr')).length === 4, 4000), 'A0: the server ends at HR 4 / Fin 0 (the held frame changed only WHEN Fin\'s record left)', J({ hr: await serverIds('desk-hr'), fin: await serverIds('desk-fin') }));
+      ok(gateOf(sent.hr.got) && !sent.atHr.includes(0), 'A0: the pre-.358 read — Fin\'s list taken at the instant HR\'s frame is seen — misses the 0 (the runner\'s ✗, `[]`)', sent.hr.why || J(sent.atHr));
+      ok(verdictOf(sent.fin.got), 'A0: …the awaited read finds Fin\'s with 0 within the 3 s bound', sent.fin.why);
+      ok(verdictOf(await until(async () => (await serverIds('desk-fin')).length === 0 && (await serverIds('desk-hr')).length === 4, 4000)), 'A0: the server ends at HR 4 / Fin 0 (the held frame changed only WHEN Fin\'s record left)', J({ hr: await serverIds('desk-hr'), fin: await serverIds('desk-fin') }));
     }
 
     // ── B: CONTROL visited first ──
     console.log('— B: CONTROL — HR opened once before the drag (what 2.369.198 got right)');
-    if (want('B') && ok(await fresh('b'), 'B: fresh fixture, the page booted')) {
+    if (want('B') && ok(verdictOf(await fresh('b')), 'B: fresh fixture, the page booted')) {
       await clickPreview('desk-hr'); await clickPreview('desk-fin');
       await dropOnto('win-fin-1-b', 'desk-hr');
-      ok(await until(async () => (await serverIds('desk-hr')).length === 4, 4000), 'B: the server\'s HR = 4 after the drop', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(async () => (await serverIds('desk-hr')).length === 4, 4000)), 'B: the server\'s HR = 4 after the drop', J(await serverIds('desk-hr')));
       await clickPreview('desk-hr');
       ok(J(await ev(SHOWN)) === J(sortIds(['win-hr-1-b', 'win-hr-2-b', 'win-hr-3-b', 'win-fin-1-b'])), 'B: HR shows 4');
     }
 
     // ── C: the menu door ──
     console.log('— C: the window menu — "Move to Desktop ▸ HR" (a real right-click, a real hover, a real click)');
-    if (want('C') && ok(await fresh('c'), 'C: fresh fixture, the page booted')) {
+    if (want('C') && ok(verdictOf(await fresh('c')), 'C: fresh fixture, the page booted')) {
       const tb = await titleBar('win-fin-1-c');
       await mouse('mouseMoved', tb.l + 80, tb.y, { buttons: 0 });
       await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: tb.l + 80, y: tb.y, button: 'right', buttons: 2, clickCount: 1 });
@@ -307,7 +307,7 @@ else await (async () => {
         if (ok(!!hr, 'C: …its submenu lists HR')) {
           await mouse('mouseMoved', hr.x, hr.y, { buttons: 0 }); await sleep(80);
           await click(hr.x, hr.y); await sleep(600);
-          ok(await until(async () => (await serverIds('desk-hr')).length === 4, 4000), 'C: the server\'s HR = 4 after the menu move (2.369.198: then 1 after the switch + autosave)', J(await serverIds('desk-hr')));
+          ok(verdictOf(await until(async () => (await serverIds('desk-hr')).length === 4, 4000)), 'C: the server\'s HR = 4 after the menu move (2.369.198: then 1 after the switch + autosave)', J(await serverIds('desk-hr')));
           await clickPreview('desk-hr');
           ok(J(await ev(SHOWN)) === J(sortIds(['win-hr-1-c', 'win-hr-2-c', 'win-hr-3-c', 'win-fin-1-c'])), 'C: HR shows 4', J(await ev(SHOWN)));
         }
@@ -317,12 +317,12 @@ else await (async () => {
     // ── D: resume placement ──
     console.log('— D: resume placement onto a desktop the page has not opened (no gesture)');
     if (!dtachOk) skip('D: dtach is not installed — a local shell session cannot be created here');
-    else if (want('D') && ok(await fresh('d', [{ winId: 'win-hr-old-d', title: 'old conversation', type: 'chat', isMinimized: false, isMaximized: false, gridBounds: { left: 0.5, top: 0.5, width: 0.45, height: 0.45 }, zIndex: 10, openSpec: { action: 'viewSession', sessionId: 'e2e00000-0000-4000-8000-00000000d0d0', backend: 'claude', backendSessionId: 'e2e00000-0000-4000-8000-00000000d0d0', cwd: ROOT, name: 'old conversation' } }]), 'D: fresh fixture (HR also holds an old conversation\'s never-opened window), the page booted')) {
+    else if (want('D') && ok(verdictOf(await fresh('d', [{ winId: 'win-hr-old-d', title: 'old conversation', type: 'chat', isMinimized: false, isMaximized: false, gridBounds: { left: 0.5, top: 0.5, width: 0.45, height: 0.45 }, zIndex: 10, openSpec: { action: 'viewSession', sessionId: 'e2e00000-0000-4000-8000-00000000d0d0', backend: 'claude', backendSessionId: 'e2e00000-0000-4000-8000-00000000d0d0', cwd: ROOT, name: 'old conversation' } }])), 'D: fresh fixture (HR also holds an old conversation\'s never-opened window), the page booted')) {
       const fin = await titleBar('win-fin-1-d'); await click(fin.l + 120, fin.y); // a user's act (the resume-all confirm is one)
       const newId = await ev(`(async () => { const before = new Set(app.wm.windows.keys()); app.createSession({ backend: 'shell', mode: 'terminal', cwd: ${J(ROOT)}, name: 'Resumed', model: null, permission: null, effort: null, extraArgs: '', winBounds: { desktopId: 'desk-hr', gridBounds: { left: 0.5, top: 0.5, width: 0.45, height: 0.45 }, winId: 'win-hr-old-d' } }); await new Promise((r) => setTimeout(r, 300)); return [...app.wm.windows.keys()].find((k) => !before.has(k)) || null; })()`);
       ok(!!newId && await ev(`app.wm.windows.get(${J(newId)})?._desktopId`) === 'desk-hr', 'D: the resumed window was placed on HR (the resume-placement door)', J(newId));
       const want = sortIds(['win-hr-1-d', 'win-hr-2-d', 'win-hr-3-d', newId]);
-      ok(await until(async () => J(sortIds(await serverIds('desk-hr'))) === J(want), 5000), 'D: the server\'s HR = its 3 windows + the resumed one; the old entry it replaced is gone (2.369.198: HR became [the resumed window])', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(async () => J(sortIds(await serverIds('desk-hr'))) === J(want), 5000)), 'D: the server\'s HR = its 3 windows + the resumed one; the old entry it replaced is gone (2.369.198: HR became [the resumed window])', J(await serverIds('desk-hr')));
       await clickPreview('desk-hr');
       ok(J(await ev(SHOWN)) === J(want), 'D: HR shows those 4 — no second window of the old conversation', J(await ev(SHOWN)));
       try { await ev(`(() => { const s = app.sessions.get(${J(newId)}); if (s && s.sessionId) app.ws.send({ type: 'kill', sessionId: s.sessionId }); })()`); } catch { }
@@ -331,7 +331,7 @@ else await (async () => {
     // ── E: the server belt, forged ──
     console.log('— E: the server belt — a forged shrinking layout-sync');
     await cdp('Page.navigate', { url: 'about:blank' }); await sleep(300); // no page writes while the sockets forge
-    if (want('E') && ok(await install(fixture('e')), 'E: fresh fixture installed')) {
+    if (want('E') && ok(verdictOf(await install(fixture('e'))), 'E: fresh fixture installed')) {
       const sock = async () => { const s = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const got = []; s.on('message', (d) => { try { got.push(JSON.parse(d)); } catch { } }); await new Promise((r, e) => { s.on('open', r); s.on('error', e); }); return { s, got }; };
       const A = await sock(), B = await sock();
       const before = await serverIds('desk-hr');
@@ -339,42 +339,42 @@ else await (async () => {
       A.s.send(J({ type: 'layout-sync', desktopId: 'desk-hr', state: { windows: [W('win-x-e', 'x-e', { left: 0, top: 0, width: 0.3, height: 0.3 })] } }));
       await until(() => A.got.some((m) => m.type === 'layout-sync-refused'), 3000);
       const ref = A.got.find((m) => m.type === 'layout-sync-refused');
-      ok(ref && ref.desktopId === 'desk-hr' && ref.reason === 'shrink-without-close' && J(sortIds(ref.unexplained || [])) === J(sortIds(before)) && J(sortIds((ref.state?.windows || []).map((w) => w.winId))) === J(sortIds(before)), 'E: the sender gets `layout-sync-refused` naming the 3 windows, WITH the record the server kept', J(ref));
+      ok(gateOf(ref) && ref.desktopId === 'desk-hr' && ref.reason === 'shrink-without-close' && J(sortIds(ref.unexplained || [])) === J(sortIds(before)) && J(sortIds((ref.state?.windows || []).map((w) => w.winId))) === J(sortIds(before)), 'E: the sender gets `layout-sync-refused` naming the 3 windows, WITH the record the server kept', J(ref));
       ok(J(await serverIds('desk-hr')) === J(before), 'E: the server\'s record of HR is unchanged', J(await serverIds('desk-hr')));
       await sleep(500);
       ok(!B.got.some((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr'), 'E: nothing was broadcast to another socket');
-      ok(/\[layout-sync\] REFUSED a record of desktop "HR" \(desk-hr\): it drops 3 window\(s\)/.test(journal.slice(j0)), 'E: the journal names the refusal', journal.slice(j0).slice(-400));
+      ok(verdictOf(/\[layout-sync\] REFUSED a record of desktop "HR" \(desk-hr\): it drops 3 window\(s\)/.test(journal.slice(j0))), 'E: the journal names the refusal', journal.slice(j0).slice(-400));
       // CONTROL: the same shrink with a close for each window (a user's bulk close) is accepted
       A.s.send(J({ type: 'layout-sync', desktopId: 'desk-hr', state: { windows: [W('win-x-e', 'x-e', { left: 0, top: 0, width: 0.3, height: 0.3 })] }, evidence: before.map((id) => ({ id, why: 'closed' })) }));
-      ok(await until(async () => J(await serverIds('desk-hr')) === J(['win-x-e']), 3000), 'E: CONTROL — the same shrink carrying a close for each window is ACCEPTED (a bulk close still works)', J(await serverIds('desk-hr')));
-      ok(await until(() => B.got.some((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr'), 2000), 'E: …and broadcast to the other socket');
+      ok(verdictOf(await until(async () => J(await serverIds('desk-hr')) === J(['win-x-e']), 3000)), 'E: CONTROL — the same shrink carrying a close for each window is ACCEPTED (a bulk close still works)', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(() => B.got.some((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr'), 2000)), 'E: …and broadcast to the other socket');
       // verify r1 — THE ARRIVALS: a window ONE socket added is not dropped unexplained by ANOTHER, even one window
       B.s.send(J({ type: 'layout-sync', desktopId: 'desk-hr', state: { windows: [W('win-x-e', 'x-e', { left: 0, top: 0, width: 0.3, height: 0.3 }), W('win-y-e', 'y-e', { left: 0.5, top: 0, width: 0.3, height: 0.3 })] } }));
-      ok(await until(async () => J(sortIds(await serverIds('desk-hr'))) === J(['win-x-e', 'win-y-e']), 3000), 'E+: socket B adds ONE window to HR (growth, accepted)', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(async () => J(sortIds(await serverIds('desk-hr'))) === J(['win-x-e', 'win-y-e']), 3000)), 'E+: socket B adds ONE window to HR (growth, accepted)', J(await serverIds('desk-hr')));
       A.got.length = 0;
       A.s.send(J({ type: 'layout-sync', desktopId: 'desk-hr', state: { windows: [W('win-x-e', 'x-e', { left: 0, top: 0, width: 0.3, height: 0.3 })] } }));
       await until(() => A.got.some((m) => m.type === 'layout-sync-refused'), 3000);
       const ref2 = A.got.find((m) => m.type === 'layout-sync-refused');
-      ok(ref2 && J(ref2.arrived) === J(['win-y-e']) && J(ref2.unexplained) === J(['win-y-e']) && J(sortIds(await serverIds('desk-hr'))) === J(['win-x-e', 'win-y-e']), 'E+: socket A\'s record without it (no evidence) is REFUSED at ONE window — `arrived` names it, the server keeps both (the lane\'s ①: below the ≥ 2 rule, accepted — the moved window of verify r1 D4 vanished this way)', J(ref2));
-      ok(/arrived from another client lately/.test(journal.slice(j0)), 'E+: the journal says the drop was an arrival');
+      ok(gateOf(ref2) && J(ref2.arrived) === J(['win-y-e']) && J(ref2.unexplained) === J(['win-y-e']) && J(sortIds(await serverIds('desk-hr'))) === J(['win-x-e', 'win-y-e']), 'E+: socket A\'s record without it (no evidence) is REFUSED at ONE window — `arrived` names it, the server keeps both (the lane\'s ①: below the ≥ 2 rule, accepted — the moved window of verify r1 D4 vanished this way)', J(ref2));
+      ok(verdictOf(/arrived from another client lately/.test(journal.slice(j0))), 'E+: the journal says the drop was an arrival');
       B.s.send(J({ type: 'layout-sync', desktopId: 'desk-hr', state: { windows: [W('win-x-e', 'x-e', { left: 0, top: 0, width: 0.3, height: 0.3 })] } }));
-      ok(await until(async () => J(await serverIds('desk-hr')) === J(['win-x-e']), 3000), 'E+: CONTROL — the socket that ADDED it may drop it by the ≥ 2 rule (its own arrival is no arrival to it)', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(async () => J(await serverIds('desk-hr')) === J(['win-x-e']), 3000)), 'E+: CONTROL — the socket that ADDED it may drop it by the ≥ 2 rule (its own arrival is no arrival to it)', J(await serverIds('desk-hr')));
       // verify r2 ⑦ — a write for a desktop DELETED meanwhile lands nowhere, and the sender is told with the meta
-      ok(await install(fixture('e2', [], [], [{ id: 'desk-x', name: 'X', windows: [W('win-x-1-e2', 'x-1-e2', { left: 0.3, top: 0.3, width: 0.4, height: 0.4 })] }])), 'E⑦: a fixture with a third desktop X installed');
+      ok(verdictOf(await install(fixture('e2', [], [], [{ id: 'desk-x', name: 'X', windows: [W('win-x-1-e2', 'x-1-e2', { left: 0.3, top: 0.3, width: 0.4, height: 0.4 })] }]))), 'E⑦: a fixture with a third desktop X installed');
       A.s.send(J({ type: 'desktop-delete', desktopId: 'desk-x' }));
-      ok(await until(async () => !((await api('/api/layouts')).desktopMeta || []).some((d) => d.id === 'desk-x'), 3000), 'E⑦: socket A deleted X');
+      ok(verdictOf(await until(async () => !((await api('/api/layouts')).desktopMeta || []).some((d) => d.id === 'desk-x'), 3000)), 'E⑦: socket A deleted X');
       B.got.length = 0;
       B.s.send(J({ type: 'layout-sync', desktopId: 'desk-x', state: { windows: [W('win-x-1-e2', 'x-1-e2', { left: 0.3, top: 0.3, width: 0.4, height: 0.4 })] } }));
       await until(() => B.got.some((m) => m.type === 'layout-sync-refused'), 3000);
       const layE = await api('/api/layouts');
       const refX = B.got.find((m) => m.type === 'layout-sync-refused');
-      ok(!layE.desktops?.['desk-x'] && refX?.reason === 'no-such-desktop' && refX.desktopId === 'desk-x' && Array.isArray(refX.desktops) && !refX.desktops.some((d) => d.id === 'desk-x'), 'E⑦: socket B\'s write for the deleted desktop lands NOWHERE (verify r2: an orphan `desktops[desk-x]` no meta named, a ghost on every boot) and B is told `no-such-desktop` with the meta', J([Object.keys(layE.desktops || {}), refX]));
+      ok(!layE.desktops?.['desk-x'] && refX?.reason === 'no-such-desktop' && refX.desktopId === 'desk-x' && gateOf(Array.isArray(refX.desktops)) && !refX.desktops.some((d) => d.id === 'desk-x'), 'E⑦: socket B\'s write for the deleted desktop lands NOWHERE (verify r2: an orphan `desktops[desk-x]` no meta named, a ghost on every boot) and B is told `no-such-desktop` with the meta', J([Object.keys(layE.desktops || {}), refX]));
       A.s.close(); B.s.close();
     }
 
     // ── F: the belt catches the next writer (the pre-fix cache rebuild, re-installed on the live page) ──
     console.log('— F: the 2.369.198 cache rebuild on the live page — the belt catches it');
-    if (want('F') && ok(await fresh('f'), 'F: fresh fixture, the page booted')) {
+    if (want('F') && ok(verdictOf(await fresh('f')), 'F: fresh fixture, the page booted')) {
       await ev(`(() => { const dm = app.desktopManager; dm._updateCachedDesktop = function (desktopId) { if (desktopId === this._activeId) return; const cached = this._savedStates.get(desktopId) || { windows: [] }; const wins = []; for (const [id, win] of this.app.wm.windows) { if (win._desktopId !== desktopId) continue; wins.push({ winId: id, gridBounds: win.gridBounds, isMinimized: false, openSpec: win._openSpec }); } cached.windows = wins; this._savedStates.set(desktopId, cached); }; })()`);
       let minHr = 3; let polling = true;
       const poll = (async () => { while (polling) { try { minHr = Math.min(minHr, (await serverIds('desk-hr')).filter((id) => /^win-hr-/.test(id)).length); } catch { } await sleep(150); } })();
@@ -385,13 +385,13 @@ else await (async () => {
       await clickPreview('desk-hr');
       await nudge(); // his autosave — the shrinking write
       const refused = await until(() => /\[layout-sync\] REFUSED a record of desktop "HR"/.test(journal.slice(j0)), 5000);
-      ok(refused, 'F: the server REFUSED the shrinking write (the belt)', journal.slice(j0).slice(-500));
+      ok(verdictOf(refused), 'F: the server REFUSED the shrinking write (the belt)', journal.slice(j0).slice(-500));
       const want = sortIds(['win-hr-1-f', 'win-hr-2-f', 'win-hr-3-f', 'win-fin-1-f']);
-      ok(await until(async () => J(await ev(SHOWN)) === J(want), 6000), 'F: the page reconciled — HR\'s 3 windows opened beside the moved one', J(await ev(SHOWN)));
+      ok(verdictOf(await until(async () => J(await ev(SHOWN)) === J(want), 6000)), 'F: the page reconciled — HR\'s 3 windows opened beside the moved one', J(await ev(SHOWN)));
       const toast = await ev(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').map((h) => h.m).find((m) => /were kept/.test(m)) || null`);
-      ok(!!toast && /“hr-1-f”, “hr-2-f”, “hr-3-f” on “HR” were kept/.test(toast), 'F: …and said so in a toast — naming the windows kept (userW inc-mw1ogdno-5jny)', J(toast));
+      ok(!!toast && verdictOf(/“hr-1-f”, “hr-2-f”, “hr-3-f” on “HR” were kept/.test(toast)), 'F: …and said so in a toast — naming the windows kept (userW inc-mw1ogdno-5jny)', J(toast));
       await nudge();
-      ok(await until(async () => J(sortIds(await serverIds('desk-hr'))) === J(want), 5000), 'F: the server ends at 4 (the corrected record went out)', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(async () => J(sortIds(await serverIds('desk-hr'))) === J(want), 5000)), 'F: the server ends at 4 (the corrected record went out)', J(await serverIds('desk-hr')));
       polling = false; await poll;
       ok(minHr === 3, 'F: the server\'s HR never held fewer than its 3 windows at any point', minHr);
     }
@@ -399,16 +399,16 @@ else await (async () => {
     // ── G: two pages — verify r1 D4 ──
     console.log('— G: two pages (verify r1 D4) — B drags on HR while A moves a window there; then B moves it back under A\'s eyes');
     const P2 = await mkPage('p2');
-    if (want('G') && ok(!!P2, 'G: a second chrome (page B)') && ok(await fresh('g'), 'G: fresh fixture, page A booted on Fin') && ok(await P2.boot(), 'G: page B booted on Fin')) {
+    if (want('G') && ok(!!P2, 'G: a second chrome (page B)') && ok(verdictOf(await fresh('g')), 'G: fresh fixture, page A booted on Fin') && ok(verdictOf(await P2.boot()), 'G: page B booted on Fin')) {
       await P2.clickPreview('desk-hr');
       ok(J(await P2.shown()) === J(sortIds(['win-hr-1-g', 'win-hr-2-g', 'win-hr-3-g'])), 'G: B shows HR\'s 3 windows', J(await P2.shown()));
       const j0 = journal.length;
       const tb = await P2.titleBar('win-hr-2-g');
       await P2.mouse('mouseMoved', tb.l + 80, tb.y, { buttons: 0 }); await P2.mouse('mousePressed', tb.l + 80, tb.y); await sleep(60);
       for (let i = 1; i <= 5; i++) { await P2.mouse('mouseMoved', tb.l + 80 + i * 6, tb.y + i * 4); await sleep(35); }
-      ok(await P2.ev('app.layoutManager._pointerDown === true'), 'G: B\'s pointer is down on hr-2 (§6b guard 3 armed)');
+      ok(verdictOf(await P2.ev('app.layoutManager._pointerDown === true')), 'G: B\'s pointer is down on hr-2 (§6b guard 3 armed)');
       await dropOnto('win-fin-1-g', 'desk-hr'); // A's move: the burst HR(4), Fin(0), Fin(0) lands under B\'s pointer
-      ok(await until(async () => (await serverIds('desk-hr')).length === 4, 4000), 'G: A\'s drop reached the server: HR = 4', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(async () => (await serverIds('desk-hr')).length === 4, 4000)), 'G: A\'s drop reached the server: HR = 4', J(await serverIds('desk-hr')));
       await sleep(1200);
       const held = await P2.ev(`(() => { const p = app.layoutManager._pendingRemote; return p instanceof Map ? [...p.keys()].sort() : null; })()`);
       ok(J(held) === J(['desk-fin', 'desk-hr']), 'G: B holds BOTH desktops\' records under its pointer, one per desktop (2.369.198: one slot, the last — Fin — only)', J(held));
@@ -418,96 +418,96 @@ else await (async () => {
       const want = sortIds(['win-hr-1-g', 'win-hr-2-g', 'win-hr-3-g', 'win-fin-1-g']);
       ok(J(sortIds(await serverIds('desk-hr'))) === J(want) && !(await serverIds('desk-fin')).includes('win-fin-1-g'), 'G: after B\'s release + save the server\'s HR still holds the moved window (2.369.198 + the lane\'s ①: gone everywhere within 4 s — B\'s save dropped it, one window is below the belt, A then closed its copy)', J([await serverIds('desk-hr'), await serverIds('desk-fin')]));
       ok(J(await P2.shown()) === J(want), 'G: B shows the moved window beside its three', J(await P2.shown()));
-      ok((await P1.allWins()).includes('win-fin-1-g@desk-hr(h)'), 'G: A still holds it (hidden, on HR)', J(await P1.allWins()));
+      ok(verdictOf((await P1.allWins()).includes('win-fin-1-g@desk-hr(h)')), 'G: A still holds it (hidden, on HR)', J(await P1.allWins()));
       ok(refusalsSince(j0).length === 0, 'G: …and the belt never had to refuse — B\'s base was fresh', J(refusalsSince(j0)));
       // B moves it back to Fin while A shows Fin: a REMOTE MOVE IN on A
       await P2.ev(`(() => { app.wm.focusWindow('win-fin-1-g'); app.wm.windows.get('win-fin-1-g').element.style.zIndex = 99999; return true; })()`); await sleep(200);
       await P2.dropOnto('win-fin-1-g', 'desk-fin');
-      ok(await until(async () => (await serverIds('desk-fin')).includes('win-fin-1-g'), 4000), 'G: B moved it back: the server\'s Fin holds it');
-      ok(await until(async () => (await P1.shown()).includes('win-fin-1-g'), 5000), 'G: A, on Fin, SHOWS the window that came back (a remote move applied as a move — the lane\'s ①: A\'s Fin record listed a window A held hidden on HR, and HR\'s next record closed it)', J(await P1.allWins()));
+      ok(verdictOf(await until(async () => (await serverIds('desk-fin')).includes('win-fin-1-g'), 4000)), 'G: B moved it back: the server\'s Fin holds it');
+      ok(verdictOf(await until(async () => (await P1.shown()).includes('win-fin-1-g'), 5000)), 'G: A, on Fin, SHOWS the window that came back (a remote move applied as a move — the lane\'s ①: A\'s Fin record listed a window A held hidden on HR, and HR\'s next record closed it)', J(await P1.allWins()));
       await nudge();
-      ok((await serverIds('desk-fin')).includes('win-fin-1-g') && !(await serverIds('desk-hr')).includes('win-fin-1-g'), 'G: A\'s next save keeps it on Fin only', J([await serverIds('desk-fin'), await serverIds('desk-hr')]));
+      ok(gateOf((await serverIds('desk-fin')).includes('win-fin-1-g')) && !(await serverIds('desk-hr')).includes('win-fin-1-g'), 'G: A\'s next save keeps it on Fin only', J([await serverIds('desk-fin'), await serverIds('desk-hr')]));
       ok(refusalsSince(j0).length === 0, 'G: no refusal in the whole round', J(refusalsSince(j0)));
     }
 
     // ── H: a reconnect re-reads the layout — verify r1 D2 ──
     console.log('— H: a reconnect (verify r1 D2) — B\'s socket cut while A opens a window on HR');
-    if (want('H') && P2 && ok(await fresh('h'), 'H: fresh fixture, page A booted') && ok(await P2.boot(), 'H: page B booted')) {
+    if (want('H') && P2 && ok(verdictOf(await fresh('h')), 'H: fresh fixture, page A booted') && ok(verdictOf(await P2.boot()), 'H: page B booted')) {
       await clickPreview('desk-hr'); await P2.clickPreview('desk-hr');
       const tbA = await titleBar('win-hr-1-h'); await click(tbA.l + 120, tbA.y); // a real input on A (guard 2)
       const j0 = journal.length;
       await P2.wsClose();
-      ok(await until(async () => !(await P2.wsConnected()), 2000, 50), 'H: B\'s socket is down');
+      ok(verdictOf(await until(async () => !(await P2.wsConnected()), 2000, 50)), 'H: B\'s socket is down');
       const newId = await ev(`(() => { const before = new Set(app.wm.windows.keys()); app.openFileExplorer(${J(dir('new-h'))}); return [...app.wm.windows.keys()].find((k) => !before.has(k)); })()`);
-      ok(!!newId && await until(async () => (await serverIds('desk-hr')).includes(newId), 4000), 'H: A opened a window on HR while B was cut off; the server has it', J(await serverIds('desk-hr')));
-      ok(await until(() => P2.wsConnected(), 8000, 100), 'H: B reconnected');
+      ok(!!newId && verdictOf(await until(async () => (await serverIds('desk-hr')).includes(newId), 4000)), 'H: A opened a window on HR while B was cut off; the server has it', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(() => P2.wsConnected(), 8000, 100)), 'H: B reconnected');
       await sleep(800);
       await P2.nudge(); // B's next user act: a drag on HR
-      ok((await serverIds('desk-hr')).includes(newId), 'H: after B\'s save the server still holds A\'s window (the lane\'s ①: wiped — B\'s base was the last broadcast before the outage, one window is below the belt)', J(await serverIds('desk-hr')));
-      ok(await until(async () => (await P2.allWins()).some((w) => w.startsWith(newId + '@desk-hr')), 4000), 'H: B has it too (the reconnect re-read the layout)', J(await P2.allWins()));
-      ok((await ev('[...app.wm.windows.keys()]')).includes(newId), 'H: A kept it', J(await ev('[...app.wm.windows.keys()]')));
+      ok(verdictOf((await serverIds('desk-hr')).includes(newId)), 'H: after B\'s save the server still holds A\'s window (the lane\'s ①: wiped — B\'s base was the last broadcast before the outage, one window is below the belt)', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(async () => (await P2.allWins()).some((w) => w.startsWith(newId + '@desk-hr')), 4000)), 'H: B has it too (the reconnect re-read the layout)', J(await P2.allWins()));
+      ok(verdictOf((await ev('[...app.wm.windows.keys()]')).includes(newId)), 'H: A kept it', J(await ev('[...app.wm.windows.keys()]')));
       ok(refusalsSince(j0).length === 0, 'H: no refusal was needed', J(refusalsSince(j0)));
     }
     // ── J: THE HELD MOVE (verify r2) — B drags fin-2 onto HR's preview while A's save of Fin lands under B's pointer ──
     console.log('— J: two pages (verify r2) — B\'s drop on HR vs A\'s stale Fin record deferred under the drag');
-    if (want('J') && P2 && ok(await fresh('j', [], [W('win-fin-2-j', 'fin-2-j', { left: 0.55, top: 0.1, width: 0.4, height: 0.4 })]), 'J: fresh fixture (Fin 2 + HR 3), page A booted') && ok(await P2.boot(), 'J: page B booted on Fin')) {
+    if (want('J') && P2 && ok(verdictOf(await fresh('j', [], [W('win-fin-2-j', 'fin-2-j', { left: 0.55, top: 0.1, width: 0.4, height: 0.4 })])), 'J: fresh fixture (Fin 2 + HR 3), page A booted') && ok(verdictOf(await P2.boot()), 'J: page B booted on Fin')) {
       const j0 = journal.length;
       const tb = await P2.titleBar('win-fin-2-j'); const p = await P2.rect('.desktop-preview[data-desktop-id="desk-hr"]');
       await P2.mouse('mouseMoved', tb.l + 80, tb.y, { buttons: 0 }); await P2.mouse('mousePressed', tb.l + 80, tb.y); await sleep(60);
       for (let i = 1; i <= 6; i++) { await P2.mouse('mouseMoved', tb.l + 80 + (p.x - tb.l - 80) * i / 20, tb.y + (p.y - tb.y) * i / 20); await sleep(35); }
-      ok(await P2.ev('app.layoutManager._pointerDown === true'), 'J: B\'s pointer is down on fin-2, heading for HR\'s preview');
+      ok(verdictOf(await P2.ev('app.layoutManager._pointerDown === true')), 'J: B\'s pointer is down on fin-2, heading for HR\'s preview');
       P2.framesGot.length = 0;
       await nudge(); // A's drag of fin-1 ⇒ A's save of Fin (still listing fin-2) lands under B's pointer
-      ok(await until(() => P2.framesGot.some((f) => f.desktopId === 'desk-fin' && (f.state?.windows || []).some((w) => w.winId === 'win-fin-2-j')), 3000), 'J: A\'s Fin record, listing fin-2, reached B during the drag (deferred; awaited ≤ 3 s)', J(P2.framesGot.map((f) => [f.desktopId, (f.state?.windows || []).map((w) => w.winId)])));
+      ok(verdictOf(await until(() => P2.framesGot.some((f) => f.desktopId === 'desk-fin' && (f.state?.windows || []).some((w) => w.winId === 'win-fin-2-j')), 3000)), 'J: A\'s Fin record, listing fin-2, reached B during the drag (deferred; awaited ≤ 3 s)', J(P2.framesGot.map((f) => [f.desktopId, (f.state?.windows || []).map((w) => w.winId)])));
       for (let i = 7; i <= 20; i++) { await P2.mouse('mouseMoved', tb.l + 80 + (p.x - tb.l - 80) * i / 20, tb.y + (p.y - tb.y) * i / 20); await sleep(35); }
       await P2.mouse('mouseMoved', p.x + 1, p.y); await sleep(80); await P2.mouse('mouseMoved', p.x, p.y); await sleep(120);
       await P2.mouse('mouseReleased', p.x, p.y);
       await sleep(150);
-      ok((await P2.allWins()).includes('win-fin-2-j@desk-hr(h)'), 'J: the drop moved fin-2 to HR on B', J(await P2.allWins()));
+      ok(verdictOf((await P2.allWins()).includes('win-fin-2-j@desk-hr(h)')), 'J: the drop moved fin-2 to HR on B', J(await P2.allWins()));
       await sleep(4500);
-      ok((await P2.allWins()).includes('win-fin-2-j@desk-hr(h)'), 'J: B still holds fin-2 on HR — the record deferred under the drag could not know the move (verify r2: r1\'s move-in put it back on Fin, silently)', J(await P2.allWins()));
-      ok((await serverIds('desk-hr')).includes('win-fin-2-j') && !(await serverIds('desk-fin')).includes('win-fin-2-j'), 'J: the server holds the move (the held move re-sent as the user\'s own act; r1: the apply\'s dirty clear swallowed it, never sent)', J([await serverIds('desk-hr'), await serverIds('desk-fin')]));
-      ok(await until(async () => (await P1.allWins()).includes('win-fin-2-j@desk-hr(h)'), 4000), 'J: A learned of the move', J(await P1.allWins()));
+      ok(verdictOf((await P2.allWins()).includes('win-fin-2-j@desk-hr(h)')), 'J: B still holds fin-2 on HR — the record deferred under the drag could not know the move (verify r2: r1\'s move-in put it back on Fin, silently)', J(await P2.allWins()));
+      ok(gateOf((await serverIds('desk-hr')).includes('win-fin-2-j')) && !(await serverIds('desk-fin')).includes('win-fin-2-j'), 'J: the server holds the move (the held move re-sent as the user\'s own act; r1: the apply\'s dirty clear swallowed it, never sent)', J([await serverIds('desk-hr'), await serverIds('desk-fin')]));
+      ok(verdictOf(await until(async () => (await P1.allWins()).includes('win-fin-2-j@desk-hr(h)'), 4000)), 'J: A learned of the move', J(await P1.allWins()));
       ok(refusalsSince(j0).length === 0, 'J: no refusal', J(refusalsSince(j0)));
     }
     // ── K: a tab group on B's hidden HR vs A's save of Fin (verify r2) ──
     console.log('— K: two pages (verify r2) — B holds a tab group on HR (hidden) and shows Fin; A saves Fin');
-    if (want('K') && P2 && ok(await fresh('k'), 'K: fresh fixture, page A booted') && ok(await P2.boot(), 'K: page B booted on Fin')) {
+    if (want('K') && P2 && ok(verdictOf(await fresh('k')), 'K: fresh fixture, page A booted') && ok(verdictOf(await P2.boot()), 'K: page B booted on Fin')) {
       await P2.clickPreview('desk-hr');
       const grouped = await P2.ev(`(() => { const h = app.wm.windows.get('win-hr-1-k'), g = app.wm.windows.get('win-hr-2-k'); if (!h || !g) return null; app.wm.createTabChain(h, g); return h._tabChain ? h._tabChain.tabs.join(',') : null; })()`);
       ok(grouped === 'win-hr-1-k,win-hr-2-k', 'K: B grouped hr-1 + hr-2 on HR', J(grouped));
       await P2.nudge();
-      ok(await until(async () => ((await api('/api/layouts')).desktops['desk-hr'].autoSave.windows.find((w) => w.winId === 'win-hr-1-k')?.tabChain?.tabs || []).length === 2, 4000), 'K: the server\'s HR record carries the group');
+      ok(verdictOf(await until(async () => ((await api('/api/layouts')).desktops['desk-hr'].autoSave.windows.find((w) => w.winId === 'win-hr-1-k')?.tabChain?.tabs || []).length === 2, 4000)), 'K: the server\'s HR record carries the group');
       await P2.clickPreview('desk-fin');
       P2.framesGot.length = 0;
       await nudge(); // A's save of Fin lands on B, which shows Fin
-      ok(await until(() => P2.framesGot.some((f) => f.desktopId === 'desk-fin'), 3000), 'K: A\'s Fin record reached B');
+      ok(verdictOf(await until(() => P2.framesGot.some((f) => f.desktopId === 'desk-fin'), 3000)), 'K: A\'s Fin record reached B');
       const after = await P2.ev(`(() => { const h = app.wm.windows.get('win-hr-1-k'); return h?._tabChain?.tabs || null; })()`);
-      ok(after && after.length === 2, 'K: B\'s group on hidden HR is intact (verify r2: every save of the desktop on show by another client broke every group on the page\'s other desktops)', J(after));
+      ok(gateOf(after) && after.length === 2, 'K: B\'s group on hidden HR is intact (verify r2: every save of the desktop on show by another client broke every group on the page\'s other desktops)', J(after));
       await P2.clickPreview('desk-hr'); await P2.nudge();
       ok(((await api('/api/layouts')).desktops['desk-hr'].autoSave.windows.find((w) => w.winId === 'win-hr-1-k')?.tabChain?.tabs || []).length === 2, 'K: …and B\'s next save of HR still carries it (the broken group used to reach the server here)');
     }
     // ── L: a delete seen from another page (verify r2 ④) — the windows go to the deleter's target, not desktop #1 ──
     console.log('— L: two pages (verify r2 ④) — A, on X, deletes X (its neighbour HR takes the windows); B, on Fin with X built');
-    if (want('L') && P2 && ok(await fresh('l', [], [], [{ id: 'desk-x', name: 'X', windows: [W('win-x-1-l', 'x-1-l', { left: 0.3, top: 0.3, width: 0.4, height: 0.4 })] }]), 'L: fresh fixture (Fin 1 + HR 3 + X 1), page A booted') && ok(await P2.boot(), 'L: page B booted on Fin')) {
+    if (want('L') && P2 && ok(verdictOf(await fresh('l', [], [], [{ id: 'desk-x', name: 'X', windows: [W('win-x-1-l', 'x-1-l', { left: 0.3, top: 0.3, width: 0.4, height: 0.4 })] }])), 'L: fresh fixture (Fin 1 + HR 3 + X 1), page A booted') && ok(verdictOf(await P2.boot()), 'L: page B booted on Fin')) {
       await P2.clickPreview('desk-x'); await P2.clickPreview('desk-fin'); // B has X built (hidden now)
-      ok((await P2.allWins()).includes('win-x-1-l@desk-x(h)'), 'L: B holds x-1 on X, hidden', J(await P2.allWins()));
+      ok(verdictOf((await P2.allWins()).includes('win-x-1-l@desk-x(h)')), 'L: B holds x-1 on X, hidden', J(await P2.allWins()));
       await clickPreview('desk-x');
       const tbX = await titleBar('win-x-1-l'); await click(tbX.l + 120, tbX.y);
       const j0 = journal.length;
       await ev(`app.desktopManager.deleteDesktop('desk-x')`); // A: the desktop on show; its neighbour HR is the target
-      ok(await until(async () => (await serverIds('desk-hr')).includes('win-x-1-l'), 4000), 'L: the server\'s HR holds x-1 (the deleter\'s target)', J(await serverIds('desk-hr')));
-      ok(await until(async () => (await P2.allWins()).includes('win-x-1-l@desk-hr(h)'), 4000), 'L: B moved x-1 to HR (hidden) — where the deleter\'s record put it, not onto Fin, the first desktop, shown (verify r2 ④)', J(await P2.allWins()));
+      ok(verdictOf(await until(async () => (await serverIds('desk-hr')).includes('win-x-1-l'), 4000)), 'L: the server\'s HR holds x-1 (the deleter\'s target)', J(await serverIds('desk-hr')));
+      ok(verdictOf(await until(async () => (await P2.allWins()).includes('win-x-1-l@desk-hr(h)'), 4000)), 'L: B moved x-1 to HR (hidden) — where the deleter\'s record put it, not onto Fin, the first desktop, shown (verify r2 ④)', J(await P2.allWins()));
       ok(!(await P2.shown()).includes('win-x-1-l'), 'L: …B\'s Fin does not show it');
       await P2.nudge(); // B's next save of Fin
-      ok(!(await serverIds('desk-fin')).includes('win-x-1-l') && (await serverIds('desk-hr')).includes('win-x-1-l'), 'L: B\'s save of Fin does not write x-1 under Fin — one record of it on the server (HR)', J([await serverIds('desk-fin'), await serverIds('desk-hr')]));
-      ok(await ev('app.desktopManager.activeDesktopId') === 'desk-hr' && (await ev(SHOWN)).includes('win-x-1-l'), 'L: A shows x-1 on HR still (it used to jump to Fin once B\'s save landed)', J(await ev(SHOWN)));
+      ok(!(await serverIds('desk-fin')).includes('win-x-1-l') && verdictOf((await serverIds('desk-hr')).includes('win-x-1-l')), 'L: B\'s save of Fin does not write x-1 under Fin — one record of it on the server (HR)', J([await serverIds('desk-fin'), await serverIds('desk-hr')]));
+      ok(await ev('app.desktopManager.activeDesktopId') === 'desk-hr' && verdictOf((await ev(SHOWN)).includes('win-x-1-l')), 'L: A shows x-1 on HR still (it used to jump to Fin once B\'s save landed)', J(await ev(SHOWN)));
       const layL = await api('/api/layouts');
       ok(!layL.desktops?.['desk-x'] && refusalsSince(j0).length === 0, 'L: no record of the deleted desktop on the server, no refusal', J([Object.keys(layL.desktops || {}), refusalsSince(j0)]));
     }
     // ── M: THE HELD GEOMETRY (verify r2 ⑩) — B drags hr-2 on HR while A's save of HR (hr-2 where A last saw it) lands under B's pointer ──
     console.log('— M: two pages (verify r2 ⑩) — a plain drag on the desktop on show vs another client\'s record deferred under it');
-    if (want('M') && P2 && ok(await fresh('m'), 'M: fresh fixture, page A booted') && ok(await P2.boot(), 'M: page B booted on Fin')) {
+    if (want('M') && P2 && ok(verdictOf(await fresh('m')), 'M: fresh fixture, page A booted') && ok(verdictOf(await P2.boot()), 'M: page B booted on Fin')) {
       await clickPreview('desk-hr'); await P2.clickPreview('desk-hr');
       const box = (P, id) => P.ev(`(() => { const w = app.wm.windows.get(${J(id)}); if (!w) return null; const r = w.element.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top)]; })()`);
       const srvBox = async (id) => { const w = ((await api('/api/layouts')).desktops['desk-hr'].autoSave.windows || []).find((x) => x.winId === id); return w?.gridBounds ? [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)] : null; };
@@ -515,47 +515,47 @@ else await (async () => {
       const tb = await P2.titleBar('win-hr-2-m');
       await P2.mouse('mouseMoved', tb.l + 80, tb.y, { buttons: 0 }); await P2.mouse('mousePressed', tb.l + 80, tb.y); await sleep(60);
       for (let i = 1; i <= 6; i++) { await P2.mouse('mouseMoved', tb.l + 80 + i * 30, tb.y + i * 20); await sleep(35); }
-      ok(await P2.ev('app.layoutManager._pointerDown === true'), 'M: B\'s pointer is down on hr-2');
+      ok(verdictOf(await P2.ev('app.layoutManager._pointerDown === true')), 'M: B\'s pointer is down on hr-2');
       P2.framesGot.length = 0;
       await nudge(); // A drags hr-1 a little ⇒ A's save of HR (hr-2 where A last saw it) lands on B, deferred
-      ok(await until(() => P2.framesGot.some((f) => f.desktopId === 'desk-hr'), 3000), 'M: A\'s HR record reached B during the drag (awaited ≤ 3 s)', J(P2.framesGot.map((f) => f.desktopId)));
+      ok(verdictOf(await until(() => P2.framesGot.some((f) => f.desktopId === 'desk-hr'), 3000)), 'M: A\'s HR record reached B during the drag (awaited ≤ 3 s)', J(P2.framesGot.map((f) => f.desktopId)));
       for (let i = 7; i <= 12; i++) { await P2.mouse('mouseMoved', tb.l + 80 + i * 30, tb.y + i * 20); await sleep(35); }
       await P2.mouse('mouseReleased', tb.l + 80 + 12 * 30, tb.y + 12 * 20);
       await sleep(150);
       const dropped = await box(P2, 'win-hr-2-m');
-      ok(dropped && (Math.abs(dropped[0] - before[0]) > 40 || Math.abs(dropped[1] - before[1]) > 40), 'M: B\'s drag moved hr-2 (its box at the release)', J([before, dropped]));
+      ok(gateOf(dropped) && (Math.abs(dropped[0] - before[0]) > 40 || Math.abs(dropped[1] - before[1]) > 40), 'M: B\'s drag moved hr-2 (its box at the release)', J([before, dropped]));
       await sleep(4000);
       const later = await box(P2, 'win-hr-2-m');
       const gbB = await P2.ev(`(() => { const w = app.wm.windows.get('win-hr-2-m'); return [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)]; })()`);
-      ok(later && Math.abs(later[0] - dropped[0]) < 8 && Math.abs(later[1] - dropped[1]) < 8, 'M: B\'s window stays where B dropped it (the record deferred under the drag could not know the drag; verify r2: it snapped the box back to where A last saw it, silently)', J([dropped, later]));
+      ok(gateOf(later) && Math.abs(later[0] - dropped[0]) < 8 && Math.abs(later[1] - dropped[1]) < 8, 'M: B\'s window stays where B dropped it (the record deferred under the drag could not know the drag; verify r2: it snapped the box back to where A last saw it, silently)', J([dropped, later]));
       ok(J(await srvBox('win-hr-2-m')) === J(gbB) && Math.abs(gbB[0] - 0.5) > 0.05, 'M: …and the server holds the dragged place (the drag\'s save had been swallowed by the apply\'s dirty clear)', J([gbB, await srvBox('win-hr-2-m')]));
-      ok(await until(async () => J(await P2.ev(`(() => { const w = app.wm.windows.get('win-hr-2-m'); return [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)]; })()`)) === J(await ev(`(() => { const w = app.wm.windows.get('win-hr-2-m'); return [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)]; })()`)), 4000), 'M: A follows B\'s drag');
+      ok(verdictOf(await until(async () => J(await P2.ev(`(() => { const w = app.wm.windows.get('win-hr-2-m'); return [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)]; })()`)) === J(await ev(`(() => { const w = app.wm.windows.get('win-hr-2-m'); return [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)]; })()`)), 4000)), 'M: A follows B\'s drag');
     }
     // ── N: verify r3 ① — a title-bar PRESS that drags nothing (a click-to-focus) on B while A MOVES that very window: the record deferred under the press must still apply — a click holds no geometry ──
     console.log('— N: two pages (verify r3 ①) — a click-to-focus on the desktop on show vs another client\'s move of that window deferred under it');
-    if (want('N') && P2 && ok(await fresh('n'), 'N: fresh fixture, page A booted') && ok(await P2.boot(), 'N: page B booted on Fin')) {
+    if (want('N') && P2 && ok(verdictOf(await fresh('n')), 'N: fresh fixture, page A booted') && ok(verdictOf(await P2.boot()), 'N: page B booted on Fin')) {
       await clickPreview('desk-hr'); await P2.clickPreview('desk-hr');
       const box = (P, id) => P.ev(`(() => { const w = app.wm.windows.get(${J(id)}); if (!w) return null; const r = w.element.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top)]; })()`);
       const srvBox = async (id) => { const w = ((await api('/api/layouts')).desktops['desk-hr'].autoSave.windows || []).find((x) => x.winId === id); return w?.gridBounds ? [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)] : null; };
       const tb = await P2.titleBar('win-hr-2-n');
       await P2.mouse('mouseMoved', tb.l + 80, tb.y, { buttons: 0 }); await P2.mouse('mousePressed', tb.l + 80, tb.y); await sleep(60);
-      ok(await P2.ev('app.layoutManager._pointerDown === true'), 'N: B\'s pointer is down on hr-2 (a press, no movement)');
+      ok(verdictOf(await P2.ev('app.layoutManager._pointerDown === true')), 'N: B\'s pointer is down on hr-2 (a press, no movement)');
       const ta = await titleBar('win-hr-2-n');
       await drag(ta.l + 80, ta.y, ta.l + 80 + 360, ta.y + 200); // A moves hr-2 itself
-      ok(await until(async () => { const b = await srvBox('win-hr-2-n'); return !!b && Math.abs(b[0] - 0.5) > 0.05; }, 6000), 'N: A\'s drag of hr-2 reached the server');
+      ok(verdictOf(await until(async () => { const b = await srvBox('win-hr-2-n'); return !!b && Math.abs(b[0] - 0.5) > 0.05; }, 6000)), 'N: A\'s drag of hr-2 reached the server');
       const srv0 = await srvBox('win-hr-2-n');
-      ok(await until(() => P2.ev(`Math.abs((app.layoutManager._pendingRemote.get('desk-hr')?.state?.windows?.find((w) => w.winId === 'win-hr-2-n')?.gridBounds?.left ?? 0.5) - ${srv0[0]}) < 0.01`), 4000), 'N: A\'s HR record (hr-2 MOVED) is the one deferred under B\'s press');
+      ok(verdictOf(await until(() => P2.ev(`Math.abs((app.layoutManager._pendingRemote.get('desk-hr')?.state?.windows?.find((w) => w.winId === 'win-hr-2-n')?.gridBounds?.left ?? 0.5) - ${srv0[0]}) < 0.01`), 4000)), 'N: A\'s HR record (hr-2 MOVED) is the one deferred under B\'s press');
       await sleep(100);
       await P2.mouse('mouseReleased', tb.l + 80, tb.y); // released in place: a click
       const aBox = await box(P1, 'win-hr-2-n');
-      ok(await until(async () => { const l = await box(P2, 'win-hr-2-n'); return !!l && Math.abs(l[0] - aBox[0]) < 8 && Math.abs(l[1] - aBox[1]) < 8; }, 5000), 'N: B shows hr-2 where A moved it — a press that dragged nothing holds no geometry (verify r3: the click stamped the witness and B kept the old box; its next save wrote it over A\'s move)', J([aBox, await box(P2, 'win-hr-2-n')]));
+      ok(verdictOf(await until(async () => { const l = await box(P2, 'win-hr-2-n'); return !!l && Math.abs(l[0] - aBox[0]) < 8 && Math.abs(l[1] - aBox[1]) < 8; }, 5000)), 'N: B shows hr-2 where A moved it — a press that dragged nothing holds no geometry (verify r3: the click stamped the witness and B kept the old box; its next save wrote it over A\'s move)', J([aBox, await box(P2, 'win-hr-2-n')]));
       await sleep(2500);
       ok(J(await srvBox('win-hr-2-n')) === J(srv0), 'N: …and the server keeps A\'s box (B\'s click re-sent nothing over it)', J([srv0, await srvBox('win-hr-2-n')]));
-      ok(await P2.ev(`!app.wm.windows.get('win-hr-2-n')._boundsAt`), 'N: the click left no geometry witness on B\'s window');
+      ok(verdictOf(await P2.ev(`!app.wm.windows.get('win-hr-2-n')._boundsAt`)), 'N: the click left no geometry witness on B\'s window');
     }
     // ── O: verify r4 ③ — a SNAP by command mode and a MAXIMIZE by the title-bar □, made in the second after another client's record landed, vs a record deferred under that second ──
     console.log('— O: two pages (verify r4 ③) — B snaps hr-2 left by Ctrl+\\ ← / maximizes it by its □ 150 ms after another client\'s record landed; a second record lands under the cooldown');
-    if (want('O') && P2 && ok(await fresh('o'), 'O: fresh fixture, page A booted') && ok(await P2.boot(), 'O: page B booted on Fin')) {
+    if (want('O') && P2 && ok(verdictOf(await fresh('o')), 'O: fresh fixture, page A booted') && ok(verdictOf(await P2.boot()), 'O: page B booted on Fin')) {
       await clickPreview('desk-hr'); await P2.clickPreview('desk-hr');
       const sockO = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); await new Promise((r, e) => { sockO.on('open', r); sockO.on('error', e); });
       const hrRecord = async () => (await api('/api/layouts')).desktops['desk-hr'].autoSave;
@@ -564,10 +564,10 @@ else await (async () => {
       const j0 = journal.length;
       // the snap by command mode (Ctrl+\ then ←) on hr-2 (at 0.5, 0 — the left half is a real change)
       const tb2 = await P2.titleBar('win-hr-2-o'); await P2.click(tb2.l + 120, tb2.y); await sleep(400);
-      ok(await P2.ev(`app.wm.activeWindowId === 'win-hr-2-o'`), 'O: hr-2 is B\'s active window');
+      ok(verdictOf(await P2.ev(`app.wm.activeWindowId === 'win-hr-2-o'`)), 'O: hr-2 is B\'s active window');
       const before = await P2.ev(`Math.round(app.wm.windows.get('win-hr-2-o').element.offsetLeft)`);
       const base = await hrRecord();
-      ok(await landOnB(nudged(base, 1)), 'O: another client\'s HR record landed on B (applied at once — the cooldown starts)');
+      ok(verdictOf(await landOnB(nudged(base, 1))), 'O: another client\'s HR record landed on B (applied at once — the cooldown starts)');
       await sleep(150);
       await P2.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: '\\', code: 'Backslash', modifiers: 2 }); await P2.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: '\\', code: 'Backslash', modifiers: 2 });
       await sleep(80);
@@ -575,28 +575,28 @@ else await (async () => {
       await sleep(350);
       const snapped = await P2.ev(`Math.round(app.wm.windows.get('win-hr-2-o').element.offsetLeft)`);
       ok(before > 200 && snapped <= 8, 'O: Ctrl+\\ ← snapped hr-2 to the left half on B, 150 ms into the cooldown', J([before, snapped]));
-      ok(await landOnB(nudged(base, 2)), 'O: a second record (hr-2 at its old place) landed on B under the cooldown (deferred)');
+      ok(verdictOf(await landOnB(nudged(base, 2))), 'O: a second record (hr-2 at its old place) landed on B under the cooldown (deferred)');
       await sleep(3000);
       const after = await P2.ev(`(() => { const w = app.wm.windows.get('win-hr-2-o'); return [Math.round(w.element.offsetLeft), +w.gridBounds.left.toFixed(2)]; })()`);
       ok(after[0] <= 8, 'O: B\'s hr-2 stays snapped — a keyboard snap is a witnessed act (verify r4 ③: the snap stamped nothing and the record deferred under the cooldown put the window back)', J(after));
-      ok(await until(async () => ((await hrRecord()).windows.find((w) => w.winId === 'win-hr-2-o')?.gridBounds?.left ?? 1) < 0.02, 5000), 'O: …and the server holds the snap (B\'s deferred save carried it)', J((await hrRecord()).windows.map((w) => [w.winId, w.gridBounds?.left])));
+      ok(verdictOf(await until(async () => ((await hrRecord()).windows.find((w) => w.winId === 'win-hr-2-o')?.gridBounds?.left ?? 1) < 0.02, 5000)), 'O: …and the server holds the snap (B\'s deferred save carried it)', J((await hrRecord()).windows.map((w) => [w.winId, w.gridBounds?.left])));
       // the maximize by the □ button, on the same window (snapped left, on top)
       const base2 = await hrRecord();
-      ok(await landOnB(nudged(base2, 3)), 'O: a third record landed on B (the cooldown starts again)');
+      ok(verdictOf(await landOnB(nudged(base2, 3))), 'O: a third record landed on B (the cooldown starts again)');
       await sleep(150);
       const mx = await P2.ev(`(() => { const w = app.wm.windows.get('win-hr-2-o'); const b = w.element.querySelector('.win-maximize'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
       await P2.click(mx.x, mx.y);
-      ok(await P2.ev(`app.wm.windows.get('win-hr-2-o').isMaximized === true`), 'O: B\'s □ click maximized hr-2, 150 ms into the cooldown');
-      ok(await landOnB(nudged(base2, 4)), 'O: a fourth record (hr-2 NOT maximized) landed on B under the cooldown (deferred)');
+      ok(verdictOf(await P2.ev(`app.wm.windows.get('win-hr-2-o').isMaximized === true`)), 'O: B\'s □ click maximized hr-2, 150 ms into the cooldown');
+      ok(verdictOf(await landOnB(nudged(base2, 4))), 'O: a fourth record (hr-2 NOT maximized) landed on B under the cooldown (deferred)');
       await sleep(3000);
-      ok(await P2.ev(`app.wm.windows.get('win-hr-2-o').isMaximized === true`), 'O: B\'s hr-2 stays maximized — a maximize the user asked for is a witnessed act too (the □ stamped nothing and the deferred record un-maximized it)');
-      ok(await until(async () => (await hrRecord()).windows.find((w) => w.winId === 'win-hr-2-o')?.isMaximized === true, 5000), 'O: …and the server holds it', J((await hrRecord()).windows.map((w) => [w.winId, !!w.isMaximized])));
+      ok(verdictOf(await P2.ev(`app.wm.windows.get('win-hr-2-o').isMaximized === true`)), 'O: B\'s hr-2 stays maximized — a maximize the user asked for is a witnessed act too (the □ stamped nothing and the deferred record un-maximized it)');
+      ok(verdictOf(await until(async () => (await hrRecord()).windows.find((w) => w.winId === 'win-hr-2-o')?.isMaximized === true, 5000)), 'O: …and the server holds it', J((await hrRecord()).windows.map((w) => [w.winId, !!w.isMaximized])));
       ok(refusalsSince(j0).length === 0, 'O: no refusal', J(refusalsSince(j0)));
       sockO.close();
     }
     // ── P: verify r5 ③ — a layout PRESET (the toolbar's two-column button) 150 ms into a cooldown; a record deferred under it ──
     console.log('— P: two pages (verify r5 ③) — B clicks the toolbar\'s two-column preset 150 ms after another client\'s record landed; a second record lands under the cooldown');
-    if (want('P') && P2 && ok(await fresh('p'), 'P: fresh fixture, page A booted') && ok(await P2.boot(), 'P: page B booted on Fin')) {
+    if (want('P') && P2 && ok(verdictOf(await fresh('p')), 'P: fresh fixture, page A booted') && ok(verdictOf(await P2.boot()), 'P: page B booted on Fin')) {
       await clickPreview('desk-hr'); await P2.clickPreview('desk-hr');
       const sockP = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); await new Promise((r, e) => { sockP.on('open', r); sockP.on('error', e); });
       const hrRecord = async () => (await api('/api/layouts')).desktops['desk-hr'].autoSave;
@@ -606,18 +606,18 @@ else await (async () => {
       const btn = await P2.rect('.layout-btn[data-layout="two-vertical"]');
       if (ok(!!btn && btn.w > 0, 'P: the toolbar shows the two-column preset button (toolbar.showLayoutPresets default)')) {
         const base = await hrRecord();
-        ok(await landOnB(nudged(base, 1)), 'P: another client\'s HR record landed on B (applied at once — the cooldown starts)');
+        ok(verdictOf(await landOnB(nudged(base, 1))), 'P: another client\'s HR record landed on B (applied at once — the cooldown starts)');
         await sleep(150);
         await P2.click(btn.x, btn.y);
         await sleep(400);
         const cols = () => P2.ev(`(() => { const ws = app.wm.workspace.offsetWidth; return ['win-hr-1-p', 'win-hr-2-p', 'win-hr-3-p'].map((id) => { const w = app.wm.windows.get(id); return [Math.round(w.element.offsetLeft), Math.round(w.element.offsetWidth / ws * 100)]; }); })()`);
         const placed = await cols();
-        ok(placed[0][0] <= 8 && placed[1][0] > 300 && placed[2][0] <= 8 && placed.every((c) => c[1] >= 45 && c[1] <= 52), 'P: the preset placed hr-1 / hr-3 in the left column and hr-2 in the right, 150 ms into the cooldown', J(placed));
-        ok(await landOnB(nudged(base, 2)), 'P: a second record (the old boxes) landed on B under the cooldown (deferred)');
+        ok(placed[0][0] <= 8 && placed[1][0] > 300 && placed[2][0] <= 8 && verdictOf(placed.every((c) => c[1] >= 45 && c[1] <= 52)), 'P: the preset placed hr-1 / hr-3 in the left column and hr-2 in the right, 150 ms into the cooldown', J(placed));
+        ok(verdictOf(await landOnB(nudged(base, 2))), 'P: a second record (the old boxes) landed on B under the cooldown (deferred)');
         await sleep(3000);
         const after = await cols();
         ok(J(after) === J(placed), 'P: B\'s windows stay in their columns — a preset is a witnessed act on every window it places (verify r5 ③: the record deferred under the cooldown put every window back and the preset\'s save was swallowed)', J([placed, after]));
-        ok(await until(async () => { const r = await hrRecord(); const w = (id) => r.windows.find((x) => x.winId === id)?.gridBounds; return !!w('win-hr-2-p') && w('win-hr-2-p').left > 0.45 && w('win-hr-1-p').left < 0.02 && w('win-hr-1-p').width > 0.45; }, 5000), 'P: …and the server holds the columns (B\'s deferred save carried them)', J((await hrRecord()).windows.map((w) => [w.winId, w.gridBounds?.left, w.gridBounds?.width])));
+        ok(verdictOf(await until(async () => { const r = await hrRecord(); const w = (id) => r.windows.find((x) => x.winId === id)?.gridBounds; return !!w('win-hr-2-p') && w('win-hr-2-p').left > 0.45 && w('win-hr-1-p').left < 0.02 && w('win-hr-1-p').width > 0.45; }, 5000)), 'P: …and the server holds the columns (B\'s deferred save carried them)', J((await hrRecord()).windows.map((w) => [w.winId, w.gridBounds?.left, w.gridBounds?.width])));
       }
       ok(refusalsSince(j0).length === 0, 'P: no refusal', J(refusalsSince(j0)));
       sockP.close();
@@ -625,7 +625,7 @@ else await (async () => {
 
     // ── R: verify r5 ② — a tab-group MERGE by a real icon drag 150 ms into a cooldown; a record deferred under it ──
     console.log('— R: two pages (verify r5 ②) — B drags hr-3\'s icon onto hr-1 (a merge) 150 ms after another client\'s record landed; a second record (no group) lands under the cooldown');
-    if (want('R') && P2 && ok(await fresh('r'), 'R: fresh fixture, page A booted') && ok(await P2.boot(), 'R: page B booted on Fin')) {
+    if (want('R') && P2 && ok(verdictOf(await fresh('r')), 'R: fresh fixture, page A booted') && ok(verdictOf(await P2.boot()), 'R: page B booted on Fin')) {
       await clickPreview('desk-hr'); await P2.clickPreview('desk-hr');
       const sockR = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); await new Promise((r, e) => { sockR.on('open', r); sockR.on('error', e); });
       const hrRecord = async () => (await api('/api/layouts')).desktops['desk-hr'].autoSave;
@@ -634,7 +634,7 @@ else await (async () => {
       const j0 = journal.length;
       const iconOf = (id) => P2.ev(`(() => { const w = app.wm.windows.get(${J(id)}); const el = w && w.element.querySelector('.window-icon-stack'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
       const base = await hrRecord();
-      ok(await landOnB(nudged(base, 1)), 'R: another client\'s HR record landed on B (applied at once — the cooldown starts)');
+      ok(verdictOf(await landOnB(nudged(base, 1))), 'R: another client\'s HR record landed on B (applied at once — the cooldown starts)');
       await sleep(150);
       const from = await iconOf('win-hr-3-r'), to = await iconOf('win-hr-1-r');
       if (ok(!!from && !!to, 'R: both window icons are on screen')) {
@@ -642,12 +642,12 @@ else await (async () => {
         await sleep(300);
         const chainOf = () => P2.ev(`(() => { const h = app.wm.windows.get('win-hr-1-r'); return h?._tabChain ? [...h._tabChain.tabs] : null; })()`);
         const merged = await chainOf();
-        ok(!!merged && merged.length === 2 && merged.includes('win-hr-3-r'), 'R: the icon drop merged hr-3 into hr-1\'s group, 150 ms into the cooldown', J(merged));
-        ok(await landOnB(nudged(base, 2)), 'R: a second record (hr-1 and hr-3 free) landed on B under the cooldown (deferred)');
+        ok(!!merged && merged.length === 2 && verdictOf(merged.includes('win-hr-3-r')), 'R: the icon drop merged hr-3 into hr-1\'s group, 150 ms into the cooldown', J(merged));
+        ok(verdictOf(await landOnB(nudged(base, 2))), 'R: a second record (hr-1 and hr-3 free) landed on B under the cooldown (deferred)');
         await sleep(3000);
         const after = await chainOf();
-        ok(!!after && after.length === 2 && after.includes('win-hr-3-r') && await P2.ev(`app.wm.windows.get('win-hr-3-r')?._tabChain === app.wm.windows.get('win-hr-1-r')?._tabChain`), 'R: B\'s group stands — a merge is a witnessed act on the group (verify r5 ②: the record deferred under the cooldown dissolved it 300 ms after the drop and the merge\'s save was swallowed)', J([merged, after]));
-        ok(await until(async () => ((await hrRecord()).windows.find((w) => w.winId === 'win-hr-1-r')?.tabChain?.tabs || []).length === 2, 5000), 'R: …and the server\'s HR record carries the group (B\'s deferred save)', J((await hrRecord()).windows.map((w) => [w.winId, w.tabChain?.tabs])));
+        ok(!!after && after.length === 2 && gateOf(after.includes('win-hr-3-r')) && verdictOf(await P2.ev(`app.wm.windows.get('win-hr-3-r')?._tabChain === app.wm.windows.get('win-hr-1-r')?._tabChain`)), 'R: B\'s group stands — a merge is a witnessed act on the group (verify r5 ②: the record deferred under the cooldown dissolved it 300 ms after the drop and the merge\'s save was swallowed)', J([merged, after]));
+        ok(verdictOf(await until(async () => ((await hrRecord()).windows.find((w) => w.winId === 'win-hr-1-r')?.tabChain?.tabs || []).length === 2, 5000)), 'R: …and the server\'s HR record carries the group (B\'s deferred save)', J((await hrRecord()).windows.map((w) => [w.winId, w.tabChain?.tabs])));
       }
       ok(refusalsSince(j0).length === 0, 'R: no refusal', J(refusalsSince(j0)));
       sockR.close();
@@ -655,10 +655,10 @@ else await (async () => {
 
     // ── Q: THE ACK (verify r5 ⑤) — a save sent on a socket that looks open but the server never reads; the socket dies; the reconnect re-reads ──
     console.log('— Q: (verify r5 ⑤) B\'s save leaves on a socket that looks open but the server never reads it; the socket dies; the reconnect re-reads');
-    if (want('Q') && P2 && ok(await fresh('q'), 'Q: fresh fixture, page A booted') && ok(await P2.boot(), 'Q: page B booted on Fin')) {
+    if (want('Q') && P2 && ok(verdictOf(await fresh('q')), 'Q: fresh fixture, page A booted') && ok(verdictOf(await P2.boot()), 'Q: page B booted on Fin')) {
       await P2.clickPreview('desk-hr');
       await P2.nudge(); // a real save, answered by the real server
-      ok(await until(() => P2.ev('app.layoutManager._serverAcks === true && app.layoutManager._unacked.length === 0'), 3000), 'Q: the real server ACKED B\'s save (`layout-sync-ack`): B knows this server acks, nothing owed', J(await P2.ev('[app.layoutManager._serverAcks, app.layoutManager._unacked.length]')));
+      ok(verdictOf(await until(() => P2.ev('app.layoutManager._serverAcks === true && app.layoutManager._unacked.length === 0'), 3000)), 'Q: the real server ACKED B\'s save (`layout-sync-ack`): B knows this server acks, nothing owed', J(await P2.ev('[app.layoutManager._serverAcks, app.layoutManager._unacked.length]')));
       const box = (P, id) => P.ev(`(() => { const w = app.wm.windows.get(${J(id)}); if (!w) return null; const r = w.element.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top)]; })()`);
       const srvBox = async (id) => { const w = ((await api('/api/layouts')).desktops['desk-hr'].autoSave.windows || []).find((x) => x.winId === id); return w?.gridBounds ? [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)] : null; };
       const gbOf = (id) => P2.ev(`(() => { const w = app.wm.windows.get(${J(id)}); return [+w.gridBounds.left.toFixed(3), +w.gridBounds.top.toFixed(3)]; })()`);
@@ -668,47 +668,47 @@ else await (async () => {
       await P2.drag(tb.l + 80, tb.y, tb.l + 80 + 300, tb.y + 180);
       await sleep(1500);
       const dropped = await box(P2, 'win-hr-2-q'), gb = await gbOf('win-hr-2-q');
-      ok(J(await srvBox('win-hr-2-q')) === J(srv0) && await P2.ev('app.layoutManager._unacked.length >= 1'), 'Q: the drag\'s save "left" (B\'s socket looks open) but the server never read it — the save is still OWED on B', J([srv0, await srvBox('win-hr-2-q'), await P2.ev('app.layoutManager._unacked.length')]));
+      ok(J(await srvBox('win-hr-2-q')) === J(srv0) && verdictOf(await P2.ev('app.layoutManager._unacked.length >= 1')), 'Q: the drag\'s save "left" (B\'s socket looks open) but the server never read it — the save is still OWED on B', J([srv0, await srvBox('win-hr-2-q'), await P2.ev('app.layoutManager._unacked.length')]));
       const c0 = await P2.ev('app.layoutManager._connects');
       await P2.wsClose();
-      ok(await until(async () => !(await P2.wsConnected()), 3000, 50), 'Q: B\'s socket is down');
-      ok(await until(() => P2.wsConnected(), 8000, 100) && await until(() => P2.ev(`app.layoutManager._connects === ${c0 + 1}`), 3000, 50), 'Q: B reconnected (the open was told)');
+      ok(verdictOf(await until(async () => !(await P2.wsConnected()), 3000, 50)), 'Q: B\'s socket is down');
+      ok(gateOf(await until(() => P2.wsConnected(), 8000, 100)) && verdictOf(await until(() => P2.ev(`app.layoutManager._connects === ${c0 + 1}`), 3000, 50)), 'Q: B reconnected (the open was told)');
       await sleep(1500); // the re-read (250 ms after the open) + its apply
       const after = await box(P2, 'win-hr-2-q');
-      ok(after && Math.abs(after[0] - dropped[0]) < 8 && Math.abs(after[1] - dropped[1]) < 8, 'Q: B\'s window stays where B dropped it — the re-read did not reverse an act the server never read (r4\'s held (a): "sent on an open socket" counted as sent, and the re-read reversed it for good)', J([dropped, after]));
-      ok(await until(async () => J(await srvBox('win-hr-2-q')) === J(gb), 6000), 'Q: …and the held act is RE-SENT after the reconnect: the server holds the dragged place', J([gb, await srvBox('win-hr-2-q')]));
-      ok(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 3000), 'Q: the re-send was acked — nothing owed', J(await P2.ev('(() => { const lm = app.layoutManager; return { unacked: lm._unacked, serverAcks: lm._serverAcks, timer: !!lm._ackTimer, now: Date.now(), carried: [...lm._carried] }; })()')));
+      ok(gateOf(after) && Math.abs(after[0] - dropped[0]) < 8 && Math.abs(after[1] - dropped[1]) < 8, 'Q: B\'s window stays where B dropped it — the re-read did not reverse an act the server never read (r4\'s held (a): "sent on an open socket" counted as sent, and the re-read reversed it for good)', J([dropped, after]));
+      ok(verdictOf(await until(async () => J(await srvBox('win-hr-2-q')) === J(gb), 6000)), 'Q: …and the held act is RE-SENT after the reconnect: the server holds the dragged place', J([gb, await srvBox('win-hr-2-q')]));
+      ok(verdictOf(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 3000)), 'Q: the re-send was acked — nothing owed', J(await P2.ev('(() => { const lm = app.layoutManager; return { unacked: lm._unacked, serverAcks: lm._serverAcks, timer: !!lm._ackTimer, now: Date.now(), carried: [...lm._carried] }; })()')));
       // CONTROL (an old server): B ignores acks and forgets it ever saw one — the 2 s fallback stamps at the send (today's rule);
       // the same swallow + reconnect reverses the drag, and B does not hang (its next drag still reaches the server)
       // PLACED (主开发 r966 — a control goes red by placement, never by a race): the swallowing send COUNTS the layout saves it swallows
       await P2.ev(`(() => { const lm = app.layoutManager; lm._serverAcks = false; lm._onLayoutAnswer = () => {}; window.__qSwallowed = 0; app.ws.ws.send = (d) => { try { if (JSON.parse(d).type === 'layout-sync') window.__qSwallowed++; } catch { } }; return true; })()`);
       const tb2 = await P2.titleBar('win-hr-2-q');
       await P2.drag(tb2.l + 80, tb2.y, tb2.l + 80 - 200, tb2.y - 100);
-      ok(await until(() => P2.ev('window.__qSwallowed >= 1 && app.layoutManager._unacked.length >= 1'), 6000), 'Q control (placed): the drag\'s save LEFT on the swallowing socket — counted there, owed on B (no ack will come)', J(await P2.ev('[window.__qSwallowed, app.layoutManager._unacked.length]')));
+      ok(verdictOf(await until(() => P2.ev('window.__qSwallowed >= 1 && app.layoutManager._unacked.length >= 1'), 6000)), 'Q control (placed): the drag\'s save LEFT on the swallowing socket — counted there, owed on B (no ack will come)', J(await P2.ev('[window.__qSwallowed, app.layoutManager._unacked.length]')));
       const dropped2 = await box(P2, 'win-hr-2-q');
-      ok(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 6000), 'Q control: without acks B falls back to the send stamp after ACK_WAIT_MS (an old server never hangs a hold)', J(await P2.ev('(() => { const lm = app.layoutManager; return { unacked: lm._unacked, serverAcks: lm._serverAcks, timer: !!lm._ackTimer, now: Date.now(), carried: [...lm._carried], dirty: [...app.desktopManager._dirtyDesks] }; })()')));
+      ok(verdictOf(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 6000)), 'Q control: without acks B falls back to the send stamp after ACK_WAIT_MS (an old server never hangs a hold)', J(await P2.ev('(() => { const lm = app.layoutManager; return { unacked: lm._unacked, serverAcks: lm._serverAcks, timer: !!lm._ackTimer, now: Date.now(), carried: [...lm._carried], dirty: [...app.desktopManager._dirtyDesks] }; })()')));
       const c1 = await P2.ev('app.layoutManager._connects');
       await P2.wsClose();
-      ok(await until(async () => !(await P2.wsConnected()), 3000, 50), 'Q control: B\'s socket is down');
-      ok(await until(() => P2.wsConnected(), 8000, 100) && await until(() => P2.ev(`app.layoutManager._connects === ${c1 + 1}`), 3000, 50), 'Q control: B reconnected (the open was told)');
+      ok(verdictOf(await until(async () => !(await P2.wsConnected()), 3000, 50)), 'Q control: B\'s socket is down');
+      ok(gateOf(await until(() => P2.wsConnected(), 8000, 100)) && verdictOf(await until(() => P2.ev(`app.layoutManager._connects === ${c1 + 1}`), 3000, 50)), 'Q control: B reconnected (the open was told)');
       let after2 = null;   // the re-read (250 ms after the open) and its apply — WAITED FOR (bounded), never slept on
       await until(async () => { after2 = await box(P2, 'win-hr-2-q'); return !!after2 && (Math.abs(after2[0] - dropped2[0]) > 40 || Math.abs(after2[1] - dropped2[1]) > 40); }, 6000, 100);
-      ok(after2 && (Math.abs(after2[0] - dropped2[0]) > 40 || Math.abs(after2[1] - dropped2[1]) > 40) && Math.abs(after2[0] - after[0]) < 8, 'Q control: …so the re-read reverses the swallowed drag — today\'s loss, by design of the fallback (RED without the ack)', J([dropped2, after2, after, await srvBox('win-hr-2-q'), await P2.ev('(() => { const lm = app.layoutManager, w = app.wm.windows.get("win-hr-2-q"); return { gb: w.gridBounds, boundsAt: w._boundsAt, carried: [...lm._carried], movesSentAt: lm._movesSentAt, unacked: lm._unacked.length }; })()')]));
+      ok(gateOf(after2) && (Math.abs(after2[0] - dropped2[0]) > 40 || Math.abs(after2[1] - dropped2[1]) > 40) && Math.abs(after2[0] - after[0]) < 8, 'Q control: …so the re-read reverses the swallowed drag — today\'s loss, by design of the fallback (RED without the ack)', J([dropped2, after2, after, await srvBox('win-hr-2-q'), await P2.ev('(() => { const lm = app.layoutManager, w = app.wm.windows.get("win-hr-2-q"); return { gb: w.gridBounds, boundsAt: w._boundsAt, carried: [...lm._carried], movesSentAt: lm._movesSentAt, unacked: lm._unacked.length }; })()')]));
       const hr1 = await srvBox('win-hr-1-q');
       await P2.nudge(); // a real drag of the first shown window (hr-1)
-      ok(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 4000) && await until(async () => J(await srvBox('win-hr-1-q')) !== J(hr1), 4000), 'Q control: B\'s next drag still reaches the server (no hang)', J([hr1, await srvBox('win-hr-1-q')]));
+      ok(gateOf(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 4000)) && verdictOf(await until(async () => J(await srvBox('win-hr-1-q')) !== J(hr1), 4000)), 'Q control: B\'s next drag still reaches the server (no hang)', J([hr1, await srvBox('win-hr-1-q')]));
     }
     if (P2) P2.close();
 
     // ── I: deleting the desktop on show — verify r1 D1 ──
     console.log('— I: delete the desktop ON SHOW (verify r1 D1) — its windows reach the target\'s record with no further input');
-    if (want('I') && ok(await fresh('i'), 'I: fresh fixture, booted on Fin')) {
+    if (want('I') && ok(verdictOf(await fresh('i')), 'I: fresh fixture, booted on Fin')) {
       await clickPreview('desk-hr');
       const tbI = await titleBar('win-hr-1-i'); await click(tbI.l + 120, tbI.y);
       const j0 = journal.length;
       await ev(`app.desktopManager.deleteDesktop('desk-hr')`);
       const wantI = sortIds(['win-fin-1-i', 'win-hr-1-i', 'win-hr-2-i', 'win-hr-3-i']);
-      ok(await until(async () => J(sortIds(await serverIds('desk-fin'))) === J(wantI), 4000), 'I: the server\'s Fin holds all 4 within seconds, no input after the delete (the lane\'s ①: [fin-1] — HR deleted, its 3 windows in no record)', J(await serverIds('desk-fin')));
+      ok(verdictOf(await until(async () => J(sortIds(await serverIds('desk-fin'))) === J(wantI), 4000)), 'I: the server\'s Fin holds all 4 within seconds, no input after the delete (the lane\'s ①: [fin-1] — HR deleted, its 3 windows in no record)', J(await serverIds('desk-fin')));
       const layI = await api('/api/layouts');
       ok(!layI.desktops?.['desk-hr'] && !(layI.desktopMeta || []).some((d) => d.id === 'desk-hr'), 'I: HR is gone from the server');
       ok(refusalsSince(j0).length === 0, 'I: no refusal', J(refusalsSince(j0)));
@@ -719,7 +719,7 @@ else await (async () => {
     // ── S: the replayed triple (userW inc-mw1ogdno-5jny) — the toasts over 5 s ──
     console.log('— S: one conversation on three desktops (userW inc-mw1ogdno-5jny) — a switch to a desktop holding a copy: the toasts over 5 s');
     if (!dtachOk) skip('S: dtach is not installed — a live shell session cannot be created here');
-    else if (want('S') && ok(await fresh('s'), 'S: fresh fixture, booted on Fin')) {
+    else if (want('S') && ok(verdictOf(await fresh('s')), 'S: fresh fixture, booted on Fin')) {
       // the live conversation is created on a RAW socket that then closes: since r2 the hub refuses a dedup while ANOTHER live socket
       // has the session attached — a page that created it and navigated away still counted as one (measured: «1 other page(s) attached»)
       const raw = new WebSocket(`ws://127.0.0.1:${PORT}/ws`), rawGot = [];
@@ -735,8 +735,8 @@ else await (async () => {
         const live = (w) => ({ winId: w.winId + '-s', title: 'Atlas notes — ' + ROOT, type: 'terminal', isMinimized: false, isMaximized: false, gridBounds: w.gridBounds, zIndex: w.zIndex, serverSessionId: sid, openSpec: { action: 'attachSession', serverId: sid, name: 'Atlas notes', cwd: ROOT, mode: 'terminal', backend: 'shell', backendSessionId: null, hostId: null } });
         const triple = { current: null, autoSave: null, saved: {}, customGrids: [], desktopMeta: FIX.desktopMeta,
           desktops: Object.fromEntries(Object.entries(FIX.desktops).map(([d, v]) => [d, { autoSave: { windows: v.autoSave.windows.map((w) => (w.serverSessionId === S0 ? live(w) : W(w.winId + '-s', w.winId + '-s', w.gridBounds))) } }])) };
-        await cdp('Page.navigate', { url: 'about:blank' }); await sleep(300); ok(await install(triple), 'S: the triple installed through the restore path');
-        ok(await boot() && await ev(`app.desktopManager.activeDesktopId`) === 'desk-x' && await until(() => ev(`!!app.sessions.get('win-x-s-s')`), 8000), 'S: the page booted on Desk X — its window of the conversation attached', J(await P1.allWins()));
+        await cdp('Page.navigate', { url: 'about:blank' }); await sleep(300); ok(verdictOf(await install(triple)), 'S: the triple installed through the restore path');
+        ok(gateOf(await boot()) && await ev(`app.desktopManager.activeDesktopId`) === 'desk-x' && verdictOf(await until(() => ev(`!!app.sessions.get('win-x-s-s')`), 8000)), 'S: the page booted on Desk X — its window of the conversation attached', J(await P1.allWins()));
         const h0 = await ev(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').length`), j0 = journal.length, f0 = P1.framesGot.length;
         await clickPreview('desk-v'); await sleep(2500); // 5 s since the click
         const said = await ev(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').slice(${h0}).map((h) => h.m).filter((m) => /were kept|disagree/.test(m))`);
@@ -746,7 +746,7 @@ else await (async () => {
         const lay = await api('/api/layouts');
         const listed = Object.entries(lay.desktops || {}).flatMap(([d, v]) => ((v.autoSave && v.autoSave.windows) || []).filter((w) => w.serverSessionId === sid || w.openSpec?.serverId === sid).map((w) => d + ':' + w.winId));
         ok(J(listed) === J(['desk-x:win-x-s-s']), 'S: …and the server lists the conversation ONCE — Desk X\'s window, the one the page shows (V\'s and Y\'s copies left with evidence \'dup\')', J(listed));
-        ok(/1 duplicate window\(s\) left/.test(journal.slice(j0)), 'S: …the journal names the duplicates that left', journal.slice(j0).split('\n').filter((l) => /layout-sync/.test(l)).slice(0, 4).join(' | '));
+        ok(verdictOf(/1 duplicate window\(s\) left/.test(journal.slice(j0))), 'S: …the journal names the duplicates that left', journal.slice(j0).split('\n').filter((l) => /layout-sync/.test(l)).slice(0, 4).join(' | '));
         // r2 C — A PERSON'S OPEN REVEALS THE CONVERSATION (the r1 acceptance: the switch rebuilt the group with the record's active tab):
         // the conversation's only entry is a tab GUEST on Desk V; the page on Desk X opens it through attachSession (the sidebar's door)
         const guestId = 'win-vg-s', hostId = 'v-host-s', box = { left: 0.1, top: 0.1, width: 0.5, height: 0.5 };
@@ -755,11 +755,11 @@ else await (async () => {
           'desk-x': { autoSave: { windows: [W('x-1-s2', 'x-1-s2', box)] } }, 'desk-y': { autoSave: { windows: [] } },
           'desk-v': { autoSave: { windows: [{ ...W(hostId, hostId, box), tabChain: tg, isTabGuest: false }, { ...live({ winId: 'win-vg', gridBounds: box, zIndex: 20 }), tabChain: tg, isTabGuest: true }] } } } };
         await cdp('Page.navigate', { url: 'about:blank' }); await sleep(300);
-        ok(await install(guestShape) && await boot() && await ev(`app.desktopManager.activeDesktopId`) === 'desk-x', 'S (r2 C): the conversation\'s only entry is a tab GUEST on Desk V; the page booted on Desk X');
+        ok(gateOf(await install(guestShape)) && gateOf(await boot()) && await ev(`app.desktopManager.activeDesktopId`) === 'desk-x', 'S (r2 C): the conversation\'s only entry is a tab GUEST on Desk V; the page booted on Desk X');
         await ev(`(app.attachSession(${J(sid)}, 'Atlas notes', ${J(ROOT)}, { mode: 'terminal', backend: 'shell' }), true)`);
         const inFront = await until(async () => (await ev(`app.wm.activeWindowId`)) === guestId, 8000);
         const st = await ev(`(() => { const w = app.wm.windows.get(${J(guestId)}); const c = w && w._tabChain; return { desk: app.desktopManager.activeDesktopId, active: app.wm.activeWindowId, chain: c ? { tabs: c.tabs, active: c.active } : null, windows: [...app.wm.windows.values()].filter((x) => x._openSpec && x._openSpec.serverId === ${J(sid)}).map((x) => x.id) }; })()`);
-        ok(inFront && st.desk === 'desk-v' && !!st.chain && st.chain.tabs[st.chain.active] === guestId && J(st.windows) === J([guestId]), `S (r2 C): a person's open goes to Desk V and shows the conversation's OWN tab in front — its one window, the group re-formed around it (b3a058eb2: the host's tab) — ${J(st)}`);
+        ok(gateOf(inFront) && st.desk === 'desk-v' && !!st.chain && st.chain.tabs[st.chain.active] === guestId && J(st.windows) === J([guestId]), `S (r2 C): a person's open goes to Desk V and shows the conversation's OWN tab in front — its one window, the group re-formed around it (b3a058eb2: the host's tab) — ${J(st)}`);
         try { await ev(`app.ws.send({ type: 'kill', sessionId: ${J(sid)} })`); } catch { }
       }
     }
@@ -769,4 +769,4 @@ else await (async () => {
 })();
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -47,7 +47,7 @@ import { scratch } from './scratch.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
 const TMP = scratch('incident-recorder');
 fs.mkdirSync(TMP, { recursive: true });
@@ -66,27 +66,27 @@ console.log('① stackHead / frameOf (PURE)');
   const asPage = { stack: err.stack.split('\n').map((l, i) => (i === 0 ? l : l.replace(/\(([^()]+):(\d+):(\d+)\)$/, `(${ORIGIN}/bundle.js?v=1792588246450:$2:$3)`))).join('\n') };
   const h = S.stackHead(asPage, ORIGIN);
   const lines = h.split('\n');
-  ok(`a real V8 stack (${err.stack.split('\n').length} lines) keeps exactly ${S.STACK_FRAMES} frames, every one an \`at\` line`, lines.length === S.STACK_FRAMES && lines.every((l) => l.startsWith('at ')), h);
-  ok('the page origin is cut and the bundle’s line:column is kept', !h.includes(ORIGIN) && lines.every((l) => /\(\/bundle\.js\?v=1792588246450:\d+:\d+\)$/.test(l)), h);
+  ok(`a real V8 stack (${err.stack.split('\n').length} lines) keeps exactly ${S.STACK_FRAMES} frames, every one an \`at\` line`, lines.length === S.STACK_FRAMES && verdictOf(lines.every((l) => l.startsWith('at '))), h);
+  ok('the page origin is cut and the bundle’s line:column is kept', !h.includes(ORIGIN) && verdictOf(lines.every((l) => /\(\/bundle\.js\?v=1792588246450:\d+:\d+\)$/.test(l))), h);
   ok(`STACK_MAX is 400 and the head never exceeds it (${h.length})`, S.STACK_MAX === 400 && h.length <= 400);
   const long = { stack: `TypeError: x\n    at ${'a'.repeat(390)} (/bundle.js?v=1:1:2)\n    at b (/bundle.js?v=1:1:3)` };
   const lh = S.stackHead(long, '');
   ok('whole frames only: a frame too long for the room keeps its LOCATION (its name goes), never cut mid-address', lh === 'at /bundle.js?v=1:1:2\nat b (/bundle.js?v=1:1:3)', lh);
-  ok('nothing to keep ⇒ \'\': a string rejection, null, an object without a stack, a message-only error event', ['', S.stackHead('boom'), S.stackHead(null), S.stackHead({ message: 'x' }), S.stackHead(undefined, ORIGIN)].every((x) => x === ''));
+  ok('nothing to keep ⇒ \'\': a string rejection, null, an object without a stack, a message-only error event', verdictOf(['', S.stackHead('boom'), S.stackHead(null), S.stackHead({ message: 'x' }), S.stackHead(undefined, ORIGIN)].every((x) => x === '')));
   const f1 = S.frameOf('at Ye (/bundle.js?v=1792588246450:1:3415923)');
   const f2 = S.frameOf('at /bundle.js?v=7:12:34');
   const f3 = S.frameOf('at async Object.run (/bundle.js?v=7:1:99)');
-  ok('frameOf reads a named frame, an anonymous one and an async one back', f1 && f1.fn === 'Ye' && f1.file === '/bundle.js?v=1792588246450' && f1.line === 1 && f1.col === 3415923 && f2 && f2.fn === '' && f2.line === 12 && f2.col === 34 && f3 && f3.fn === 'async Object.run' && f3.col === 99, { f1, f2, f3 });
-  ok('frameOf: not a frame ⇒ null (`at <anonymous>`, native code, a message line)', [S.frameOf('at <anonymous>'), S.frameOf('at Array.map (native)'), S.frameOf('TypeError: x')].every((x) => x === null));
+  ok('frameOf reads a named frame, an anonymous one and an async one back', gateOf(f1) && f1.fn === 'Ye' && f1.file === '/bundle.js?v=1792588246450' && f1.line === 1 && f1.col === 3415923 && gateOf(f2) && f2.fn === '' && f2.line === 12 && f2.col === 34 && gateOf(f3) && f3.fn === 'async Object.run' && f3.col === 99, { f1, f2, f3 });
+  ok('frameOf: not a frame ⇒ null (`at <anonymous>`, native code, a message line)', verdictOf([S.frameOf('at <anonymous>'), S.frameOf('at Array.map (native)'), S.frameOf('TypeError: x')].every((x) => x === null)));
 }
 
 console.log('② the recorder writes it on BOTH error entries');
 {
   const rec = read('src/lib/incident-recorder.js');
-  ok('the recorder imports stackHead from the PURE module', /import \{ stackHead \} from '\.\/incident-stack\.js';/.test(rec));
-  ok('stackOf = stackHead(err, location.origin), and only a non-empty head adds the field', /const stackOf = \(err\) => \{ const s = stackHead\(err, location\.origin\); return s \? \{ stack: s \} : \{\}; \};/.test(rec));
-  ok('the `uncaught` entry keeps m + src and spreads stackOf(e.error)', /l: 'uncaught', m: String\(e\.message \|\| ''\)\.slice\(0, 400\), src: `\$\{e\.filename \|\| ''\}:\$\{e\.lineno \|\| 0\}`, \.\.\.stackOf\(e\.error\) \}/.test(rec));
-  ok('the `unhandled` entry spreads stackOf(e.reason)', /l: 'unhandled', m: String\(e\.reason\?\.message \|\| e\.reason \|\| ''\)\.slice\(0, 400\), \.\.\.stackOf\(e\.reason\) \}/.test(rec));
+  ok('the recorder imports stackHead from the PURE module', verdictOf(/import \{ stackHead \} from '\.\/incident-stack\.js';/.test(rec)));
+  ok('stackOf = stackHead(err, location.origin), and only a non-empty head adds the field', verdictOf(/const stackOf = \(err\) => \{ const s = stackHead\(err, location\.origin\); return s \? \{ stack: s \} : \{\}; \};/.test(rec)));
+  ok('the `uncaught` entry keeps m + src and spreads stackOf(e.error)', verdictOf(/l: 'uncaught', m: String\(e\.message \|\| ''\)\.slice\(0, 400\), src: `\$\{e\.filename \|\| ''\}:\$\{e\.lineno \|\| 0\}`, \.\.\.stackOf\(e\.error\) \}/.test(rec)));
+  ok('the `unhandled` entry spreads stackOf(e.reason)', verdictOf(/l: 'unhandled', m: String\(e\.reason\?\.message \|\| e\.reason \|\| ''\)\.slice\(0, 400\), \.\.\.stackOf\(e\.reason\) \}/.test(rec)));
 }
 
 console.log('③ the cap');
@@ -116,7 +116,7 @@ console.log('④ scripts/symbolicate.mjs end to end');
   // the client step's own flags (package.json's), on a two-file client whose throw sits on a known line
   const realPkg = JSON.parse(read('package.json'));
   const realOpts = SY.clientBuildOptions(realPkg);
-  ok('clientBuildOptions reads the REAL package.json client step (bundle, minify, iife, public/bundle.js, the .css loader)', realOpts.bundle && realOpts.minify && realOpts.format === 'iife' && realOpts.outfile === 'public/bundle.js' && realOpts.loader['.css'] === 'css', realOpts);
+  ok('clientBuildOptions reads the REAL package.json client step (bundle, minify, iife, public/bundle.js, the .css loader)', gateOf(realOpts.bundle) && gateOf(realOpts.minify) && realOpts.format === 'iife' && realOpts.outfile === 'public/bundle.js' && realOpts.loader['.css'] === 'css', realOpts);
   // 主开发's ruling (2026-10-21): the flags are PARSED off the build script at run time — never a copied list
   const realStep = [realPkg.scripts['build:bundles'], realPkg.scripts.build].filter(Boolean).join(' && ').split('&&').map((s) => s.trim()).find((s) => s.startsWith('esbuild src/client.js'));
   const stepFlags = realStep.split(/\s+/).slice(2).sort();
@@ -131,7 +131,7 @@ console.log('④ scripts/symbolicate.mjs end to end');
   ok('CONTROL: a copied flag list planted in that source is caught (`const OPTS = { target: \'es2020\', format: \'iife\' }`)', ((symCode + "\nconst OPTS = { target: 'es2020', format: 'iife' };").match(OWN_RE) || []).length === 2);
   let threw = '';
   try { SY.clientBuildOptions({ scripts: { build: 'esbuild src/client.js --bundle --outfile=public/bundle.js --define:x=1' } }); } catch (e) { threw = e.message; }
-  ok('CONTROL: a flag the tool does not know throws (a silent difference would map other bytes)', /does not know: --define:x=1/.test(threw), threw);
+  ok('CONTROL: a flag the tool does not know throws (a silent difference would map other bytes)', verdictOf(/does not know: --define:x=1/.test(threw)), threw);
   const step = [realPkg.scripts['build:bundles'], realPkg.scripts.build].filter(Boolean).join(' && ').split('&&').map((s) => s.trim()).find((s) => s.startsWith('esbuild src/client.js'));
   fs.writeFileSync(path.join(CK, 'package.json'), JSON.stringify({ name: 'sym-fixture', scripts: { build: step } }));
   fs.writeFileSync(path.join(CK, 'src/lib/rings.js'), [
@@ -155,9 +155,9 @@ console.log('④ scripts/symbolicate.mjs end to end');
   vm.runInContext(Buffer.from(js.contents).toString('utf8'), ctx, { filename: `${ORIGIN}/bundle.js?v=${v}` });
   let e = null;
   try { ctx.__boom(); } catch (x) { e = x; }
-  ok('the bundle throws a REAL TypeError — `.length` of undefined', !!e && /Cannot read properties of undefined \(reading 'length'\)/.test(e.message), e && e.message);
+  ok('the bundle throws a REAL TypeError — `.length` of undefined', !!e && verdictOf(/Cannot read properties of undefined \(reading 'length'\)/.test(e.message)), e && e.message);
   const stack = S.stackHead(e, ORIGIN);
-  ok('the entry the recorder writes: frames on /bundle.js?v=<mtime>:1:<col>', /^at \S+ \(\/bundle\.js\?v=\d+:1:\d+\)$/.test(stack.split('\n')[0]), stack);
+  ok('the entry the recorder writes: frames on /bundle.js?v=<mtime>:1:<col>', verdictOf(/^at \S+ \(\/bundle\.js\?v=\d+:1:\d+\)$/.test(stack.split('\n')[0])), stack);
   const otherBuild = stack.split('\n')[0].replace(/\?v=\d+/, `?v=${v - 60000}`);
   const inc = { id: 'inc-fixture-0001', clientVersion: '0.0.0', client: { rings: { console: [
     { t: 1792588374949, l: 'unhandled', m: 'no stack here' },
@@ -168,27 +168,27 @@ console.log('④ scripts/symbolicate.mjs end to end');
   fs.writeFileSync(incFile, JSON.stringify(inc));
   const run = (...extra) => { try { return { rc: 0, out: execFileSync(process.execPath, ['--no-warnings', path.join(REPO, 'scripts/symbolicate.mjs'), incFile, '--checkout', CK, ...extra], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; } catch (x) { return { rc: x.status, out: String(x.stdout || '') + String(x.stderr || '') }; } };
   const r1 = run();
-  ok('the CLI maps the top frame to src/lib/rings.js:4:15 — the `.length` read of the missing list (the map rebuilt in memory, byte-identical)', r1.rc === 0 && /→\s+src\/lib\/rings\.js:4:15/.test(r1.out) && /rebuilt in memory \(byte-identical/.test(r1.out), r1.out);
-  ok('… a frame from ANOTHER build is not mapped (its v differs) and the summary counts it', /another build: v=\d+, this checkout's bundle is v=\d+/.test(r1.out) && /2 frame\(s\) mapped, 1 from another build/.test(r1.out), r1.out);
-  ok('… an entry without a stack prints nothing; the frames outside the bundle pass through as they are', !r1.out.includes('no stack here') && /at .*test-incident-recorder\.mjs/.test(r1.out), r1.out);
+  ok('the CLI maps the top frame to src/lib/rings.js:4:15 — the `.length` read of the missing list (the map rebuilt in memory, byte-identical)', r1.rc === 0 && gateOf(/→\s+src\/lib\/rings\.js:4:15/.test(r1.out)) && verdictOf(/rebuilt in memory \(byte-identical/.test(r1.out)), r1.out);
+  ok('… a frame from ANOTHER build is not mapped (its v differs) and the summary counts it', gateOf(/another build: v=\d+, this checkout's bundle is v=\d+/.test(r1.out)) && verdictOf(/2 frame\(s\) mapped, 1 from another build/.test(r1.out)), r1.out);
+  ok('… an entry without a stack prints nothing; the frames outside the bundle pass through as they are', !r1.out.includes('no stack here') && verdictOf(/at .*test-incident-recorder\.mjs/.test(r1.out)), r1.out);
   const r2 = run('--any-build');
-  ok('--any-build maps the other build’s frame too', r2.rc === 0 && /3 frame\(s\) mapped$/.test(r2.out.trim()), r2.out);
+  ok('--any-build maps the other build’s frame too', r2.rc === 0 && verdictOf(/3 frame\(s\) mapped$/.test(r2.out.trim())), r2.out);
   const lie = JSON.parse(Buffer.from(mp.contents).toString('utf8')); lie.sources = lie.sources.map(() => 'src/planted.js');
   fs.writeFileSync(path.join(CK, 'public/bundle.js.map'), JSON.stringify(lie));
   const r3 = run();
-  ok('a map FILE planted beside the bundle is never read — the map is rebuilt in memory every time', r3.rc === 0 && /rebuilt in memory/.test(r3.out) && /→\s+src\/lib\/rings\.js:4:15/.test(r3.out) && !/planted/.test(r3.out), r3.out);
+  ok('a map FILE planted beside the bundle is never read — the map is rebuilt in memory every time', r3.rc === 0 && gateOf(/rebuilt in memory/.test(r3.out)) && gateOf(/→\s+src\/lib\/rings\.js:4:15/.test(r3.out)) && !/planted/.test(r3.out), r3.out);
   fs.rmSync(path.join(CK, 'public/bundle.js.map'));
   fs.appendFileSync(path.join(CK, 'public/bundle.js'), ' ');
   fs.utimesSync(path.join(CK, 'public/bundle.js'), v / 1000, v / 1000);
   const r4 = run();
-  ok('MUTANT: a served bundle one byte off ⇒ REFUSED (the rebuilt map would map other bytes)', r4.rc !== 0 && /the rebuilt bundle differs from public\/bundle\.js/.test(r4.out), r4.out);
+  ok('MUTANT: a served bundle one byte off ⇒ REFUSED (the rebuilt map would map other bytes)', r4.rc !== 0 && verdictOf(/the rebuilt bundle differs from public\/bundle\.js/.test(r4.out)), r4.out);
   // decodeMappings: a hand-made line — [0,0,0,0] then [+5, 0, +2, -3, +1] (the name), then [+1]
   const vlq = (n) => { let x = n < 0 ? (-n << 1) | 1 : n << 1; let s = ''; do { let d = x & 31; x >>>= 5; if (x) d |= 32; s += 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'[d]; } while (x); return s; };
   const seg = (...a) => a.map(vlq).join('');
   const dm = SY.decodeMappings(`${seg(0, 0, 0, 0)},${seg(5, 0, 2, -3, 1)},${seg(1)};${seg(7, 0, 1, 4)}`);
   ok('decodeMappings: absolute values across segments and lines (negative deltas, a name index, a 1-field segment)', JSON.stringify(dm) === JSON.stringify([[[0, 0, 0, 0], [5, 0, 2, -3, 1], [6]], [[7, 0, 3, 1]]]), dm);
   const lk = SY.lookup({ sources: ['a.js'], names: ['n0', 'n1'] }, dm, 1, 6);
-  ok('lookup: the last segment at or before the column, 1-based out', lk && lk.source === 'a.js' && lk.line === 3 && lk.col === -2 && lk.name === 'n1', lk);
+  ok('lookup: the last segment at or before the column, 1-based out', gateOf(lk) && lk.source === 'a.js' && lk.line === 3 && lk.col === -2 && lk.name === 'n1', lk);
 }
 
 console.log('⑤ the real client bundle');
@@ -216,7 +216,7 @@ console.log('⑥ the tab\'s navigation diary (lane phone-back-reload)');
   const NL = await import(pathToFileURL(navCopy).href);
   for (let i = 0; i < 200; i++) NL.navNote({ k: 'pop', v: 'close', tg: 'window', ex: i });
   const log = NL.navLogRead();
-  ok(`the ring keeps the last ${NL.NAV_LOG_CAP} rows (200 written), newest last, each stamped with t + this document's id`, log.length === NL.NAV_LOG_CAP && log[0].ex === 200 - NL.NAV_LOG_CAP && log.at(-1).ex === 199 && log.every((r) => typeof r.t === 'number' && r.d === NL.DOC_ID), { n: log.length, first: log[0], last: log.at(-1) });
+  ok(`the ring keeps the last ${NL.NAV_LOG_CAP} rows (200 written), newest last, each stamped with t + this document's id`, log.length === NL.NAV_LOG_CAP && log[0].ex === 200 - NL.NAV_LOG_CAP && log.at(-1).ex === 199 && verdictOf(log.every((r) => typeof r.t === 'number' && r.d === NL.DOC_ID)), { n: log.length, first: log[0], last: log.at(-1) });
   store.clear();
   const wide = { k: 'boot', type: 'back_forward', step: 'rebuild', st: 'other', len: 50, ents: 'x'.repeat(50) + '*S', disc: 1, ref: 'other', vis: 'visible' };
   for (let i = 0; i < 80; i++) NL.navNote({ ...wide, i });
@@ -277,7 +277,7 @@ console.log('⑥ the tab\'s navigation diary (lane phone-back-reload)');
   }
   const bad = calls.filter((c) => c.bad.length || (c.fn === 'navNote' && !c.keys.includes('k')));
   const nNote = calls.filter((c) => c.fn === 'navNote').length, nIntent = calls.filter((c) => c.fn === 'exitIntentWrite').length;
-  ok(`PRIVACY CENSUS (parsed): ${nNote} navNote( + ${nIntent} exitIntentWrite( calls (${[...new Set(calls.map((c) => c.file))].join(', ')}) — each argument a literal row (either side of a ternary), only declared keys (shorthand ones too), no value reading a url / href / title / text / location`, nNote >= 15 && nIntent >= 2 && bad.length === 0 && calls.some((c) => c.keys.length > 1 && c.line && /mobile-back/.test(c.file)), bad);
+  ok(`PRIVACY CENSUS (parsed): ${nNote} navNote( + ${nIntent} exitIntentWrite( calls (${[...new Set(calls.map((c) => c.file))].join(', ')}) — each argument a literal row (either side of a ternary), only declared keys (shorthand ones too), no value reading a url / href / title / text / location`, nNote >= 15 && nIntent >= 2 && bad.length === 0 && verdictOf(calls.some((c) => c.keys.length > 1 && c.line && /mobile-back/.test(c.file))), bad);
   const PLANTED = {
     'a ternary argument whose branch reads location.href': "navNote(cond ? { k: 'hop', why: location.href } : { k: 'hop', n: 1 });",
     'a shorthand key the set never declared': "const href = location.href; navNote({ k: 'hop', href });",
@@ -290,10 +290,10 @@ console.log('⑥ the tab\'s navigation diary (lane phone-back-reload)');
   const missed = Object.entries(PLANTED).filter(([, src]) => !privacyCensus(src, 'planted').some((c) => c.bad.length)).map(([n]) => n);
   ok(`CONTROL: the census reds each of ${Object.keys(PLANTED).length} planted calls (${Object.keys(PLANTED).join('; ')})`, missed.length === 0, missed);
   const round2 = (src) => [...src.matchAll(/\bnavNote\(\{([^}]*)\}\)/g)].some((m) => [...m[1].matchAll(/(?:^|,)\s*([a-z0-9]+)\s*:/gi)].map((x) => x[1]).some((k) => !KEYS.has(k)));
-  ok('CONTROL (RED from round 2): round 2\'s regex census passes the ternary and the shorthand shapes — this one reds both', !round2(PLANTED['a ternary argument whose branch reads location.href']) && !round2(PLANTED['a shorthand key the set never declared']) && round2("navNote({ k: 'boot', href: location.href })"));
+  ok('CONTROL (RED from round 2): round 2\'s regex census passes the ternary and the shorthand shapes — this one reds both', !round2(PLANTED['a ternary argument whose branch reads location.href']) && !round2(PLANTED['a shorthand key the set never declared']) && verdictOf(round2("navNote({ k: 'boot', href: location.href })")));
   const rec = read('src/lib/incident-recorder.js');
-  ok('the snapshot carries the diary (out.navLog = navLogRead()) — every capture, manual or automatic', rec.includes("import { navLogRead } from './nav-log.js';") && rec.includes('try { out.navLog = navLogRead(); } catch { }'));
-  ok('autoCaptureIncident takes the toast\'s words (a back that cost a load is no freeze); the freeze words stay the default', /app\.autoCaptureIncident = async \(reason, detail, \{ toastKey = 'Freeze captured automatically \(\{id\}\) — see Diagnostics → Incidents' \} = \{\}\) => \{/.test(rec) && rec.includes('showToast(t(toastKey, { id: r.id }));'));
+  ok('the snapshot carries the diary (out.navLog = navLogRead()) — every capture, manual or automatic', gateOf(rec.includes("import { navLogRead } from './nav-log.js';")) && verdictOf(rec.includes('try { out.navLog = navLogRead(); } catch { }')));
+  ok('autoCaptureIncident takes the toast\'s words (a back that cost a load is no freeze); the freeze words stay the default', gateOf(/app\.autoCaptureIncident = async \(reason, detail, \{ toastKey = 'Freeze captured automatically \(\{id\}\) — see Diagnostics → Incidents' \} = \{\}\) => \{/.test(rec)) && verdictOf(rec.includes('showToast(t(toastKey, { id: r.id }));')));
 }
 
 console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t; r2: their own rings, the window\'s head kept)');
@@ -333,7 +333,7 @@ console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9
   // r2 5a: deltaY is read before deltaMode (Firefox answers later listeners in lines once deltaMode was read first)
   const order = []; const w4 = F.createWheelRecorder({ now: () => clock, later, describe: () => 'x', scrollerOf: () => list, push: () => {} });
   w4({ target: card, get deltaY() { order.push('deltaY'); return -5; }, get deltaMode() { order.push('deltaMode'); return 0; } }); tick(100);
-  ok(`deltaY is read BEFORE deltaMode (${order.join(' → ')})`, order[0] === 'deltaY' && order.includes('deltaMode'), order);
+  ok(`deltaY is read BEFORE deltaMode (${order.join(' → ')})`, order[0] === 'deltaY' && verdictOf(order.includes('deltaMode')), order);
   // r2 2 — THE CROWD-OUT, measured: 20 presses, then 60 s of 60 Hz wheeling; the recorder's own two rings
   const CAPA = 500;
   const pushA = (r, e) => { r.push(e); if (r.length > CAPA) r.splice(0, r.length - CAPA); };
@@ -372,7 +372,7 @@ console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9
   const fr2 = []; F.pushFine(fr2, { t: 0, arm: 'scrollBtn' }); for (let i = 1; i <= 900; i++) F.pushFine(fr2, i === 450 ? { t: i, arm: 'runOpen' } : { t: i });
   const marks2 = fr2.filter((x) => 'dropped' in x).map((x) => x.dropped);
   ok(`two busy windows (r3): BOTH fit whole (${fr2.length} ≤ FINE_SCROLL_CAP ${F.FINE_SCROLL_CAP} = 2 × 402) — the FIRST window's arm (${fr2[0].arm}) and its marker (${marks2[0]}) survive beside the second's (${marks2[1]}), nothing trimmed`,
-    F.FINE_SCROLL_CAP >= 2 * 402 && fr2.length <= F.FINE_SCROLL_CAP && fr2[0].arm === 'scrollBtn' && !('droppedBefore' in fr2[0]) && fr2.some((x) => x.arm === 'runOpen') && JSON.stringify(marks2) === JSON.stringify([449 - F.FINE_HEAD - F.FINE_TAIL, 450 - F.FINE_HEAD - F.FINE_TAIL]), { n: fr2.length, head: fr2[0], marks2 });
+    F.FINE_SCROLL_CAP >= 2 * 402 && fr2.length <= F.FINE_SCROLL_CAP && fr2[0].arm === 'scrollBtn' && !('droppedBefore' in fr2[0]) && gateOf(fr2.some((x) => x.arm === 'runOpen')) && JSON.stringify(marks2) === JSON.stringify([449 - F.FINE_HEAD - F.FINE_TAIL, 450 - F.FINE_HEAD - F.FINE_TAIL]), { n: fr2.length, head: fr2[0], marks2 });
   const fr3 = []; F.pushFine(fr3, { t: 0, arm: 'runOpen' }); for (let i = 1; i <= 288; i++) F.pushFine(fr3, { t: i }); // 1.2 s at 240 Hz
   F.pushFine(fr3, { t: 289, arm: 'scrollBtn' }); for (let i = 290; i <= 769; i++) F.pushFine(fr3, { t: i }); // then the ↓ — the incident's own shape
   ok(`toggle, then ↓ 1.2 s later at 240 Hz: the first window keeps its arm and all ${fr3.findIndex((x) => x.arm === 'scrollBtn') - 1} events (the acceptance measured 92 entries lost uncounted at a 600 cap)`, fr3[0].arm === 'runOpen' && fr3[1].t === 1 && fr3.findIndex((x) => x.arm === 'scrollBtn') === 289 && !fr3.some((x) => 'droppedBefore' in x));
@@ -385,30 +385,30 @@ console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9
   const rec = read('src/lib/incident-recorder.js');
   const cv = read('src/lib/chat-view.js');
   ok('the recorder: ptr records carry pointerType; the wheel listener feeds its OWN ring (rings.wheel through pushCapped), with the scroll listener\'s map — never rings.action',
-    rec.includes("pointerType: e.pointerType || '' });") && /const rings = \{ action: \[\], ws: \[\], console: \[\], op: \[\], wheel: \[\] \};/.test(rec)
-    && /document\.addEventListener\('wheel', createWheelRecorder\(\{[\s\S]{0,400}lastSt,[\s\S]{0,300}push: \(rec\) => pushCapped\(rings\.wheel, WHEEL_RING_CAP, rec\),\s*\}\), \{ capture: true, passive: true \}\);/.test(rec)
+    gateOf(rec.includes("pointerType: e.pointerType || '' });")) && gateOf(/const rings = \{ action: \[\], ws: \[\], console: \[\], op: \[\], wheel: \[\] \};/.test(rec))
+    && gateOf(/document\.addEventListener\('wheel', createWheelRecorder\(\{[\s\S]{0,400}lastSt,[\s\S]{0,300}push: \(rec\) => pushCapped\(rings\.wheel, WHEEL_RING_CAP, rec\),\s*\}\), \{ capture: true, passive: true \}\);/.test(rec))
     && !/push\(rings\.action, CAP\.action, rec\)/.test(rec)
-    && /document\.addEventListener\('scroll', \(e\) => \{[^\n]*lastSt\.set\(n, n\.scrollTop\);[^\n]*\{ capture: true, passive: true \}\);/.test(rec));
+    && verdictOf(/document\.addEventListener\('scroll', \(e\) => \{[^\n]*lastSt\.set\(n, n\.scrollTop\);[^\n]*\{ capture: true, passive: true \}\);/.test(rec)));
   ok('…the capture ships a window whose coarse ring is empty but whose fine ring is not (either ring), and its fine ring',
-    rec.includes('if (!v?._traceRing?.length && !v?._scrollFine?.length) continue;') && rec.includes('if (v._scrollFine?.length) traces[winId].fine = v._scrollFine.slice(-FINE_SCROLL_CAP);'));
-  ok('…and the nav-log import keeps its own comment (the scroll-forensics import is its own line)', rec.includes("import { navLogRead } from './nav-log.js'; // lane phone-back-reload: the tab's diary"));
+    gateOf(rec.includes('if (!v?._traceRing?.length && !v?._scrollFine?.length) continue;')) && verdictOf(rec.includes('if (v._scrollFine?.length) traces[winId].fine = v._scrollFine.slice(-FINE_SCROLL_CAP);')));
+  ok('…and the nav-log import keeps its own comment (the scroll-forensics import is its own line)', verdictOf(rec.includes("import { navLogRead } from './nav-log.js'; // lane phone-back-reload: the tab's diary")));
   const setRunOpen = cv.match(/\n  _setRunOpen\(run, open\) \{[\s\S]*?\n  \}\n/)?.[0] || '';
   const armPin = (src) => /^\n  _setRunOpen\(run, open\) \{\n    if \(!run\?\.header\) return;\n    if \(!this\._runsMutating\) this\._armScrollFine\(open \? 'runOpen' : 'runClose'\);/.test(src) && (src.match(/_armScrollFine\(/g) || []).length === 1;
   const armFn = cv.match(/\n  _armScrollFine\(why\) \{[\s\S]*?\n  \}\n/)?.[0] || '';
   ok('the chat view ARMS the window BEFORE the toggle (the first line of _setRunOpen, outside a pass) and at the ↓ press; every scroll event inside it is kept BEFORE the coarse 400 px filter',
-    armPin(setRunOpen)
-    && /this\._setPinned\(true, 'scrollBtn'\);\n\s*this\._armScrollFine\('scrollBtn'\);/.test(cv)
-    && /if \(Date\.now\(\) < \(this\._scrollFineUntil \|\| 0\)\) this\._noteFineScroll\(st\);[^\n]*\n\s*if \(Math\.abs\(st - last\) < 400\) return;/.test(cv));
+    gateOf(armPin(setRunOpen))
+    && gateOf(/this\._setPinned\(true, 'scrollBtn'\);\n\s*this\._armScrollFine\('scrollBtn'\);/.test(cv))
+    && verdictOf(/if \(Date\.now\(\) < \(this\._scrollFineUntil \|\| 0\)\) this\._noteFineScroll\(st\);[^\n]*\n\s*if \(Math\.abs\(st - last\) < 400\) return;/.test(cv)));
   const noLayoutPin = (fn) => !!fn && !/scrollTop|scrollHeight|clientHeight|getBoundingClientRect|offset(Top|Height)/.test(fn) && /const now = Date\.now\(\), g = this\._geomSeen;/.test(fn) && fn.includes("at: 'press'");
   ok('…and the arm reads NO live layout: the geometry the scroll handler last saw (_geomSeen, set in its rAF read), marked «at: press»',
-    noLayoutPin(armFn)
-    && /const \{ scrollTop, scrollHeight, clientHeight \} = this\._messageList;\n\s*this\._geomSeen = \{ st: Math\.round\(scrollTop\), sh: scrollHeight, ch: clientHeight, t: Date\.now\(\) \};/.test(cv));
-  ok('…every stamped write counts (_traceExpect bumps _stWriteSeq) — the fine trace\'s writer test', /_traceExpect\(by\) \{ this\._lastStWriteAt = Date\.now\(\); this\._lastStWriteBy = by \|\| ''; this\._stWriteSeq = \(this\._stWriteSeq \|\| 0\) \+ 1; this\._gapSettle\?\.wrote\(by\); \}/.test(cv));   // (B-3e8b: the settle watch hears every stamp)
+    gateOf(noLayoutPin(armFn))
+    && verdictOf(/const \{ scrollTop, scrollHeight, clientHeight \} = this\._messageList;\n\s*this\._geomSeen = \{ st: Math\.round\(scrollTop\), sh: scrollHeight, ch: clientHeight, t: Date\.now\(\) \};/.test(cv)));
+  ok('…every stamped write counts (_traceExpect bumps _stWriteSeq) — the fine trace\'s writer test', verdictOf(/_traceExpect\(by\) \{ this\._lastStWriteAt = Date\.now\(\); this\._lastStWriteBy = by \|\| ''; this\._stWriteSeq = \(this\._stWriteSeq \|\| 0\) \+ 1; this\._gapSettle\?\.wrote\(by\); \}/.test(cv)));   // (B-3e8b: the settle watch hears every stamp)
   // MUTANTS: the arm back AFTER the toggles (r1's place) ⇒ the pin reds; a live read in the arm ⇒ its pin reds
   const mutant = setRunOpen.replace("\n    if (!this._runsMutating) this._armScrollFine(open ? 'runOpen' : 'runClose');", '').replace('    if (outsidePass) {\n', "    if (outsidePass) {\n      this._armScrollFine(run.open ? 'runOpen' : 'runClose');\n");
-  ok('MUTANT: the arm moved back after the toggles (r1) reds the arm pin', mutant !== setRunOpen && armPin(setRunOpen) && !armPin(mutant));
+  ok('MUTANT: the arm moved back after the toggles (r1) reds the arm pin', mutant !== setRunOpen && gateOf(armPin(setRunOpen)) && !armPin(mutant));
   const liveArm = armFn.replace('const now = Date.now(), g = this._geomSeen;', 'const now = Date.now(), l = this._messageList, g = { st: l.scrollTop, sh: l.scrollHeight, ch: l.clientHeight, t: now };');
-  ok('MUTANT: a live layout read put back in the arm reds the no-layout pin', liveArm !== armFn && noLayoutPin(armFn) && !noLayoutPin(liveArm));
+  ok('MUTANT: a live layout read put back in the arm reds the no-layout pin', liveArm !== armFn && gateOf(noLayoutPin(armFn)) && !noLayoutPin(liveArm));
   // the bundle bound: a full fine ring of the widest entries + a full wheel ring
   const wide = { t: 1793625787053, st: 123456, sh: 1234567, ch: 12345, by: 'extendTop:delta', writeAgo: 1234567, wheelAgo: 1234567 };
   const wheelRec = { t: 1793625787053, k: 'wheel', el: 'div.chat-compact-content<div.chat-compact-msg<div.chat-msg.chat-msg-assistant<div.chat-message-list.chat-minimap-active', deltaY: -12345.67, deltaMode: 0, ctrl: 1, n: 999, stBefore: 123456, stAfter: 123456, droppedBefore: 123456 };
@@ -418,4 +418,4 @@ console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9
 
 console.log(`\nfull console ring with stacks: ${(ringBytes / 1024).toFixed(0)} KB in bundle.json`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

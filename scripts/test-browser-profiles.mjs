@@ -79,7 +79,7 @@ const BE = require('../src/server/browser-env.js');
 const { createBrowserFacts, sanitizeProbeEnv } = require('../src/browser-facts.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -189,17 +189,17 @@ console.log('\n② the RESOLVED user-data-dir (§9: assert the directory, not th
   const m = pairsMap(r.pairs);
   // A MUTANT MUST GO RED, NOT CRASH: if the variable is gone, say so and stop
   // reading the report it would have named (this repo has paid for that once).
-  const cfg = ok(typeof m.AGENT_BROWSER_CONFIG === 'string' && fs.existsSync(m.AGENT_BROWSER_CONFIG),
+  const cfg = ok(typeof m.AGENT_BROWSER_CONFIG === 'string' && verdictOf(fs.existsSync(m.AGENT_BROWSER_CONFIG)),
     'variant D names a generated config that EXISTS') ? JSON.parse(fs.readFileSync(m.AGENT_BROWSER_CONFIG, 'utf8')) : {};
   ok(!('profile' in cfg), 'variant D: the generated config has NO `profile` key — its ABSENCE is the ephemerality');
-  ok(cfg.args && cfg.args.includes('--ozone-platform=wayland'),
+  ok(gateOf(cfg.args) && verdictOf(cfg.args.includes('--ozone-platform=wayland')),
     "the user's own launch `args` are carried across (a custom config REPLACES the user file; drop these and the browser does not start on this desktop)");
   ok(e.resolvedProfileDir(KEY) === '', 'what the NEXT command resolves: ephemeral (empty), read back off the file');
 
   // THE VARIANT-B CONTROL, stated as §3.2.2 states it.
   const bPairs = ['AGENT_BROWSER_SESSION=vs-' + KEY, 'AGENT_BROWSER_NAMESPACE=vs-' + KEY];
   const looksRight = bPairs.some((p) => p.startsWith('AGENT_BROWSER_SESSION=')) && bPairs.some((p) => p.startsWith('AGENT_BROWSER_NAMESPACE='));
-  ok(looksRight, 'NEGATIVE CONTROL: variant B (SESSION+NAMESPACE only) SATISFIES an env-string assertion…');
+  ok(verdictOf(looksRight), 'NEGATIVE CONTROL: variant B (SESSION+NAMESPACE only) SATISFIES an env-string assertion…');
   ok(!bPairs.some((p) => p.startsWith('AGENT_BROWSER_CONFIG=') || p.startsWith('AGENT_BROWSER_PROFILE=')),
     '…and names no user-data-dir at all, so the shared default-profile still wins (MEASURED on 0.32.0) — which is why this suite asserts the directory');
 }
@@ -229,14 +229,14 @@ console.log('\n③ the browserKey ladder (a conversation, not a webui id)');
   let n = 0;
   const mint = () => B.mintBrowserKey(String(++n).padStart(8, '0'));
   const nw = B.browserKeyFor({ prior: '', resume: false, fork: false, mint });
-  ok(nw.origin === 'new' && B.isBrowserKey(nw.key), 'a NEW session mints a key');
+  ok(nw.origin === 'new' && verdictOf(B.isBrowserKey(nw.key)), 'a NEW session mints a key');
   const rs = B.browserKeyFor({ prior: KEY, resume: true, fork: false, mint });
   ok(rs.key === KEY && rs.origin === 'conversation', 'a RESUME reuses the conversation\'s key (a new key per resume leaks a browser + a daemon + a pinned tab)');
   const ru = B.browserKeyFor({ prior: '', resume: true, fork: false, mint });
   ok(ru.origin === 'resume-unknown' && ru.key !== KEY, 'a resume with no record mints, and SAYS SO — "resume-unknown" is not "new" wearing a hat');
   const fk = B.browserKeyFor({ prior: KEY, resume: true, fork: true, mint });
   ok(fk.origin === 'fork' && fk.key !== KEY, 'a FORK mints a NEW key (D15: a fork is a new conversation, it must not inherit a pinned tab)');
-  ok(B.mintBrowserKey('deadBEEF') === 'bk-deadbeef' && B.isBrowserKey(B.mintBrowserKey('1')), 'keys are bk-<8 hex>, case-folded and padded');
+  ok(B.mintBrowserKey('deadBEEF') === 'bk-deadbeef' && verdictOf(B.isBrowserKey(B.mintBrowserKey('1'))), 'keys are bk-<8 hex>, case-folded and padded');
 }
 // the join that recovers it, driven over REAL session-meta files
 {
@@ -269,13 +269,13 @@ console.log('\n④ the ladder (D12) and its reasons');
   const z = B.variantLadder({ configPath: null, profileDir: null, reasons: ['w1', 'w2'], namesProfile: true });
   ok(z.variant === 'none' && z.fallbacks.length === 3 && z.fallbacks[2]?.from === 'N' && z.fallbacks[2]?.to === 'none',
     'neither, and the config NAMES a profile ⇒ none (today\'s shared browser), as a THIRD recorded step');
-  ok(/SingletonLock/.test(z.fallbacks[2]?.why || '') && /smaller harm/.test(z.fallbacks[2]?.why || ''), '…whose reason carries the measurement and the trade');
+  ok(gateOf(/SingletonLock/.test(z.fallbacks[2]?.why || '')) && verdictOf(/smaller harm/.test(z.fallbacks[2]?.why || '')), '…whose reason carries the measurement and the trade');
   ok(B.browserEnvFor({ browserKey: KEY, variant: 'none', enabled: true }).length === 0, 'and `none` composes to ZERO pairs (not "fewer")');
   ok(!Object.values(B.VARIANTS).includes('B') && !Object.values(B.VARIANTS).includes('A'),
     'the design\'s A and B are both NAMED REJECTS — neither is in the shippable set');
-  ok(/SingletonLock/.test(B.REJECTED_VARIANTS.A) && /SingletonLock/.test(B.REJECTED_VARIANTS.B),
+  ok(gateOf(/SingletonLock/.test(B.REJECTED_VARIANTS.A)) && verdictOf(/SingletonLock/.test(B.REJECTED_VARIANTS.B)),
     '…each with the measurement that rejected it (A collides exactly like B once a profile is named: every --session launches its own chromium)');
-  ok(B.configNamesProfile({ profile: '/p' }) && B.configNamesProfile({ profile: 'Default' }) && !B.configNamesProfile({ profile: '' }) && !B.configNamesProfile({}) && !B.configNamesProfile({ profile: null }),
+  ok(gateOf(B.configNamesProfile({ profile: '/p' })) && gateOf(B.configNamesProfile({ profile: 'Default' })) && !B.configNamesProfile({ profile: '' }) && !B.configNamesProfile({}) && !B.configNamesProfile({ profile: null }),
     'configNamesProfile: a path OR a Chrome profile NAME names one; empty/null/absent do not');
   // A FENCED CONFIG NEVER LANDS ON C (r4): rung C IS `AGENT_BROWSER_PROFILE`,
   // which the CLI refuses beside `--allowed-domains` at the argument check
@@ -287,13 +287,13 @@ console.log('\n④ the ladder (D12) and its reasons');
   // A MUTANT MUST GO RED, NOT CRASH: a ladder that ignores `fenced` stops at C
   // with ONE step, so the second is read with `?.` (measured: the bare read
   // took the whole suite down with a TypeError instead of two red lines).
-  ok(/rung C refused/.test(fc.fallbacks[1]?.why || '') && /allowedDomains/.test(fc.fallbacks[1]?.why || '') && /measured/.test(fc.fallbacks[1]?.why || ''),
+  ok(gateOf(/rung C refused/.test(fc.fallbacks[1]?.why || '')) && gateOf(/allowedDomains/.test(fc.fallbacks[1]?.why || '')) && verdictOf(/measured/.test(fc.fallbacks[1]?.why || '')),
     '…with the fence as the reason, in the ONE exported spelling (fencedRungReason)');
   ok(B.variantLadder({ configPath: null, profileDir: '/p', reasons: ['w1'], namesProfile: false, fenced: false }).variant === 'C',
     'NEGATIVE CONTROL: the same inputs unfenced ⇒ C (round 3\'s ladder, byte for byte)');
   ok(B.variantLadder({ configPath: '/x.json', profileDir: null, fenced: true }).variant === 'D',
     'a fence changes nothing on D — the generated config CARRIES the fence (r2); the refusal is about rung C alone');
-  ok(/allowedDomains: example\.com, b\.org/.test(B.fencedRungReason(['example.com', 'b.org'])) && /allowedDomains\)/.test(B.fencedRungReason(null)),
+  ok(gateOf(/allowedDomains: example\.com, b\.org/.test(B.fencedRungReason(['example.com', 'b.org']))) && verdictOf(/allowedDomains\)/.test(B.fencedRungReason(null))),
     'the reason names the fence it was handed, and says `allowedDomains` when handed none');
 }
 // THE JOURNAL HAS TWO DECLARED CATEGORIES since r2: LADDER lines (a fallback,
@@ -325,7 +325,7 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
   const d = e.envFor({ browserKey: KEY, integrationOn: true });
   ok(d.variant === 'D' && ladderOnly(lines).length === 0, 'D on a healthy tree journals no FALLBACK (a fallback is news, a success is not)');
   ok(undeclared(lines).length === 0, `…and every line it DOES write is of a declared kind (${undeclared(lines).join(' | ') || 'none undeclared'})`);
-  ok(lines.length === 1 && CONFIG_RE.test(lines[0]),
+  ok(lines.length === 1 && verdictOf(CONFIG_RE.test(lines[0])),
     'the one line on a healthy tree is the `profile` drop — this fixture IS this machine\'s config shape, and dropping a key the user set is a decision, not a success');
 
   // (C): make the config path unwritable by planting a DIRECTORY where the
@@ -338,7 +338,7 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
   ok(c2.variant === 'C', 'config unwritable ⇒ falls to C (the per-session scratch dir)');
   ok(pairsMap(c2.pairs).AGENT_BROWSER_PROFILE === e2.linkPathFor(KEY2), 'C names the indirection SYMLINK, not the directory (so a pin can re-point it)');
   ok(fs.realpathSync(e2.linkPathFor(KEY2)) === fs.realpathSync(e2.scratchDirFor(KEY2)), 'the symlink resolves to our own scratch dir under data/');
-  ok(ladderOnly(l2).length === 1 && /D → C/.test(ladderOnly(l2)[0]) && /unusable/.test(ladderOnly(l2)[0]), 'the fallback is JOURNALLED with its reason (a silent degrade is a silent failure)');
+  ok(ladderOnly(l2).length === 1 && gateOf(/D → C/.test(ladderOnly(l2)[0])) && verdictOf(/unusable/.test(ladderOnly(l2)[0])), 'the fallback is JOURNALLED with its reason (a silent degrade is a silent failure)');
   ok(undeclared(l2).length === 0, '…and nothing undeclared rode along with it');
   ok(pairsMap(c2.pairs).AGENT_BROWSER_SESSION === 'vs-' + KEY2, 'C still carries both names — the isolation half never degrades');
 
@@ -351,7 +351,7 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
     const eTorn = mk({ log: { warn: (s) => l.push(s), log() { } }, writeJson: (f) => fs.writeFileSync(f, '{ torn') });
     const torn = eTorn.envFor({ browserKey: 'bk-beef0001', integrationOn: true });
     ok(torn.variant === 'C', 'a config our own writer left unparseable is NOT named — the read-back catches it and we fall to C');
-    ok(ladderOnly(l).length === 1 && /generated config unusable/.test(ladderOnly(l)[0]), 'and the reason says it was OUR config, not the machine');
+    ok(ladderOnly(l).length === 1 && verdictOf(/generated config unusable/.test(ladderOnly(l)[0])), 'and the reason says it was OUR config, not the machine');
     ok(!pairsMap(torn.pairs).AGENT_BROWSER_CONFIG, 'the variable never points at a file the CLI would exit 1 on');
   }
 
@@ -369,7 +369,7 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
   const a3 = e3.envFor({ browserKey: KEY, integrationOn: true });
   ok(a3.variant === 'none', 'neither rung available AND the config names a profile ⇒ none (today\'s shared browser, never a launch failure)');
   ok(a3.pairs.length === 0, '…with ZERO pairs: the three names would be variant B on this config (the second browser dies on SingletonLock, measured)');
-  ok(ladderOnly(l3).length === 3 && /D → C/.test(ladderOnly(l3)[0]) && /C → N/.test(ladderOnly(l3)[1]) && /N → none/.test(ladderOnly(l3)[2]),
+  ok(ladderOnly(l3).length === 3 && gateOf(/D → C/.test(ladderOnly(l3)[0])) && gateOf(/C → N/.test(ladderOnly(l3)[1])) && verdictOf(/N → none/.test(ladderOnly(l3)[2])),
     'all THREE fallback steps reach the journal, in order');
   // …and the SAME unwritable tree with a config that names NO profile lands on
   // N: the names alone are safe there (each daemon gets the CLI's own ephemeral
@@ -383,7 +383,7 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
   ok(a4.variant === 'N', 'NEGATIVE CONTROL: the same unwritable tree with a config naming NO profile ⇒ N');
   ok(a4.pairs.length === 3 && pairsMap(a4.pairs).AGENT_BROWSER_NAMESPACE === 'vs-' + KEY,
     'N is a DEGRADED P0, not a broken one: session + namespace still stop the tab stealing and scope `close --all`, and with no profile named each daemon is ephemeral');
-  ok(ladderOnly(l4).length === 2 && /C → N/.test(ladderOnly(l4)[1]), '…and only TWO steps are journalled (N is where it stopped)');
+  ok(ladderOnly(l4).length === 2 && verdictOf(/C → N/.test(ladderOnly(l4)[1])), '…and only TWO steps are journalled (N is where it stopped)');
 }
 // remote — the rung is DECIDED ON THE HOST (r3); leg ⑭ drives the fragment
 {
@@ -395,12 +395,12 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
   ok(!('AGENT_BROWSER_CONFIG' in m) && !('AGENT_BROWSER_PROFILE' in m), 'and the PAIRS name no user-data-dir: that decision is the prelude\'s, on the host');
   ok(m.AGENT_BROWSER_SESSION === 'vs-' + KEY && m.AGENT_BROWSER_NAMESPACE === 'vs-' + KEY && 'AGENT_BROWSER_IDLE_TIMEOUT_MS' in m,
     'remote still gets all THREE string variables — the isolation is the half that was actually reported broken');
-  ok(typeof r.remotePrelude === 'string' && r.remotePrelude.includes('AGENT_BROWSER_PROFILE="$vs_ab_d/vs-' + KEY + '"'),
+  ok(typeof r.remotePrelude === 'string' && verdictOf(r.remotePrelude.includes('AGENT_BROWSER_PROFILE="$vs_ab_d/vs-' + KEY + '"')),
     'and a remotePrelude that exports a per-KEY profile dir on the host, conditionally');
   ok(r.remotePrelude === B.remoteBrowserPrelude({ browserKey: KEY, socketDirBase: SOCKBASE }), '…which is the PURE fragment verbatim (one spelling; this suite\'s scratch socket base rides through)');
   ok(e.envFor({ browserKey: KEY, integrationOn: true }).remotePrelude === '', 'a LOCAL session gets an empty prelude (the fragment is the remote rung, not a second mechanism)');
   const rl = ladderOnly(l);
-  ok(rl.length === 1 && /decide their user-data-dir on the host/.test(rl[0]) && /fail to launch/.test(rl[0]),
+  ok(rl.length === 1 && gateOf(/decide their user-data-dir on the host/.test(rl[0])) && verdictOf(/fail to launch/.test(rl[0])),
     'and the reason is journalled, naming the measured collision that made the names-alone shape unsafe');
   ok(r.fallbacks.length === 0 && r.remote === true,
     '…as `remote`, NOT as a fallback — rung (H) is the DESIGNED answer for another machine, and calling a correct design decision a fallback makes every remote create warn about something working as intended');
@@ -413,7 +413,7 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
   const e = mk({ log: { warn: (s) => l.push(s), log() { } } });
   for (let i = 0; i < 25; i++) e.envFor({ browserKey: `bk-dddd00${String(i).padStart(2, '0')}`, integrationOn: true, remote: true });
   ok(l.length === 1, `25 remote creates produce ONE journal line, not 25 (${l.length})`);
-  ok(/decide their user-data-dir on the host/.test(l[0]), '…and it says what is actually true, once');
+  ok(verdictOf(/decide their user-data-dir on the host/.test(l[0])), '…and it says what is actually true, once');
   // a DIFFERENT reason is a different line: the throttle keys on the reason,
   // never on "we already said something about the browser".
   const l2 = [];
@@ -422,7 +422,7 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
   fs.rmSync(e2.configPathFor('bk-dddd2222'), { recursive: true, force: true });
   fs.mkdirSync(e2.configPathFor('bk-dddd2222'), { recursive: true });
   e2.envFor({ browserKey: 'bk-dddd2222', integrationOn: true });
-  ok(ladderOnly(l2).length === 2 && /D → C/.test(ladderOnly(l2)[1]), 'a DIFFERENT reason still gets its own line (the throttle keys on the reason, not on "we said something already")');
+  ok(ladderOnly(l2).length === 2 && verdictOf(/D → C/.test(ladderOnly(l2)[1])), 'a DIFFERENT reason still gets its own line (the throttle keys on the reason, not on "we said something already")');
   ok(undeclared(l2).length === 0, '…and still nothing of an undeclared kind');
   // THE DROP LINE OBEYS THE SAME THROTTLE, keyed on the KEY: the remote create
   // above drops nothing (rung H writes no config), the local one drops `profile`
@@ -432,7 +432,7 @@ const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFI
   for (let i = 0; i < 25; i++) e3.envFor({ browserKey: `bk-eeee00${String(i).padStart(2, '0')}`, integrationOn: true });
   ok(l3.filter((l) => /config drops `profile`/.test(l)).length === 1,
     `25 local creates produce ONE \`profile\` drop line, not 25 (${l3.length}) — the condition is PERMANENT while this runs once per create`);
-  ok(/bk-dddd2222/.test(l2[1]), '…and every line names the browser key it is about');
+  ok(verdictOf(/bk-dddd2222/.test(l2[1])), '…and every line names the browser key it is about');
 }
 
 // ═══ ⑤ D1: the floor probe, three outcomes, driven by a FAKE binary ═══════
@@ -462,12 +462,12 @@ console.log('\n⑤ the version floor (D1)');
   // B-0b8c (lane browser-probe-transient): …but ONE failed probe never decides for ever — an 'unknown' is NOT YET KNOWN (no
   // notice) until the owner's probe ladder is exhausted; then it says so in its own words, naming its tries and why
   ok(B.floorNotice(outs.unknown) === null && outs.unknown.settled === false, '…and while nobody has finished asking it is NOT YET KNOWN — no notice (one failed probe never decides for ever)');
-  ok(/^Could not read the agent-browser version after 6 tries over 14 minutes \(timed out after 8 s\)/.test(B.floorNotice(B.floorVerdict('weird build', B.FLOOR_VERSION, { ok: false, exhausted: true, attempts: 6, at: 834e3, since: 1e3, why: 'timed out after 8 s' })) || ''),
+  ok(verdictOf(/^Could not read the agent-browser version after 6 tries over 14 minutes \(timed out after 8 s\)/.test(B.floorNotice(B.floorVerdict('weird build', B.FLOOR_VERSION, { ok: false, exhausted: true, attempts: 6, at: 834e3, since: 1e3, why: 'timed out after 8 s' })) || '')),
     '…and once the ladder is exhausted it says so in its own words — the tries, the span, the last why — rather than claiming a version');
   const n = B.floorNotice(outs['too-old']);
-  ok(/too old for shared profiles/.test(n), 'the sentence is the design\'s: "your agent-browser is too old for shared profiles"');
-  ok(/0\.32\.0/.test(n) && /0\.37\.1/.test(n), 'it names the installed version AND the floor');
-  ok(/isolation is on and working/.test(n), 'and it is HONEST about what still works — P0\'s isolation is measured working on 0.32.0');
+  ok(verdictOf(/too old for shared profiles/.test(n)), 'the sentence is the design\'s: "your agent-browser is too old for shared profiles"');
+  ok(gateOf(/0\.32\.0/.test(n)) && verdictOf(/0\.37\.1/.test(n)), 'it names the installed version AND the floor');
+  ok(verdictOf(/isolation is on and working/.test(n)), 'and it is HONEST about what still works — P0\'s isolation is measured working on 0.32.0');
 }
 // the SHARED probe, over a fake execFile (no fork, no binary)
 {
@@ -516,19 +516,19 @@ console.log('\n⑥ the pin indirection (a mid-task pin never needs a restart)');
   ok(e.resolvedProfileDir(KEY) === '', 'before the pin: the next launch resolves an EPHEMERAL dir');
   const pinned = path.join(HOME, '.agent-browser', 'vs-bp-work');
   const r = e.repointPin(KEY, pinned);
-  ok(r.ok && r.variant === 'D', 'the pin lands on the D indirection');
+  ok(gateOf(r.ok) && r.variant === 'D', 'the pin lands on the D indirection');
   ok(e.resolvedProfileDir(KEY) === pinned, 'AFTER the pin, with NOTHING respawned, the next launch resolves the PINNED dir');
   // the env variable itself is BYTE-IDENTICAL — that is the whole mechanism
   const after = e.envFor({ browserKey: KEY, integrationOn: true, pinnedDir: pinned });
   ok(pairsMap(after.pairs).AGENT_BROWSER_CONFIG === cfgPath,
     'the ENV VARIABLE never changed — a running shell\'s environment is immutable, so the pin changes what it POINTS AT');
-  ok(cfgPath && JSON.parse(fs.readFileSync(cfgPath, 'utf8')).profile === pinned, 'read off the FILE, not off any in-memory copy (an in-memory answer passes with a writer that never lands)');
-  ok(r.appliesFrom === B.PIN_APPLIES_FROM && /next command/.test(r.appliesFrom) && /relaunches the browser/.test(r.appliesFrom) && /lost/.test(r.appliesFrom),
+  ok(gateOf(cfgPath) && JSON.parse(fs.readFileSync(cfgPath, 'utf8')).profile === pinned, 'read off the FILE, not off any in-memory copy (an in-memory answer passes with a writer that never lands)');
+  ok(r.appliesFrom === B.PIN_APPLIES_FROM && gateOf(/next command/.test(r.appliesFrom)) && gateOf(/relaunches the browser/.test(r.appliesFrom)) && verdictOf(/lost/.test(r.appliesFrom)),
     'and the answer states WHEN it applies as MEASURED (r4): on the next command, which RELAUNCHES the browser and loses the open page — not "on the next launch, never a running browser", the sentence rounds 1-3 inherited from the pool and 0.32.0 falsifies (test-browser-resources §ⓗ drives the binary)');
   ok(!/next browser launch/.test(B.PIN_APPLIES_FROM), 'the retired sentence is gone from the answer (a UI that printed it would tell the user their page was safe)');
   // unpin
   const u = e.repointPin(KEY, null);
-  ok(u.ok && e.resolvedProfileDir(KEY) === '', 'unpinning restores the ephemeral resolution in the same one write');
+  ok(gateOf(u.ok) && e.resolvedProfileDir(KEY) === '', 'unpinning restores the ephemeral resolution in the same one write');
 
   // variant C: the symlink
   const e2 = mk();
@@ -540,14 +540,14 @@ console.log('\n⑥ the pin indirection (a mid-task pin never needs a restart)');
   const was = fs.realpathSync(linkPath);
   const pin2 = path.join(HOME, '.agent-browser', 'vs-bp-two');
   const r2 = e2.repointPin(KEY2, pin2);
-  ok(r2.ok && r2.variant === 'C', 'the C pin re-points the symlink');
+  ok(gateOf(r2.ok) && r2.variant === 'C', 'the C pin re-points the symlink');
   ok(fs.realpathSync(linkPath) === fs.realpathSync(pin2) && fs.realpathSync(linkPath) !== was,
     'the SAME path now resolves somewhere else — symlink-to-temp + rename, the pool\'s own primitive');
   ok(pairsMap(e2.envFor({ browserKey: KEY2, integrationOn: true, pinnedDir: pin2 }).pairs).AGENT_BROWSER_PROFILE === linkPath,
     'and the env variable is byte-identical here too');
   ok(r2.appliesFrom === B.PIN_APPLIES_FROM, 'the C rung answers the same measured sentence as D (one spelling)');
   const none = mk().repointPin('bk-99999999', pin2);
-  ok(!none.ok && /no browser indirection/.test(none.why), 'a session with no indirection (rung A / older than this feature) is REFUSED by name, never silently "pinned"');
+  ok(!none.ok && verdictOf(/no browser indirection/.test(none.why)), 'a session with no indirection (rung A / older than this feature) is REFUSED by name, never silently "pinned"');
 }
 
 // ═══ ⑩ THE GENERATED CONFIG IS A DENY, NOT AN ALLOW (r2) ═════════════════
@@ -579,9 +579,9 @@ console.log('\n⑩ the generated config carries the user\'s restrictions (r2)');
   const lines = [];
   const e = mk({ homeDir: H2, log: { warn: (s) => lines.push(String(s)), log() { } } });
   const r = e.envFor({ browserKey: 'bk-fe0e0001', integrationOn: true });
-  const cfg = ok(r.configPath && fs.existsSync(r.configPath), 'setup: the generated config exists (a mutant must go RED, not crash)')
+  const cfg = ok(gateOf(r.configPath) && verdictOf(fs.existsSync(r.configPath)), 'setup: the generated config exists (a mutant must go RED, not crash)')
     ? unmark(JSON.parse(fs.readFileSync(r.configPath, 'utf8')), 'bk-fe0e0001') : {};
-  ok(Array.isArray(cfg.allowedDomains) && cfg.allowedDomains[0] === 'example.com',
+  ok(gateOf(Array.isArray(cfg.allowedDomains)) && cfg.allowedDomains[0] === 'example.com',
     "the user's own browsing FENCE survives — §3.2.2 sells variant D on \"能否带 --allowed-domains: 是\" and §6.3 forbids accepting a flag that is later silently dropped");
   for (const k of ['confirmActions', 'actionPolicy', 'initScripts', 'downloadPath', 'maxOutput', 'aKeyNobodyEnumerated']) {
     ok(JSON.stringify(cfg[k]) === JSON.stringify(userCfg[k]), `…and so does \`${k}\` (a DENY carries the keys nobody enumerated)`);
@@ -596,11 +596,11 @@ console.log('\n⑩ the generated config carries the user\'s restrictions (r2)');
   for (const k of R1_ALLOW) if (userCfg[k] !== undefined && userCfg[k] !== null) r1[k] = userCfg[k];
   r1.headed = !!userCfg.headed;
   const lost = Object.keys(userCfg).filter((k) => !(k in r1));
-  ok(lost.includes('allowedDomains') && lost.includes('confirmActions') && lost.includes('actionPolicy'),
+  ok(gateOf(lost.includes('allowedDomains')) && gateOf(lost.includes('confirmActions')) && verdictOf(lost.includes('actionPolicy')),
     `PRE-FIX CONTROL: round 1's ALLOW list dropped ${lost.length} of the user's keys including the fence — [${lost.join(', ')}]`);
   ok(Object.keys(userCfg).filter((k) => !(k in cfg)).length === 0,
     'while the DENY drops NOTHING from a fenced config — it has no `profile` to drop, because the CLI refuses those two together');
-  ok(r.dropped && r.dropped.length === 0 && lines.length === 0,
+  ok(gateOf(r.dropped) && r.dropped.length === 0 && lines.length === 0,
     'so there is nothing to report and nothing to journal (a drop line for a key nobody set would be noise)');
 
   // A DROPPED KEY IS A STATED DECISION, not one made by omission — driven on a
@@ -617,14 +617,14 @@ console.log('\n⑩ the generated config carries the user\'s restrictions (r2)');
     `the resolver REPORTS both denied keys this config carries (${JSON.stringify(rp.dropped)})`);
   ok(l2.filter((l) => /config drops `/.test(l)).length === 2,
     'ONE journal line PER KEY — the throttle keys on the key, so a reader learns which restriction of theirs does not apply here');
-  ok(l2.some((l) => /drops `profile`/.test(l) && /ephemerality/.test(l)) && l2.some((l) => /drops `restore`/.test(l) && /replays/.test(l)),
+  ok(gateOf(l2.some((l) => /drops `profile`/.test(l) && /ephemerality/.test(l))) && verdictOf(l2.some((l) => /drops `restore`/.test(l) && /replays/.test(l))),
     `and each line carries that key's own reason — ${JSON.stringify(l2.find((l) => /drops `restore`/.test(l))?.slice(0, 110) || '<nothing>')}`);
-  ok(l2.every((l) => /carried across unchanged/.test(l)),
+  ok(verdictOf(l2.every((l) => /carried across unchanged/.test(l))),
     '…and says what it did NOT drop, so the line is not read as "your config was ignored"');
   const cfgP = unmark(JSON.parse(fs.readFileSync(rp.configPath, 'utf8')), 'bk-fe0e0002');
   ok(!('profile' in cfgP) && !('restore' in cfgP) && cfgP.args === '--no-sandbox' && cfgP.headed === true,
     'the file itself: both denied keys gone, everything else verbatim');
-  ok(Object.keys(B.EPHEMERAL_DENY).every((k) => typeof B.EPHEMERAL_DENY[k] === 'string' && B.EPHEMERAL_DENY[k].length > 10),
+  ok(verdictOf(Object.keys(B.EPHEMERAL_DENY).every((k) => typeof B.EPHEMERAL_DENY[k] === 'string' && B.EPHEMERAL_DENY[k].length > 10)),
     `every denied key carries a reason (${Object.keys(B.EPHEMERAL_DENY).join(', ')})`);
   // the deny set is the CLI's own "this is not a fresh, isolated context" list
   for (const k of ['profile', 'restore', 'sessionName', 'state', 'autoConnect', 'cdp']) {
@@ -660,11 +660,11 @@ console.log('\n⑪ a pin over a fenced config is refused, with the reason (§6.3
   const pinned = path.join(H3, '.agent-browser', 'vs-bp-vendor');
   const r = e.repointPin(K, pinned);
   ok(r.ok === false, 'repointPin REFUSES while the user config carries a fence');
-  ok(/mutually exclusive/.test(r.why) && /allowedDomains/.test(r.why) && /proxy/.test(r.why),
+  ok(gateOf(/mutually exclusive/.test(r.why)) && gateOf(/allowedDomains/.test(r.why)) && verdictOf(/proxy/.test(r.why)),
     'and the refusal names the conflict, the CLI\'s reason and the way out — never a silent drop');
   ok(e.resolvedProfileDir(K) === '', 'the session is still EPHEMERAL — the refusal changed nothing');
   const stillFenced = JSON.parse(fs.readFileSync(e.configPathFor(K), 'utf8'));
-  ok(Array.isArray(stillFenced.allowedDomains) && !('profile' in stillFenced),
+  ok(gateOf(Array.isArray(stillFenced.allowedDomains)) && !('profile' in stillFenced),
     'and the config on disk still has the fence and no profile (a refusal that half-applied would be worse than either answer)');
 
   // the spawn path lands EPHEMERAL and SAYS the pin was refused
@@ -673,7 +673,7 @@ console.log('\n⑪ a pin over a fenced config is refused, with the reason (§6.3
   const r2 = e2.envFor({ browserKey: 'bk-f0f0f0f1', integrationOn: true, pinnedDir: pinned });
   ok(!!r2.pinRefused && r2.pinRefused.key === 'allowedDomains', 'a spawn asked to pin under a fence reports the refusal');
   ok(!('profile' in JSON.parse(fs.readFileSync(r2.configPath, 'utf8'))), '…and writes NO profile, so the browser still works');
-  ok(lines.some((l) => /pin was NOT applied/.test(l)), 'and journals it — a dropped pin nobody is told about is the anti-pattern §6.3 names');
+  ok(verdictOf(lines.some((l) => /pin was NOT applied/.test(l))), 'and journals it — a dropped pin nobody is told about is the anti-pattern §6.3 names');
 
   // NEGATIVE CONTROLS — the refusal must be about the FENCE, not about pinning.
   write({ args: '--no-sandbox' });
@@ -681,12 +681,12 @@ console.log('\n⑪ a pin over a fenced config is refused, with the reason (§6.3
   const K3 = 'bk-f0f0f0f2';
   e3.envFor({ browserKey: K3, integrationOn: true });
   const r3 = e3.repointPin(K3, pinned);
-  ok(r3.ok && e3.resolvedProfileDir(K3) === pinned, 'NEGATIVE CONTROL: with no fence the SAME pin is applied normally');
+  ok(gateOf(r3.ok) && e3.resolvedProfileDir(K3) === pinned, 'NEGATIVE CONTROL: with no fence the SAME pin is applied normally');
   write({ args: '--no-sandbox', allowedDomains: [] });
   const e4 = mk({ homeDir: H3 });
   const K4 = 'bk-f0f0f0f3';
   e4.envFor({ browserKey: K4, integrationOn: true });
-  ok(e4.repointPin(K4, pinned).ok,
+  ok(verdictOf(e4.repointPin(K4, pinned).ok),
     'NEGATIVE CONTROL: an EMPTY allowedDomains is not a fence — MEASURED, `[]` + a profile opens the page, so it may not block a pin');
   ok(B.pinFenceConflict({ userConfig: { allowedDomains: ['x'] }, pinnedDir: null }) === null,
     'NEGATIVE CONTROL: a fence with no pin conflicts with nothing (the ephemeral default is exactly what §6.3 wants)');
@@ -717,7 +717,7 @@ console.log('\n⑫ the version probe strips an ambient AGENT_BROWSER_* (r2)');
   ok(Object.keys(sanitizeProbeEnv({ A: '1', AGENT_BROWSER_X: '2' })).join() === 'A', 'the rule is one exported predicate, so it can be asserted directly');
   // PRE-FIX CONTROL: the retired shape, over the SAME ambient env.
   const before = { PATH: '/usr/bin', AGENT_BROWSER_CONFIG: '/AMBIENT/LEAK/config.json' };
-  ok(Object.keys(before).some((k) => k.startsWith('AGENT_BROWSER_')),
+  ok(verdictOf(Object.keys(before).some((k) => k.startsWith('AGENT_BROWSER_'))),
     'PRE-FIX CONTROL: round 1 handed execFile no env at all, so process.env — including that variable — reached the CLI');
   // and the SPAWN path already had this rule, one layer away: same names, same reason
   const { agentEnv } = require('../src/ws-handler.js');
@@ -727,12 +727,12 @@ console.log('\n⑫ the version probe strips an ambient AGENT_BROWSER_* (r2)');
 // the ORIGIN vocabulary — P0 may only emit what BOTH existing vocabularies accept
 {
   const { SPAWN_ORIGINS } = require('../src/resume-continuity.js');
-  ok(B.P0_PIN_ORIGINS.every((o) => SPAWN_ORIGINS.includes(o)),
+  ok(verdictOf(B.P0_PIN_ORIGINS.every((o) => SPAWN_ORIGINS.includes(o))),
     'every origin P0 emits is already in SPAWN_ORIGINS (the frozen four) — no vocabulary change rides in on P0');
   const client = read('src/lib/agent-meta.js');
-  ok(B.P0_PIN_ORIGINS.every((o) => client.includes(`'${o}'`)),
+  ok(verdictOf(B.P0_PIN_ORIGINS.every((o) => client.includes(`'${o}'`))),
     'and the CLIENT mirror (agent-meta.js) recognises each of them — an unknown origin there is a SILENT mislabel, never an error');
-  ok(B.PIN_ORIGINS.includes('task-group') && !B.P0_PIN_ORIGINS.includes('task-group'),
+  ok(gateOf(B.PIN_ORIGINS.includes('task-group')) && !B.P0_PIN_ORIGINS.includes('task-group'),
     "the fifth value ('task-group') is written down for P1 but NOT emitted by P0 — adding it is a two-place change in P1's own commit");
   for (const [inp, want] of [
     [{ explicit: 'p1', conversation: 'p2', instanceDefault: 'p3' }, 'chosen'],
@@ -764,8 +764,8 @@ console.log('\n⑦ wiring (a pure function nobody calls is a feature nobody has)
   const e = mk();
   const rp = e.envFor({ browserKey: KEY, integrationOn: true, remote: true }).pairs;
   const line = buildRemoteExec({ cwd: '/w', shq, parts: [...rp.map(shq), shq('claude')] });
-  ok(line.includes(shq('AGENT_BROWSER_SESSION=vs-' + KEY)), 'buildRemoteExec carries the browser env, shell-quoted, into the remote command');
-  ok(/exec env .*AGENT_BROWSER_NAMESPACE/.test(line), 'as part of the one `exec env` composition, not a second mechanism');
+  ok(verdictOf(line.includes(shq('AGENT_BROWSER_SESSION=vs-' + KEY))), 'buildRemoteExec carries the browser env, shell-quoted, into the remote command');
+  ok(verdictOf(/exec env .*AGENT_BROWSER_NAMESPACE/.test(line)), 'as part of the one `exec env` composition, not a second mechanism');
 }
 
 // ═══ ⑧ housekeeping: the C rung may not farm orphans ═════════════════════
@@ -777,25 +777,25 @@ console.log('\n⑧ the sweep (§3.2.2: those directories are ours, and they are 
   // age them past the in-flight grace
   const old = Date.now() / 1000 - 7200;
   for (const k of ['bk-aaaa0001', 'bk-aaaa0002']) { try { fs.utimesSync(e.configPathFor(k), old, old); } catch { } }
-  ok(e.sweep(null).skipped, 'NO live-session set ⇒ sweeps NOTHING and says so ("I could not enumerate" is not "there are none")');
+  ok(verdictOf(e.sweep(null).skipped), 'NO live-session set ⇒ sweeps NOTHING and says so ("I could not enumerate" is not "there are none")');
   const r = e.sweep(new Set(['bk-aaaa0001']));
   ok(r.swept === 1 && r.kept >= 1, 'an orphaned indirection is removed; a live one is kept');
-  ok(fs.existsSync(e.configPathFor('bk-aaaa0001')) && !fs.existsSync(e.configPathFor('bk-aaaa0002')), 'and the right one survived');
+  ok(gateOf(fs.existsSync(e.configPathFor('bk-aaaa0001'))) && !fs.existsSync(e.configPathFor('bk-aaaa0002')), 'and the right one survived');
   // the on-disk half: a restored session may not carry the key in memory yet
   const k3 = 'bk-aaaa0003';
   e.envFor({ browserKey: k3, integrationOn: true });
   fs.utimesSync(e.configPathFor(k3), old, old);
   fs.writeFileSync(path.join(DATA, 'session-meta', 'cw-77-7777.json'), JSON.stringify({ browserKey: k3, webuiSessionId: 'sess-77-7777' }));
   const r3 = e.sweep(new Set());   // in-memory set EMPTY, as right after a restart
-  ok(fs.existsSync(e.configPathFor(k3)),
+  ok(verdictOf(fs.existsSync(e.configPathFor(k3))),
     'a session-meta on disk keeps its indirection alive even when the in-memory set is empty — a restart must not silently revert a pin');
-  ok(e.liveKeysFromMeta().has(k3) && !r3.spared.some((s) => s.name.includes(k3)),
+  ok(gateOf(e.liveKeysFromMeta().has(k3)) && !r3.spared.some((s) => s.name.includes(k3)),
     '…and it was the META that saved it, not the in-flight grace (the two halves are separable)');
   // the in-flight grace
   const k4 = 'bk-aaaa0004';
   e.envFor({ browserKey: k4, integrationOn: true });   // fresh: mtime ≈ now
   const r4 = e.sweep(new Set());
-  ok(r4.spared.some((s) => s.name.includes(k4)) && fs.existsSync(e.configPathFor(k4)),
+  ok(gateOf(r4.spared.some((s) => s.name.includes(k4))) && verdictOf(fs.existsSync(e.configPathFor(k4))),
     'a create still in flight (indirection written, meta not yet) is SPARED and NAMED with its age');
   ok(r4.spared[0].ageMs >= 0 && r4.graceMs === BE.SWEEP_GRACE_MS,
     'the sweep reports its own clock and threshold, so a reader never re-measures the age (and the age is never NEGATIVE — Date.now() truncates where mtimeMs does not)');
@@ -849,7 +849,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
   ok(m.args === p.args, 'a key in BOTH files takes the PROJECT value (measured: the project `args` reached the chromium cmdline, the user file\'s did not)');
   ok(m.userAgent === 'U' && m.headed === false, 'a key in ONE file survives (measured: a user-level `userAgent` still answered beside a project file)');
   ok(JSON.stringify(m.extensions) === '["/e/a","/e/b"]', '`extensions` is the ONE key that is CONCATENATED, user first (measured: --load-extension=<user>,<project>)');
-  ok(Array.isArray(m.allowedDomains) && m.allowedDomains[0] === 'example.com', 'the project-level FENCE is in the merged config');
+  ok(gateOf(Array.isArray(m.allowedDomains)) && m.allowedDomains[0] === 'example.com', 'the project-level FENCE is in the merged config');
   ok(JSON.stringify(B.layerProjectConfig(u, null)) === JSON.stringify(u), 'no project file ⇒ the user file verbatim (round 2\'s shape, by construction)');
   ok(JSON.stringify(B.layerProjectConfig({ extensions: '/e/a' }, { extensions: '/e/b' }).extensions) === '["/e/a","/e/b"]', 'a string `extensions` is coerced before concatenation');
 
@@ -863,28 +863,28 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
   const e = mk({ homeDir: H13, log: { warn: (s) => lines.push(String(s)), log() { } } });
   const K = 'bk-13131301';
   const r = e.envFor({ browserKey: K, integrationOn: true, cwd: PROJ });
-  const cfg = ok(!!r.configPath && fs.existsSync(r.configPath), 'setup: variant D wrote a config (a mutant must go RED, not crash)') ? unmark(JSON.parse(fs.readFileSync(r.configPath, 'utf8')), K) : {};
-  ok(Array.isArray(cfg.allowedDomains) && cfg.allowedDomains[0] === 'example.com', 'THE FIX: the generated config carries the PROJECT-level fence');
+  const cfg = ok(!!r.configPath && verdictOf(fs.existsSync(r.configPath)), 'setup: variant D wrote a config (a mutant must go RED, not crash)') ? unmark(JSON.parse(fs.readFileSync(r.configPath, 'utf8')), K) : {};
+  ok(gateOf(Array.isArray(cfg.allowedDomains)) && cfg.allowedDomains[0] === 'example.com', 'THE FIX: the generated config carries the PROJECT-level fence');
   // takeover r3 (finding 2): the project file only NARROWS — its `confirmActions` (a narrowing key) is carried,
   // its `args` and `extensions` (launch keys) are NOT: the user file's stand, and the drop is journalled by name
   ok(cfg.args === '--no-sandbox,--user' && cfg.confirmActions === 'navigate' && JSON.stringify(cfg.extensions) === '["/e/a"]',
     'takeover r3: the project `confirmActions` is carried (it narrows); its `args` / `extensions` are NOT — the user file\'s launch keys stand', JSON.stringify(cfg));
-  ok(JSON.stringify(r.projectDropped) === '["args","extensions"]' && lines.some((l) => /NOT carried: a project file lives where the agent works/.test(l) && /args, extensions/.test(l) && l.includes(path.join(PROJ, 'agent-browser.json'))),
+  ok(JSON.stringify(r.projectDropped) === '["args","extensions"]' && verdictOf(lines.some((l) => /NOT carried: a project file lives where the agent works/.test(l) && /args, extensions/.test(l) && l.includes(path.join(PROJ, 'agent-browser.json')))),
     'takeover r3: …and the dropped project keys are SAID (the result + one journal line naming the file and the keys)', JSON.stringify({ pd: r.projectDropped, lines }));
-  ok(r.projectConfig && r.projectConfig.path === path.join(PROJ, 'agent-browser.json') && r.projectConfig.keys.includes('allowedDomains'),
+  ok(gateOf(r.projectConfig) && r.projectConfig.path === path.join(PROJ, 'agent-browser.json') && verdictOf(r.projectConfig.keys.includes('allowedDomains')),
     'the resolver REPORTS the file it layered and the keys it took');
   const pl = lines.filter((l) => /config also carries the project-level/.test(l));
-  ok(pl.length === 1 && pl[0].includes(path.join(PROJ, 'agent-browser.json')) && /allowedDomains/.test(pl[0]) && !/keys: [^)]*\bargs\b/.test(pl[0]),
+  ok(pl.length === 1 && gateOf(pl[0].includes(path.join(PROJ, 'agent-browser.json'))) && gateOf(/allowedDomains/.test(pl[0])) && !/keys: [^)]*\bargs\b/.test(pl[0]),
     'ONE journal line names the file and its keys (round 2 wrote nothing — the drop was by omission)');
-  ok(/cd's into/.test(pl[0]) && /per invocation directory/.test(pl[0]),
+  ok(gateOf(/cd's into/.test(pl[0])) && verdictOf(/per invocation directory/.test(pl[0])),
     '…and states the one boundary honestly: the CLI reads it per invocation directory, the generated config applies it to the whole session');
   ok(undeclared(lines).length === 0, 'and the line is of a declared journal kind');
   // THE PIN READS THE SESSION'S OWN FILE (door #2): a pin over the layered
   // fence is refused even though the USER file has no fence at all.
   const pinned = path.join(H13, '.agent-browser', 'vs-bp-x');
   const pr = e.repointPin(K, pinned);
-  ok(pr.ok === false && /allowedDomains/.test(pr.why), 'a pin over a PROJECT-level fence is refused — repointPin asks the session\'s own generated file, not ~/.agent-browser/config.json');
-  ok(e.resolvedProfileDir(K) === '' && Array.isArray(JSON.parse(fs.readFileSync(r.configPath, 'utf8')).allowedDomains),
+  ok(pr.ok === false && verdictOf(/allowedDomains/.test(pr.why)), 'a pin over a PROJECT-level fence is refused — repointPin asks the session\'s own generated file, not ~/.agent-browser/config.json');
+  ok(e.resolvedProfileDir(K) === '' && verdictOf(Array.isArray(JSON.parse(fs.readFileSync(r.configPath, 'utf8')).allowedDomains)),
     '…and nothing half-applied: still ephemeral, fence still on disk');
   // drop-line sentence names BOTH files now
   const H13b = path.join(ROOT, 'home-project-profile');
@@ -893,7 +893,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
   const l2 = [];
   mk({ homeDir: H13b, log: { warn: (s) => l2.push(String(s)), log() { } } }).envFor({ browserKey: 'bk-13131302', integrationOn: true, cwd: PROJ });
   const dl = l2.find((l) => /drops `profile`/.test(l)) || '';
-  ok(dl.includes('and ' + path.join(PROJ, 'agent-browser.json')) && /carried across unchanged/.test(dl),
+  ok(gateOf(dl.includes('and ' + path.join(PROJ, 'agent-browser.json'))) && verdictOf(/carried across unchanged/.test(dl)),
     'the drop line now says what it carried FROM — both files — so it is not read as "your config was ignored"');
 
   // CONTROLS — each must be the thing it names.
@@ -913,7 +913,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
   fs.writeFileSync(path.join(BAD, 'agent-browser.json'), '{ torn');
   const lc = [];
   const rc = mk({ homeDir: H13, log: { warn: (s) => lc.push(String(s)), log() { } } }).envFor({ browserKey: 'bk-13131305', integrationOn: true, cwd: BAD });
-  ok(rc.projectConfig.error && lc.some((l) => /could not be layered/.test(l) && l.includes(path.join(BAD, 'agent-browser.json'))),
+  ok(gateOf(rc.projectConfig.error) && verdictOf(lc.some((l) => /could not be layered/.test(l) && l.includes(path.join(BAD, 'agent-browser.json')))),
     'a project file that does not parse is NAMED in the journal with the error (the CLI would refuse it too; "we ignored your file" is the sentence this round exists to stop leaving out)');
   ok(!('allowedDomains' in JSON.parse(fs.readFileSync(rc.configPath, 'utf8'))), '…and the generated config falls back to the user file');
   // (d) PRE-FIX CONTROL #1: round 2's spawn — the layering call put back to the
@@ -959,7 +959,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
     const cr = unmark(JSON.parse(fs.readFileSync(rr.configPath, 'utf8')), 'bk-13131308');
     ok(cr.args === '--no-sandbox,--ozone-platform=wayland' && cr.userAgent === 'U' && !('executablePath' in cr) && !('proxy' in cr) && !('cdp' in cr) && JSON.stringify(cr.allowedDomains) === '["example.com"]',
       'takeover r3: the verifier\'s rung-D shape — the project\'s args / userAgent / executablePath / proxy are not carried, the user\'s raw-debugging switch and `cdp` are dropped, the user\'s other args and the project FENCE stand', JSON.stringify(cr));
-    ok(JSON.stringify(rr.argsDropped) === '["--remote-debugging-port=41999"]' && lr.some((l) => /drops --remote-debugging-port=41999 from `args`/.test(l)) && undeclared(lr).length === 0,
+    ok(JSON.stringify(rr.argsDropped) === '["--remote-debugging-port=41999"]' && gateOf(lr.some((l) => /drops --remote-debugging-port=41999 from `args`/.test(l))) && undeclared(lr).length === 0,
       'takeover r3: …the dropped switch is SAID in a declared journal line', JSON.stringify({ ad: rr.argsDropped, lr }));
     // PRE-FIX CONTROL: the v2-r3 composition (the layered config whole, only EPHEMERAL_DENY dropped) in a patched copy of
     // the PURE module carries the verifier's raw port and user agent into the generated config
@@ -968,7 +968,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
       "const lay = layerProjectConfig(userConfig, projectConfig); const cfg0 = { ...lay }; for (const k of deniedKeys(lay)) delete cfg0[k]; const r = { config: cfg0, dropped: { project: [], keys: [], args: [] } };", "src/browser-profiles.js");
     const m0 = { exports: {} }; new Function('module', 'exports', 'require', pre)(m0, m0.exports, (x) => require(x.startsWith('./') ? path.join(REPO, 'src', x) : x));
     const pc = m0.exports.generatedConfig({ userConfig: JSON.parse(fs.readFileSync(path.join(H13r, '.agent-browser', 'config.json'), 'utf8')), projectConfig: JSON.parse(fs.readFileSync(path.join(PR, 'agent-browser.json'), 'utf8')) });
-    ok(pre !== bsrc && /--remote-debugging-port=42945/.test(pc.args) && pc.userAgent === 'R3-UA-LAYERED' && pc.executablePath === '/x/dumpchrome',
+    ok(pre !== bsrc && gateOf(/--remote-debugging-port=42945/.test(pc.args)) && pc.userAgent === 'R3-UA-LAYERED' && pc.executablePath === '/x/dumpchrome',
       'takeover r3 PRE-FIX CONTROL: the v2-r3 layering (patched copy) carries the project\'s raw debugging port, user agent and executable into the generated config — the legs above can go red', JSON.stringify(pc));
   }
   // (⑬ the cwd wiring + docs pins — MOVED to the fast scripts/test-browser-profiles-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -990,16 +990,16 @@ console.log('\n⑭ the remote rung: a shell fragment the host runs (r3)');
   // applies the socket-root rule, and this fixture HOME is over 38 characters,
   // so running it would otherwise create the production `/tmp/vs-ab-<uid>`.
   const frag = B.remoteBrowserPrelude({ browserKey: KEY, socketDirBase: SOCKBASE });
-  ok(frag.endsWith('; ') && !/\n/.test(frag), 'the fragment is one line ending in "; ", like every prelude beside it');
-  ok(frag.includes(`awk '${B.TOP_LEVEL_PROFILE_AWK}'`) && /-name 'vs-bk-\*'/.test(frag) && !B.TOP_LEVEL_PROFILE_AWK.includes("'"),
+  ok(gateOf(frag.endsWith('; ')) && !/\n/.test(frag), 'the fragment is one line ending in "; ", like every prelude beside it');
+  ok(gateOf(frag.includes(`awk '${B.TOP_LEVEL_PROFILE_AWK}'`)) && gateOf(/-name 'vs-bk-\*'/.test(frag)) && !B.TOP_LEVEL_PROFILE_AWK.includes("'"),
     'the awk program and every pattern are single-quoted words (zsh reads an unquoted pattern as a glob — the B-3185 lesson; the awk carries no quote of its own)');
   ok(!/grep -qs '"profile"/.test(frag), 'round 3\'s grep spelling is GONE from the fragment (it counted `"profile": null` as naming a profile — r4)');
-  ok(/\[ -L "\$1\/SingletonLock" \]/.test(frag), 'liveness is `-L`: chromium\'s SingletonLock is a DANGLING symlink while the browser runs (measured), and `-e` follows it and answers "absent"');
-  ok(frag.includes(`-mtime +${B.REMOTE_SCRATCH_STALE_DAYS}`) && B.REMOTE_SCRATCH_STALE_DAYS === 7, 'the sweep threshold is the named constant (7 days)');
+  ok(verdictOf(/\[ -L "\$1\/SingletonLock" \]/.test(frag)), 'liveness is `-L`: chromium\'s SingletonLock is a DANGLING symlink while the browser runs (measured), and `-e` follows it and answers "absent"');
+  ok(gateOf(frag.includes(`-mtime +${B.REMOTE_SCRATCH_STALE_DAYS}`)) && B.REMOTE_SCRATCH_STALE_DAYS === 7, 'the sweep threshold is the named constant (7 days)');
   ok(B.remoteBrowserPrelude({ browserKey: 'nope' }) === '', 'a malformed key produces NO fragment (never a half-formed shell line)');
 
   const shells = ['sh', 'bash', 'zsh', 'dash', 'busybox'].filter((s) => { const r = spawnSync('sh', ['-c', `command -v ${s}`], { encoding: 'utf8' }); return r.status === 0; });
-  ok(shells.includes('sh'), `sh is available to drive the fragment (found: ${shells.join(', ')})`);
+  ok(verdictOf(shells.includes('sh')), `sh is available to drive the fragment (found: ${shells.join(', ')})`);
   for (const s of ['bash', 'zsh', 'dash', 'busybox']) if (!shells.includes(s)) skip(`${s} is not installed here — the fragment is driven under ${shells.join('/')} only`);
   const run = (shell, home, cwd, fragment = frag, extraEnv = {}, echo = 'PROFILE=[$AGENT_BROWSER_PROFILE]') => {
     const argv = shell === 'busybox' ? ['busybox', ['sh', '-c', fragment + `echo "${echo}"`]] : [shell, ['-c', fragment + `echo "${echo}"`]];
@@ -1036,14 +1036,14 @@ console.log('\n⑭ the remote rung: a shell fragment the host runs (r3)');
   for (const d of ['vs-bk-0ld00001', 'vs-bk-11ve0001', 'vs-bk-y0ung001', 'other-dir']) fs.mkdirSync(path.join(SD, d), { recursive: true });
   fs.symlinkSync('somehost-12345', path.join(SD, 'vs-bk-11ve0001', 'SingletonLock'));   // the MEASURED live shape: dangling
   for (const d of ['vs-bk-0ld00001', 'vs-bk-11ve0001', 'other-dir']) fs.utimesSync(path.join(SD, d), old, old);
-  ok(!fs.existsSync(path.join(SD, 'vs-bk-11ve0001', 'SingletonLock')) && fs.lstatSync(path.join(SD, 'vs-bk-11ve0001', 'SingletonLock')).isSymbolicLink(),
+  ok(!fs.existsSync(path.join(SD, 'vs-bk-11ve0001', 'SingletonLock')) && verdictOf(fs.lstatSync(path.join(SD, 'vs-bk-11ve0001', 'SingletonLock')).isSymbolicLink()),
     'setup: the live marker is a dangling symlink — `existsSync`/`-e` say absent, `lstat`/`-L` say present (chromium\'s real shape)');
   const rs = run('sh', HR, CWD);
   ok(rs.status === 0, 'the sweep runs to exit 0');
   ok(!fs.existsSync(path.join(SD, 'vs-bk-0ld00001')), 'a stale, unlocked per-key dir is SWEPT');
-  ok(fs.existsSync(path.join(SD, 'vs-bk-11ve0001')), 'a stale dir whose browser is LIVE (dangling SingletonLock) is KEPT');
-  ok(fs.existsSync(path.join(SD, 'vs-bk-y0ung001')), 'a young dir is kept (a create may be in flight)');
-  ok(fs.existsSync(path.join(SD, 'other-dir')), 'a directory that is not ours is never touched');
+  ok(verdictOf(fs.existsSync(path.join(SD, 'vs-bk-11ve0001'))), 'a stale dir whose browser is LIVE (dangling SingletonLock) is KEPT');
+  ok(verdictOf(fs.existsSync(path.join(SD, 'vs-bk-y0ung001'))), 'a young dir is kept (a create may be in flight)');
+  ok(verdictOf(fs.existsSync(path.join(SD, 'other-dir'))), 'a directory that is not ours is never touched');
   // PRE-FIX CONTROL: the same sweep with `-e` only — the LIVE browser's dir goes.
   fs.mkdirSync(path.join(SD, 'vs-bk-0ld00001'), { recursive: true }); fs.utimesSync(path.join(SD, 'vs-bk-0ld00001'), old, old);
   const eOnly = frag.replace('[ -L "$1/SingletonLock" ] || ', '');
@@ -1099,7 +1099,7 @@ console.log('\n⑭ the remote rung: a shell fragment the host runs (r3)');
     const r3grep = `if grep -qs '"profile"[[:space:]]*:' ./${B.PROJECT_CONFIG_NAME} "$HOME/${B.USER_CONFIG_REL}" 2>/dev/null; then export AGENT_BROWSER_PROFILE="$vs_ab_d/vs-${KEY}"; fi; `;
     const iP = frag.indexOf('vs_ab_p() {'), iS = frag.indexOf('if [ -z "${AGENT_BROWSER_SOCKET_DIR:-}" ]');
     const pre = iP > 0 && iS > iP ? frag.slice(0, iP) + r3grep + frag.slice(iS) : '';
-    if (ok(pre && /grep -qs/.test(pre) && !pre.includes('vs_ab_p'), 'setup: the control is the fragment with round 3\'s grep put back in place of the awk')) {
+    if (ok(gateOf(pre) && gateOf(/grep -qs/.test(pre)) && !pre.includes('vs_ab_p'), 'setup: the control is the fragment with round 3\'s grep put back in place of the awk')) {
       reset({ args: '--no-sandbox', profile: null, allowedDomains: ['example.com'] }, null);
       ok(run('sh', HR, CWD, pre).out === want && run('sh', HR, CWD).out === 'PROFILE=[]',
         'PRE-FIX CONTROL: round 3\'s grep EXPORTS a profile for `"profile": null` beside a fence — a host shape that works bare and then answers "--allowed-domains is not supported with --profile"; the awk exports nothing');
@@ -1122,7 +1122,7 @@ console.log('\n⑭ the remote rung: a shell fragment the host runs (r3)');
       fs.rmSync(sdir, { recursive: true, force: true });
       const a = run(shell, HR, CWD, frag, {}, S);
       ok(a.status === 0 && a.out === `SOCK=[${sdir}]` && a.err === '', `${shell}: a long HOME ⇒ AGENT_BROWSER_SOCKET_DIR=<base>/vs-ab-<uid> exported on the host${a.err ? ' — ' + a.err.slice(0, 100) : ''}`);
-      ok(fs.lstatSync(sdir).isDirectory() && !fs.lstatSync(sdir).isSymbolicLink() && (fs.statSync(sdir).mode & 0o777) === 0o700 && fs.statSync(sdir).uid === uid, `${shell}: …a real 0700 directory this user owns`);
+      ok(gateOf(fs.lstatSync(sdir).isDirectory()) && !fs.lstatSync(sdir).isSymbolicLink() && (fs.statSync(sdir).mode & 0o777) === 0o700 && fs.statSync(sdir).uid === uid, `${shell}: …a real 0700 directory this user owns`);
       ok(run(shell, HSHORT, CWD, frag, {}, S).out === 'SOCK=[]', `${shell}: a short HOME ⇒ nothing (the CLI's own root fits)`);
       ok(run(shell, HR, CWD, frag, { XDG_RUNTIME_DIR: path.join(SHORT, 'x') }, S).out === 'SOCK=[]', `${shell}: a short $XDG_RUNTIME_DIR ⇒ nothing (the CLI's own second rung, measured precedence)`);
       ok(run(shell, HR, CWD, frag, { AGENT_BROWSER_SOCKET_DIR: '/pre/set' }, S).out === 'SOCK=[/pre/set]', `${shell}: a pre-set AGENT_BROWSER_SOCKET_DIR is left alone`);
@@ -1131,9 +1131,9 @@ console.log('\n⑭ the remote rung: a shell fragment the host runs (r3)');
       ok(h.status === 0 && h.out === 'SOCK=[]', `${shell}: the fixed name pre-created as a SYMLINK ⇒ nothing exported (a socket may not live in somebody else's directory; ownership by another uid cannot be staged without root, so the planted link is the reachable shape)`);
       fs.unlinkSync(sdir);
     }
-    ok(frag.includes(`+ ${B.socketTailBytes(KEY)} )) -gt ${B.SOCKET_PATH_MAX}`), `the fragment's arithmetic uses the tail the PURE half computes from the names (${B.socketTailBytes(KEY)} bytes) against ${B.SOCKET_PATH_MAX}`);
-    ok(/printf %s "\$vs_ab_r" \| wc -c/.test(frag), 'the length is counted in BYTES (`wc -c`), like the kernel counts sun_path — `${#var}` is characters in bash/zsh');
-    ok(B.SOCKET_DIR_BASE === '/tmp' && B.remoteBrowserPrelude({ browserKey: KEY }).includes(`${B.SOCKET_DIR_BASE}/vs-ab-$(id -u)`),
+    ok(verdictOf(frag.includes(`+ ${B.socketTailBytes(KEY)} )) -gt ${B.SOCKET_PATH_MAX}`)), `the fragment's arithmetic uses the tail the PURE half computes from the names (${B.socketTailBytes(KEY)} bytes) against ${B.SOCKET_PATH_MAX}`);
+    ok(verdictOf(/printf %s "\$vs_ab_r" \| wc -c/.test(frag)), 'the length is counted in BYTES (`wc -c`), like the kernel counts sun_path — `${#var}` is characters in bash/zsh');
+    ok(B.SOCKET_DIR_BASE === '/tmp' && verdictOf(B.remoteBrowserPrelude({ browserKey: KEY }).includes(`${B.SOCKET_DIR_BASE}/vs-ab-$(id -u)`)),
       'production\'s base is the LITERAL /tmp (a short root is the point; TMPDIR may be the long path) — asserted on the string, never run from this tier');
   }
 
@@ -1165,7 +1165,7 @@ console.log('\n⑯ modes: the generated config is 0600 in a 0700 directory (r3)'
   const e = BE.create({ dataDir: D16, homeDir: H16, ...SESSION_ENV, log: { warn() { }, log() { } } });
   const r = e.envFor({ browserKey: 'bk-16161601', integrationOn: true });
   const mode = (p) => fs.statSync(p).mode & 0o777;
-  ok(fs.readFileSync(r.configPath, 'utf8').includes('s3cr3t'), 'setup: the generated config really carries the proxy credential');
+  ok(verdictOf(fs.readFileSync(r.configPath, 'utf8').includes('s3cr3t')), 'setup: the generated config really carries the proxy credential');
   ok(mode(r.configPath) === 0o600, `the generated config is 0600 (got ${mode(r.configPath).toString(8)})`);
   ok(mode(e.ENV_DIR) === 0o700, `its directory is 0700 even though it pre-existed at 0775 (got ${mode(e.ENV_DIR).toString(8)})`);
   ok(mode(e.PROFILE_DIR) === 0o700, `the scratch root is 0700 (got ${mode(e.PROFILE_DIR).toString(8)})`);
@@ -1215,7 +1215,7 @@ console.log('\n⑰ a fenced effective config skips the C rung (r4)');
   ok(!fs.existsSync(e.linkPathFor(K)) && !fs.existsSync(e.scratchDirFor(K)) && !fs.existsSync(e.cwdPathFor(K)),
     'and NO symlink, scratch dir or sidecar was made — a refused rung leaves nothing to sweep');
   const lad = ladderOnly(lines);
-  ok(lad.length === 2 && /D → C/.test(lad[0]) && /C → N/.test(lad[1]) && /rung C refused/.test(lad[1]) && /allowedDomains: example\.com/.test(lad[1]),
+  ok(lad.length === 2 && gateOf(/D → C/.test(lad[0])) && gateOf(/C → N/.test(lad[1])) && gateOf(/rung C refused/.test(lad[1])) && verdictOf(/allowedDomains: example\.com/.test(lad[1])),
     `the journal: "D → C" (config unusable), then "C → N" with the FENCE as the reason (${lad.length} ladder lines)`);
   ok(undeclared(lines).length === 0, '…and nothing undeclared rode along');
   // the PROJECT-level fence counts too (the effective config is both files, as at every other site)
@@ -1230,7 +1230,7 @@ console.log('\n⑰ a fenced effective config skips the C rung (r4)');
   const K3 = 'bk-17171703';
   fs.mkdirSync(e.configPathFor(K3), { recursive: true });
   const r3 = e.envFor({ browserKey: K3, integrationOn: true });
-  ok(r3.variant === 'C' && pairsMap(r3.pairs).AGENT_BROWSER_PROFILE === e.linkPathFor(K3) && fs.existsSync(e.scratchDirFor(K3)),
+  ok(r3.variant === 'C' && pairsMap(r3.pairs).AGENT_BROWSER_PROFILE === e.linkPathFor(K3) && verdictOf(fs.existsSync(e.scratchDirFor(K3))),
     'NEGATIVE CONTROL: the same unwritable tree UNFENCED ⇒ C with its symlink and scratch dir (round 3\'s rung, unchanged where it is safe)');
   // THE C RUNG RECORDS THE SESSION'S DIRECTORY beside its link, so a later pin
   // asks BOTH of the CLI's files as they stand THEN — round 3's C-branch check
@@ -1239,19 +1239,19 @@ console.log('\n⑰ a fenced effective config skips the C rung (r4)');
   const P4 = path.join(ROOT, 'proj-c-pin'); fs.mkdirSync(P4, { recursive: true });
   fs.mkdirSync(e.configPathFor(K4), { recursive: true });
   const r4 = e.envFor({ browserKey: K4, integrationOn: true, cwd: P4 });
-  ok(e._cwdLanded(K4), 'the C rung\'s sidecar LANDED (B-574d browser-stores: the store writer\'s record — read after its landing)');
+  ok(verdictOf(e._cwdLanded(K4)), 'the C rung\'s sidecar LANDED (B-574d browser-stores: the store writer\'s record — read after its landing)');
   ok(r4.variant === 'C' && JSON.parse(fs.readFileSync(e.cwdPathFor(K4), 'utf8')).cwd === P4, 'on C the session\'s cwd is recorded in `<key>.cwd` beside the link');
   ok((fs.statSync(e.cwdPathFor(K4)).mode & 0o777) === 0o600, '…0600, like every file this module writes');
   fs.writeFileSync(path.join(P4, 'agent-browser.json'), JSON.stringify({ allowedDomains: ['later.example'] }));   // the fence appears AFTER spawn, at project level
   const pinned = path.join(H17, '.agent-browser', 'vs-bp-c');
   const pr = e.repointPin(K4, pinned);
-  ok(pr.ok === false && /allowedDomains/.test(pr.why) && /later\.example/.test(pr.why),
+  ok(pr.ok === false && gateOf(/allowedDomains/.test(pr.why)) && verdictOf(/later\.example/.test(pr.why)),
     'a pin on the C rung is refused by a PROJECT-level fence — the check reads the session directory\'s file, which round 3\'s `effectiveConfig(null)` could not see');
   fs.rmSync(path.join(P4, 'agent-browser.json'));
   ok(e.repointPin(K4, pinned).ok === true && e.repointPin(K4, null).ok === true, 'NEGATIVE CONTROL: with the project fence gone the same pin applies (and unpins)');
   e._cwdDrop(K4); fs.unlinkSync(e.cwdPathFor(K4));   // B-574d browser-stores: the record is read from memory first — the stand-in for a pre-r4 spawn drops the memory too
   const pm = e.repointPin(K4, pinned);
-  ok(pm.ok === false && /not recorded/.test(pm.why) && /\.cwd/.test(pm.why),
+  ok(pm.ok === false && gateOf(/not recorded/.test(pm.why)) && verdictOf(/\.cwd/.test(pm.why)),
     'a C-rung session WITHOUT the record (a pre-r4 spawn) is refused BY NAME, never half-checked against the user file alone');
   // PRE-FIX CONTROL #1: round 3's resolver — the fence is not an input of the C rung
   const pre = mutantBE([['    const fenced = !!fence;', '    const fenced = false;']]);
@@ -1284,7 +1284,7 @@ console.log('\n⑰ a fenced effective config skips the C rung (r4)');
   const K7 = 'bk-17171707';
   fs.mkdirSync(e.configPathFor(K7), { recursive: true });
   e.envFor({ browserKey: K7, integrationOn: true, cwd: P4 });
-  ok(e._cwdLanded(K7), '…K7\'s sidecar landed before it is aged (B-574d browser-stores: an owed one is spared by the sweep)');
+  ok(verdictOf(e._cwdLanded(K7)), '…K7\'s sidecar landed before it is aged (B-574d browser-stores: an owed one is spared by the sweep)');
   const old = Date.now() / 1000 - 7200;
   for (const p of [e.configPathFor(K7), e.cwdPathFor(K7), e.scratchDirFor(K7)]) { try { fs.utimesSync(p, old, old); } catch { } }
   try { fs.lutimesSync(e.linkPathFor(K7), old, old); } catch { }
@@ -1318,7 +1318,7 @@ console.log('\n⑱ AGENT_BROWSER_SOCKET_DIR when the CLI\'s own root is over 103
     'a base a shell could read as syntax falls back to the literal (the fragment interpolates it)');
   ok(B.socketDirDecision({ browserKey: KEY, home: '/' + 'h'.repeat(60), uid: 1000, base: '/' + 'b'.repeat(60) }).fits === false,
     'a base that does not itself fit is reported (`fits:false`), so the ORCH never emits a remedy that does not remedy');
-  ok(B.browserEnvFor({ browserKey: KEY, variant: 'N', enabled: true, socketDir: '/s' }).includes('AGENT_BROWSER_SOCKET_DIR=/s') && B.browserEnvFor({ browserKey: KEY, variant: 'N', enabled: true }).length === 3,
+  ok(gateOf(B.browserEnvFor({ browserKey: KEY, variant: 'N', enabled: true, socketDir: '/s' }).includes('AGENT_BROWSER_SOCKET_DIR=/s')) && B.browserEnvFor({ browserKey: KEY, variant: 'N', enabled: true }).length === 3,
     'the composition carries the fifth pair only when handed one');
   ok(B.browserEnvFor({ browserKey: KEY, variant: 'none', enabled: true, socketDir: '/s' }).length === 0, '`none` still emits ZERO pairs, socket dir or not');
 
@@ -1335,12 +1335,12 @@ console.log('\n⑱ AGENT_BROWSER_SOCKET_DIR when the CLI\'s own root is over 103
   const r = e.envFor({ browserKey: 'bk-18181801', integrationOn: true });
   const m = pairsMap(r.pairs);
   ok(r.variant === 'D' && m.AGENT_BROWSER_SOCKET_DIR === sdir, `THE FIX: a ${HL.length}-char HOME ⇒ AGENT_BROWSER_SOCKET_DIR=<scratch base>/vs-ab-${uid} as a FIFTH pair (${r.pairs.length} pairs)`);
-  ok(!!r.socket && r.socket.needed && r.socket.via === 'HOME' && r.socket.bytes > 103,
+  ok(!!r.socket && gateOf(r.socket.needed) && r.socket.via === 'HOME' && r.socket.bytes > 103,
     `…because the CLI's own root would be ${r.socket && r.socket.bytes} bytes (via ${r.socket && r.socket.via})`);
-  ok(fs.lstatSync(sdir).isDirectory() && !fs.lstatSync(sdir).isSymbolicLink() && (fs.statSync(sdir).mode & 0o777) === 0o700 && fs.statSync(sdir).uid === uid,
+  ok(gateOf(fs.lstatSync(sdir).isDirectory()) && !fs.lstatSync(sdir).isSymbolicLink() && (fs.statSync(sdir).mode & 0o777) === 0o700 && fs.statSync(sdir).uid === uid,
     'the directory exists, is real, is 0700, and is ours');
   const sl = l.filter((x) => /AGENT_BROWSER_SOCKET_DIR=/.test(x));
-  ok(sl.length === 1 && /would be \d+ bytes/.test(sl[0]) && /too long/.test(sl[0]) && CONFIG_RE.test(sl[0]),
+  ok(sl.length === 1 && gateOf(/would be \d+ bytes/.test(sl[0])) && gateOf(/too long/.test(sl[0])) && verdictOf(CONFIG_RE.test(sl[0])),
     'ONE journal line says what would have happened and what was set, of a declared kind');
   for (let i = 0; i < 5; i++) e.envFor({ browserKey: `bk-1818180${i + 2}`, integrationOn: true });
   ok(l.filter((x) => /AGENT_BROWSER_SOCKET_DIR=/.test(x)).length === 1, '…and once only: a long home is permanent while this runs once per create');
@@ -1350,20 +1350,20 @@ console.log('\n⑱ AGENT_BROWSER_SOCKET_DIR when the CLI\'s own root is over 103
   const HS = path.join(SHORT, 'hs'); fs.mkdirSync(path.join(HS, '.agent-browser'), { recursive: true });
   fs.writeFileSync(path.join(HS, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', headed: false }));
   const rS = BE.create({ dataDir: path.join(ROOT, 'data-sock-s'), homeDir: HS, env: {}, socketDirBase: SOCKBASE, log: { warn() { }, log() { } } }).envFor({ browserKey: 'bk-18181812', integrationOn: true });
-  ok(!('AGENT_BROWSER_SOCKET_DIR' in pairsMap(rS.pairs)) && rS.socket && rS.socket.needed === false && rS.pairs.length === 4,
+  ok(!('AGENT_BROWSER_SOCKET_DIR' in pairsMap(rS.pairs)) && gateOf(rS.socket) && rS.socket.needed === false && rS.pairs.length === 4,
     `NEGATIVE CONTROL: a ${HS.length}-char HOME ⇒ the four pairs of round 3, nothing more`);
   // HIJACK: the fixed name pre-created as a SYMLINK ⇒ no variable, and the journal names why
   fs.rmSync(sdir, { recursive: true, force: true }); fs.symlinkSync(SHORT, sdir);
   const lh = [];
   const eh = BE.create({ dataDir: path.join(ROOT, 'data-sock-h'), homeDir: HL, env: {}, socketDirBase: SOCKBASE, log: { warn: (s) => lh.push(String(s)), log() { } } });
   const rh = eh.envFor({ browserKey: 'bk-18181813', integrationOn: true });
-  ok(!('AGENT_BROWSER_SOCKET_DIR' in pairsMap(rh.pairs)) && !!rh.socket.refused && /SYMLINK/.test(rh.socket.refused),
+  ok(!('AGENT_BROWSER_SOCKET_DIR' in pairsMap(rh.pairs)) && !!rh.socket.refused && verdictOf(/SYMLINK/.test(rh.socket.refused)),
     'a planted SYMLINK at the fixed name ⇒ NO variable (a socket may not live in somebody else\'s directory)');
-  ok(lh.some((x) => /could NOT be used/.test(x) && /SYMLINK/.test(x) && /refuse every command/.test(x)), '…and the journal says so, with the CLI\'s consequence');
-  ok(fs.lstatSync(sdir).isSymbolicLink() && fs.readlinkSync(sdir) === SHORT, '…and the planted link was not touched (no chmod through it)');
+  ok(verdictOf(lh.some((x) => /could NOT be used/.test(x) && /SYMLINK/.test(x) && /refuse every command/.test(x))), '…and the journal says so, with the CLI\'s consequence');
+  ok(gateOf(fs.lstatSync(sdir).isSymbolicLink()) && fs.readlinkSync(sdir) === SHORT, '…and the planted link was not touched (no chmod through it)');
   fs.unlinkSync(sdir);
   fs.writeFileSync(sdir, 'x');
-  ok(/not a directory/.test(eh.envFor({ browserKey: 'bk-18181814', integrationOn: true }).socket.refused || ''), 'a plain FILE at the name is refused too');
+  ok(verdictOf(/not a directory/.test(eh.envFor({ browserKey: 'bk-18181814', integrationOn: true }).socket.refused || '')), 'a plain FILE at the name is refused too');
   fs.unlinkSync(sdir);
   ok(e.ensureSocketDir(path.join(SOCKBASE, 'fresh-' + process.pid)).ok === true && (fs.statSync(path.join(SOCKBASE, 'fresh-' + process.pid)).mode & 0o777) === 0o700,
     'POSITIVE CONTROL: ensureSocketDir makes a fresh 0700 directory (the refusals above are not a broken helper)');
@@ -1389,11 +1389,11 @@ console.log('\n⑨ the installed binary (skips with evidence when absent)');
     skip(`${DRIVER.skip} agent-browser not runnable here (${v.error ? v.error.code || v.error.message : 'exit ' + v.status}) — the floor verdict and the four variable NAMES are asserted above against a fake binary; what cannot be checked without it is that this build still accepts these names, and that its own socket-root reader honours AGENT_BROWSER_SOCKET_DIR`);
   } else {
     const out = String(v.stdout || '').trim();
-    ok(/\d+\.\d+\.\d+/.test(out), `installed: ${out}`);
+    ok(verdictOf(/\d+\.\d+\.\d+/.test(out)), `installed: ${out}`);
     const help = spawnSync(AB9, ['--help'], { encoding: 'utf8', timeout: 20000 });
     const h = String(help.stdout || '') + String(help.stderr || '');
     for (const name of ['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_IDLE_TIMEOUT_MS', 'AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_PROFILE']) {
-      ok(h.includes(name), `the installed build documents ${name} (the P0 environment is not aspirational)`);
+      ok(verdictOf(h.includes(name)), `the installed build documents ${name} (the P0 environment is not aspirational)`);
     }
     // AGENT_BROWSER_SOCKET_DIR is NOT in the top-level `--help` of 0.32.0; the
     // binary names it in its own refusal (asserted below) and honours it in
@@ -1421,13 +1421,13 @@ console.log('\n⑨ the installed binary (skips with evidence when absent)');
     if (ok(H9.length > 38 && env9.AGENT_BROWSER_SOCKET_DIR === sdir, `setup: a ${H9.length}-char HOME made the resolver emit AGENT_BROWSER_SOCKET_DIR (a mutant must go RED, not crash)`)) {
       const info = spawnSync(AB9, ['session', 'info', '--json'], { env: env9, encoding: 'utf8', timeout: 20000 });
       let data = null; try { data = JSON.parse(String(info.stdout || '')).data; } catch { }
-      ok(!!data && typeof data.socketDir === 'string' && data.socketDir.startsWith(sdir + '/') && data.active === false,
+      ok(!!data && typeof data.socketDir === 'string' && gateOf(data.socketDir.startsWith(sdir + '/')) && data.active === false,
         `the installed CLI resolves its socket root to OUR directory — session info --json: ${data ? data.socketDir : String(info.stdout || info.stderr || '').slice(0, 80)} (launch-free: active:false)`);
       const env9x = { ...env9 }; delete env9x.AGENT_BROWSER_SOCKET_DIR;
       const tl = spawnSync(AB9, ['tab', 'list'], { env: env9x, encoding: 'utf8', timeout: 20000 });
       const tlo = String(tl.stdout || '') + String(tl.stderr || '');
-      ok(/is too long/.test(tlo) && /\(max 103\)/.test(tlo), `PRE-FIX CONTROL: the same session WITHOUT the fifth variable is refused at its first command — "${tlo.trim().split('\n')[0].slice(0, 90)}" (round 3's regression on a long home)`);
-      ok(/AGENT_BROWSER_SOCKET_DIR/.test(tlo), 'and the CLI\'s own refusal names AGENT_BROWSER_SOCKET_DIR as the remedy — the variable the product now sets');
+      ok(gateOf(/is too long/.test(tlo)) && verdictOf(/\(max 103\)/.test(tlo)), `PRE-FIX CONTROL: the same session WITHOUT the fifth variable is refused at its first command — "${tlo.trim().split('\n')[0].slice(0, 90)}" (round 3's regression on a long home)`);
+      ok(verdictOf(/AGENT_BROWSER_SOCKET_DIR/.test(tlo)), 'and the CLI\'s own refusal names AGENT_BROWSER_SOCKET_DIR as the remedy — the variable the product now sets');
       let launched = 0;
       for (const d of fs.readdirSync('/proc')) {
         if (!/^\d+$/.test(d)) continue;
@@ -1503,7 +1503,7 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   ok(b.record(BB.conversationIdOf(meta), meta.browserKey) === true, 'the first record WRITES (this is the call session-stdout.writeSessionMeta makes)');
   ok(b.record(conv, KEY) === false, 'the same binding again writes NOTHING (a session writes its meta dozens of times per turn)');
   ok(b.file === path.join(e.ENV_DIR, 'bindings.json'), `the store lives in the directory browser-env owns (${path.relative(DATA, b.file)})`);
-  ok(b.landed() && (fs.statSync(b.file).mode & 0o777) === 0o600, 'and it is 0600 like every file beside it (on disk once the store writer landed it — B-574d browser-stores)');
+  ok(gateOf(b.landed()) && (fs.statSync(b.file).mode & 0o777) === 0o600, 'and it is 0600 like every file beside it (on disk once the store writer landed it — B-574d browser-stores)');
   fs.unlinkSync(metaFile);
   ok(e.priorKeyFor(conv) === KEY, 'THE FINDING: with the meta file UNLINKED (what the ws kill and the pty-exit path do), priorKeyFor still answers the conversation\'s key');
   ok(B.browserKeyFor({ prior: e.priorKeyFor(conv), resume: true, fork: false, mint: () => 'bk-ffffffff' }).origin === 'conversation', '…so the ladder says `conversation`, not `resume-unknown`');
@@ -1522,7 +1522,7 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   for (let i = 0; i < BB.MAX_BINDINGS + 5; i++) b2.record(`conv-${i}`, B.mintBrowserKey(String(i)), { at: 1000 + i });
   ok(b2.lookup('conv-0') === '' && b2.lookup(`conv-${BB.MAX_BINDINGS + 4}`) !== '' && b2.keys().size === BB.MAX_BINDINGS, `the store is bounded at ${BB.MAX_BINDINGS} newest conversations (the oldest is pruned)`);
   const sw = e.sweep(new Set(), { graceMs: 0 });
-  ok(fs.existsSync(b.file) && b.lookup(conv) === KEY, `the orphan sweep never removes bindings.json (${sw.swept} object(s) swept around it)`);
+  ok(gateOf(fs.existsSync(b.file)) && b.lookup(conv) === KEY, `the orphan sweep never removes bindings.json (${sw.swept} object(s) swept around it)`);
   // (⑳(b) the meta choke point's wiring pins — MOVED to the fast scripts/test-browser-profiles-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 // (b′) r6 — A RECORD MAY NOT BIND THE CONVERSATION IT WAS FORKED FROM (the
@@ -1560,7 +1560,7 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   const b3 = BB.create({ dataDir: path.join(ROOT, 'bind3'), log: { warn(m) { warned.push(String(m)); } } });
   ok(b3.record(parent, pKey) === true && b3.lookup(parent) === pKey, 'setup: the parent conversation is bound to its own key');
   ok(b3.record(parent, forkKey) === false && b3.lookup(parent) === pKey, 'THE BELT: the store REFUSES to move a bound conversation onto a different key — the parent keeps its browser');
-  ok(warned.length === 1 && /refused to move the browser binding/.test(warned[0]) && warned[0].includes(pKey) && warned[0].includes(forkKey), `and journals the refusal ONCE, naming both keys (${warned.length} line)`);
+  ok(warned.length === 1 && gateOf(/refused to move the browser binding/.test(warned[0])) && gateOf(warned[0].includes(pKey)) && verdictOf(warned[0].includes(forkKey)), `and journals the refusal ONCE, naming both keys (${warned.length} line)`);
   ok(b3.record(parent, forkKey) === false && warned.length === 1 && b3.refusals() === 1, 'the same offer again is silent (one line per pair — a fork writes its meta dozens of times per turn) and counted once');
   ok(b3.record(parent, pKey) === false && warned.length === 1, 'the parent\'s own key is still a silent no-op re-record, not a refusal');
   ok(b3.record('fresh-conv', forkKey) === true && b3.lookup('fresh-conv') === forkKey, 'a NEW conversation still binds (the belt refuses MOVES, not first writes)');
@@ -1583,13 +1583,13 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   ok(BB.bindableIdOf({ claudeSessionId: announcedId, browserKey: rKey }) === announcedId && BB.bindableIdOf({ claudeSessionId: forkId, browserKey: forkKey, forkSourceId: parent }) === forkId, 'r7: a NEW session and a FORK state no browserKeyFor, so their first announced id binds as before');
   // THE BELT's other half — a key is ONE conversation's.
   ok(b3.record(announcedId, pKey) === false && b3.lookup(announcedId) === '' && b3.lookup(parent) === pKey, 'r7 THE BELT: the store REFUSES to bind a NEW conversation to a key another conversation already holds — the holder keeps it, the newcomer stays unbound');
-  ok(warned.length === 2 && /refused to bind conversation/.test(warned[1]) && warned[1].includes(pKey) && warned[1].includes(parent.slice(0, 8)), `and journals it ONCE, naming the key and its holder (${warned.length} lines)`);
+  ok(warned.length === 2 && gateOf(/refused to bind conversation/.test(warned[1])) && gateOf(warned[1].includes(pKey)) && verdictOf(warned[1].includes(parent.slice(0, 8))), `and journals it ONCE, naming the key and its holder (${warned.length} lines)`);
   ok(b3.record(announcedId, pKey) === false && warned.length === 2 && b3.refusals() === 2, 'the same offer again is silent; moves and shares share one refusal census (2)');
   ok(b3.record(announcedId, 'bk-0d0d0d0d') === true && b3.lookup(announcedId) === 'bk-0d0d0d0d', 'a refused newcomer still binds its OWN fresh key later (the belt refuses SHARES, not the conversation)');
   ok(BB.SHARE_METRIC === 'browser-binding-share-refused' && BB.IMPLICIT_FORK_METRIC === 'browser-binding-implicit-fork', 'both r7 events have telemetry names');
   // THE CHOKE POINT's journal line for the implicit fork: once per (session, id).
   const unboundMeta = { claudeSessionId: announcedId, browserKey: rKey, browserKeyFor: resumed };
-  ok(b3.noteUnbound(unboundMeta, 'cw-9-9') === true && warned.length === 3 && /the harness announced conversation/.test(warned[2]) && warned[2].includes(rKey) && warned[2].includes(resumed.slice(0, 8)) && warned[2].includes('cw-9-9'), 'r7: the choke point SAYS the implicit fork once, naming the session, the key and the conversation it was decided for');
+  ok(b3.noteUnbound(unboundMeta, 'cw-9-9') === true && warned.length === 3 && gateOf(/the harness announced conversation/.test(warned[2])) && gateOf(warned[2].includes(rKey)) && gateOf(warned[2].includes(resumed.slice(0, 8))) && verdictOf(warned[2].includes('cw-9-9')), 'r7: the choke point SAYS the implicit fork once, naming the session, the key and the conversation it was decided for');
   ok(b3.noteUnbound(unboundMeta, 'cw-9-9') === false && warned.length === 3 && b3.implicitForks() === 1, 'the adopted record\'s dozens of later writes are silent (once per session + id) and counted once');
   ok(b3.noteUnbound(forkMeta, 'cw-9-9') === false && b3.noteUnbound({ claudeSessionId: resumed, browserKey: rKey, browserKeyFor: resumed }, 'cw-9-9') === false && b3.noteUnbound({}, 'cw-9-9') === false && warned.length === 3, 'a fork\'s pre-adoption record, a resume naming its own conversation, and an empty record are NOT announcements');
   // THE CHOKE POINT, mirrored line for line from session-stdout.writeSessionMeta
@@ -1636,14 +1636,14 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   const ar = require('../src/agent-routes.js');
   const T = { status: true, ask: true, task: false, jobs: false };
   const line = (v) => ar.sessionToolsIntro(T, { browserVariant: v }).split('\n').find((l) => l.startsWith('Browsing:')) || '';
-  for (const v of B.ISOLATED_VARIANTS) ok(/THIS conversation's own browser/.test(line(v)) && /close --all` closes only yours/.test(line(v)), `rung ${v}: the intro says this conversation has its OWN browser and \`close --all\` is safe`);
+  for (const v of B.ISOLATED_VARIANTS) ok(gateOf(/THIS conversation's own browser/.test(line(v))) && verdictOf(/close --all` closes only yours/.test(line(v))), `rung ${v}: the intro says this conversation has its OWN browser and \`close --all\` is safe`);
   for (const [label, v] of [['none', B.VARIANTS.NONE], ['null (feature off / resolver unavailable)', null], ['undefined (a session that predates the feature)', undefined], ['garbage', 'Z']]) {
     const l = line(v);
-    ok(/machine's SHARED browser/.test(l) && /never `close --all`/.test(l) && !/closes only yours/.test(l), `rung ${label}: the intro says the browser is SHARED and \`close --all\` is NOT safe (the manual's own words)`);
+    ok(gateOf(/machine's SHARED browser/.test(l)) && gateOf(/never `close --all`/.test(l)) && !/closes only yours/.test(l), `rung ${label}: the intro says the browser is SHARED and \`close --all\` is NOT safe (the manual's own words)`);
   }
-  ok(ar.sessionToolsIntro(T) === ar.sessionToolsIntro(T, {}) && /machine's SHARED browser/.test(ar.sessionToolsIntro(T)), 'no facts at all ⇒ the shared sentence (the conservative default: a caller that forgot the session cannot claim isolation)');
-  ok(/^Browsing: `vibespace-browser <verb>`/.test(line('none')) && /^Browsing: `vibespace-browser <verb>`/.test(line('D')) && /vibespace-docs browser/.test(line('none')), 'both sentences keep the two anchors leg ⑦ pins (the one tool; the manual pointer)');
-  ok(B.isolatedVariant('D') && B.isolatedVariant('C') && B.isolatedVariant('N') && B.isolatedVariant('H') && !B.isolatedVariant('none') && !B.isolatedVariant(null) && !B.isolatedVariant(''), 'isolatedVariant is the ONE table (D/C/N/H yes; none/null/empty no)');
+  ok(ar.sessionToolsIntro(T) === ar.sessionToolsIntro(T, {}) && verdictOf(/machine's SHARED browser/.test(ar.sessionToolsIntro(T))), 'no facts at all ⇒ the shared sentence (the conservative default: a caller that forgot the session cannot claim isolation)');
+  ok(gateOf(/^Browsing: `vibespace-browser <verb>`/.test(line('none'))) && gateOf(/^Browsing: `vibespace-browser <verb>`/.test(line('D'))) && verdictOf(/vibespace-docs browser/.test(line('none'))), 'both sentences keep the two anchors leg ⑦ pins (the one tool; the manual pointer)');
+  ok(gateOf(B.isolatedVariant('D')) && gateOf(B.isolatedVariant('C')) && gateOf(B.isolatedVariant('N')) && gateOf(B.isolatedVariant('H')) && !B.isolatedVariant('none') && !B.isolatedVariant(null) && !B.isolatedVariant(''), 'isolatedVariant is the ONE table (D/C/N/H yes; none/null/empty no)');
   // (⑳(c) the two delivery sites' pins — MOVED to the fast scripts/test-browser-profiles-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
@@ -1674,13 +1674,13 @@ console.log('\n㉒ lane H: the holder rows (a live managed ephemeral browser is 
   const rows = B.holderRows({ leases, profiles, browsers: ready });
   const e = rows.find((r) => r.profileId === eph.id), k = rows.find((r) => r.profileId === kid.id), n = rows.find((r) => r.profileId === named.id);
   ok(rows.length === 3 && !!n && !('ephemeral' in n) && n.alias === 'work', '㉒ a NAMED lease is a row as it is (its browser\'s state is not its question) and says nothing about being ephemeral', JSON.stringify(rows));
-  ok(e && e.ephemeral === true && e.child === false && e.sessionId === 'sess-a' && e.browserKey === KA && e.label === eph.label && e.alias === 'ephemeral', '㉒ a managed ephemeral browser whose browser is READY is a row: ephemeral:true, its session, its key, its record\'s label', JSON.stringify(e));
-  ok(k && k.ephemeral === true && k.child === true, '㉒ a sub-agent\'s ephemeral is a row too, marked child (its pairs are not its session\'s — the live view and the recorder skip it)');
+  ok(gateOf(e) && e.ephemeral === true && e.child === false && e.sessionId === 'sess-a' && e.browserKey === KA && e.label === eph.label && e.alias === 'ephemeral', '㉒ a managed ephemeral browser whose browser is READY is a row: ephemeral:true, its session, its key, its record\'s label', JSON.stringify(e));
+  ok(gateOf(k) && k.ephemeral === true && k.child === true, '㉒ a sub-agent\'s ephemeral is a row too, marked child (its pairs are not its session\'s — the live view and the recorder skip it)');
   ok(!rows.some((r) => r.profileId === 'bp-0000dead'), '㉒ a lease naming no known profile is never a row (no dangling holder)');
   for (const st of ['starting', 'stopped', 'failed']) ok(!B.holderRows({ leases, profiles, browsers: { ...ready, [eph.id]: { state: st } } }).some((r) => r.profileId === eph.id), `㉒ an ephemeral whose browser is ${st} holds nothing — no row (it comes back when the next verb makes it ready: the auto-bind's "it started")`);
   ok(!B.holderRows({ leases, profiles, browsers: {} }).some((r) => r.ephemeral) && B.holderRows({ leases, profiles, browsers: {} }).length === 1, '㉒ no browser record at all ⇒ only the named lease');
   const viewed = B.holderRows({ leases, profiles, browsers: ready, view: (l) => ({ ...l, mediated: false }) });
-  ok(viewed.every((r) => r.mediated === false) && viewed.find((r) => r.profileId === eph.id).ephemeral === true, '㉒ the keeper\'s view decorates every row and cannot erase the ephemeral mark');
+  ok(gateOf(viewed.every((r) => r.mediated === false)) && viewed.find((r) => r.profileId === eph.id).ephemeral === true, '㉒ the keeper\'s view decorates every row and cannot erase the ephemeral mark');
   ok(B.holderRows({}).length === 0 && B.holderRows({ leases: null, profiles: null }).length === 0, '㉒ nothing in ⇒ nothing out (never a throw)');
   // the live view's target rule the ephemeral row opens on: EPHEMERAL_REF names the session's OWN ephemeral browser
   const SS = require('../src/browser-stream.js');
@@ -1688,7 +1688,7 @@ console.log('\n㉒ lane H: the holder rows (a live managed ephemeral browser is 
   const set = { attachments: [{ profileId: named.id, alias: 'work', label: 'Work', isDefault: true }] };
   const t1 = SS.streamTargetFor({ browserKey: KA, set, profileRef: SS.EPHEMERAL_REF, envPairs: pairs, profiles });
   const t0 = SS.streamTargetFor({ browserKey: KA, set, profileRef: '', envPairs: pairs, profiles });
-  ok(t1.ok && t1.kind === 'ephemeral' && t1.ns === 'vs-' + KA && t0.ok && t0.kind === 'attachment', '㉒ EPHEMERAL_REF targets the session\'s own ephemeral browser even beside an attachment (the default pane would be the attachment — the recorder would file its actions under `ephemeral`)', JSON.stringify([t1.kind, t0.kind]));
+  ok(gateOf(t1.ok) && t1.kind === 'ephemeral' && t1.ns === 'vs-' + KA && gateOf(t0.ok) && t0.kind === 'attachment', '㉒ EPHEMERAL_REF targets the session\'s own ephemeral browser even beside an attachment (the default pane would be the attachment — the recorder would file its actions under `ephemeral`)', JSON.stringify([t1.kind, t0.kind]));
   ok(!SS.streamTargetFor({ browserKey: KA, set, profileRef: SS.EPHEMERAL_REF, envPairs: [], profiles }).ok && !B.isAlias(SS.EPHEMERAL_REF), '㉒ …no pairs ⇒ no-browser (typed); and no alias can ever spell the ref');
 }
 
@@ -1713,7 +1713,7 @@ console.log('— lane dc-browser-providers: every provider row carries THE launc
   const schema = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8');
   ok(!('cloakservePlan' in B) && !('CLOAKSERVE_IMAGE' in B) && !schema.includes("'browser.cloak.enabled'") && !schema.includes("'browser.cloak.executablePath'"), 'the cloakserve CONTAINER rung is deleted (its plan, image, setting), and the program-file row left with the anti-bot row (retired: src/retired-settings.js)');
 }
-for (const r of copiesCensus(MUTB.files, MUTB.dir, REPO, { minCopies: 2 })) ok(r.pass, '㉑ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTB.files, MUTB.dir, REPO, { minCopies: 2 })) ok(verdictOf(r.pass), '㉑ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 // ㉓ lane new-session-form: THE NEW SESSION FORM'S ADMISSION — the 浏览器 row lists ONLY the profiles a conversation that does
 // not exist yet may use through the Task Groups it is about to join: the keeper's mayAttach over those groups (one verdict
@@ -1742,9 +1742,9 @@ console.log('\n㉓ lane new-session-form: mayAttach at create (the form\'s profi
   ok(okIds(['T-261023-ir']) === 'bp-0000a001,bp-0000a002,bp-0000a003', 'a group the profile lists admits it (its own list, read by B.mayAttach)');
   ok(okIds(['T-261023-cd', 'T-261023-hr']) === 'bp-0000a001,bp-0000a003', 'two groups: the union of what each admits');
   const bank = k.admitsAtCreate({ taskIds: ['T-261023-ir'] }).find((x) => x.id === 'bp-0000a004');
-  ok(bank && !bank.ok && bank.code === 'not_owner' && k.admitsAtCreate({ taskIds: [] }).find((x) => x.id === 'bp-0000a005').code === 'not_owner', 'a profile kept to one conversation is never offered to a new one; an owner shape this release cannot judge is refused (fail closed)');
+  ok(gateOf(bank) && !bank.ok && bank.code === 'not_owner' && k.admitsAtCreate({ taskIds: [] }).find((x) => x.id === 'bp-0000a005').code === 'not_owner', 'a profile kept to one conversation is never offered to a new one; an owner shape this release cannot judge is refused (fail closed)');
   const one = k.mayAttachAtCreate('bp-0000a002', { taskIds: ['T-261023-ir'] });
-  ok(one.ok && one.via === 'task' && one.taskId === 'T-261023-ir' && k.mayAttachAtCreate('bp-0000a002', { taskIds: [] }).code === 'not_owner' && k.mayAttachAtCreate('bp-ffffffff', {}).code === 'not-found', 'mayAttachAtCreate = B.mayAttach over the picked groups (no key: a new conversation is on no list by itself)');
+  ok(gateOf(one.ok) && one.via === 'task' && one.taskId === 'T-261023-ir' && k.mayAttachAtCreate('bp-0000a002', { taskIds: [] }).code === 'not_owner' && k.mayAttachAtCreate('bp-ffffffff', {}).code === 'not-found', 'mayAttachAtCreate = B.mayAttach over the picked groups (no key: a new conversation is on no list by itself)');
   ok(JSON.parse((landedU5b(), fs).readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')).profiles.find((p) => p.id === 'bp-0000a002').owner.who.length === 1, 'asking writes nothing (the who-list is untouched)');
   try { k.stop?.(); } catch { }
   // (㉓ the form's admission wiring pins — MOVED to the fast scripts/test-browser-profiles-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -1752,4 +1752,4 @@ console.log('\n㉓ lane new-session-form: mayAttach at create (the form\'s profi
 
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

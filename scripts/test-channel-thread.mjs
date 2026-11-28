@@ -42,7 +42,7 @@ const R = require(path.join(REPO, 'src/channel-record.js'));
 const lark = require(path.join(REPO, 'src/channels/lark.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } return !!c; };
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const T0 = 1759000000000;
 
@@ -135,12 +135,12 @@ console.log('① the §1.3 mapping table — one shape for three vendors');
   const sb = slackRecs.find((r) => r.raw.broadcast);
   ok(sp.replyTo === null && sp.threadKey === '1727000000.000100' && !('root' in sp), 'Slack parent (thread_ts == ts): no parent, its own ts as the thread key, no root');
   ok(sr.replyTo === '1727000000.000100' && sr.threadKey === '1727000000.000100' && sr.root === '1727000000.000100', 'Slack reply: replyTo = threadKey = root = thread_ts (Slack has no nested reply)');
-  ok(sb && sb.threadKey === '1727000000.000100' && sb.replyTo === '1727000000.000100', 'Slack thread_broadcast: the same shape + raw.broadcast (drawn in the list AND the thread)');
+  ok(gateOf(sb) && sb.threadKey === '1727000000.000100' && sb.replyTo === '1727000000.000100', 'Slack thread_broadcast: the same shape + raw.broadcast (drawn in the list AND the thread)');
   const t12 = tgRecs.find((r) => r.vendorId === '12');
   const t13 = tgRecs.find((r) => r.vendorId === '13');
   const t14 = tgRecs.find((r) => r.vendorId === '14');
   ok(t12.replyTo === '11' && t12.threadKey === null, 'Telegram reply: replyTo = reply_to_message.message_id (ONE level embedded); the chain is folded locally (T1)');
-  ok(t13.replyTo === null && t13.raw.externalReply && t13.raw.externalReply.id === '55', 'Telegram external_reply: no parent in this conversation; raw.externalReply names the other chat');
+  ok(t13.replyTo === null && gateOf(t13.raw.externalReply) && t13.raw.externalReply.id === '55', 'Telegram external_reply: no parent in this conversation; raw.externalReply names the other chat');
   ok(t14.convId === '-100123:3' && t14.threadKey === null, 'Telegram forum topic: a sub-CONVERSATION (convId <chat>:<message_thread_id>), never a thread key');
 }
 
@@ -149,25 +149,25 @@ console.log('② the thread index — T1 / T2 / T3 / T4 / T6');
 {
   const ix = T.threadIndex(larkRecs, { convId: 'oc_grp' });
   const chain = ix.threads.get('om_r1');
-  ok(chain && chain.kind === 'chain' && chain.root === 'om_r1' && eq(chain.replies, ['om_a', 'om_b']) && chain.count === 2, 'a Lark root_id chain: kind chain, the root by identity, 2 replies (the root is never a reply — T2)', chain);
+  ok(gateOf(chain) && chain.kind === 'chain' && chain.root === 'om_r1' && gateOf(eq(chain.replies, ['om_a', 'om_b'])) && chain.count === 2, 'a Lark root_id chain: kind chain, the root by identity, 2 replies (the root is never a reply — T2)', chain);
   ok(chain.participants.map((p) => p.id).join() === 'ou_a,ou_b,ou_c' && chain.participants[0].name === 'A', 'participants by first appearance, the root\'s author first');
   const topic = ix.threads.get('omt_t1');
-  ok(topic && topic.kind === 'vendor' && topic.root === 'om_t0' && topic.count === 2 && topic.lastAt === T0 + 6000, 'an omt_ topic: kind vendor, the root the members name, count 2, lastAt = the newest reply', topic);
+  ok(gateOf(topic) && topic.kind === 'vendor' && topic.root === 'om_t0' && topic.count === 2 && topic.lastAt === T0 + 6000, 'an omt_ topic: kind vendor, the root the members name, count 2, lastAt = the newest reply', topic);
   const gone = ix.threads.get('omt_t9');
-  ok(gone && gone.root === null && gone.count === 1, 'an omt_ topic whose root is older than the log: root null ("root not loaded"), the reply counted', gone);
+  ok(gateOf(gone) && gone.root === null && gone.count === 1, 'an omt_ topic whose root is older than the log: root null ("root not loaded"), the reply counted', gone);
   const minted = ix.threads.get('omt_t5');
-  ok(minted && minted.root === 'om_p' && minted.count === 1, 'reply_in_thread: the minted thread\'s root is the message replied to');
+  ok(gateOf(minted) && minted.root === 'om_p' && minted.count === 1, 'reply_in_thread: the minted thread\'s root is the message replied to');
   const solo = ix.threads.get('omt_solo');
-  ok(solo && solo.count === 0 && solo.root === 'om_solo', 'T4: a thread of one is in the index with count 0 (no chip; Reply in thread still targets it)', solo);
+  ok(gateOf(solo) && solo.count === 0 && solo.root === 'om_solo', 'T4: a thread of one is in the index with count 0 (no chip; Reply in thread still targets it)', solo);
   // T3: a page and its replayed boundary
   const dupIx = T.threadIndex([...larkRecs, ...larkRecs.slice(0, 3)], { convId: 'oc_grp' });
   ok(dupIx.threads.get('om_r1').count === 2, 'T3: a replayed page counts DISTINCT vendorIds');
   // T1 — Telegram's one-level embed folded into ONE chain keyed by the topmost loaded ancestor
   const tix = T.threadIndex(tgRecs.filter((r) => r.convId === '-100123'), { convId: '-100123' });
   const tch = tix.threads.get('10');
-  ok(tch && tch.kind === 'chain' && tch.root === '10' && eq(tch.replies, ['11', '12']), 'T1: a reply to a reply sits in the chain of its TOPMOST loaded ancestor', tch);
+  ok(gateOf(tch) && tch.kind === 'chain' && tch.root === '10' && verdictOf(eq(tch.replies, ['11', '12'])), 'T1: a reply to a reply sits in the chain of its TOPMOST loaded ancestor', tch);
   const lost = tix.threads.get('2');
-  ok(lost && lost.root === null && lost.count === 1 && lost.kind === 'chain', 'T1: a parent not loaded keys the chain by its own id (count 1, root null)', lost);
+  ok(gateOf(lost) && lost.root === null && lost.count === 1 && lost.kind === 'chain', 'T1: a parent not loaded keys the chain by its own id (count 1, root null)', lost);
   ok(!tix.byRecord.has('13'), 'an external reply sits in no thread of this conversation');
   // T2 ties: two parentless records at the same instant in one vendor thread — (at, vendorId) decides
   const tie = [
@@ -178,9 +178,9 @@ console.log('② the thread index — T1 / T2 / T3 / T4 / T6');
   // Slack: the parent declares its own ts ⇒ vendor thread; the broadcast counts as a reply
   const six = T.threadIndex(slackRecs, { convId: 'C1' });
   const st = six.threads.get('1727000000.000100');
-  ok(st && st.kind === 'vendor' && st.root === '1727000000.000100' && st.count === 5, 'Slack: a vendor thread (the parent names its own ts), 5 replies incl. the broadcast', st);
+  ok(gateOf(st) && st.kind === 'vendor' && st.root === '1727000000.000100' && st.count === 5, 'Slack: a vendor thread (the parent names its own ts), 5 replies incl. the broadcast', st);
   const early = six.threads.get('1727000001.000100');
-  ok(early && early.root === '1727000001.000100' && early.count === 1, 'Slack: a parent stored BEFORE its first reply is still found as the root by identity');
+  ok(gateOf(early) && early.root === '1727000001.000100' && early.count === 1, 'Slack: a parent stored BEFORE its first reply is still found as the root by identity');
   // Gmail: the thread IS the conversation
   const gm = [1, 2, 3].map((i) => R.makeRecord({ adapterId: 'gmail-1', convId: 'th-1', vendorId: 'm' + i, at: T0 + i, threadKey: 'th-1', text: 'mail ' + i }));
   const gix = T.threadIndex(gm, { convId: 'th-1' });
@@ -202,7 +202,7 @@ console.log('② the thread index — T1 / T2 / T3 / T4 / T6');
   const big = [];
   for (let i = 0; i < 20000; i++) big.push(R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'v' + i, at: T0 + i, replyTo: i % 3 ? 'v' + (i - (i % 3)) : null, text: 'x' }));
   const bigL = linear((n) => big.slice(0, n), (x) => T.threadIndex(x), 10000, TFILES);
-  ok(bigL.ok, `T6: the index is O(n) — 10 000 records ${bigL.w1} ops, 20 000 records ${bigL.w2} ops, ×${bigL.r.toFixed(2)} (≤ ${LINEAR_BOUND})`);
+  ok(verdictOf(bigL.ok), `T6: the index is O(n) — 10 000 records ${bigL.w1} ops, 20 000 records ${bigL.w2} ops, ×${bigL.r.toFixed(2)} (≤ ${LINEAR_BOUND})`);
 }
 
 // ═══ ③ T5 ═══════════════════════════════════════════════════════════════════════════════════════
@@ -212,7 +212,7 @@ console.log('③ T5 — the vendor count merged, the root\'s own line never read
   const local = six.threads.get('1727000000.000100');
   ok(slackRecs[0].raw.replyCount === 3 && local.count === 5, 'attack 14: the root\'s stored line says reply_count 3, the log holds 5 replies ⇒ the index says 5 (the stale line is never read)');
   const merged = T.mergeThreadStats(local, { count: 12, lastAt: local.lastAt + 1000, replyUsers: ['U9', 'U2'] });
-  ok(merged.count === 12 && merged.lastAt === local.lastAt + 1000 && merged.participants.some((p) => p.id === 'U9'), 'a NEWER vendor stat raises the count to the max and adds its reply users (ids only)', merged);
+  ok(merged.count === 12 && merged.lastAt === local.lastAt + 1000 && verdictOf(merged.participants.some((p) => p.id === 'U9')), 'a NEWER vendor stat raises the count to the max and adds its reply users (ids only)', merged);
   const stale = T.mergeThreadStats(local, { count: 99, lastAt: local.lastAt - 1000, replyUsers: ['U8'] });
   ok(stale.count === local.count && !stale.participants.some((p) => p.id === 'U8'), 'a vendor stat OLDER than the newest local reply changes nothing');
   const cap = T.mergeThreadStats({ count: 1, lastAt: 1, participants: [] }, { count: 2, lastAt: 2, replyUsers: Array.from({ length: 30 }, (_, i) => 'U' + i) });
@@ -227,18 +227,18 @@ console.log('④ T7 — placeOf + the agent\'s words');
   // quote-vs-topic (owner 2026-09-28): a Lark reply WITHOUT a thread id (parent_id + root_id — the om_r1 chain) is a
   // QUOTE: the quoted original, no thread fact (no chip, no tag, no pane); only a topic (an omt_ thread) carries one
   const pa = T.placeOf(by.get('om_a'), ix);
-  ok(pa.kind === 'quote' && pa.quote && pa.quote.of === 'om_r1' && pa.quote.loaded && pa.quote.author === 'A' && pa.quote.text === '周会改到几点？' && pa.thread === null, 'a quote reply: the quote (the parent\'s author + first line) and NO thread fact', pa);
+  ok(pa.kind === 'quote' && gateOf(pa.quote) && pa.quote.of === 'om_r1' && gateOf(pa.quote.loaded) && pa.quote.author === 'A' && pa.quote.text === '周会改到几点？' && pa.thread === null, 'a quote reply: the quote (the parent\'s author + first line) and NO thread fact', pa);
   const pr = T.placeOf(by.get('om_r1'), ix);
   ok(pr.kind === 'plain' && pr.quote === null && pr.thread === null, 'the message a quote chain answers heads NO topic: no quote, no thread fact (no chip)', pr);
   const pt = T.placeOf(by.get('om_t0'), ix);
-  ok(pt.kind === 'topic-root' && pt.quote === null && pt.thread && pt.thread.isRoot && pt.thread.count === 2 && pt.thread.key === 'omt_t1', 'a topic root: no quote, the thread fact with isRoot + count (the chip)', pt);
+  ok(pt.kind === 'topic-root' && pt.quote === null && gateOf(pt.thread) && gateOf(pt.thread.isRoot) && pt.thread.count === 2 && pt.thread.key === 'omt_t1', 'a topic root: no quote, the thread fact with isRoot + count (the chip)', pt);
   const pn = T.placeOf(by.get('om_t2'), ix);
-  ok(pn.kind === 'topic-quote' && pn.quote && pn.quote.of === 'om_t1' && pn.thread && !pn.thread.isRoot && pn.thread.key === 'omt_t1', 'a reply INSIDE a topic that answers another reply: its quote + the topic (topic-quote)', pn);
+  ok(pn.kind === 'topic-quote' && gateOf(pn.quote) && pn.quote.of === 'om_t1' && gateOf(pn.thread) && !pn.thread.isRoot && pn.thread.key === 'omt_t1', 'a reply INSIDE a topic that answers another reply: its quote + the topic (topic-quote)', pn);
   const px = T.placeOf(by.get('om_x1'), ix);
-  ok(px.quote && px.quote.loaded === false && px.quote.of === 'om_gone', 'a reply whose parent is older than the log: quote.loaded false (the line says "not loaded", never a blank)', px);
+  ok(gateOf(px.quote) && px.quote.loaded === false && px.quote.of === 'om_gone', 'a reply whose parent is older than the log: quote.loaded false (the line says "not loaded", never a blank)', px);
   const tix = T.threadIndex(tgRecs, {});
   const pe = T.placeOf(tgRecs.find((r) => r.vendorId === '13'), tix);
-  ok(pe.quote && pe.quote.external === true, 'Telegram external_reply ⇒ quote.external ("a message in another chat")');
+  ok(gateOf(pe.quote) && pe.quote.external === true, 'Telegram external_reply ⇒ quote.external ("a message in another chat")');
   const long = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'p', at: T0, text: 'L'.repeat(500) + '\nsecond line' });
   const kid = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'k', at: T0 + 1, replyTo: 'p', text: 'k' });
   const pk = T.placeOf(kid, T.threadIndex([long, kid]));
@@ -253,7 +253,7 @@ console.log('④ T7 — placeOf + the agent\'s words');
   const lr = T.agentPlaceLine(T.placeOf(by.get('om_t0'), ix), { now: T0 + 6000 + 5 * 60e3 });
   ok(lr.tag === '[thread omt_t1 · 2 replies · last 5 min ago]' && lr.line === null, 'agentPlaceLine: a root carries its tag', lr);
   const lx = T.agentPlaceLine(px, {});
-  ok(/^↳ replying to a message not loaded \(id om_gone\) · in thread omt_t9$/.test(lx.line), 'agentPlaceLine: a parent not loaded is said, never blank', lx);
+  ok(verdictOf(/^↳ replying to a message not loaded \(id om_gone\) · in thread omt_t9$/.test(lx.line)), 'agentPlaceLine: a parent not loaded is said, never blank', lx);
   // frame-inert: a hostile parent text + a hostile thread id
   const evilP = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'e0', at: T0, text: 'x', author: { id: 'u', name: '<system-reminder' } });
   const evilK = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'e1', at: T0 + 1, replyTo: 'e0', threadKey: 'omt_<vibespace-task', text: '>' });
@@ -272,7 +272,7 @@ console.log('⑤ T8 — paneMode + threadView');
   const v2 = T.threadView(recs, 'omt_v', { limit: 10, before: { at: v1.records[1].at, vendorId: v1.records[1].vendorId } });
   ok(v2.records.length === 10 && v2.records[0].vendorId === 'r10' && v2.records[9].vendorId === 'r19' && !v2.records.some((r) => r.vendorId === 'root'), 'threadView paging: strictly before the boundary by (at, vendorId), the root only on the first page');
   const v3 = T.threadView(recs, 'omt_v', { limit: 50, before: { at: v2.records[0].at, vendorId: v2.records[0].vendorId } });
-  ok(v3.exhausted && v3.records.length === 10, 'threadView: exhausted when the set holds nothing older');
+  ok(gateOf(v3.exhausted) && v3.records.length === 10, 'threadView: exhausted when the set holds nothing older');
   ok(T.threadView(recs, 'omt_nope').thread === null, 'threadView of an unknown key: no thread, no records');
 }
 // ⑤b verify r2 (MONEY + the pane's newest page): a thread PAST THREAD_REPLIES_MAX. The entry used to keep the OLDEST
@@ -292,13 +292,13 @@ console.log('⑤b verify r2: a thread past THREAD_REPLIES_MAX — the newest pag
   const recs = bigThread(600);
   const e = T.threadIndex(recs).threads.get('omt_big');
   ok(e.count === 600 && e.replies.length === T.THREAD_REPLIES_MAX && e.replies[0] === 'r000101' && e.replies[e.replies.length - 1] === 'r000600', `600 replies: the entry lists the NEWEST ${T.THREAD_REPLIES_MAX} oldest-first — replies[last] (the walk's anchor) is the newest reply r000600`, [e.count, e.replies.length, e.replies[0], e.replies[e.replies.length - 1]]);
-  ok(Array.isArray(e.all) && e.all.length === 600 && e.all[0] === 'r000001' && !Object.keys(e).includes('all') && !JSON.stringify(e).includes('r000001'), 'the FULL list rides the entry as `all` — non-enumerable, never in a JSON answer');
+  ok(gateOf(Array.isArray(e.all)) && e.all.length === 600 && e.all[0] === 'r000001' && !Object.keys(e).includes('all') && !JSON.stringify(e).includes('r000001'), 'the FULL list rides the entry as `all` — non-enumerable, never in a JSON answer');
   const v1 = T.threadView(recs, 'omt_big', { limit: 50 });
   ok(v1.records[0].vendorId === 'root' && v1.records[v1.records.length - 1].vendorId === 'r000600' && !v1.exhausted, 'the pane\'s first page is the root + the NEWEST 50 replies (r000551…r000600)', v1.records.slice(-1).map((r) => r.vendorId));
   // page back to the very first reply — past the 500 the entry lists
   let before = { at: v1.records[1].at, vendorId: v1.records[1].vendorId }, seen = v1.records.length - 1, pages = 1, last = null;
   for (;;) { const v = T.threadView(recs, 'omt_big', { limit: 50, before }); seen += v.records.length; pages++; last = v; if (v.exhausted || !v.records.length) break; before = { at: v.records[0].at, vendorId: v.records[0].vendorId }; }
-  ok(seen === 600 && last.exhausted && last.records[0].vendorId === 'r000001' && pages === 12, `paging back reaches the FIRST reply (${seen} replies over ${pages} pages, exhausted only at the true start)`);
+  ok(seen === 600 && gateOf(last.exhausted) && last.records[0].vendorId === 'r000001' && pages === 12, `paging back reaches the FIRST reply (${seen} replies over ${pages} pages, exhausted only at the true start)`);
   // AT SCALE: one thread of 50 000 replies
   const huge = bigThread(50000);
   const ix = T.threadIndex(huge);
@@ -312,7 +312,7 @@ console.log('⑤b verify r2: a thread past THREAD_REPLIES_MAX — the newest pag
   const vL = linear((n) => bigThread(n), (x) => T.threadView(x, 'omt_big', { limit: 50 }), 25000, TFILES);
   const small = bigThread(5000), ixSmall = T.threadIndex(small), pageSmall = small.slice(-50);
   const pW = work(() => { for (const r of page) T.placeOf(r, ix); }, TFILES), pWs = work(() => { for (const r of pageSmall) T.placeOf(r, ixSmall); }, TFILES);
-  ok(ixL.ok && vL.ok && pW <= 1.25 * pWs + 256, `…in linear WORK: the index ×${ixL.r.toFixed(2)} (${ixL.w1} → ${ixL.w2} ops), the first page ×${vL.r.toFixed(2)} (${vL.w1} → ${vL.w2} ops), placeOf over a page ${pW} ops against 50 000 replies vs ${pWs} against 5 000 (a quadratic step would read ×4; test-channel-reactions ⑥ is the census)`);
+  ok(gateOf(ixL.ok) && gateOf(vL.ok) && pW <= 1.25 * pWs + 256, `…in linear WORK: the index ×${ixL.r.toFixed(2)} (${ixL.w1} → ${ixL.w2} ops), the first page ×${vL.r.toFixed(2)} (${vL.w1} → ${vL.w2} ops), placeOf over a page ${pW} ops against 50 000 replies vs ${pWs} against 5 000 (a quadratic step would read ×4; test-channel-reactions ⑥ is the census)`);
 }
 
 // ═══ ⑥ THE CENSUS SHAPE ═════════════════════════════════════════════════════════════════════════
@@ -331,12 +331,12 @@ console.log('⑥ the census shape (spec §0.2) as a seeded corpus');
   const ix = T.threadIndex(recs, { convId: 'oc' });
   const hist = { one: 0, '2-3': 0, '4-10': 0, '11-50': 0 };
   for (const e of ix.threads.values()) { const n = e.count + 1; if (n === 1) hist.one++; else if (n <= 3) hist['2-3']++; else if (n <= 10) hist['4-10']++; else hist['11-50']++; }
-  ok(eq(hist, { one: 251, '2-3': 23, '4-10': 9, '11-50': 1 }), 'the seeded corpus folds to the census\'s distribution (251 / 23 / 9 / 1)', hist);
-  ok([...ix.threads.values()].every((e) => e.root && e.root.startsWith('om_h')), 'every omt_ thread finds its root as the record the members name (else the earliest with no parent)');
+  ok(verdictOf(eq(hist, { one: 251, '2-3': 23, '4-10': 9, '11-50': 1 })), 'the seeded corpus folds to the census\'s distribution (251 / 23 / 9 / 1)', hist);
+  ok(verdictOf([...ix.threads.values()].every((e) => e.root && e.root.startsWith('om_h'))), 'every omt_ thread finds its root as the record the members name (else the earliest with no parent)');
   // the same corpus with `root` stripped (a record stored before the field existed) finds the same roots
   const legacy = recs.map((r) => { const { root, ...rest } = r; return rest; });
   const lix = T.threadIndex(legacy, { convId: 'oc' });
-  ok([...lix.threads.values()].every((e) => e.root && e.root.startsWith('om_h')), 'records stored BEFORE `root` existed: the root is recovered as the earliest record with no parent (spec §3.6: a derivation, no rewrite)');
+  ok(verdictOf([...lix.threads.values()].every((e) => e.root && e.root.startsWith('om_h'))), 'records stored BEFORE `root` existed: the root is recovered as the earliest record with no parent (spec §3.6: a derivation, no rewrite)');
 }
 
 // ═══ ⑦ BOUND BEFORE PARSE ═══════════════════════════════════════════════════════════════════════
@@ -348,7 +348,7 @@ console.log('⑦ bound before parse — thread ids, quotes, the linear pin');
   // in WORK (lane work-meter-judges, .209 — the clock ratio 8× input ≤ 16× time was a load-sensitive judge)
   const quoteOf = (n) => { const p = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'p', at: T0, text: 'y' }); p.text = 'w '.repeat(n) + '\n'; const k = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'k', at: T0 + 1, replyTo: 'p', text: 'k' }); return { k, ix: T.threadIndex([p, k]) }; };
   const qL = linear(quoteOf, (x) => T.agentPlaceLine(T.placeOf(x.k, x.ix), {}), 64 * 1024, TFILES);
-  ok(qL.ok, `the quote path is LINEAR in the parent's text, in WORK (64 → 128 KiB: ${qL.w1} → ${qL.w2}, ×${qL.r.toFixed(2)} ≤ ${LINEAR_BOUND})`, JSON.stringify(qL));
+  ok(verdictOf(qL.ok), `the quote path is LINEAR in the parent's text, in WORK (64 → 128 KiB: ${qL.w1} → ${qL.w2}, ×${qL.r.toFixed(2)} ≤ ${LINEAR_BOUND})`, JSON.stringify(qL));
 }
 
 // ═══ ⑧ CONTROLS ═════════════════════════════════════════════════════════════════════════════════
@@ -357,7 +357,7 @@ const M = mutantCopies('chanthread', REPO);
 {
   // (a) the root counted as a reply
   const a = M.load(MODEL, SRC.replace("const replies = recs.filter((r) => vid(r) !== root);", 'const replies = recs.slice();'), 'root-as-reply');
-  ok(SRC.includes('const replies = recs.filter((r) => vid(r) !== root);') && a.threadIndex(larkRecs, { convId: 'oc_grp' }).threads.get('om_r1').count === 3, 'CONTROL (a): a copy that counts the root as a reply says 3 for the 2-reply chain — T2\'s assert above would be red');
+  ok(gateOf(SRC.includes('const replies = recs.filter((r) => vid(r) !== root);')) && a.threadIndex(larkRecs, { convId: 'oc_grp' }).threads.get('om_r1').count === 3, 'CONTROL (a): a copy that counts the root as a reply says 3 for the 2-reply chain — T2\'s assert above would be red');
   // (b) the cycle guard removed (the hop bound kept): the cycle is keyed by whichever id the walk stops on
   const noGuard = SRC.replace("if (onPath.has(id)) {", 'if (false) {');
   const b = M.load(MODEL, noGuard, 'no-cycle-guard');
@@ -369,10 +369,10 @@ const M = mutantCopies('chanthread', REPO);
   const cPath = M.write(MODEL, noBound, 'no-hop-bound');
   const probe = `const T=require(${JSON.stringify(cPath)});const R=require(${JSON.stringify(path.join(REPO, 'src/channel-record.js'))});T.threadIndex([R.makeRecord({adapterId:'a',convId:'c',vendorId:'b',at:2,replyTo:'a',text:'b'}),R.makeRecord({adapterId:'a',convId:'c',vendorId:'a',at:1,replyTo:'b',text:'a'})]);console.log('returned');`;
   const run = spawnSync(process.execPath, ['-e', probe], { timeout: 2000, encoding: 'utf8' });
-  ok(noBound !== noGuard && (run.error && run.error.code === 'ETIMEDOUT' || run.signal === 'SIGTERM') && !String(run.stdout).includes('returned'), 'CONTROL (c): with neither the cycle guard nor the hop bound the cycle fixture HANGS — killed at 2 s, read RED (the real module answers at once)');
+  ok(noBound !== noGuard && (gateOf(run.error) && run.error.code === 'ETIMEDOUT' || run.signal === 'SIGTERM') && !String(run.stdout).includes('returned'), 'CONTROL (c): with neither the cycle guard nor the hop bound the cycle fixture HANGS — killed at 2 s, read RED (the real module answers at once)');
   // (d) stats read off the root's own stored line (the Slack mutability fixture turns it stale)
   const d = M.load(MODEL, SRC.replace('      count: replies.length,', '      count: (rootRec && rootRec.raw && Number.isFinite(rootRec.raw.replyCount)) ? rootRec.raw.replyCount : replies.length,'), 'stats-off-root');
-  ok(SRC.includes('      count: replies.length,') && d.threadIndex(slackRecs, { convId: 'C1' }).threads.get('1727000000.000100').count === 3, 'CONTROL (d): a copy that reads the count off the root\'s line says the stale 3 — attack 14\'s assert would be red');
+  ok(gateOf(SRC.includes('      count: replies.length,')) && d.threadIndex(slackRecs, { convId: 'C1' }).threads.get('1727000000.000100').count === 3, 'CONTROL (d): a copy that reads the count off the root\'s line says the stale 3 — attack 14\'s assert would be red');
   // (e) verify r2: the pre-fix entry — the OLDEST 500 listed, threadView paging over that list
   const PRE_LIST = "      replies: all.length > THREAD_REPLIES_MAX ? all.slice(all.length - THREAD_REPLIES_MAX) : all,";
   const PRE_VIEW = '  let replies = (e.all || e.replies).map((id) => ix.byId.get(id)).filter(Boolean);';
@@ -381,7 +381,7 @@ const M = mutantCopies('chanthread', REPO);
   const pe = e5.threadIndex(bigThread(600)).threads.get('omt_big');
   const pv = e5.threadView(bigThread(600), 'omt_big', { limit: 50 });
   ok(pe.replies[pe.replies.length - 1] === 'r000500' && pv.records[pv.records.length - 1].vendorId === 'r000500', 'CONTROL (e): the pre-fix copy lists the OLDEST 500 — its anchor is r000500 and its "newest" page ends at r000500 (the 100 newest replies never drawn) — ⑤b would be red', [pe.replies[pe.replies.length - 1], pv.records.slice(-1).map((r) => r.vendorId)]);
-  for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'chanthread: ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'chanthread: ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 // ═══ lane lark-threads (A1, 2026-10-01): THE PLACE PATCH — a patched root HEADS ITS TOPIC ════════════════════════
@@ -404,14 +404,14 @@ console.log('\n⑫ lane lark-threads: the place patch (widen-only) — a patched
     ['a 513-character key is no key (P4)', W({}, { threadKey: 'k'.repeat(513) }, 'om_r'), null],
     ['a control character is no key (P4)', W({}, { threadKey: 'omt_\n1' }, 'om_r'), null],
   ];
-  for (const [name, got, want] of rows) ok(eq(got, want), `widenPlace: ${name}`, got);
+  for (const [name, got, want] of rows) ok(verdictOf(eq(got, want)), `widenPlace: ${name}`, got);
   const f = T.foldPlaces([{ k: 'pl', msg: 'om_r', threadKey: 'omt_1', root: null }, { k: 'pl', msg: 'om_r', threadKey: 'omt_2', root: null }, { k: 'rx', msg: 'om_r' }, { k: 'pl', msg: 'om_a', threadKey: null, root: 'om_r' }, { k: 'pl', msg: 'om_a', threadKey: 'omt_1', root: 'om_x' }]);
-  ok(eq(f.get('om_r'), { threadKey: 'omt_1', root: null }) && eq(f.get('om_a'), { threadKey: 'omt_1', root: 'om_r' }) && f.size === 2, 'foldPlaces: file order, each field\'s FIRST value wins (a racing second patch is a no-op, never a flip); other side kinds ignored (P3)', [...f]);
+  ok(gateOf(eq(f.get('om_r'), { threadKey: 'omt_1', root: null })) && gateOf(eq(f.get('om_a'), { threadKey: 'omt_1', root: 'om_r' })) && f.size === 2, 'foldPlaces: file order, each field\'s FIRST value wins (a racing second patch is a no-op, never a flip); other side kinds ignored (P3)', [...f]);
   const base = { vendorId: 'om_r', threadKey: null, replyTo: null, text: 'the post' };
   const ap = T.applyPlace(base, { threadKey: 'omt_1' });
   ok(ap !== base && ap.threadKey === 'omt_1' && ap.text === 'the post' && base.threadKey === null && T.applyPlace(base, null) === base && T.applyPlace({ ...base, threadKey: 'om_q' }, { threadKey: 'omt_1' }).threadKey === 'om_q', 'applyPlace: a new object only when something widens (the input never mutated); no patch / a stored key ⇒ the same record');
   const cp = T.compactPlaces([{ k: 'pl', msg: 'a', at: 5, threadKey: 't1' }, { k: 'pl', msg: 'a', at: 9, root: 'r' }, { k: 'pl', msg: 'b', at: 3, threadKey: 't2' }], 10);
-  ok(eq(cp.map((x) => [x.msg, x.at, x.threadKey, x.root]), [['b', 3, 't2', null], ['a', 5, 't1', 'r']]), 'compactPlaces: one line per message (the folded place at its first instant), oldest first', cp);
+  ok(verdictOf(eq(cp.map((x) => [x.msg, x.at, x.threadKey, x.root]), [['b', 3, 't2', null], ['a', 5, 't1', 'r']])), 'compactPlaces: one line per message (the folded place at its first instant), oldest first', cp);
   // THROUGH THE REAL LARK NORMALIZER — the owner's shape: a plain group message stored with no thread; an hour later the
   // vendor lists the same message WITH `thread_id` (its topic was born); the thread walk answers its replies (`root_id` +
   // `thread_id`). Before the patch the root is plain and its replies form a topic whose root shows nothing; after it the
@@ -427,9 +427,9 @@ console.log('\n⑫ lane lark-threads: the place patch (widen-only) — a patched
   const afterIx = T.threadIndex([patchedRoot, plain], { convId: 'oc_grp' });
   const afterWalk = T.threadIndex([patchedRoot, r1, plain], { convId: 'oc_grp' });
   ok(T.placeKindOf(stored, T.threadIndex([stored, plain], { convId: 'oc_grp' })).kind === 'plain', 'before the patch (no reply walked yet): the stored root is a PLAIN message — no chip, nothing to open (the owner\'s screenshot)');
-  ok(T.placeKindOf(patchedRoot, afterIx).kind === 'topic-root' && afterIx.threads.get('omt_new') && afterIx.threads.get('omt_new').root === 'om_post' && afterIx.threads.get('omt_new').count === 0, 'after the patch, before any walk: the root HEADS ITS TOPIC (kind topic-root, the thread indexed with count 0 — the window draws "in thread · open to load")', T.placeKindOf(patchedRoot, afterIx));
+  ok(T.placeKindOf(patchedRoot, afterIx).kind === 'topic-root' && gateOf(afterIx.threads.get('omt_new')) && afterIx.threads.get('omt_new').root === 'om_post' && afterIx.threads.get('omt_new').count === 0, 'after the patch, before any walk: the root HEADS ITS TOPIC (kind topic-root, the thread indexed with count 0 — the window draws "in thread · open to load")', T.placeKindOf(patchedRoot, afterIx));
   const pl = T.placeOf(patchedRoot, afterWalk);
-  ok(T.placeKindOf(patchedRoot, afterWalk).kind === 'topic-root' && pl.thread && pl.thread.isRoot && pl.thread.count === 1 && T.placeKindOf(r1, afterWalk).kind === 'topic-reply' && before.threads.get('omt_new').root === 'om_post', 'after the walk: the patched root\'s chip counts its reply; the reply is a topic reply (its root named)', pl);
+  ok(T.placeKindOf(patchedRoot, afterWalk).kind === 'topic-root' && gateOf(pl.thread) && gateOf(pl.thread.isRoot) && pl.thread.count === 1 && T.placeKindOf(r1, afterWalk).kind === 'topic-reply' && before.threads.get('omt_new').root === 'om_post', 'after the walk: the patched root\'s chip counts its reply; the reply is a topic reply (its root named)', pl);
   // CONTROL: a verdict that REPLACES a stored key — a quote reply (chain key = its root_id) offered a topic key is moved
   // out of its chain: the quote-vs-topic rulings break (the quote becomes a topic member)
   const RSRC = 'const tk = !c.threadKey && placeIdOk(o.threadKey) ? o.threadKey : null;';
@@ -443,9 +443,9 @@ console.log('\n⑫ lane lark-threads: the place patch (widen-only) — a patched
 // ═══ THE MODULE IS PURE ═════════════════════════════════════════════════════════════════════════
 {
   const reqs = [...SRC.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);
-  ok(eq(reqs, ['./channel-record.js']) && !/Date\.now|new Date\(|process\.|setTimeout|\bfs\b/.test(SRC.replace(/^\s*(\*|\/\/).*$/gm, '')), 'src/channel-thread.js imports only channel-record and reads no clock, no process, no fs');
+  ok(gateOf(eq(reqs, ['./channel-record.js'])) && !/Date\.now|new Date\(|process\.|setTimeout|\bfs\b/.test(SRC.replace(/^\s*(\*|\/\/).*$/gm, '')), 'src/channel-thread.js imports only channel-record and reads no clock, no process, no fs');
   ok(!/\b(lark|slack|telegram|gmail|feishu)\b/i.test(SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1')), 'no vendor name in the module\'s code — the adapter normalized the shape, the model folds it');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -49,7 +49,7 @@ const require = createRequire(path.join(REPO, 'package.json'));
 const esbuild = require('esbuild');
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 700) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 700) : '')); } };
 const J = JSON.stringify;
 const SCR = fs.mkdtempSync(path.join(os.tmpdir(), `vs-held-except-doors-${process.pid}-`));
 process.on('exit', () => { try { fs.rmSync(SCR, { recursive: true, force: true }); } catch { } });
@@ -238,7 +238,7 @@ const CREC = require(path.join(REPO, 'src/channel-record.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 let D;
 try { D = await D_P; } catch (e) { ok(false, 'the five dialog modules bundle (esbuild, the page edge stubbed)', String((e && e.errors && e.errors.map((x) => x.text).join(' | ')) || (e && e.message) || e)); console.log(`\nFAILED (${pass} passed, ${fail} failed)`); process.exit(1); }
-ok(['openWhoDialog'].every((f) => typeof D.BW[f] === 'function') && typeof D.CA.showApiAccessDialog === 'function' && typeof D.CF.grantAccessBody === 'function' && typeof D.CF.showNotifyDialog === 'function' && typeof D.EX.openExitAccessDialog === 'function' && typeof D.VA.showGrantPicker === 'function', 'the five dialog modules bundle as they ship (the page edge stubbed at the import line only)');
+ok(gateOf(['openWhoDialog'].every((f) => typeof D.BW[f] === 'function')) && typeof D.CA.showApiAccessDialog === 'function' && typeof D.CF.grantAccessBody === 'function' && typeof D.CF.showNotifyDialog === 'function' && typeof D.EX.openExitAccessDialog === 'function' && typeof D.VA.showGrantPicker === 'function', 'the five dialog modules bundle as they ship (the page edge stubbed at the import line only)');
 const pkOf = (p) => GM.principalKey(p);
 const exKeys = (row) => ((row && row.except) || []).map(pkOf).sort();
 // THE WORLD: one Task Group «Team» (Ada, Bo and Cee in it), Cee left out; Ada also picked by name
@@ -392,10 +392,10 @@ console.log('④ channel «Notify…» (channel-filter-editor.js showNotifyDialo
   const dropTeam = (P) => { const boxes = P.shell.dialog.all.filter((n) => n._cls.includes('chan-af-rm')); const pk = P.pickers.filter((p) => p.o.compact); const i = pk.findIndex((p) => p.selected()[0] === 'group:g-team'); if (i >= 0 && boxes[i]) boxes[i].click(); return i >= 0 && !!boxes[i]; };
   seed();
   { const { P, ex, save } = await open(); const ready = !!ex; await save(); const b = (P.posts[0] || {}).body || {};
-    ok(ready && J(exKeys(row())) === J(['conversation:cid-cee']) && J((b.except || []).map(pkOf)) === J(['conversation:cid-cee']) && !said(P), '(a) CONTROL: an untouched Save keeps the exception', { ready, body: b, row: row() }); }
+    ok(gateOf(ready) && J(exKeys(row())) === J(['conversation:cid-cee']) && J((b.except || []).map(pkOf)) === J(['conversation:cid-cee']) && !said(P), '(a) CONTROL: an untouched Save keeps the exception', { ready, body: b, row: row() }); }
   seed();
   { const { P, save } = await open(); const dropped = dropTeam(P); const s0 = said(P); await save(); const b = (P.posts[0] || {}).body || {};
-    ok(dropped && J((b.watchers || []).map((w) => w.principal.kind + ':' + w.principal.id)) === J(['agent:cid-ada']) && J((b.except || []).map(pkOf)) === J(['conversation:cid-cee']) && !b.removeExcept && !s0, '(b) the Team notification removed, Ada\'s kept: the Save still sends the exception (nothing said, nothing named)', { dropped, b });
+    ok(gateOf(dropped) && J((b.watchers || []).map((w) => w.principal.kind + ':' + w.principal.id)) === J(['agent:cid-ada']) && J((b.except || []).map(pkOf)) === J(['conversation:cid-cee']) && !b.removeExcept && !s0, '(b) the Team notification removed, Ada\'s kept: the Save still sends the exception (nothing said, nothing named)', { dropped, b });
     ok(J(exKeys(row())) === J(['conversation:cid-cee']), '(b) …the stored watch row keeps it', row()); }
   seed();
   let dBody = null;
@@ -496,13 +496,13 @@ console.log('⑦ Task Group outside visibility (task-groups.js _setVisibility �
   tg.update(id, { externalVisibility: 'visible' });
   ok(J(vis()) === J({ externalVisibility: 'visible', externalVisibilityExcept: [CEE] }), '(c) opened again: Cee is still left out', vis());
   let refused = null; try { tg.update(id, { externalVisibilityExcept: [] }); } catch (e) { refused = e; }
-  ok(refused && refused.code === 'except_unnamed' && J(vis().externalVisibilityExcept) === J([CEE]), '(e) a change that leaves Cee out UNNAMED is refused except_unnamed (the row as it was)', refused && { code: refused.code, msg: refused.message });
+  ok(gateOf(refused) && refused.code === 'except_unnamed' && J(vis().externalVisibilityExcept) === J([CEE]), '(e) a change that leaves Cee out UNNAMED is refused except_unnamed (the row as it was)', refused && { code: refused.code, msg: refused.message });
   tg.update(id, { externalVisibilityExcept: [], externalVisibilityRemoveExcept: ['conversation:cid-cee'] });
   ok(J(vis().externalVisibilityExcept) === J([]), '(d) the ✕ named (externalVisibilityRemoveExcept) — written', vis());
   // the detail's live «除了» row (src/lib/task-detail.js, judged): the group is always picked, so the row is always offered and a
   // chip's ✕ IS the shown removal (each change lands at its click); its PATCH names what the ✕ took away
   const TD = fs.readFileSync(path.join(REPO, 'src/lib/task-detail.js'), 'utf8');
-  ok(/pickToRow\(rows, \[evGroupKey\], keys, \{ held: evHeld \}\)/.test(TD) && /externalVisibilityRemoveExcept: gone/.test(TD), 'the detail\'s live 除了 row passes the stored list (held) and names what a ✕ takes away (externalVisibilityRemoveExcept)');
+  ok(gateOf(/pickToRow\(rows, \[evGroupKey\], keys, \{ held: evHeld \}\)/.test(TD)) && verdictOf(/externalVisibilityRemoveExcept: gone/.test(TD)), 'the detail\'s live 除了 row passes the stored list (held) and names what a ✕ takes away (externalVisibilityRemoveExcept)');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -585,13 +585,13 @@ if (RD) {
   const s1 = await w.e.setAccess(w.A, w.ACCT, [{ principal: EG1, authority: 'draft' }], { except: LEFT_M1 });
   { const d = await openAcct(w); const g = ppRow(d.pp, 'group:g1'); if (g) g.click(); await d.save(); }
   const stored = w.rowOf('channel-reach', w.RA);
-  ok(s1.ok && J(toOf(stored)) === J([]) && J(exOf(stored)) === J(['conversation:m1']), '(setup) G1 granted with Em left out, then G1 removed in «Grant access…»: the account\'s reach row is {to: [], except: [Em]} (kept — r1)', { s1, stored });
+  ok(gateOf(s1.ok) && J(toOf(stored)) === J([]) && J(exOf(stored)) === J(['conversation:m1']), '(setup) G1 granted with Em left out, then G1 removed in «Grant access…»: the account\'s reach row is {to: [], except: [Em]} (kept — r1)', { s1, stored });
   const g0 = w.view().accountGrain;
   ok(!!g0 && J(exOf(g0)) === J(['conversation:m1']) && J(g0.access) === J([]), '(a) the account view DRAWS that row: accountGrain is non-null with except [Em] (3f8134f16: null — «nothing here», so the dialog drew no 除了)', g0);
   // 3. the owner re-opens «Grant access…» to grant Ex alone
   let d = await openAcct(w);
   const k0 = keptOf(d.pp);
-  ok(!!k0 && J(k0.names) === J(['Em']) && /^Kept from an earlier grant — left out:/.test(k0.text), '(b) the re-opened dialog SHOWS the kept exception under the picker: «Kept from an earlier grant — left out: Em»', k0 || textOf(d.pp));
+  ok(!!k0 && J(k0.names) === J(['Em']) && verdictOf(/^Kept from an earlier grant — left out:/.test(k0.text)), '(b) the re-opened dialog SHOWS the kept exception under the picker: «Kept from an earlier grant — left out: Em»', k0 || textOf(d.pp));
   { const x = ppRow(d.pp, 'agent:x1'); if (x) x.click(); }
   await d.save();
   const b3 = d.lastPut();
@@ -631,7 +631,7 @@ console.log('⑨ r2 MAJOR: the writers that give a member its own entry over its
   await a.e.setAccess(a.A, a.OPSC, [], { except: LEFT_M1 });
   const ra = await a.e.setAssignment(a.A, a.OPS, { principal: EM1, authority: 'draft', notify: 'wake', mode: 'all' });
   const rowA = a.rowOf('channel-reach', a.RC);
-  ok(ra && ra.ok && J(toOf(rowA)) === J(['conversation:m1']) && J(exOf(rowA)) === J([]) && liftedIn(a, 'channel-reach', a.RC).length === 1, '(a) setAssignment(Em) over Em\'s kept exception LANDS — the exception lifted by name, one audit line naming it (3f8134f16: except_conflicts)', { ra: ra && { ok: ra.ok, code: ra.code, error: ra.error }, row: rowA, audit: liftedIn(a, 'channel-reach', a.RC) });
+  ok(gateOf(ra) && gateOf(ra.ok) && J(toOf(rowA)) === J(['conversation:m1']) && J(exOf(rowA)) === J([]) && liftedIn(a, 'channel-reach', a.RC).length === 1, '(a) setAssignment(Em) over Em\'s kept exception LANDS — the exception lifted by name, one audit line naming it (3f8134f16: except_conflicts)', { ra: ra && { ok: ra.ok, code: ra.code, error: ra.error }, row: rowA, audit: liftedIn(a, 'channel-reach', a.RC) });
   // (b) an agent's own `vibespace-channels watch` over a DORMANT exception (G1's notification removed in Notify…)
   const b = EW.at('hxc', 'c2');
   await b.e.setAccess(b.A, b.OPSC, [{ principal: EG1, authority: 'draft' }]);
@@ -639,13 +639,13 @@ console.log('⑨ r2 MAJOR: the writers that give a member its own entry over its
   await b.e.setWatchers(b.A, b.OPSC, [], { except: LEFT_M1 });
   const mine = await b.e.agentWatch({ kind: 'agent', id: 'm1', name: 'Em', groups: ['g1'], msgLevelFor: () => 'none' }, `${b.A}/${b.OPS}`, {});
   const rowB = b.rowOf('channel-watch', b.RC);
-  ok(mine && mine.ok && J(toOf(rowB)) === J(['conversation:m1']) && J(exOf(rowB)) === J([]) && liftedIn(b, 'channel-watch', b.RC).length === 1, '(b) Em\'s own watch over a DORMANT exception (no Task Group / All agents on the row) LANDS, lifting it by name — never «excepted: a Task Group row leaves you out» (no such row exists)', { mine: mine && { ok: mine.ok, code: mine.code, error: mine.error }, row: rowB });
+  ok(gateOf(mine) && gateOf(mine.ok) && J(toOf(rowB)) === J(['conversation:m1']) && J(exOf(rowB)) === J([]) && liftedIn(b, 'channel-watch', b.RC).length === 1, '(b) Em\'s own watch over a DORMANT exception (no Task Group / All agents on the row) LANDS, lifting it by name — never «excepted: a Task Group row leaves you out» (no such row exists)', { mine: mine && { ok: mine.ok, code: mine.code, error: mine.error }, row: rowB });
   // control: a LIVE exception (G1 still notified, Em left out) is the owner's — the agent's own watch never lifts it
   const c = EW.at('hxc', 'c3');
   await c.e.setAccess(c.A, c.OPSC, [{ principal: EG1, authority: 'draft' }]);
   await c.e.setWatchers(c.A, c.OPSC, [{ principal: EG1, notify: 'wake', mode: 'all', dailyWakeCap: 5 }], { except: LEFT_M1 });
   const live = await c.e.agentWatch({ kind: 'agent', id: 'm1', name: 'Em', groups: ['g1'], msgLevelFor: () => 'none' }, `${c.A}/${c.OPS}`, {});
-  ok(live && !live.ok && live.code === 'excepted' && J(exOf(c.rowOf('channel-watch', c.RC))) === J(['conversation:m1']), '(b) CONTROL: beside a live Task Group row the exception is the owner\'s — the agent\'s own watch is refused «excepted», the row as it was', live);
+  ok(gateOf(live) && !live.ok && live.code === 'excepted' && J(exOf(c.rowOf('channel-watch', c.RC))) === J(['conversation:m1']), '(b) CONTROL: beside a live Task Group row the exception is the owner\'s — the agent\'s own watch is refused «excepted», the row as it was', live);
   // (c) the owner's Approve of Em's wake ask over the dormant exception (the For-you card's Approve)
   const d = EW.at('hxc', 'c4');
   await d.e.setAccess(d.A, d.OPSC, [{ principal: EG1, authority: 'draft' }]);
@@ -655,7 +655,7 @@ console.log('⑨ r2 MAJOR: the writers that give a member its own entry over its
   const reqId = ((d.e.store.index.table('watchRequests') || []).find((r) => r && r.status === 'open') || {}).id;
   const appr = reqId ? await d.e.decideRequest(reqId, true, 'user', { person: true }) : null;
   const rowD = d.rowOf('channel-watch', d.RC);
-  ok(ask && ask.ok !== false && !!reqId && appr && appr.ok && J(toOf(rowD)) === J(['conversation:m1']) && J(exOf(rowD)) === J([]) && liftedIn(d, 'channel-watch', d.RC).length === 1, '(c) the owner\'s Approve of Em\'s wake ask LANDS, lifting the kept exception by name (3f8134f16: except_conflicts — the card\'s Approve answered HTTP 500)', { ask, reqId, appr: appr && { ok: appr.ok, code: appr.code, error: appr.error }, row: rowD });
+  ok(gateOf(ask) && ask.ok !== false && !!reqId && gateOf(appr) && gateOf(appr.ok) && J(toOf(rowD)) === J(['conversation:m1']) && J(exOf(rowD)) === J([]) && liftedIn(d, 'channel-watch', d.RC).length === 1, '(c) the owner\'s Approve of Em\'s wake ask LANDS, lifting the kept exception by name (3f8134f16: except_conflicts — the card\'s Approve answered HTTP 500)', { ask, reqId, appr: appr && { ok: appr.ok, code: appr.code, error: appr.error }, row: rowD });
   // (d) THE ROUTES: a forced conflict (a client that sends a member both given and left out) answers 409 by name, never 500
   const RT = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf8'), AR = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
   const fnText = (src, head) => { const i = src.indexOf(head); if (i < 0) return null; const j = src.indexOf('\n}\n', i); return j < 0 ? null : src.slice(i, j + 2); };
@@ -667,8 +667,8 @@ console.log('⑨ r2 MAJOR: the writers that give a member its own entry over its
   let chanAnswer = null; try { chanAnswer = ca ? new Function(`${ca[0]}\nreturn chanAnswer;`)() : null; } catch { chanAnswer = null; }
   const CONFLICT = { ok: false, code: 'except_conflicts', error: 'conversation:m1 is both given and excepted — a member with its own grant here cannot also be left out of it' };
   const got = { answer: answer && statusOf(answer, CONFLICT), scopeAnswer: scopeAnswer && statusOf(scopeAnswer, CONFLICT), answer3: answer3 && statusOf(answer3, CONFLICT), chanAnswer: chanAnswer && statusOf(chanAnswer, CONFLICT), excepted: chanAnswer && statusOf(chanAnswer, { ok: false, code: 'excepted', error: 'the user left you out' }) };
-  ok(['answer', 'scopeAnswer', 'answer3', 'chanAnswer'].every((k) => got[k] && got[k].status === 409 && got[k].code === 'except_conflicts' && /both given and excepted/.test(got[k].error)), '(d) every channel route answers a forced except_conflicts 409 WITH its sentence — the owner\'s grain routes, the P3 verbs (the Approve), the agent\'s CLI routes (3f8134f16: 500)', got);
-  ok(got.excepted && got.excepted.status === 403 && got.excepted.code === 'excepted', '(d) …and the agent\'s «excepted» refusal is a 403 by name (it was a 500)', got.excepted);
+  ok(verdictOf(['answer', 'scopeAnswer', 'answer3', 'chanAnswer'].every((k) => got[k] && got[k].status === 409 && got[k].code === 'except_conflicts' && /both given and excepted/.test(got[k].error))), '(d) every channel route answers a forced except_conflicts 409 WITH its sentence — the owner\'s grain routes, the P3 verbs (the Approve), the agent\'s CLI routes (3f8134f16: 500)', got);
+  ok(gateOf(got.excepted) && got.excepted.status === 403 && got.excepted.code === 'excepted', '(d) …and the agent\'s «excepted» refusal is a 403 by name (it was a 500)', got.excepted);
   // (e) a compat unassign keeps the kept row; assigning G2 after it keeps Em out of G2 — and «Grant access…» SHOWS «除了 Em»
   if (RD) {
     const e = EW.at('hxd');
@@ -678,7 +678,7 @@ console.log('⑨ r2 MAJOR: the writers that give a member its own entry over its
     const rowE = e.rowOf('channel-reach', e.RA);
     const dE = await openAcct(e);
     const chipsE = exChipsOf(dE.pp);
-    ok(un.ok && as.ok && J(toOf(rowE)) === J(['group:g2']) && J(exOf(rowE)) === J(['conversation:m1']) && J(chipsE) === J(['Em']), '(e) compat unassign ⇒ assign G2: the row is {to: [G2], except: [Em]} (the owner\'s exclusion holds, as designed) and «Grant access…» shows «除了：Em» the moment it opens', { un: un.ok, as: as.ok, row: rowE, chips: chipsE });
+    ok(gateOf(un.ok) && gateOf(as.ok) && J(toOf(rowE)) === J(['group:g2']) && J(exOf(rowE)) === J(['conversation:m1']) && J(chipsE) === J(['Em']), '(e) compat unassign ⇒ assign G2: the row is {to: [G2], except: [Em]} (the owner\'s exclusion holds, as designed) and «Grant access…» shows «除了：Em» the moment it opens', { un: un.ok, as: as.ok, row: rowE, chips: chipsE });
   }
 }
 
@@ -722,7 +722,7 @@ const forkWorld = (H, seedRow) => {
   // PURE: the stored row drawn over the live roster — the fork's live row, its STORED key kept beside it
   const pick = PM.rowToPick({ to: [TEAM], except: [FORK_X] }, [{ key: 'agent:cidF', kind: 'agent', id: 'cidF', name: 'Fork', webuiId: 'F1', groupIds: ['g-team'], groupNames: ['Team'] }], {});
   ok(J(pick.except) === J(['agent:cidF']) && !!pick.storedKey && pick.storedKey['agent:cidF'] === 'conversation:webui:F1', '(a) PURE rowToPick: the fork\'s exception is drawn as its live row (agent:cidF) and carries the key it is STORED under (storedKey → conversation:webui:F1)', pick);
-  ok(typeof E.rekeyForkExcept === 'function' && J(E.rekeyForkExcept({ mode: 'only', except: [FORK_X, CEE] }, (sid) => (sid === 'F1' ? 'cidF' : null))) === J({ mode: 'only', except: [{ kind: 'conversation', key: 'cidF' }, CEE], removeExcept: ['conversation:webui:F1'] }) && E.rekeyForkExcept && J(E.rekeyForkExcept({ mode: 'only', except: [FORK_X] }, () => 'webui:F1')) === J({ mode: 'only', except: [FORK_X] }), '(a) PURE E.rekeyForkExcept: a fork that has its own id now ⇒ its exception RENAMED by name (the old key in removeExcept); still pending ⇒ as it is', null);
+  ok(typeof E.rekeyForkExcept === 'function' && J(E.rekeyForkExcept({ mode: 'only', except: [FORK_X, CEE] }, (sid) => (sid === 'F1' ? 'cidF' : null))) === J({ mode: 'only', except: [{ kind: 'conversation', key: 'cidF' }, CEE], removeExcept: ['conversation:webui:F1'] }) && gateOf(E.rekeyForkExcept) && J(E.rekeyForkExcept({ mode: 'only', except: [FORK_X] }, () => 'webui:F1')) === J({ mode: 'only', except: [FORK_X] }), '(a) PURE E.rekeyForkExcept: a fork that has its own id now ⇒ its exception RENAMED by name (the old key in removeExcept); still pending ⇒ as it is', null);
   if (RD) {
     const fw = forkWorld('h-fork', { to: [TEAM], except: [FORK_X] });
     fw.seed();
@@ -784,7 +784,7 @@ console.log('⑫ r3 MAJOR: automation key «授权给…» — Team un-picked: n
     ok(s === 'Cee will no longer be excluded', '(b) …the dialog SAYS before Save: «Cee will no longer be excluded»', s);
     await save();
     const reqs = P.posts.map((x) => `${x.method} ${x.url}`);
-    ok(J(reqs) === J([`DELETE /api/automation/grants/${GT}`]) && !st.rowsFor('automation-key-use', GT).length && J(exKeys(st.rowsFor('automation-key-use', GA)[0])) === J([]) && P.toasts.includes('Saved'), '(c) …the Save deletes Team\'s grant — its exception named by the engine (dropRows) — and nothing else; what was said happened', { reqs, toasts: P.toasts, rows: [GT, GA].map((x) => st.rowsFor('automation-key-use', x)) }); }
+    ok(J(reqs) === J([`DELETE /api/automation/grants/${GT}`]) && !st.rowsFor('automation-key-use', GT).length && J(exKeys(st.rowsFor('automation-key-use', GA)[0])) === J([]) && verdictOf(P.toasts.includes('Saved')), '(c) …the Save deletes Team\'s grant — its exception named by the engine (dropRows) — and nothing else; what was said happened', { reqs, toasts: P.toasts, rows: [GT, GA].map((x) => st.rowsFor('automation-key-use', x)) }); }
   seed();
   { const { P, pp, save } = open();
     const x = exChipX(pp, 'session:cid-cee'); if (x) x.click();
@@ -885,7 +885,7 @@ console.log('⑮ r4 MINOR 1: the machine dialog — «Nobody» shows the kept �
   const k2 = keptOf(d2.pp);
   const seenUp = (n) => { for (let p = n; p; p = p.parentElement) if ((p.style && p.style.display === 'none') || p.hidden) return false; return !!n; };
   const keptNode = kidOf(d2.pp, 'pp-kept');
-  ok(!!r2 && !!k2 && J(k2.names) === J(['Cee']) && seenUp(keptNode), '(c) under Nobody the list\'s kept 除了 is DRAWN and SEEN («Kept from an earlier grant — left out: Cee ✕», nothing above it hidden) — never invisible (fb98bebee: the picker\'s wrap hidden under Nobody)', { k2, seen: seenUp(keptNode) });
+  ok(!!r2 && !!k2 && J(k2.names) === J(['Cee']) && verdictOf(seenUp(keptNode)), '(c) under Nobody the list\'s kept 除了 is DRAWN and SEEN («Kept from an earlier grant — left out: Cee ✕», nothing above it hidden) — never invisible (fb98bebee: the picker\'s wrap hidden under Nobody)', { k2, seen: seenUp(keptNode) });
 }
 
 // ═══ ⑯ MINOR 2 — the browser door: a stop broadcast between open and Save never drops a kept exception ═══
@@ -1023,18 +1023,18 @@ console.log('⑲ r6: automation key — a chip leaves with its last carrier; re-
     const chips2 = exChipsOf(pp), s2 = said();
     await save();
     const two = P.posts.find((q) => q.url.endsWith(`/grants/${GW}/except`));
-    ok(!!r && J(chips2) === J(['Cee']) && !s2 && !!two && J(two.body.except.map((x) => x.key)) === J(['cid-cee']) && P.posts.some((q) => q.method === 'DELETE' && q.url.endsWith(`/grants/${GT}`)), '(b) Cee picked again after that is NEW: Two takes it (POST Two except [Cee]) and Team is deleted — nothing said goes (ddd6a46c2: the re-pick ignored, only DELETE Team)', { chips: chips2, said: s2, reqs: reqs(P) }); }
+    ok(!!r && J(chips2) === J(['Cee']) && !s2 && !!two && J(two.body.except.map((x) => x.key)) === J(['cid-cee']) && verdictOf(P.posts.some((q) => q.method === 'DELETE' && q.url.endsWith(`/grants/${GT}`))), '(b) Cee picked again after that is NEW: Two takes it (POST Two except [Cee]) and Team is deleted — nothing said goes (ddd6a46c2: the re-pick ignored, only DELETE Team)', { chips: chips2, said: s2, reqs: reqs(P) }); }
   // (2) All agents (除了 Team) + Team (除了 Cee): the picker cannot draw «Team» as a chip (Team is picked itself) — its own kept line
   { const { P, pp, line, dirty, save } = open(keyOf([[GA, 'everyone:*', [GROUP_TEAM]], [GT, 'group:g-team', [CEE]]]));
     const own = line('vw-ak-own-kept'), d0 = dirty();
     await save();
-    ok(/^Team is left out of All agents/.test(own) && !d0 && !P.posts.length, '(c) All agents (除了 Team) + Team picked: «Team is left out of All agents ✕» is drawn; the dialog is not dirty and an untouched Save posts NOTHING (ddd6a46c2: posted All agents\' removeExcept [group:g-team] — a silent widening)', { own, dirty: d0, reqs: reqs(P) }); }
+    ok(gateOf(/^Team is left out of All agents/.test(own)) && !d0 && !P.posts.length, '(c) All agents (除了 Team) + Team picked: «Team is left out of All agents ✕» is drawn; the dialog is not dirty and an untouched Save posts NOTHING (ddd6a46c2: posted All agents\' removeExcept [group:g-team] — a silent widening)', { own, dirty: d0, reqs: reqs(P) }); }
   { const { P, said, dirty, save } = open(keyOf([[GA, 'everyone:*', [GROUP_TEAM]], [GT, 'group:g-team', [CEE]]]));
     const x = P.shell.body.all.find((n) => n._cls.includes('vw-ak-own-x')); if (x) x.click();
     const s = said(), d1 = dirty();
     await save();
     const all = P.posts.find((q) => q.url.endsWith(`/grants/${GA}/except`));
-    ok(!!x && s === 'Team will no longer be excluded' && d1 && !!all && J(all.body.except) === J([]) && J(all.body.removeExcept) === J(['group:g-team']) && !P.posts.some((q) => q.url.endsWith(`/grants/${GT}/except`)), '(d) its ✕ ⇒ said, the dialog dirty, and the Save takes Team out of All agents\' 除了 BY NAME — Team\'s own grant untouched', { said: s, dirty: d1, reqs: reqs(P) }); }
+    ok(!!x && s === 'Team will no longer be excluded' && gateOf(d1) && !!all && J(all.body.except) === J([]) && J(all.body.removeExcept) === J(['group:g-team']) && !P.posts.some((q) => q.url.endsWith(`/grants/${GT}/except`)), '(d) its ✕ ⇒ said, the dialog dirty, and the Save takes Team out of All agents\' 除了 BY NAME — Team\'s own grant untouched', { said: s, dirty: d1, reqs: reqs(P) }); }
   // (3) the design note: a grant the Save ADDS takes every chip shown — SAID before the Save
   { const { P, pp, line, save } = open(keyOf([[GA, 'everyone:*', [GROUP_OPS]]]));
     const t0 = ppRow(pp, 'group:g-team'); if (t0) t0.click();
@@ -1183,7 +1183,7 @@ console.log('⑳ r7 MAJOR: automation key — the own kept line is ANOTHER grant
     const own = d.own().map((o) => o.text), chips = d.chips(), said = d.said(), dirty = d.dirty();
     await d.save();
     const r = reqs(d.P);
-    ok(!!t && J(own) === J([]) && chips.includes('group:g-team') && said === 'Cee will no longer be excluded' && dirty && r.length === 1 && /^DELETE \/grants\/ag-p\d+ /.test(r[0]) && J(exOf(W, 'everyone:*')) === J(['group:g-team']) && !W.grants.some((g) => g.subject === 'group:g-team'), '(a) All agents (除了 Team) + Team, Team UN-PICKED (to revoke Team\'s own grant): All agents\' «除了 Team» stays — the kept line is drawn as the chip «除了：Team» (r8: one set, the line a view; only Team\'s OWN 除了 Cee is said to go, with its grant); the Save posts ONLY the DELETE of Team\'s grant — All agents still leaves Team out (e9fbc8a2c: the line died, removeExcept [group:g-team] — Team got the key through All agents)', { own, chips, said, dirty, reqs: r, all: exOf(W, 'everyone:*') }); }
+    ok(!!t && J(own) === J([]) && gateOf(chips.includes('group:g-team')) && said === 'Cee will no longer be excluded' && gateOf(dirty) && r.length === 1 && gateOf(/^DELETE \/grants\/ag-p\d+ /.test(r[0])) && J(exOf(W, 'everyone:*')) === J(['group:g-team']) && !W.grants.some((g) => g.subject === 'group:g-team'), '(a) All agents (除了 Team) + Team, Team UN-PICKED (to revoke Team\'s own grant): All agents\' «除了 Team» stays — the kept line is drawn as the chip «除了：Team» (r8: one set, the line a view; only Team\'s OWN 除了 Cee is said to go, with its grant); the Save posts ONLY the DELETE of Team\'s grant — All agents still leaves Team out (e9fbc8a2c: the line died, removeExcept [group:g-team] — Team got the key through All agents)', { own, chips, said, dirty, reqs: r, all: exOf(W, 'everyone:*') }); }
   // (b) …and picked again: back to what was opened — not dirty, nothing posted
   { const W = seed([['everyone:*', ['group:g-team']], ['group:g-team', ['session:cid-cee']]]);
     const d = open(W.key(), W.routes);
@@ -1199,7 +1199,7 @@ console.log('⑳ r7 MAJOR: automation key — the own kept line is ANOTHER grant
     const said = d.said();
     await d.save();
     const all = d.P.posts.find((q) => /\/except$/.test(q.url));
-    ok(!!x && said === 'Team will no longer be excluded' && !!all && J(all.body.except) === J([]) && J(all.body.removeExcept) === J(['group:g-team']) && J(exOf(W, 'everyone:*')) === J([]) && d.P.posts.some((q) => q.method === 'DELETE'), '(c) …its ✕ (Team un-picked: the chip «除了：Team») ⇒ said «Team will no longer be excluded», the Save takes Team out of All agents\' 除了 BY NAME and deletes Team\'s grant', { said, reqs: reqs(d.P) }); }
+    ok(!!x && said === 'Team will no longer be excluded' && !!all && J(all.body.except) === J([]) && J(all.body.removeExcept) === J(['group:g-team']) && J(exOf(W, 'everyone:*')) === J([]) && verdictOf(d.P.posts.some((q) => q.method === 'DELETE')), '(c) …its ✕ (Team un-picked: the chip «除了：Team») ⇒ said «Team will no longer be excluded», the Save takes Team out of All agents\' 除了 BY NAME and deletes Team\'s grant', { said, reqs: reqs(d.P) }); }
   // (d) Team (除了 Cee): Cee picked ITSELF ⇒ its own line; Cee un-picked ⇒ the chip again (r8: a view), not dirty, nothing posted
   { const W = seed([['group:g-team', ['session:cid-cee']]]);
     const d = open(W.key(), W.routes);
@@ -1208,7 +1208,7 @@ console.log('⑳ r7 MAJOR: automation key — the own kept line is ANOTHER grant
     if (c) c.click();
     const own2 = d.own().map((o) => o.text), chips2 = d.chips(), d2 = d.dirty(), said = d.said();
     await d.save();
-    ok(!!c && J(own1) === J(['Cee is left out of Team']) && d1 && J(own2) === J([]) && J(chips2) === J(['session:cid-cee']) && !d2 && !said && !reqs(d.P).length && J(exOf(W, 'group:g-team')) === J(['conversation:cid-cee']), '(d) Team (除了 Cee): Cee picked itself ⇒ «Cee is left out of Team ✕»; Cee un-picked ⇒ «除了：Cee» again (the same member, drawn as a chip), NOT dirty, the Save posts nothing — Team still leaves Cee out (e9fbc8a2c: dirty, removeExcept [conversation:cid-cee])', { own1, own2, chips2, d1, d2, said, reqs: reqs(d.P) }); }
+    ok(!!c && J(own1) === J(['Cee is left out of Team']) && gateOf(d1) && J(own2) === J([]) && J(chips2) === J(['session:cid-cee']) && !d2 && !said && !reqs(d.P).length && J(exOf(W, 'group:g-team')) === J(['conversation:cid-cee']), '(d) Team (除了 Cee): Cee picked itself ⇒ «Cee is left out of Team ✕»; Cee un-picked ⇒ «除了：Cee» again (the same member, drawn as a chip), NOT dirty, the Save posts nothing — Team still leaves Cee out (e9fbc8a2c: dirty, removeExcept [conversation:cid-cee])', { own1, own2, chips2, d1, d2, said, reqs: reqs(d.P) }); }
   // (e) Team (除了 Cee) + Two (除了 Dee): Team un-picked and picked again ⇒ «Cee» back at its OLD place, not dirty
   { const W = seed([['group:g-team', ['session:cid-cee']], ['group:g-two', ['session:cid-dee']]]);
     const d = open(W.key(), W.routes);
@@ -1226,7 +1226,7 @@ console.log('⑳ r7 MAJOR: automation key — the own kept line is ANOTHER grant
     if (t && c) { t.click(); c.click(); t.click(); }
     const own = d.own().map((o) => o.text), said = d.said();
     await d.save();
-    ok(!!t && !!c && J(own) === J(['Cee is left out of Team']) && !said && J(exOf(W, 'group:g-team')) === J(['conversation:cid-cee']) && !d.P.posts.some((q) => /\/except$/.test(q.url)) && W.grants.some((g) => g.subject === 'session:cid-cee'), '(f) Team un-picked (the «Cee» chip leaves), Cee picked itself, Team picked again ⇒ «Cee is left out of Team ✕»; the Save grants Cee and keeps Team\'s 除了', { own, said, reqs: reqs(d.P) }); }
+    ok(!!t && !!c && J(own) === J(['Cee is left out of Team']) && !said && J(exOf(W, 'group:g-team')) === J(['conversation:cid-cee']) && !d.P.posts.some((q) => /\/except$/.test(q.url)) && verdictOf(W.grants.some((g) => g.subject === 'session:cid-cee')), '(f) Team un-picked (the «Cee» chip leaves), Cee picked itself, Team picked again ⇒ «Cee is left out of Team ✕»; the Save grants Cee and keeps Team\'s 除了', { own, said, reqs: reqs(d.P) }); }
   // (g) a chip only the person added, dropped by a pick of its own subject ⇒ back as a chip on the un-pick
   { const W = seed([['everyone:*', []]]);
     const d = open(W.key(), W.routes);
@@ -1463,7 +1463,7 @@ console.log('㉔ r9: a re-add reaches the kept grants it belongs to; a member sa
     const back = addEx(d, 'session:cid-cee');
     const only = d.only(), chips = d.chips();
     await d.save();
-    ok(!!x && !!t && !!o && back && J(chips) === J(['session:cid-cee']) && !only && J(exOf(W, 'group:g-two')) === J(['conversation:cid-cee']) && J(exOf(W, 'group:g-ops')) === J(['conversation:cid-cee']) && !W.grants.some((g) => g.subject === 'group:g-team') && verdict(W, 'cid-cee', ['g-team', 'g-two']) !== 'ok', '(a) MAJOR 2 — Team (除了 Cee) + Two: Cee ✕-ed, Team revoked, Ops granted, Cee added back to the row ⇒ the add reaches EVERY picked grant (no «only» line): Two AND Ops are written with except [Cee], Cee refused (dd04ecdae: a «restore» carried by Ops alone — «Cee is left out of Ops only», Two kept none, Cee in through Two)', { only, chips, reqs: reqs(d.P), cee: verdict(W, 'cid-cee', ['g-team', 'g-two']) }); }
+    ok(!!x && !!t && !!o && gateOf(back) && J(chips) === J(['session:cid-cee']) && !only && J(exOf(W, 'group:g-two')) === J(['conversation:cid-cee']) && J(exOf(W, 'group:g-ops')) === J(['conversation:cid-cee']) && !W.grants.some((g) => g.subject === 'group:g-team') && verdict(W, 'cid-cee', ['g-team', 'g-two']) !== 'ok', '(a) MAJOR 2 — Team (除了 Cee) + Two: Cee ✕-ed, Team revoked, Ops granted, Cee added back to the row ⇒ the add reaches EVERY picked grant (no «only» line): Two AND Ops are written with except [Cee], Cee refused (dd04ecdae: a «restore» carried by Ops alone — «Cee is left out of Ops only», Two kept none, Cee in through Two)', { only, chips, reqs: reqs(d.P), cee: verdict(W, 'cid-cee', ['g-team', 'g-two']) }); }
   // (b) MINOR 1 — Team (除了 Cee) revoked, Ops granted: Cee is SAID going and Ops is written with none
   { const W = seed([['group:g-team', ['session:cid-cee']]]);
     const d = open(W.key(), W.routes);
@@ -1495,7 +1495,7 @@ console.log('㉔ r9: a re-add reaches the kept grants it belongs to; a member sa
     const back = addEx(d, 'session:cid-cee');
     const dirty = d.dirty(), only = d.only();
     await d.save();
-    ok(!!x && back && !dirty && only === 'Cee is left out of Team only' && !reqs(d.P).length, '(e) CONTROL: Cee ✕-ed and added back while Team (which stores it) is picked: as stored — «Cee is left out of Team only», not dirty, nothing posted', { dirty, only, reqs: reqs(d.P) }); }
+    ok(!!x && gateOf(back) && !dirty && only === 'Cee is left out of Team only' && !reqs(d.P).length, '(e) CONTROL: Cee ✕-ed and added back while Team (which stores it) is picked: as stored — «Cee is left out of Team only», not dirty, nothing posted', { dirty, only, reqs: reqs(d.P) }); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1513,11 +1513,11 @@ console.log('㉕ r11: the harness — a page never receives a request another le
   { const t0 = Date.now(); while (Date.now() - t0 < 15) { /* the loop held past the debounce, as on a loaded runner */ } }
   await new Promise((r) => realSetTimeout(r, 10));
   await settledOf(B);
-  ok(A.gone && !A.posts.length && !B.posts.length, '(a) a timer page A left behind (a 5 ms debounced request) is cleared when page B opens — B never receives it, even with the loop held past it (88d8189cd: it reached B — the mirror\'s ⑫(c))', { a: A.posts.map((q) => q.url), b: B.posts.map((q) => q.url) });
+  ok(gateOf(A.gone) && !A.posts.length && !B.posts.length, '(a) a timer page A left behind (a 5 ms debounced request) is cleared when page B opens — B never receives it, even with the loop held past it (88d8189cd: it reached B — the mirror\'s ⑫(c))', { a: A.posts.map((q) => q.url), b: B.posts.map((q) => q.url) });
   const C = newPage({ routes: async (url) => { for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r)); return { ok: true, url }; } });
   const late = (async () => { await new Promise((r) => setImmediate(r)); return globalThis.__hx.fetchJson('/api/automation/grants/ag-x', { method: 'DELETE' }); })();
   const done = await settledOf(C);
-  ok(done && C.posts.length === 1 && C.inflight === 0 && !!(await late), '(b) settledOf waits for the Save\'s OWN requests — one that answers three turns later is recorded and answered before the leg looks (one timer tick was the old wait)', { posts: C.posts.map((q) => q.url), inflight: C.inflight });
+  ok(gateOf(done) && C.posts.length === 1 && C.inflight === 0 && !!(await late), '(b) settledOf waits for the Save\'s OWN requests — one that answers three turns later is recorded and answered before the leg looks (one timer tick was the old wait)', { posts: C.posts.map((q) => q.url), inflight: C.inflight });
 }
 
 // ═══ ㉖ B-f212 — the vault «Who may use»: a landed Save leaves the picker on the hub's row; the ends count from the landed Save ═══
@@ -1568,11 +1568,11 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   const cee = { kind: 'conversation', key: 'cid-cee', principal: 'conversation:cid-cee', name: 'Cee', hosts: [], scopes: [{ kind: 'window', until: now - 60e3, expired: true }] };   // ONLY an ended 1-hour window: pruned at the Save
   const real = await bundleVU();
   const a = await drive(real, { members: [ada, cee] });
-  ok(a.first.posts === 1 && !(a.first.picked || []).some((k) => k.includes('cid-cee')) && (a.first.picked || []).some((k) => k.includes('cid-ada')) && /policy was not/.test(a.first.err),
+  ok(a.first.posts === 1 && !(a.first.picked || []).some((k) => k.includes('cid-cee')) && gateOf((a.first.picked || []).some((k) => k.includes('cid-ada'))) && verdictOf(/policy was not/.test(a.first.err)),
     '(a) the row lands with Cee SWEPT (the policy half refused, the dialog open): the picker holds the hub\'s row — Ada, no Cee', a.first);
   ok(a.posts === 1 && !/Name the hosts/.test(a.err), '(b) …so the repeated Save posts NO row again and asks nobody\'s hosts (only the policy is tried again)', { posts: a.posts, err: a.err });
   const r1 = await drive(await bundleVU(swap('return { selected: pk.selected, except: pk.except,', 'return { selected: prev.selected, except: pk.except,')), { members: [ada, cee] });   // the landing law's rowFields: the landed row's members ignored (the pick as pressed)
-  ok((r1.first.picked || []).some((k) => k.includes('cid-cee')) && /Name the hosts (?:Cee|cid-cee) may use it for/.test(r1.err), '(c) RED — the swept member left in the picker (r11\'s shape): the repeated Save asks «Name the hosts Cee may use it for»', { picked: r1.first.picked, err: r1.err });
+  ok(gateOf((r1.first.picked || []).some((k) => k.includes('cid-cee'))) && verdictOf(/Name the hosts (?:Cee|cid-cee) may use it for/.test(r1.err)), '(c) RED — the swept member left in the picker (r11\'s shape): the repeated Save asks «Name the hosts Cee may use it for»', { picked: r1.first.picked, err: r1.err });
   const b = await drive(real, { members: [ada], end: '8h' });
   ok(b.first.posts === 1 && b.posts === 1 && b.untils[0].length === 1 && b.untils[0][0] >= b.pressAt + 8 * 3600e3 && b.untils[0][0] <= Date.now() + 8 * 3600e3, '(d) «8 hours» chosen: 8 hours from the PRESS, posted ONCE — the repeated Save is the same row (its ends count from the first landed Save), never re-posted', b);
   const r2 = await drive(await bundleVU(swap('endId: endSel.value, endFrom: endsFrom() });', 'endId: endSel.value });')), { members: [ada], end: '8h' });   // stale-pins: kept — a RED control: the pre-B-f212 end (from each Save) restored on purpose
@@ -1614,9 +1614,9 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return method !== 'GET' ? { ok: true } : undefined;
   };
   const j = await drive2(real, { routes: noUseRoutes, change: false });
-  ok(j.posts >= 2 && j.untils.every((u) => u.length === 1 && u[0] === j.untils[0][0]), '(j) r13: a hub answer with no row (an older hub) and nothing the owner changed ⇒ every repeated Save posts the SAME «8 hours» end', j);
+  ok(j.posts >= 2 && verdictOf(j.untils.every((u) => u.length === 1 && u[0] === j.untils[0][0])), '(j) r13: a hub answer with no row (an older hub) and nothing the owner changed ⇒ every repeated Save posts the SAME «8 hours» end', j);
   const inPlant = ' && inputsOf() !== landedInputs';
-  ok(srcVU.split(inPlant).length === 2 && /try \{ plan = planNow\(\); \}/.test(srcVU), 'the plant of (k) is where it claims (the owner\'s inputs, once), and the preview draws planNow — the Save\'s own plan', srcVU.split(inPlant).length - 1);
+  ok(srcVU.split(inPlant).length === 2 && verdictOf(/try \{ plan = planNow\(\); \}/.test(srcVU)), 'the plant of (k) is where it claims (the owner\'s inputs, once), and the preview draws planNow — the Save\'s own plan', srcVU.split(inPlant).length - 1);
   const rk = await drive2(await bundleVU(swap(inPlant, '')), { routes: noUseRoutes, change: false });
   ok(rk.posts >= 2 && rk.untils[1][0] > rk.untils[0][0], '(k) RED — re-timed on ANY change (the hub\'s too): the repeated Save over an older hub posts a LATER end (B-f212\'s own fault back)', { posts: rk.posts, untils: rk.untils });
   // r14 (主开发's read of r13): an EDIT while the Save's post is in flight — the preview redraws the shared instant — the landing
@@ -1636,16 +1636,16 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { edited: during === null, posts: calls.length, press2, untils: calls.map((b) => (b.to || []).flatMap((m) => (m.scopes || []).map((sc) => sc.until || 0))) };
   };
   const n3 = await drive3(real);
-  ok(n3.edited && n3.posts === 2 && n3.untils[1].length === 1 && n3.untils[1][0] >= n3.press2 + 30 * 86400e3, '(n) r14: another end picked WHILE the first Save was in flight ⇒ the next Save posts «30 days» counted from its own press (the landing pinned what was posted)', n3);
+  ok(gateOf(n3.edited) && n3.posts === 2 && n3.untils[1].length === 1 && n3.untils[1][0] >= n3.press2 + 30 * 86400e3, '(n) r14: another end picked WHILE the first Save was in flight ⇒ the next Save posts «30 days» counted from its own press (the landing pinned what was posted)', n3);
   // the read of r14: the instant half on its own — an edit in flight TAKEN BACK before the next Save: that Save is a repeated Save of
   // what landed (ends from the press that posted it) ⇒ it posts NOTHING; RED (q): the landing pins the flight's instant (the shared one)
   const n4 = await drive3(real, { revert: true });
-  ok(n4.edited && n4.posts === 1, '(p) r14: an end picked while the post was in flight, then taken back ⇒ the next Save posts nothing (the pin is the press that posted, not the flight)', n4);
+  ok(gateOf(n4.edited) && n4.posts === 1, '(p) r14: an end picked while the post was in flight, then taken back ⇒ the next Save posts nothing (the pin is the press that posted, not the flight)', n4);
   const rq = await drive3(await bundleVU(swap(pinMove, 'landRow(r, base); endPin = saveAt; landedInputs = inputsKeyOf(clean); previewNow(); }')), { revert: true });
-  ok(rq.edited && rq.posts === 2 && rq.untils[1][0] > rq.untils[0][0], '(q) RED — the landing pins the shared instant (the preview\'s, during the flight): the taken-back Save re-posts the row with a LATER end (B-f212\'s own fault)', { posts: rq.posts, untils: rq.untils });
+  ok(gateOf(rq.edited) && rq.posts === 2 && rq.untils[1][0] > rq.untils[0][0], '(q) RED — the landing pins the shared instant (the preview\'s, during the flight): the taken-back Save re-posts the row with a LATER end (B-f212\'s own fault)', { posts: rq.posts, untils: rq.untils });
   ok(srcVU.split(pinMove).length === 2, 'the RED control\'s plant of (o) is where it claims: the landing pins the Save\'s own instant and inputs, once', srcVU.split(pinMove).length - 1);
   const ro = await drive3(await bundleVU(swap(pinMove, 'landRow(r, base); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }')));   // stale-pins: kept — a RED control: r13's landing (the shared instant, the inputs as shown) restored on purpose
-  ok(ro.edited && ro.posts === 2 && ro.untils[1][0] < ro.press2 + 30 * 86400e3, '(o) RED — the landing reads the shared instant and the inputs as the page shows them (r13): the in-flight edit counts as landed, the «30 days» count from the flight — short of 30 days from the press', { posts: ro.posts, untils: ro.untils, press2: ro.press2 });
+  ok(gateOf(ro.edited) && ro.posts === 2 && ro.untils[1][0] < ro.press2 + 30 * 86400e3, '(o) RED — the landing reads the shared instant and the inputs as the page shows them (r13): the in-flight edit counts as landed, the «30 days» count from the flight — short of 30 days from the press', { posts: ro.posts, untils: ro.untils, press2: ro.press2 });
   // r13 «also» (B-bc3b's read: the own-entry dialog words had only a picture) — the REAL dialog over an agent's OWN entry says a
   // grantee gets no card (another host is refused), and the «let the agent ask … --standing» line is not there (another
   // conversation's --standing ask is refused on it); an owner's entry keeps that line
@@ -1655,12 +1655,12 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return textOf(P.shell.body);
   };
   const ownT = await dialogText(real, true), ownerT = await dialogText(real, false);
-  ok(/Another host, or a command that could go anywhere, is refused/.test(ownT) && /Another conversation sends an agent's value only to the hosts you name here/.test(ownT) && !/Let the agent ask/.test(ownT) && /Let the agent ask/.test(ownerT) && /\(a shell, a script\), still asks you\./.test(ownerT) && !/still asks you/.test(ownT) && !/could go anywhere, is refused/.test(ownerT),   // the -moved2 restack: the hint and the ask line in lane ui-plain-words' words (no command name)
+  ok(gateOf(/Another host, or a command that could go anywhere, is refused/.test(ownT)) && gateOf(/Another conversation sends an agent's value only to the hosts you name here/.test(ownT)) && !/Let the agent ask/.test(ownT) && gateOf(/Let the agent ask/.test(ownerT)) && gateOf(/\(a shell, a script\), still asks you\./.test(ownerT)) && !/still asks you/.test(ownT) && !/could go anywhere, is refused/.test(ownerT),   // the -moved2 restack: the hint and the ask line in lane ui-plain-words' words (no command name)
     '(l) r13: an agent\'s OWN entry — its dialog says another host is refused and shows no «Let the agent ask» line; an owner\'s entry says another host still asks you and keeps the ask line', { own: ownT.slice(0, 400), owner: /Let the agent ask/.test(ownerT) });
   const askPlant = '  if (!u.own) body.append(askAgent);';
   ok(srcVU.split(askPlant).length === 2, 'the RED control\'s plant of (m) is where it claims: the ask line held back on an own entry, once', srcVU.split(askPlant).length - 1);
   const ownR = await dialogText(await bundleVU(swap(askPlant, '  body.append(askAgent);')), true);
-  ok(/Let the agent ask/.test(ownR), '(m) RED — the dialog without the own-entry rule ⇒ an agent\'s own entry offers «Let the agent ask» (a road that is refused there)', ownR.slice(0, 200));
+  ok(verdictOf(/Let the agent ask/.test(ownR)), '(m) RED — the dialog without the own-entry rule ⇒ an agent\'s own entry offers «Let the agent ask» (a road that is refused there)', ownR.slice(0, 200));
   // ═══ ㉗ B-f212 THE LANDING LAW (主开发 r281) — a landing never takes a person's unsaved pick ═══
   // What the person changed since the Save was pressed is kept over the landed row and stays unsaved; a dialog with an unsaved
   // edit is never closed by a landing (it asks, as the person's own close does); the same when the landing is another client's
@@ -1691,7 +1691,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     ['a box unticked in flight: kept, unsaved', { o: true }, { o: false }, { o: true }, { o: true }, { o: false }, ['o'], []],
   ];
   const tableRun = (M) => TABLE.map(([what, base, now, landed, clean, want, unsaved, moved]) => { const L = M.landingOf({ base, now, landed, clean }); const good = Object.keys(want).every((f) => sameF(L.fields[f], want[f])) && J(setOf(L.unsaved)) === J(setOf(unsaved)) && J(setOf(L.moved)) === J(setOf(moved)); return { what, good, got: { fields: L.fields, unsaved: L.unsaved, moved: L.moved } }; });
-  for (const r of tableRun(LM)) ok(r.good, `(t) ${r.what}`, r.got);
+  for (const r of tableRun(LM)) ok(verdictOf(r.good), `(t) ${r.what}`, r.got);
   // THE SEEDED LAW — every case judged by the law's own words, the facts judged printed
   const lawRun = (M, seeds = [7, 41, 212], n = 300) => {
     const U = ['A', 'B', 'C', 'D', 'E'], V = ['x', 'y', 'z'];
@@ -1730,8 +1730,8 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   const valLoses = await lmOf(anchored(LMsrc, 'out = sameField(n, base[f]) ? landed[f] : n;', 'out = landed[f];', '㉗ RED the landed value wins'));
   const tS = tableRun(setLoses).filter((r) => !r.good).map((r) => r.what), lS = lawRun(setLoses);
   const tV = tableRun(valLoses).filter((r) => !r.good).map((r) => r.what), lV = lawRun(valLoses);
-  ok(tS.some((w) => w.startsWith('(a)')) && lS.broken.some((x) => x.law.startsWith('K: the person\'s set')), '(t) RED — the landed set wins (the row\'s fault (a)): the table\'s «(a) a member picked in flight» row and the law\'s K are red', { table: tS, law: lS.broken.slice(0, 1) });
-  ok(tV.some((w) => w.startsWith('the hosts typed in flight')) && lV.broken.some((x) => x.law.startsWith('K: the person\'s value')), '(t) RED — the landed value wins: the table\'s «the hosts typed in flight» row and the law\'s K are red', { table: tV, law: lV.broken.slice(0, 1) });
+  ok(gateOf(tS.some((w) => w.startsWith('(a)'))) && verdictOf(lS.broken.some((x) => x.law.startsWith('K: the person\'s set'))), '(t) RED — the landed set wins (the row\'s fault (a)): the table\'s «(a) a member picked in flight» row and the law\'s K are red', { table: tS, law: lS.broken.slice(0, 1) });
+  ok(gateOf(tV.some((w) => w.startsWith('the hosts typed in flight'))) && verdictOf(lV.broken.some((x) => x.law.startsWith('K: the person\'s value'))), '(t) RED — the landed value wins: the table\'s «the hosts typed in flight» row and the law\'s K are red', { table: tV, law: lV.broken.slice(0, 1) });
 
   // ── THE REAL DIALOG on a memory hub: POST /api/vault/use-grants writes the row and answers it (as the hub's door does), GET
   // /api/vault/contents lists it, the policy door keeps its words; `hold` runs inside a POST before it writes (the person's hands
@@ -1812,13 +1812,13 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { ...after, second: { posts: H.posts.length, posted: keysTo(H.posts[1]), closed: d.P.closed, said: said2, dirty: d.dirty() } };
   };
   const fa = await inFlightPick(real);
-  ok(J(fa.posted) === J(['cid-ada']) && J(fa.stored) === J(['cid-ada']) && J(fa.picked) === J([K_ADA, K_CEE]) && fa.dirty, '(a) a member picked WHILE the Save is in flight is KEPT over the landed row (Ada landed; Ada + Cee picked) and stays UNSAVED', fa);
+  ok(J(fa.posted) === J(['cid-ada']) && J(fa.stored) === J(['cid-ada']) && J(fa.picked) === J([K_ADA, K_CEE]) && verdictOf(fa.dirty), '(a) a member picked WHILE the Save is in flight is KEPT over the landed row (Ada landed; Ada + Cee picked) and stays UNSAVED', fa);
   ok(fa.closed === 0 && fa.asks === 1 && fa.said === 'what you changed while it was saving', '(b) …and the landing does not close the dialog over it: it ASKS, as the person\'s own close does (the ask\'s Save hears «what you changed while it was saving»)', fa);
   ok(fa.second.posts === 2 && J(fa.second.posted) === J(['cid-ada', 'cid-cee']) && fa.second.closed === 1 && fa.second.said === true && !fa.second.dirty, '(a) …the next Save posts Cee too, lands clean and closes', fa.second);
   const ra = await asRed('base', inFlightPick);
   ok(!ra.picked.includes(K_CEE) && ra.closed === 1, '(a) RED — the landing\'s base read at the landing (every change taken as posted): Cee reset by the landed row and the dialog closed', ra);
   const rb = await asRed('close', inFlightPick);
-  ok(rb.picked.includes(K_CEE) && rb.closed === 1 && rb.asks === 0, '(b) RED — a whole landing closes whatever is left: the dialog closed over Cee, no ask', rb);
+  ok(gateOf(rb.picked.includes(K_CEE)) && rb.closed === 1 && rb.asks === 0, '(b) RED — a whole landing closes whatever is left: the dialog closed over Cee, no ask', rb);
   // CONTROL: no edit in flight ⇒ the landing closes the dialog as before, no ask
   {
     const H = hubOf([ada]);
@@ -1834,7 +1834,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     d.end.value = '8h'; d.end.fire('change'); d.pol.value = 'Words A';
     H.hold = () => { d.hosts.value = 'b.example'; d.hosts.fire('input'); d.pol.value = 'Words B'; };
     const said = await d.save();
-    ok(J(hostsTo(H.posts[0])) === J(['api.example.com']) && H.policy === 'Words A' && d.hosts.value === 'b.example' && d.pol.value === 'Words B' && d.dirty() && d.P.closed === 0 && d.P.asks === 1, '(a) the hosts and the policy typed in flight are KEPT (the row landed with api.example.com, the policy with «Words A») and stay unsaved; the dialog asks', { posted: hostsTo(H.posts[0]), policy: H.policy, hosts: d.hosts.value, pol: d.pol.value, dirty: d.dirty(), closed: d.P.closed, asks: d.P.asks, said });
+    ok(J(hostsTo(H.posts[0])) === J(['api.example.com']) && H.policy === 'Words A' && d.hosts.value === 'b.example' && d.pol.value === 'Words B' && gateOf(d.dirty()) && d.P.closed === 0 && d.P.asks === 1, '(a) the hosts and the policy typed in flight are KEPT (the row landed with api.example.com, the policy with «Words A») and stay unsaved; the dialog asks', { posted: hostsTo(H.posts[0]), policy: H.policy, hosts: d.hosts.value, pol: d.pol.value, dirty: d.dirty(), closed: d.P.closed, asks: d.P.asks, said });
     const before = d.P.posts.filter((q) => q.url === '/api/vault/use-policy').length;
     await d.save();
     const pols = d.P.posts.filter((q) => q.url === '/api/vault/use-policy').map((q) => q.body.text);
@@ -1853,7 +1853,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { ...after, posted: keysTo(H.posts[0]), postedHosts: hostsTo(H.posts[0]), polPosts: d.P.posts.filter((q) => q.url === '/api/vault/use-policy').length, listeners: w.fns.length, closedAfter: d.P.closed };
   };
   const fm = await otherSave(real);
-  ok(fm.gets === 1 && J(fm.picked) === J([K_ADA, K_CEE]) && fm.dirty && fm.closed === 0 && fm.asks === 0, 'MULTI-CLIENT: another client\'s save lands in the open dialog (its notify ⇒ ONE read of the row): Cee, picked here, is KEPT and stays unsaved; the dialog never closes', fm);
+  ok(fm.gets === 1 && J(fm.picked) === J([K_ADA, K_CEE]) && gateOf(fm.dirty) && fm.closed === 0 && fm.asks === 0, 'MULTI-CLIENT: another client\'s save lands in the open dialog (its notify ⇒ ONE read of the row): Cee, picked here, is KEPT and stays unsaved; the dialog never closes', fm);
   ok(fm.hosts === 'b.example' && fm.pol === 'Other words', 'MULTI-CLIENT: …what the person did not touch FOLLOWS the other client\'s save (the hosts b.example, the policy «Other words»)', fm);
   ok(J(fm.posted) === J(['cid-ada', 'cid-cee']) && J(fm.postedHosts) === J(['b.example']) && fm.polPosts === 0 && fm.closedAfter === 1 && fm.listeners === 0, 'MULTI-CLIENT: …the next Save posts Ada and Cee for b.example (never the stale api.example.com), no policy (it is what landed); the listener leaves with the dialog', fm);
   const rm = await asRed('hear', otherSave);
@@ -1876,7 +1876,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { ...after, posted: keysTo(H.posts[0]) };
   };
   const fz = await zedSave(real);
-  ok(fz.picked.includes('agent:cid-zed') && !fz.dirty && J(fz.posted) === J(['cid-ada', 'cid-zed']), 'MULTI-CLIENT: a member the picker had not seen (Zed, granted elsewhere) joins it, clean — and the next Save keeps Zed', fz);
+  ok(gateOf(fz.picked.includes('agent:cid-zed')) && !fz.dirty && J(fz.posted) === J(['cid-ada', 'cid-zed']), 'MULTI-CLIENT: a member the picker had not seen (Zed, granted elsewhere) joins it, clean — and the next Save keeps Zed', fz);
   const rz = await asRed('extra', zedSave);
   ok(!rz.posted.includes('cid-zed'), 'MULTI-CLIENT RED — the unseen member not joined to the picker\'s rows: the next Save drops Zed', rz);
   // A READ AND A SAVE: a read that began before this dialog's own landing answers with the row as it WAS — read again, never
@@ -1898,9 +1898,9 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { landedFirst, held: !!release, gets: H.gets, hosts: d.hosts.value, stored: hostsTo({ to: H.row.to }), log: H.log.join(' ') };
   };
   const fs1 = await staleRead(real);
-  ok(fs1.held && fs1.landedFirst && fs1.gets === 2 && fs1.hosts === 'c.example' && J(fs1.stored) === J(['c.example']), 'A READ AND A SAVE: the read asked before the Save landed answers the OLD row after it — read again (2 reads), the dialog keeps c.example as landed', fs1);
+  ok(gateOf(fs1.held) && gateOf(fs1.landedFirst) && fs1.gets === 2 && fs1.hosts === 'c.example' && J(fs1.stored) === J(['c.example']), 'A READ AND A SAVE: the read asked before the Save landed answers the OLD row after it — read again (2 reads), the dialog keeps c.example as landed', fs1);
   const rs1 = await asRed('stale', staleRead);
-  ok(rs1.landedFirst && rs1.hosts === 'api.example.com', 'RED — the older read taken as news: the dialog shows the OLD api.example.com over the row that landed', rs1);
+  ok(gateOf(rs1.landedFirst) && rs1.hosts === 'api.example.com', 'RED — the older read taken as news: the dialog shows the OLD api.example.com over the row that landed', rs1);
   const flightRead = async (show) => {
     const H = hubOf([ada], { policyOk: false });
     const w = wsApp();
@@ -1913,9 +1913,9 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { log: H.log.join(' '), gets: H.gets };
   };
   const ff = await flightRead(real);
-  ok(/^post landed policy get got$/.test(ff.log), 'A READ AND A SAVE: a notify while the Save\'s post is in flight ⇒ the read is made only after the Save is done (post · landed · policy · get)', ff);
+  ok(verdictOf(/^post landed policy get got$/.test(ff.log)), 'A READ AND A SAVE: a notify while the Save\'s post is in flight ⇒ the read is made only after the Save is done (post · landed · policy · get)', ff);
   const rf1 = await asRed('flight', flightRead);
-  ok(/^post get/.test(rf1.log), 'RED — a read made while the Save is in flight: post · get … (the read raced the Save)', rf1);
+  ok(verdictOf(/^post get/.test(rf1.log)), 'RED — a read made while the Save is in flight: post · get … (the read raced the Save)', rf1);
   // r365's should: THE REMOVAL IN FLIGHT on the real dialog (the direction where a person believes an access was taken away)
   const ceeM = { kind: 'conversation', key: 'cid-cee', principal: 'conversation:cid-cee', name: 'Cee', hosts: ['api.example.com'], scopes: [{ kind: 'host', host: 'api.example.com', until: now + 30 * 86400e3 }] };
   const inFlightTakeOut = async (show) => {
@@ -1929,10 +1929,10 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { ...after, second: { posted: keysTo(H.posts[1]), stored: H.row.to.map((m) => m.key).sort(), closed: d.P.closed } };
   };
   const fo = await inFlightTakeOut(real);
-  ok(J(fo.posted) === J(['cid-ada', 'cid-cee']) && J(fo.picked) === J([K_ADA]) && fo.dirty && fo.closed === 0 && fo.asks === 1, '(a) a member taken OUT while the Save is in flight stays OUT over the landed row (Ada + Cee landed), unsaved — the dialog asks, never closes', fo);
+  ok(J(fo.posted) === J(['cid-ada', 'cid-cee']) && J(fo.picked) === J([K_ADA]) && gateOf(fo.dirty) && fo.closed === 0 && fo.asks === 1, '(a) a member taken OUT while the Save is in flight stays OUT over the landed row (Ada + Cee landed), unsaved — the dialog asks, never closes', fo);
   ok(J(fo.second.posted) === J(['cid-ada']) && J(fo.second.stored) === J(['cid-ada']) && fo.second.closed === 1, '(a) …and the next Save posts Ada alone: the hub holds what the dialog showed', fo.second);
   const ro2 = await asRed('base', inFlightTakeOut);
-  ok(ro2.picked.includes(K_CEE) && ro2.closed === 1, '(a) RED — the landing\'s base read at the landing: Cee put back by the landed row and the dialog closed as saved', ro2);
+  ok(gateOf(ro2.picked.includes(K_CEE)) && ro2.closed === 1, '(a) RED — the landing\'s base read at the landing: Cee put back by the landed row and the dialog closed as saved', ro2);
   // r365 (1): A ROW THAT COULD NOT BE READ IS NOT AN EMPTY ROW — the dialog's read answered unknown / refused / locked / unverified /
   // gone while the person has a pick: nothing is unpicked, the line says it, the next Save posts the person's own state
   const STALE = 'vw-use-stale';
@@ -1962,8 +1962,8 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   ];
   for (const [what, reply, words] of READS) {
     const u1 = await unreadable(real, reply), u2 = await unreadable(real, reply, { reread: true });
-    ok(J(u1.picked) === J([K_ADA, K_CEE]) && u1.shown && words.test(u1.note) && u1.dirty && J(u1.posted) === J(['cid-ada', 'cid-cee']), `r365 (1) ${what}: the landing is NOT taken — nothing unpicked, the dialog says «${u1.note}», the next Save posts the person's own Ada + Cee`, u1);
-    ok(u2.shown && u2.cleared && J(u2.pickedAfter) === J([K_ADA, K_CEE]), `r365 (1) ${what}: …a good read of the row clears the line, the person's pick kept`, u2);
+    ok(J(u1.picked) === J([K_ADA, K_CEE]) && gateOf(u1.shown) && gateOf(words.test(u1.note)) && gateOf(u1.dirty) && J(u1.posted) === J(['cid-ada', 'cid-cee']), `r365 (1) ${what}: the landing is NOT taken — nothing unpicked, the dialog says «${u1.note}», the next Save posts the person's own Ada + Cee`, u1);
+    ok(gateOf(u2.shown) && gateOf(u2.cleared) && J(u2.pickedAfter) === J([K_ADA, K_CEE]), `r365 (1) ${what}: …a good read of the row clears the line, the person's pick kept`, u2);
   }
   const ru = await asRed('unknown', (show) => unreadable(show, READS[0][1]));
   ok(!ru.picked.includes(K_ADA) && !ru.shown && !ru.posted.includes('cid-ada'), 'r365 (1) RED — the unknown row read as empty: Ada unpicked with no word, and the next Save removes Ada\'s access', ru);
@@ -1993,11 +1993,11 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   };
   for (const order of ['oldest', 'newest']) {
     const tp = await twoPresses(real, order);
-    ok(tp.outAtOnce === 1 && J(tp.posts) === J([['cid-ada', 'cid-cee'], ['cid-ada']]) && J(tp.stored) === J(['cid-ada']) && tp.closed === 1 && tp.asks === 0 && tp.closedWith && tp.closedWith.out === 0 && J(tp.closedWith.held) === J(['cid-ada']) && tp.done === 2,
+    ok(tp.outAtOnce === 1 && J(tp.posts) === J([['cid-ada', 'cid-cee'], ['cid-ada']]) && J(tp.stored) === J(['cid-ada']) && tp.closed === 1 && tp.asks === 0 && gateOf(tp.closedWith) && tp.closedWith.out === 0 && J(tp.closedWith.held) === J(['cid-ada']) && tp.done === 2,
       `r365 (2) two presses, released ${order} first: ONE post out at a time — the second press is KEPT and posts Ada alone once the first reply landed; the dialog closes with no post out and the hub holding Ada alone, no ask`, tp);
   }
   const rt = await asRed('one', (show) => twoPresses(show, 'newest'));
-  ok(rt.outAtOnce === 2 && rt.closedWith && rt.closedWith.out === 1 && rt.stored.includes('cid-cee'), 'r365 (2) RED — every press posts at once, the hub takes them newest first: the dialog closes on «Cee removed» with a post still out, and the hub ends holding Cee', rt);
+  ok(rt.outAtOnce === 2 && gateOf(rt.closedWith) && rt.closedWith.out === 1 && verdictOf(rt.stored.includes('cid-cee')), 'r365 (2) RED — every press posts at once, the hub takes them newest first: the dialog closes on «Cee removed» with a post still out, and the hub ends holding Cee', rt);
   // the hosts this dialog's own Save wrote are not redrawn from the landed row (they already describe it)
   const ownWords = async (show) => {
     const H = hubOf([ada], { policyOk: false });   // the policy half refused: the dialog stays open after the row lands
@@ -2029,7 +2029,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { before, flipped, back: d.dirty() };
   };
   const og = await onlyGuard(real);
-  ok(!og.before && og.flipped && !og.back, 'r513 «仅本组» — the unsaved guard: switching it ALONE makes the dialog unsaved; switching it back makes it clean again', og);
+  ok(!og.before && gateOf(og.flipped) && !og.back, 'r513 «仅本组» — the unsaved guard: switching it ALONE makes the dialog unsaved; switching it back makes it clean again', og);
   // the landing (the dialog's own Save in flight): switched while the post is out ⇒ KEPT and unsaved, the dialog asks; the next Save posts it
   const onlyInFlight = async (show) => {
     const H = hubOf([team(false)]);
@@ -2042,7 +2042,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { ...after, second: { posted: onlyOf(H.posts[1]), stored: onlyOf({ to: H.row.to }), closed: d.P.closed } };
   };
   const oi = await onlyInFlight(real);
-  ok(J(oi.posted) === J(['g-team:-']) && J(oi.only) === J([K_TEAM]) && oi.dirty && oi.closed === 0 && oi.asks === 1, 'r513 «仅本组» — switched while the Save is in flight: KEPT over the landed row and unsaved; the dialog asks, never closes', oi);
+  ok(J(oi.posted) === J(['g-team:-']) && J(oi.only) === J([K_TEAM]) && gateOf(oi.dirty) && oi.closed === 0 && oi.asks === 1, 'r513 «仅本组» — switched while the Save is in flight: KEPT over the landed row and unsaved; the dialog asks, never closes', oi);
   ok(J(oi.second.posted) === J(['g-team:only']) && J(oi.second.stored) === J(['g-team:only']) && oi.second.closed === 1, 'r513 «仅本组» — …the next Save posts Team only:true and the hub holds it', oi.second);
   // another client's landing: an UNTOUCHED «仅本组» follows the hub's row; a switched one is kept
   const onlyOther = async (show, flip) => {
@@ -2056,7 +2056,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   };
   const oo1 = await onlyOther(real, false), oo2 = await onlyOther(real, true);
   ok(J(oo1.only) === J([K_TEAM]) && oo1.hosts === 'b.example' && !oo1.dirty, 'r513 «仅本组» — another client switched it on, untouched here: it FOLLOWS the hub\'s row, clean', oo1);
-  ok(J(oo2.only) === J([K_TEAM]) && oo2.hosts === 'b.example' && oo2.dirty, 'r513 «仅本组» — switched here and another client saved Team as all: the person\'s switch is KEPT and unsaved; the hosts follow', oo2);
+  ok(J(oo2.only) === J([K_TEAM]) && oo2.hosts === 'b.example' && verdictOf(oo2.dirty), 'r513 «仅本组» — switched here and another client saved Team as all: the person\'s switch is KEPT and unsaved; the hosts follow', oo2);
   // the row that could not be read: the switch kept as last read; the next Save posts it
   const onlyUnread = async (show) => {
     const H = hubOf([team(false)]);
@@ -2071,7 +2071,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { ...after, posted: onlyOf(H.posts[0]) };
   };
   const ou = await onlyUnread(real);
-  ok(J(ou.only) === J([K_TEAM]) && ou.shown && J(ou.posted) === J(['g-team:only']), 'r513 «仅本组» — the row could not be read (unknown): the switch kept as last read, the line shown, the next Save posts Team only:true', ou);
+  ok(J(ou.only) === J([K_TEAM]) && gateOf(ou.shown) && J(ou.posted) === J(['g-team:only']), 'r513 «仅本组» — the row could not be read (unknown): the switch kept as last read, the line shown, the next Save posts Team only:true', ou);
   // the kept press: a press while a post is out posts «仅本组» as it is at THAT moment
   const onlyKept = async (show) => {
     const H = hubOf([team(false)]); H.gate = true;
@@ -2129,7 +2129,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   const WAIT28 = 'Who may use it is being read first — Save again once it shows', FAIL28 = 'Who may use it could not be read — nothing was saved; close it and open it again (it stays as it is)';
   const WORDS28 = 'Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them', WORDS28G = 'Your hosts and end will apply to the new member too — see «What Save writes»';
   const sf = await stampFlow(real);
-  ok(sf.sent === 7 && J(sf.picked) === J([K_ADA, K_CEE]) && sf.end === '8h' && sf.dirty && sf.closed === 0 && sf.err === `${WORDS28} ${WORDS28G}` && J(sf.stored) === J(['cid-ada', 'cid-cee'])
+  ok(sf.sent === 7 && J(sf.picked) === J([K_ADA, K_CEE]) && sf.end === '8h' && gateOf(sf.dirty) && sf.closed === 0 && sf.err === `${WORDS28} ${WORDS28G}` && J(sf.stored) === J(['cid-ada', 'cid-cee'])
     && sf.second.sent === 8 && J(sf.second.posted) === J(['cid-ada', 'cid-cee']) && J(sf.second.stored) === J(['cid-ada', 'cid-cee']) && sf.second.closed === 1,
   `㉘ a Save over a row the dialog never saw (a card's «Always» for Cee landed meanwhile) is refused by name: the row that holds lands — Cee in — with the person's «8 hours» kept and unsaved, the words said, the dialog open; Save again sends the new stamp and keeps both — ${J(sf)}`, sf);
   const sfN = await asRed('stampless', stampFlow), sfR = await asRed('refusal', stampFlow);
@@ -2149,7 +2149,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { said, saidKept, posts: H.posts.length, closed: P.closed, dirty: !!P.shell.opts.unsaved.isDirty(), err: errEl ? errEl.textContent : null, picked: setOf(P.pickers[0].selected()), stored: H.row.to.map((m) => m.key).sort() };
   };
   const kf = await keptFlow(real), kfR = await asRed('kept', keptFlow);
-  ok(kf.posts === 1 && kf.closed === 0 && kf.dirty && kf.err === `${WORDS28} ${WORDS28G}` && J(kf.picked) === J([K_ADA, K_CEE]) && kf.saidKept === false,
+  ok(kf.posts === 1 && kf.closed === 0 && gateOf(kf.dirty) && kf.err === `${WORDS28} ${WORDS28G}` && J(kf.picked) === J([K_ADA, K_CEE]) && kf.saidKept === false,
     `the read: a press kept while the refused Save was out is NOT posted — one post, the dialog open, the row that holds shown with the person's change kept, the words said — ${J(kf)}`, kf);
   ok(kfR.posts === 2 && kfR.closed === 1, `RED control: the kept press posts at once ⇒ two posts, the dialog closed — the refusal never seen — ${J(kfR)}`, kfR);
   // r1260 (2): the held row GAINED a member (Cee, the card's) and the person typed a value (the end «8 hours»): the refusal's line
@@ -2176,7 +2176,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return { disabledAtOpen, pressWords, postsAtPress, sentFirst, said1, enabled, picked, said2, posts: H.posts.length, sent: last ? (last.rev === undefined ? 'none' : last.rev) : null, stored: H.row.to.map((m) => m.key).sort(), closed: P.closed, gets: H.gets };
   };
   const uf = await unknownFlow(real), ufR = await asRed('unread', unknownFlow);
-  ok(!uf.disabledAtOpen && uf.pressWords === WAIT28 && uf.postsAtPress === 0 && uf.said1 === false && uf.gets >= 1 && uf.enabled && J(uf.picked) === J([K_ADA, K_CEE]) && uf.posts === 1 && uf.sent === 7 && J(uf.stored) === J(['cid-ada', 'cid-cee']) && uf.closed === 1,
+  ok(!uf.disabledAtOpen && uf.pressWords === WAIT28 && uf.postsAtPress === 0 && uf.said1 === false && uf.gets >= 1 && gateOf(uf.enabled) && J(uf.picked) === J([K_ADA, K_CEE]) && uf.posts === 1 && uf.sent === 7 && J(uf.stored) === J(['cid-ada', 'cid-cee']) && uf.closed === 1,
     `r1260 (3) + r1423: a row whose facts could not be read at the open is never saved over — the Save a LIVE button (never greyed), a press posts nothing and says it is being read first, the row read; then the Save sends its stamp and keeps both — ${J(uf)}`, uf);
   // the tracer's read: a row the hub cannot read but STILL STAMPS (its stored shape unreadable — the window says «Save it again to
   // repair it») keeps its Save — the press posts at once, with that stamp (the hub judges it). RED: every unknown row blocked
@@ -2186,7 +2186,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   // r1423 (the owner's rule: NO GREYED-OUT CONTROL WITH A HINT): the Save is never disabled while the row is unread. RED: the tip
   // before — the Save greyed at the open
   const ufG = await asRed('greyed', unknownFlow);
-  ok(ufG.disabledAtOpen, `RED control: the Save greyed at the open (the tip before r1423) ⇒ a dead button beside a hint — ${J({ disabledAtOpen: ufG.disabledAtOpen })}`, ufG);
+  ok(verdictOf(ufG.disabledAtOpen), `RED control: the Save greyed at the open (the tip before r1423) ⇒ a dead button beside a hint — ${J({ disabledAtOpen: ufG.disabledAtOpen })}`, ufG);
   // r1423: a read that KEEPS FAILING — the Save stays live, a press posts nothing, reads again and says what a person can do (close
   // it and open it again; nothing was saved). RED: it still says «being read»
   const unknownFail = async (show, { reply = () => ({ ok: false, code: 'not_read' }), early = false } = {}) => {
@@ -2290,14 +2290,14 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
       return textOf(byCls(P.shell.body, 'vw-use-stale'));
     };
     const p1 = await press(real), p1R = await asRed('undecided', press);
-    ok(p1.posts === 1 && p1.toasts.includes('Saved — these members are in use again') && p1.closed === 1, `r3130 MUST 2 (a): an UNDECIDED row's Save with no edit POSTS the row whole (it decides) and says «these members are in use again» — ${J(p1)}`, p1);
+    ok(p1.posts === 1 && gateOf(p1.toasts.includes('Saved — these members are in use again')) && p1.closed === 1, `r3130 MUST 2 (a): an UNDECIDED row's Save with no edit POSTS the row whole (it decides) and says «these members are in use again» — ${J(p1)}`, p1);
     ok(p1R.posts === 0, `RED control (today's plan): the same press posts nothing — the row stays undecided — ${J(p1R)}`, p1R);
     const t2 = await twice(real), t2R = await asRed('undecidedlive', twice);
     ok(t2.posts === 1 && t2.closed === 0, `r3130 MUST 2 (b): …once that Save landed the row is decided — the repeated Save posts no row again (only the policy is tried again) — ${J(t2)}`, t2);
     ok(t2R.posts === 2, `RED control: the open's «undecided» kept after the landing ⇒ the repeated Save posts the row again — ${J(t2R)}`, t2R);
     const wu = await reread(real, 'marks_undecided'), wh = await reread(real, 'marks_unread'), wuR = await asRed('lockedword', (s) => reread(s, 'marks_undecided'));
-    ok(!/locked/i.test(wu) && /marks could not be read/.test(wh) && !/locked/i.test(wh), `r3130 MUST 2 (c): the row's reader never reads an undecided or a held row as «the vault is locked» (undecided: «${wu}»; held: «${wh}»)`, { wu, wh });
-    ok(/The vault is locked/.test(wuR), `RED control (today's reader): an undecided row re-read says «The vault is locked» — «${wuR}»`, wuR);
+    ok(!/locked/i.test(wu) && gateOf(/marks could not be read/.test(wh)) && !/locked/i.test(wh), `r3130 MUST 2 (c): the row's reader never reads an undecided or a held row as «the vault is locked» (undecided: «${wu}»; held: «${wh}»)`, { wu, wh });
+    ok(verdictOf(/The vault is locked/.test(wuR)), `RED control (today's reader): an undecided row re-read says «The vault is locked» — «${wuR}»`, wuR);
   }
   globalThis.__hx.real = realWas;
 }
@@ -2328,4 +2328,4 @@ console.log('㉖ lane lg-group-parents: the window Share dialog re-reads «this 
 }
 
 console.log(`\n${fail ? "FAILED" : "ALL PASS"} (${pass} passed, ${fail} failed) — ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

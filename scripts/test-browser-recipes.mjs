@@ -26,7 +26,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const SCRATCH = path.join(os.tmpdir(), `vs-brcp-${process.pid}`);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(extra).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -104,15 +104,15 @@ console.log('— ③ PURE: where a machine without a display runs the browser, a
   ];
   for (const [inp, want] of rows) ok(R.noDisplayRung(inp) === want, `noDisplayRung(${Object.keys(inp).join('+') || 'nothing'}${inp.fact ? ':' + (D.factCode(inp.fact) || inp.fact.kind) : inp.display ? ':' + inp.display.kind : ''}) = ${want}`, R.noDisplayRung(inp));
   const l = R.noDisplayLine({ fact: hidden });
-  ok(l.startsWith('this machine has no display — only vibespace-browser works here (a hidden window)') && /do not launch a browser yourself/.test(l) && /\[no_display\]$/.test(l), 'the hidden-window sentence is the brief\'s, plus why and a code', l);
+  ok(gateOf(l.startsWith('this machine has no display — only vibespace-browser works here (a hidden window)')) && gateOf(/do not launch a browser yourself/.test(l)) && verdictOf(/\[no_display\]$/.test(l)), 'the hidden-window sentence is the brief\'s, plus why and a code', l);
   ok(R.noDisplayLine({ fact: shown }) === '' && R.noDisplayLine({}) === '', 'a display here (or nothing known) ⇒ nothing said');
-  ok(/vibespace-browser new "<site> — <user>'s login"/.test(R.RECIPE_POINTER) && /`use`/.test(R.RECIPE_POINTER) && /live view/.test(R.RECIPE_POINTER) && R.RECIPE_POINTER.endsWith('vibespace-docs browser §0'), 'the pointer: new + use, the live view, the manual §0');
-  ok(R.FIRST_VERB_NEXT.includes(R.RECIPE_POINTER) && /Never launch a browser yourself/.test(R.FIRST_VERB_NEXT), 'the first verb\'s pointer = the same pointer + never launch one yourself');
+  ok(gateOf(/vibespace-browser new "<site> — <user>'s login"/.test(R.RECIPE_POINTER)) && gateOf(/`use`/.test(R.RECIPE_POINTER)) && gateOf(/live view/.test(R.RECIPE_POINTER)) && verdictOf(R.RECIPE_POINTER.endsWith('vibespace-docs browser §0')), 'the pointer: new + use, the live view, the manual §0');
+  ok(gateOf(R.FIRST_VERB_NEXT.includes(R.RECIPE_POINTER)) && verdictOf(/Never launch a browser yourself/.test(R.FIRST_VERB_NEXT)), 'the first verb\'s pointer = the same pointer + never launch one yourself');
   ok(!/`/.test(R.noDisplayLine({ fact: hidden })), 'the status sentence carries no backtick (a shell-safe line)');
   // verify r1 F1: the three surfaces for a conversation on another machine never offer new + use + the live view
-  ok(/another machine/.test(R.REMOTE_POINTER) && R.REMOTE_POINTER.includes(R.MANUAL_REF) && /never ask for a password/.test(R.REMOTE_POINTER) && /conversation on the VibeSpace machine/.test(R.REMOTE_POINTER) && !/\+ `use` it/.test(R.REMOTE_POINTER) && !/live view \(the Agent browser window\)/.test(R.REMOTE_POINTER), 'the remote pointer: another machine ⇒ a conversation on the VibeSpace machine, the manual, never a password — never the new + use + live view recipe');
-  ok(R.FIRST_VERB_NEXT_REMOTE.includes(R.REMOTE_POINTER) && /Never launch a browser yourself/.test(R.FIRST_VERB_NEXT_REMOTE), 'the remote first verb pointer = the remote pointer + never launch one yourself');
-  ok(/another machine/.test(R.INTRO_REMOTE_CLAUSE) && R.INTRO_REMOTE_CLAUSE.includes(R.MANUAL_REF) && /never ask for a password/.test(R.INTRO_REMOTE_CLAUSE) && !/\+ `use` it/.test(R.INTRO_REMOTE_CLAUSE), 'the remote intro clause: another machine, the manual, never a password — not the new + use recipe');
+  ok(gateOf(/another machine/.test(R.REMOTE_POINTER)) && gateOf(R.REMOTE_POINTER.includes(R.MANUAL_REF)) && gateOf(/never ask for a password/.test(R.REMOTE_POINTER)) && gateOf(/conversation on the VibeSpace machine/.test(R.REMOTE_POINTER)) && !/\+ `use` it/.test(R.REMOTE_POINTER) && !/live view \(the Agent browser window\)/.test(R.REMOTE_POINTER), 'the remote pointer: another machine ⇒ a conversation on the VibeSpace machine, the manual, never a password — never the new + use + live view recipe');
+  ok(gateOf(R.FIRST_VERB_NEXT_REMOTE.includes(R.REMOTE_POINTER)) && verdictOf(/Never launch a browser yourself/.test(R.FIRST_VERB_NEXT_REMOTE)), 'the remote first verb pointer = the remote pointer + never launch one yourself');
+  ok(gateOf(/another machine/.test(R.INTRO_REMOTE_CLAUSE)) && gateOf(R.INTRO_REMOTE_CLAUSE.includes(R.MANUAL_REF)) && gateOf(/never ask for a password/.test(R.INTRO_REMOTE_CLAUSE)) && !/\+ `use` it/.test(R.INTRO_REMOTE_CLAUSE), 'the remote intro clause: another machine, the manual, never a password — not the new + use recipe');
 }
 
 // ── a stub VibeSpace answering the CLI (status + resolve) ──
@@ -169,21 +169,21 @@ ok(!/exit machine/i.test(read('data/bin/vibespace-browser')), 'the CLI spells no
   fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(MUT, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(MUT, 'cli-call.js'));
   fs.copyFileSync(path.join(REPO, 'src/browser-stuck.js'), path.join(MUT, 'vibespace-browser-stuck.js'));
   const bad = await statusCensus(path.join(MUT, 'vibespace-browser'));
-  ok(src.includes(line) && bad.length > 0 && bad.some((b) => b.startsWith('ephemeral ⇒ the pointer')), 'CONTROL: a CLI without the pointer FAILS ④', bad.join(' | ').slice(0, 300));
+  ok(gateOf(src.includes(line)) && bad.length > 0 && verdictOf(bad.some((b) => b.startsWith('ephemeral ⇒ the pointer'))), 'CONTROL: a CLI without the pointer FAILS ④', bad.join(' | ').slice(0, 300));
 }
 
 console.log('— ⑤ the first verb refused while no browser exists ⇒ the pointer under the refusal');
 {
   resolveBody = { status: 409, json: { error: 'machine ceiling reached — 6 browsers are running on this machine', code: 'browser_cap', remedy: 'wait for an idle-out', recipe: R.FIRST_VERB_NEXT } };
   const r = await run(CLI, ['open', 'https://example.com/']);
-  ok(r.code === 1 && /\[browser_cap\]/.test(r.err) && r.err.includes(`next: ${R.FIRST_VERB_NEXT}`) && !/fake browser CLI was run/.test(r.err), 'the refusal, then `next:` + the pointer; nothing ran', r.err);
+  ok(r.code === 1 && gateOf(/\[browser_cap\]/.test(r.err)) && gateOf(r.err.includes(`next: ${R.FIRST_VERB_NEXT}`)) && !/fake browser CLI was run/.test(r.err), 'the refusal, then `next:` + the pointer; nothing ran', r.err);
   resolveBody = { status: 409, json: { error: 'machine ceiling reached', code: 'browser_cap', remedy: 'wait' } };
   const r2 = await run(CLI, ['open', 'https://example.com/']);
   ok(r2.code === 1 && !/next: /.test(r2.err), 'a refusal without the server\'s pointer (a browser exists already) prints none', r2.err);
   const rsrc = read('src/routes/browser.js');
-  ok(/if \(!st0\.ephemeral && !\(st0\.leases \|\| \[\]\)\.length\) res\.locals\.recipe = f\.remote \? require\('\.\.\/browser-recipes\.js'\)\.FIRST_VERB_NEXT_REMOTE : require\('\.\.\/browser-recipes\.js'\)\.FIRST_VERB_NEXT/.test(rsrc), 'wiring: /resolve arms the pointer only while the conversation has no browser (no ephemeral record, no lease) — the remote one for a conversation on another machine');
+  ok(verdictOf(/if \(!st0\.ephemeral && !\(st0\.leases \|\| \[\]\)\.length\) res\.locals\.recipe = f\.remote \? require\('\.\.\/browser-recipes\.js'\)\.FIRST_VERB_NEXT_REMOTE : require\('\.\.\/browser-recipes\.js'\)\.FIRST_VERB_NEXT/.test(rsrc)), 'wiring: /resolve arms the pointer only while the conversation has no browser (no ephemeral record, no lease) — the remote one for a conversation on another machine');
   ok((rsrc.match(/\.\.\.\(res\.locals && res\.locals\.recipe \? \{ recipe: res\.locals\.recipe \} : \{\}\)/g) || []).length === 2, 'wiring: both refusal writers (fail + failVerdict) carry it');
-  ok(/recipe: f\.remote \? R\.REMOTE_POINTER : R\.RECIPE_POINTER, noDisplay: \(await statusNoDisplayOf\(k, f, st\)\) \|\| null/.test(rsrc) && /if \(s\.hostId \|\| s\.host \|\| s\._browserVariant === 'H'\) return '';/.test(rsrc), 'wiring: the status route sends the pointer (the remote one for a conversation on another machine) + the no-display line (never for a remote conversation)');
+  ok(gateOf(/recipe: f\.remote \? R\.REMOTE_POINTER : R\.RECIPE_POINTER, noDisplay: \(await statusNoDisplayOf\(k, f, st\)\) \|\| null/.test(rsrc)) && verdictOf(/if \(s\.hostId \|\| s\.host \|\| s\._browserVariant === 'H'\) return '';/.test(rsrc)), 'wiring: the status route sends the pointer (the remote one for a conversation on another machine) + the no-display line (never for a remote conversation)');
 }
 
 console.log('— ⑥ the tools intro: the clause, the display fact, the 9 600 B cap; rung H the remote clause');
@@ -213,14 +213,14 @@ function judgeIntro(ARx) {
   ok(!bad.length, 'rungs D / none: the clause ONCE + the no-display clause under 9 600 B; rung H: the remote clause; a display here ⇒ nothing said', bad.join(' | '));
   const asrc = read('src/agent-routes.js');
   ok((asrc.match(/browserDisplay: browserDisplayFacts\(s\)/g) || []).length === 2, 'wiring: both delivery sites hand the machine\'s display fact beside the set');
-  ok(/if \(!s \|\| s\.hostId \|\| s\.host \|\| s\._browserVariant === 'H'\) return null;/.test(asrc), 'wiring: a conversation on another machine is never told THIS machine\'s display');
-  ok(/const clause = browserVariant === VARIANTS\.H \? R\.INTRO_REMOTE_CLAUSE : R\.INTRO_CLAUSE;/.test(asrc), 'wiring: rung H picks the remote clause (verify r1 F1)');
+  ok(verdictOf(/if \(!s \|\| s\.hostId \|\| s\.host \|\| s\._browserVariant === 'H'\) return null;/.test(asrc)), 'wiring: a conversation on another machine is never told THIS machine\'s display');
+  ok(verdictOf(/const clause = browserVariant === VARIANTS\.H \? R\.INTRO_REMOTE_CLAUSE : R\.INTRO_CLAUSE;/.test(asrc)), 'wiring: rung H picks the remote clause (verify r1 F1)');
   // CONTROL: an agent-routes copy whose isolated Browsing line lost the clause ⇒ RED (a mutant copy outside the tree)
   const MUT = mutantCopies('brcp', REPO);
   const lost = editAnchor(asrc, "kept for this conversation) — ' + clause + '; a site", "kept for this conversation); a site", "src/agent-routes.js");
   const ARm = MUT.load('src/agent-routes.js', lost, 'no-clause');
   const badm = judgeIntro(ARm);
-  ok(lost !== asrc && badm.length > 0 && badm.some((x) => /^rung D/.test(x)), 'CONTROL: an intro whose Browsing line lost the clause FAILS ⑥', badm.join(' | ').slice(0, 300));
+  ok(lost !== asrc && badm.length > 0 && verdictOf(badm.some((x) => /^rung D/.test(x))), 'CONTROL: an intro whose Browsing line lost the clause FAILS ⑥', badm.join(' | ').slice(0, 300));
   const litter = treeLitter(REPO);
   ok(!litter.err && !litter.entries.length, 'the copy lives outside the tree (no litter under src/)', litter);
 }
@@ -228,4 +228,4 @@ function judgeIntro(ARx) {
 server.close();
 fs.rmSync(SCRATCH, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -42,7 +42,7 @@ const anchor = "  require('./stream-relay-xpra.js'),\n";
 ok(regSrc.split(anchor).length === 2, 'the registry lists the xpra relay once (the copy adds its line after it)');
 const regCopy = editAnchor(regSrc, anchor, anchor + `  require(${JSON.stringify(fakeFile)}),\n`, "src/server/stream-relays.js");
 const diff = regCopy.split('\n').filter((l) => !regSrc.split('\n').includes(l));
-ok(diff.length === 1 && /stream-relay-fake\.js/.test(diff[0]), `the fake kind is ONE added line in the registry copy (${diff.length})`);
+ok(diff.length === 1 && verdictOf(/stream-relay-fake\.js/.test(diff[0])), `the fake kind is ONE added line in the registry copy (${diff.length})`);
 const m = new Module(REG, null); m.filename = REG; m.paths = Module._nodeModulePaths(path.dirname(REG)); m._compile(regCopy, REG); m.loaded = true;
 require.cache[REG] = m;
 const DS = require(path.join(repo, 'src/server/desktop-stream.js'));
@@ -69,7 +69,7 @@ const FAKE = require(fakeFile);
 const r1 = await drive(DS, 'fake');
 const c = FAKE.calls[0] || {};
 ok(r1.out.msg === 'fake-hello' && c.id === 'fk1' && c.port === 5999 && c.viewerId === 'v1', `PROOF: a live upgrade for the fake kind lands in ITS relay through the real bridge (${JSON.stringify(r1.out)}, ${c.id}/${c.port}/${c.viewerId})`);
-ok(['takeSeat', 'seatState', 'stats', 'closeOversize', 'lastClose', 'KA', 'onInput'].every((k) => (c.shared || []).includes(k)) && r1.stats.opened === 1, 'the relay is handed the ONE bridge\'s shared state (seats, stats, the named closes, the keepalive) — it owns none of its own');
+ok(gateOf(['takeSeat', 'seatState', 'stats', 'closeOversize', 'lastClose', 'KA', 'onInput'].every((k) => (c.shared || []).includes(k))) && r1.stats.opened === 1, 'the relay is handed the ONE bridge\'s shared state (seats, stats, the named closes, the keepalive) — it owns none of its own');
 ok(c.netem === null, 'a relay that declares no netem gets none (the dev-only knob is a declared cell)');
 const r2 = await drive(DS, 'nope');
 ok(r2.out.status === 501, `an unregistered kind is refused 501 by name (${JSON.stringify(r2.out)})`);
@@ -87,7 +87,7 @@ ok(r4.out.status === 501, `CONTROL: with the hand list restored the registered f
 
 // ── the client twin: a view module + one line in src/lib/stream-views.js reaches the window's factory ──
 const win = read('src/lib/desktop-app-window.js');
-ok(/view = viewOf\(kind\)\(winInfo\.content, /.test(win) && !/createXpraView|createVncView|STREAM_KIND as/.test(win) && /ensureView\(streamKindOf\(r\)\)/.test(win), 'the desktop-app window makes its view ONLY through viewOf(<the record\'s kind>) and names no view module');
+ok(gateOf(/view = viewOf\(kind\)\(winInfo\.content, /.test(win)) && !/createXpraView|createVncView|STREAM_KIND as/.test(win) && verdictOf(/ensureView\(streamKindOf\(r\)\)/.test(win)), 'the desktop-app window makes its view ONLY through viewOf(<the record\'s kind>) and names no view module');
 const esbuild = require('esbuild');
 const viewsSrc = read('src/lib/stream-views.js');
 const vAnchor = "  { kind: xpra.STREAM_KIND, create: xpra.createXpraView },\n";
@@ -103,4 +103,4 @@ ok(V.viewOf('fake')() === 'fake-view' && V.viewOf('xpra')() === 'xpra-view' && V
 ok(V.viewOf('nope')() === 'rfb-view' && V.viewOf('constructor')() === 'rfb-view' && V.STATUS_KIND === 'rfb', 'an unregistered kind falls to the STATUS_KIND view, as before the registry (the bridge refuses it 501)');
 fs.rmSync(scratch, { recursive: true, force: true });
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

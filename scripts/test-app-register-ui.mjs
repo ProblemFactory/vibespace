@@ -37,7 +37,7 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 let passed = 0, failed = 0, skipped = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
 const done = () => { console.log(`\n${failed ? `${failed} FAILED` : 'ALL PASS'} (${passed}${skipped ? `, ${skipped} skipped` : ''}) in ${Math.round((Date.now() - T0) / 1000)} s`); process.exit(failed ? 1 : 0); };
@@ -88,7 +88,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 let up = false; for (let i = 0; i < 160 && !up; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); up = true; } catch { await sleep(250); } }
-check('the worktree server answered', up, fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').slice(-2000) : '');
+check('the worktree server answered', verdictOf(up), fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').slice(-2000) : '');
 
 // ── ONLY the launch is captured in the page (no app starts here); every other desktop-apps route is the REAL server's ──
 const REG = { id: 'app.jasp-tools' }, SEEN = { id: 'seen.f.org.jaspstats.jasp' };
@@ -155,13 +155,13 @@ try {
   const manifest = () => JSON.parse(fs.readFileSync(path.join(fakeHome, AM.APPS_REL, 'manifest.json'), 'utf8'));
 
   console.log('① desk 1100: a registered row with 2 variants (the seeded manifest, the real catalog)');
-  check('the Apps dialog lists both groups', await boot(1100, 800, false), await evalJs(cards).catch((e) => String(e)));
-  check('the outside group lists JASP (the stub flatpak) and Tool (the user .desktop)', await waitFor(`(() => { const c = (${cards}); return c.seen.some((x) => x.id === '${SEEN.id}') && c.seen.some((x) => x.label === 'Tool'); })()`, 15000), await evalJs(cards));
+  check('the Apps dialog lists both groups', verdictOf(await boot(1100, 800, false)), await evalJs(cards).catch((e) => String(e)));
+  check('the outside group lists JASP (the stub flatpak) and Tool (the user .desktop)', verdictOf(await waitFor(`(() => { const c = (${cards}); return c.seen.some((x) => x.id === '${SEEN.id}') && c.seen.some((x) => x.label === 'Tool'); })()`, 15000)), await evalJs(cards));
   await sleep(300); await shot('desk');
   let c = await evalJs(cards);
   const reg = c.apps.find((x) => x.id === REG.id);
-  check('the registered card shows its command, never hidden', !!reg && !!reg.chip && reg.sub.includes(`${TOOLS} --profile main`), c.apps);
-  check('the registered card has its "…"', await openMenu(REG.id));
+  check('the registered card shows its command, never hidden', !!reg && !!reg.chip && verdictOf(reg.sub.includes(`${TOOLS} --profile main`)), c.apps);
+  check('the registered card has its "…"', verdictOf(await openMenu(REG.id)));
   const rows = await ownRows();
   check('its menu: "Open" + "Open · Safe mode" above Remove… / Show command', rows.join('|') === 'Open|Open · Safe mode|Remove…|Show command', rows);
   const tip = await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === 'Open · Safe mode')?.title || ''`);
@@ -169,7 +169,7 @@ try {
   await shot('desk-menu');
   const backend = await evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((j) => (j.availability && j.availability.backend) || null)`);
   check('int256: the server sees a display backend (the stub xpra) — the launch rows are pressable on any machine, the runner too', backend === 'xpra', backend);
-  check('"Open · Safe mode" launches the second variant', await clickMenu('Open · Safe mode'));
+  check('"Open · Safe mode" launches the second variant', verdictOf(await clickMenu('Open · Safe mode')));
   await waitFor(`window.__reg.launches.length > 0`, 15000);
   const launchPost = (await evalJs('window.__reg.launches'))[0];
   check('…POST /api/desktop/apps {appId, variant: "safe"}', !!launchPost && launchPost.appId === REG.id && launchPost.variant === 'safe', launchPost);
@@ -178,68 +178,68 @@ try {
   const addGeo = await evalJs(`(() => { const b = document.querySelector('${D} .desktop-launch-card[data-app-id="${SEEN.id}"] ~ .desktop-launch-card-adopt'); const w = b.parentElement, cell = w.getBoundingClientRect(), q = b.getBoundingClientRect(); return { text: b.textContent, sw: b.scrollWidth, cw: b.clientWidth, right: q.right, wrapRight: cell.right, w: q.width }; })()`);
   check('"Add…" shows its whole word beside the card (never clipped, inside its grid cell)', addGeo.text === 'Add…' && addGeo.sw <= addGeo.cw + 1 && addGeo.right <= addGeo.wrapRight + 0.5 && addGeo.w >= 30, addGeo);
   check('the witnessed card carries "Add…" at desk width', await realClick(`${D} .desktop-launch-card[data-app-id="${SEEN.id}"] ~ .desktop-launch-card-adopt`) === true);
-  check('the adopt dialog opens', await waitFor(`!!document.querySelector('${A} .desktop-adopt-vcmd') && !document.querySelector('${A} .desktop-adopt-go').disabled`, 8000));
+  check('the adopt dialog opens', verdictOf(await waitFor(`!!document.querySelector('${A} .desktop-adopt-vcmd') && !document.querySelector('${A} .desktop-adopt-go').disabled`, 8000)));
   const pre = await evalJs(`(() => { const d = document.querySelector('${A}'); return { label: d.querySelector('.desktop-adopt-label').value, cmds: [...d.querySelectorAll('.desktop-adopt-vcmd')].map((i) => i.value), chips: [...d.querySelectorAll('.desktop-adopt-variant .desktop-adopt-chip')].map((s) => s.textContent), remove: d.querySelector('.desktop-adopt-remove').value, reinstall: d.querySelector('.desktop-adopt-reinstall').value, witness: d.querySelector('.desktop-adopt-witness').textContent, bad: d.querySelector('.desktop-adopt-witness').classList.contains('is-bad') }; })()`);
-  check('prefilled by the server: label, the command + its words as chips, both recipes, the witness line', !pre.bad && pre.label === 'JASP' && pre.cmds.join() === 'flatpak run org.jaspstats.JASP' && pre.chips.join('|') === 'flatpak|run|org.jaspstats.JASP' && pre.remove === 'flatpak uninstall --user -y org.jaspstats.JASP' && /^flatpak install --user -y .*org\.jaspstats\.JASP$/.test(pre.reinstall) && pre.witness === 'flatpak:org.jaspstats.JASP', pre);
+  check('prefilled by the server: label, the command + its words as chips, both recipes, the witness line', !pre.bad && pre.label === 'JASP' && pre.cmds.join() === 'flatpak run org.jaspstats.JASP' && pre.chips.join('|') === 'flatpak|run|org.jaspstats.JASP' && pre.remove === 'flatpak uninstall --user -y org.jaspstats.JASP' && gateOf(/^flatpak install --user -y .*org\.jaspstats\.JASP$/.test(pre.reinstall)) && pre.witness === 'flatpak:org.jaspstats.JASP', pre);
   await shot('adopt');
 
   console.log('③ the server\'s refusal lands under the variants; Add (the REAL POST …/adopt) moves the card');
   await evalJs(`document.querySelector('${A} .desktop-adopt-add-variant').click(); true`);
   await evalJs(`(() => { const r = [...document.querySelectorAll('${A} .desktop-adopt-variant')].pop(); r.querySelector('.desktop-adopt-vlabel').value = 'Debug'; const i = r.querySelector('.desktop-adopt-vcmd'); i.value = 'nosuchprog-vs-ui --debug'; i.dispatchEvent(new Event('input')); return true; })()`);
   await realClick(`${A} .desktop-adopt-go`);
-  check('the server\'s bad_exec is said under "Launch variants" (the dialog stays)', await waitFor(`/nosuchprog-vs-ui does not resolve/.test(document.querySelector('${A} [data-field="launch"] > .desktop-adopt-err')?.textContent || '')`, 8000), await evalJs(`document.querySelector('${A}')?.innerText`).catch(() => null));
+  check('the server\'s bad_exec is said under "Launch variants" (the dialog stays)', verdictOf(await waitFor(`/nosuchprog-vs-ui does not resolve/.test(document.querySelector('${A} [data-field="launch"] > .desktop-adopt-err')?.textContent || '')`, 8000)), await evalJs(`document.querySelector('${A}')?.innerText`).catch(() => null));
   await evalJs(`(() => { const i = [...document.querySelectorAll('${A} .desktop-adopt-vcmd')].pop(); i.value = "flatpak run --command='jasp --debug' org.jaspstats.JASP"; i.dispatchEvent(new Event('input')); return true; })()`);
   const chips2 = await evalJs(`[...[...document.querySelectorAll('${A} .desktop-adopt-variant')].pop().querySelectorAll('.desktop-adopt-chip')].map((s) => s.textContent)`);
   check('a quoted argument is ONE word (its chip)', chips2.join('|') === 'flatpak|run|--command=jasp --debug|org.jaspstats.JASP', chips2);
   await realClick(`${A} .desktop-adopt-go`);
-  check('Add closes the dialog', await waitFor(`!document.querySelector('${A}')`, 8000));
-  check('JASP leaves the outside group and is in Apps ONCE', await waitFor(`(() => { const c = (${cards}); return !c.seen.some((x) => x.label === 'JASP') && c.apps.filter((x) => x.label === 'JASP').length === 1; })()`, 15000), await evalJs(cards));
+  check('Add closes the dialog', verdictOf(await waitFor(`!document.querySelector('${A}')`, 8000)));
+  check('JASP leaves the outside group and is in Apps ONCE', verdictOf(await waitFor(`(() => { const c = (${cards}); return !c.seen.some((x) => x.label === 'JASP') && c.apps.filter((x) => x.label === 'JASP').length === 1; })()`, 15000)), await evalJs(cards));
   const ej = manifest().entries.find((e) => e.id === 'jasp');
   check('the server recorded both variants as argv and the recipes', !!ej && ej.launch.length === 2 && ej.launch[1].args.join('|') === 'run|--command=jasp --debug|org.jaspstats.JASP' && ej.remove.args.join(' ') === 'uninstall --user -y org.jaspstats.JASP', ej);
-  check('the toast says so', await waitFor(toast('JASP is now in your Apps'), 4000));
+  check('the toast says so', verdictOf(await waitFor(toast('JASP is now in your Apps'), 4000)));
 
   console.log('④ Remove… shows the recipe; ok ⇒ the REAL POST …/:id/remove ran it as the user, the card leaves');
   await openMenu('app.jasp');
   check('the adopted card\'s menu: its 2 variants + Remove…', (await ownRows()).join('|') === 'Open|Open · Debug|Remove…|Show command', await ownRows());
   await clickMenu('Remove…');
-  check('the confirm shows the recipe verbatim', await waitFor(`[...document.querySelectorAll('.dialog-overlay')].some((o) => o.textContent.includes('This runs as you: flatpak uninstall --user -y org.jaspstats.JASP'))`, 4000));
+  check('the confirm shows the recipe verbatim', verdictOf(await waitFor(`[...document.querySelectorAll('.dialog-overlay')].some((o) => o.textContent.includes('This runs as you: flatpak uninstall --user -y org.jaspstats.JASP'))`, 4000)));
   await shot('remove');
   await confirmOk();
-  check('ok ⇒ the card leaves Apps', await waitFor(`!(${cards}).apps.some((x) => x.id === 'app.jasp')`, 10000), await evalJs(cards));
+  check('ok ⇒ the card leaves Apps', verdictOf(await waitFor(`!(${cards}).apps.some((x) => x.id === 'app.jasp')`, 10000)), await evalJs(cards));
   const ran = fs.existsSync(path.join(fakeHome, 'uninstall-ran')) ? fs.readFileSync(path.join(fakeHome, 'uninstall-ran'), 'utf8').trim() : '';
   check('the stub recipe RAN as the user, in the home (the real door)', ran === `uninstall --user -y org.jaspstats.JASP|${fakeHome}` && !fs.existsSync(path.join(fakeHome, '.local/share/flatpak/app/org.jaspstats.JASP')) && !manifest().entries.some((e) => e.id === 'jasp'), ran);
-  check('the toast names the outcome', await waitFor(`${toast('Removed')} || ${toast('Forgotten')}`, 5000));
+  check('the toast names the outcome', verdictOf(await waitFor(`${toast('Removed')} || ${toast('Forgotten')}`, 5000)));
 
   console.log('⑤ Tool added WITHOUT a recipe ⇒ Forget; the program stays and is listed outside again');
   const toolSeen = (await evalJs(cards)).seen.find((x) => x.label === 'Tool');
   await realClick(`${D} .desktop-launch-card[data-app-id="${toolSeen.id}"] ~ .desktop-launch-card-adopt`);
   await waitFor(`!!document.querySelector('${A} .desktop-adopt-vcmd') && !document.querySelector('${A} .desktop-adopt-go').disabled`, 8000);
-  check('Tool\'s prefill: its Exec, no recipe', await evalJs(`(() => { const d = document.querySelector('${A}'); return d.querySelector('.desktop-adopt-vcmd').value === ${JSON.stringify(TOOL)} && d.querySelector('.desktop-adopt-remove').value === ''; })()`));
+  check('Tool\'s prefill: its Exec, no recipe', verdictOf(await evalJs(`(() => { const d = document.querySelector('${A}'); return d.querySelector('.desktop-adopt-vcmd').value === ${JSON.stringify(TOOL)} && d.querySelector('.desktop-adopt-remove').value === ''; })()`)));
   await realClick(`${A} .desktop-adopt-go`);
-  check('Tool is in Apps', await waitFor(`!document.querySelector('${A}') && (${cards}).apps.some((x) => x.id === 'app.tool')`, 15000), await evalJs(cards));
+  check('Tool is in Apps', verdictOf(await waitFor(`!document.querySelector('${A}') && (${cards}).apps.some((x) => x.id === 'app.tool')`, 15000)), await evalJs(cards));
   await openMenu('app.tool');
   check('a row without a recipe offers Forget (not Remove…)', (await ownRows()).join('|') === 'Forget|Show command', await ownRows());
   await clickMenu('Forget');
   await waitFor(`[...document.querySelectorAll('.dialog-overlay')].some((o) => o.textContent.includes('the program stays on this machine'))`, 4000);
   await confirmOk();
-  check('Forget ⇒ Tool leaves Apps and the witness lists it outside VibeSpace again; the program stays', await waitFor(`(() => { const c = (${cards}); return !c.apps.some((x) => x.id === 'app.tool') && c.seen.some((x) => x.label === 'Tool'); })()`, 15000) && fs.existsSync(TOOL) && !manifest().entries.some((e) => e.id === 'tool'), await evalJs(cards));
+  check('Forget ⇒ Tool leaves Apps and the witness lists it outside VibeSpace again; the program stays', gateOf(await waitFor(`(() => { const c = (${cards}); return !c.apps.some((x) => x.id === 'app.tool') && c.seen.some((x) => x.label === 'Tool'); })()`, 15000)) && gateOf(fs.existsSync(TOOL)) && !manifest().entries.some((e) => e.id === 'tool'), await evalJs(cards));
 
   console.log('⑥ the row changed outside VibeSpace: disabled, its reason said, its remove refused by name');
   const broken = await evalJs(`(() => { const b = document.querySelector('${D} .desktop-launch-card[data-app-id="app.broken"]'); return b && { dis: b.classList.contains('is-unavailable'), sub: b.querySelector('.desktop-launch-card-sub')?.textContent }; })()`);
-  check('a DISABLED card: "This entry was changed outside VibeSpace and is not runnable: …"', !!broken && broken.dis && /This entry was changed outside VibeSpace and is not runnable: .*names sudo/.test(broken.sub), broken);
+  check('a DISABLED card: "This entry was changed outside VibeSpace and is not runnable: …"', !!broken && gateOf(broken.dis) && verdictOf(/This entry was changed outside VibeSpace and is not runnable: .*names sudo/.test(broken.sub)), broken);
   await openMenu('app.broken');
   check('its menu offers Forget only (no Remove…, no variant)', (await ownRows()).join('|') === 'Forget|Show command', await ownRows());
   await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
   const rr = await evalJs(`fetch('/api/desktop/apps/app.broken/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(async (r) => ({ s: r.status, j: await r.json() }))`);
-  check('its remove is refused by name (needs_root), the entry stays, nothing ran', rr.s === 400 && rr.j.code === 'needs_root' && manifest().entries.some((e) => e.id === 'broken'), rr);
+  check('its remove is refused by name (needs_root), the entry stays, nothing ran', rr.s === 400 && rr.j.code === 'needs_root' && verdictOf(manifest().entries.some((e) => e.id === 'broken')), rr);
 
   console.log('⑦ phone 390: the long-press menu + the adopt sheet');
-  check('the phone dialog lists the outside group', await boot(390, 844, true));
-  check('no "Add…" button on a phone (the long press has it)', await evalJs(`(() => { const b = document.querySelector('${D} .desktop-launch-card-adopt'); return !!b && getComputedStyle(b).display === 'none'; })()`));
+  check('the phone dialog lists the outside group', verdictOf(await boot(390, 844, true)));
+  check('no "Add…" button on a phone (the long press has it)', verdictOf(await evalJs(`(() => { const b = document.querySelector('${D} .desktop-launch-card-adopt'); return !!b && getComputedStyle(b).display === 'none'; })()`)));
   const toolId = (await evalJs(cards)).seen.find((x) => x.label === 'Tool').id;
   const at = await centerOf(`${D} .desktop-launch-card[data-app-id="${toolId}"]`);
   await cdp('Input.synthesizeTapGesture', { x: Math.round(at.x), y: Math.round(at.y), duration: 1200, tapCount: 1, gestureSourceType: 'touch' });
-  check('a long press opens the card\'s menu with Add to VibeSpace…', await waitFor(`[...document.querySelectorAll('.context-menu .context-menu-item')].some((e) => e.textContent.trim() === 'Add to VibeSpace…')`, 4000), await menuRows());
+  check('a long press opens the card\'s menu with Add to VibeSpace…', verdictOf(await waitFor(`[...document.querySelectorAll('.context-menu .context-menu-item')].some((e) => e.textContent.trim() === 'Add to VibeSpace…')`, 4000)), await menuRows());
   await clickMenu('Add to VibeSpace…');
   await waitFor(`!!document.querySelector('${A} .desktop-adopt-vcmd') && !document.querySelector('${A} .desktop-adopt-go').disabled`, 8000);
   const sheet = await evalJs(`(() => { const d = document.querySelector('${A} .dialog'); const q = d.getBoundingClientRect(); const wide = [...document.querySelectorAll('${A} *')].filter((e) => e.getBoundingClientRect().right > innerWidth + 1).map((e) => e.className); return { w: q.width, h: q.height, top: q.top, vw: innerWidth, vh: innerHeight, wide }; })()`);
@@ -256,59 +256,59 @@ try {
   const choose = (v) => evalJs(`(() => { const s = document.querySelector('${SEL}'); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event('change')); return s.value; })()`);
   const pinChip = `(() => { const c = [...document.querySelectorAll('.desktop-app-chip-pin')].filter((e) => e.isConnected && getComputedStyle(e).display !== 'none').pop(); return c ? c.textContent : null; })()`;
   await evalJs(`localStorage.setItem('vibespace.lang', 'en'); true`);
-  check('desk: the Apps dialog opens', await boot(1100, 800, false));
+  check('desk: the Apps dialog opens', verdictOf(await boot(1100, 800, false)));
   let z = await size();
   check('desk: the head carries "Picture size" — the ONE table\'s rows in order, Follow the pane chosen, no hint yet',
-    !!z && z.inHead && z.label === 'Picture size' && z.values.join('|') === 'pane|1280x720|1920x1080|2560x1440|custom' && z.labels.join('|') === 'Follow the pane|1280×720|1920×1080|2560×1440|Custom…' && z.value === 'pane' && z.hint === null, z);
-  check('desk: it sits in the head row beside the machine row / Install an app… (one row)', !!z && z.sameRow, z);
+    !!z && gateOf(z.inHead) && z.label === 'Picture size' && z.values.join('|') === 'pane|1280x720|1920x1080|2560x1440|custom' && z.labels.join('|') === 'Follow the pane|1280×720|1920×1080|2560×1440|Custom…' && z.value === 'pane' && z.hint === null, z);
+  check('desk: it sits in the head row beside the machine row / Install an app… (one row)', !!z && verdictOf(z.sameRow), z);
   await choose('custom');
-  check('Custom… opens the size question (a VibeSpace dialog, never a native prompt)', await waitFor(`[...document.querySelectorAll('.dialog-overlay, .dialog-form')].some((o) => o.textContent.includes('Custom picture size'))`, 4000)); // (lane dialog-yield r2: showInputDialog is a FORM — its root is .dialog-form in its window)
+  check('Custom… opens the size question (a VibeSpace dialog, never a native prompt)', verdictOf(await waitFor(`[...document.querySelectorAll('.dialog-overlay, .dialog-form')].some((o) => o.textContent.includes('Custom picture size'))`, 4000))); // (lane dialog-yield r2: showInputDialog is a FORM — its root is .dialog-form in its window)
   // (the size question by its words — lane dialog-yield r2: a form stands in its window, earlier in the page than the static overlay)
   const ask = (v) => evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay:not(.hidden), .dialog-form')].filter((x) => x.textContent.includes('Custom picture size')).pop(); const i = o.querySelector('input'); i.value = ${JSON.stringify(v)}; o.querySelector('.btn-create').click(); const e = o.querySelector('.dialog-error'); return { open: o.isConnected, err: e && !e.classList.contains('hidden') ? e.textContent : null, kept: i.value }; })()`);
   const a1 = await ask('abc');
-  check('"abc" is refused INLINE in parsePin\'s own words — the dialog stays, the box keeps the text', a1.open && /a size is WxH in pixels \(e\.g\. 1920x1080\) or auto — got "abc"/.test(a1.err || '') && a1.kept === 'abc', a1);
+  check('"abc" is refused INLINE in parsePin\'s own words — the dialog stays, the box keeps the text', gateOf(a1.open) && gateOf(/a size is WxH in pixels \(e\.g\. 1920x1080\) or auto — got "abc"/.test(a1.err || '')) && a1.kept === 'abc', a1);
   await ask('1600x900'); await sleep(200);
   z = await size();
   check('1600x900 is taken: the select lists and shows it (before Custom…), the hint says what a fixed size means',
-    !!z && z.value === '1600x900' && z.labels.includes('1600×900') && z.values.indexOf('1600x900') === z.values.indexOf('custom') - 1 && z.hint === 'Fixed pixels, scaled to fit the pane; an agent sees exactly this size', z);
+    !!z && z.value === '1600x900' && gateOf(z.labels.includes('1600×900')) && z.values.indexOf('1600x900') === z.values.indexOf('custom') - 1 && z.hint === 'Fixed pixels, scaled to fit the pane; an agent sees exactly this size', z);
   await choose('2560x1440');
   const nL = await evalJs('window.__reg.launches.length');
   await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"]`);
   check('a size the machine cannot hold ⇒ pin_unsupported said in the dialog\'s BANNER (never a toast, never a greyed select), with its door',
-    await waitFor(`(() => { const b = document.querySelector('${D} .desktop-launch-banner'); return !!b && !b.classList.contains('is-empty') && /needs the xpra \\(or Xvfb\\) display backend/.test(b.textContent) && b.querySelector('.desktop-launch-banner-go')?.textContent === 'Follow the pane'; })()`, 6000),
+    verdictOf(await waitFor(`(() => { const b = document.querySelector('${D} .desktop-launch-banner'); return !!b && !b.classList.contains('is-empty') && /needs the xpra \\(or Xvfb\\) display backend/.test(b.textContent) && b.querySelector('.desktop-launch-banner-go')?.textContent === 'Follow the pane'; })()`, 6000)),
     await evalJs(`document.querySelector('${D} .desktop-launch-banner')?.outerHTML.slice(0, 600)`));
   check('…the launch carried pin 2560x1440', (await evalJs(`window.__reg.launches.slice(${nL}).map((x) => x.pin).join()`)) === '2560x1440');
   await realClick(`${D} .desktop-launch-banner-go`);
   z = await size();
-  check('the banner\'s "Follow the pane" resets the select (the door)', !!z && z.value === 'pane' && (await evalJs(`document.querySelector('${D} .desktop-launch-banner').classList.contains('is-empty')`)), z);
+  check('the banner\'s "Follow the pane" resets the select (the door)', !!z && z.value === 'pane' && (verdictOf(await evalJs(`document.querySelector('${D} .desktop-launch-banner').classList.contains('is-empty')`))), z);
   await choose('1280x720');
   await sleep(150); await shot('size-desk');
   const nL2 = await evalJs('window.__reg.launches.length');
   await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"]`);
-  check('the card\'s launch POSTs pin 1280x720 (with its appId)', await waitFor(`window.__reg.launches.slice(${nL2}).some((x) => x.appId === '${REG.id}' && x.pin === '1280x720')`, 6000), await evalJs(`window.__reg.launches.slice(${nL2})`));
-  check('…the record is born pinned ⇒ the window\'s chip says "1280×720 (pinned)"', await waitFor(`${pinChip} === '1280×720 (pinned)'`, 8000), await evalJs(pinChip));
+  check('the card\'s launch POSTs pin 1280x720 (with its appId)', verdictOf(await waitFor(`window.__reg.launches.slice(${nL2}).some((x) => x.appId === '${REG.id}' && x.pin === '1280x720')`, 6000)), await evalJs(`window.__reg.launches.slice(${nL2})`));
+  check('…the record is born pinned ⇒ the window\'s chip says "1280×720 (pinned)"', verdictOf(await waitFor(`${pinChip} === '1280×720 (pinned)'`, 8000)), await evalJs(pinChip));
   await sleep(200); await shot('size-window');
-  check('the app REMEMBERS it (user state desktopAppPin, by the app\'s key)', await waitFor(`fetch('/api/user-state').then((r) => r.json()).then((j) => j.desktopAppPin && j.desktopAppPin['${REG.id}'] === '1280x720')`, 6000),
+  check('the app REMEMBERS it (user state desktopAppPin, by the app\'s key)', verdictOf(await waitFor(`fetch('/api/user-state').then((r) => r.json()).then((j) => j.desktopAppPin && j.desktopAppPin['${REG.id}'] === '1280x720')`, 6000)),
     await evalJs(`fetch('/api/user-state').then((r) => r.json()).then((j) => j.desktopAppPin || null)`));
-  check('reopened: the select says "Each app’s last size" and the card names 1280×720', await boot(1100, 800, false) && await waitFor(`(() => { const s = document.querySelector('${SEL}'); const c = document.querySelector('${D} .desktop-launch-card[data-app-id="${REG.id}"] .desktop-launch-card-size'); return s && s.value === '' && s.options[0].textContent === 'Each app’s last size' && c && c.textContent === '1280×720'; })()`, 6000),
+  check('reopened: the select says "Each app’s last size" and the card names 1280×720', gateOf(await boot(1100, 800, false)) && verdictOf(await waitFor(`(() => { const s = document.querySelector('${SEL}'); const c = document.querySelector('${D} .desktop-launch-card[data-app-id="${REG.id}"] .desktop-launch-card-size'); return s && s.value === '' && s.options[0].textContent === 'Each app’s last size' && c && c.textContent === '1280×720'; })()`, 6000)),
     await evalJs(`(() => { const s = document.querySelector('${SEL}'); return { v: s && s.value, o: s && [...s.options].map((x) => x.textContent), chip: document.querySelector('${D} .desktop-launch-card-size')?.textContent || null }; })()`));
   const nL3 = await evalJs('window.__reg.launches.length');
   await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"]`);
-  check('…and an untouched select launches it AT the remembered 1280x720', await waitFor(`window.__reg.launches.slice(${nL3}).some((x) => x.pin === '1280x720')`, 6000), await evalJs(`window.__reg.launches.slice(${nL3})`));
+  check('…and an untouched select launches it AT the remembered 1280x720', verdictOf(await waitFor(`window.__reg.launches.slice(${nL3}).some((x) => x.pin === '1280x720')`, 6000)), await evalJs(`window.__reg.launches.slice(${nL3})`));
   // zh phone 390: its own row; a zh launch ⇒ 「1280×720（钉住）」
   await evalJs(`localStorage.setItem('vibespace.lang', 'zh'); true`);
-  check('zh phone 390: the Apps dialog opens', await boot(390, 844, true));
+  check('zh phone 390: the Apps dialog opens', verdictOf(await boot(390, 844, true)));
   await choose('1280x720');
   z = await size();
   check('zh phone: 「画面尺寸」 on its OWN row (below the head\'s first row, nearly the head\'s width), a phone-sized target, the hint in Chinese',
     !!z && z.label === '画面尺寸' && z.labels[0] === '跟随窗格' && z.top > z.instTop + 4 && z.w >= z.headW - 4 && z.h >= 36 && z.hint === '画面像素固定，窗格里按比例缩放；agent 看到的就是这个尺寸', z);
   const wide = await evalJs(`[...document.querySelectorAll('${D} .desktop-launch-head *, ${D} .desktop-launch-size-hint')].filter((e) => e.getBoundingClientRect().right > innerWidth + 1).map((e) => e.className)`);
-  check('zh phone: nothing in the head is wider than the screen', Array.isArray(wide) && !wide.length, wide);
+  check('zh phone: nothing in the head is wider than the screen', gateOf(Array.isArray(wide)) && !wide.length, wide);
   await sleep(150); await shot('size-phone');
   await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"]`);
-  check('zh: the launch ⇒ the window\'s chip 「1280×720（钉住）」', await waitFor(`${pinChip} === '1280×720（钉住）'`, 8000), await evalJs(pinChip));
+  check('zh: the launch ⇒ the window\'s chip 「1280×720（钉住）」', verdictOf(await waitFor(`${pinChip} === '1280×720（钉住）'`, 8000)), await evalJs(pinChip));
   await sleep(200); await shot('size-phone-window');
   await evalJs(`localStorage.setItem('vibespace.lang', 'en'); true`);
   check('⑧ no page errors', !pageErrors.length, pageErrors);
 } catch (e) { check('the suite ran to its end', false, String(e && e.stack || e)); }
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

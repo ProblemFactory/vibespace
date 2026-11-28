@@ -61,7 +61,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : ''}`); } return !!cond; };
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : ''}`); } return !!cond; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -374,18 +374,18 @@ let ARG = null;
   ok('launch(): an EXPLICIT proxy wins — off:explicit-proxy, no switch, no door started for it', off0.on === false && off0.why === 'explicit-proxy' && off0.arg === null && !fs.existsSync(path.join(ROOT, 'never', DOOR.STATE_FILE)), off0);
   const v = await door.launch({ label: 'Work' });
   ARG = v.arg;
-  ok('launch(): plugin up ⇒ on, its mode, THE switch --proxy-pac-url=http://127.0.0.1:<the door>/tailnet-<token>.pac (comma-free; r3: a random 128-bit token)', v.on && v.mode === 'userspace' && !!v.arg && v.arg === `--proxy-pac-url=${door.url()}` && new RegExp(`^--proxy-pac-url=http://127\\.0\\.0\\.1:${door.port()}/tailnet-[0-9a-f]{32}\\.pac$`).test(v.arg) && !v.arg.includes(','), v);
+  ok('launch(): plugin up ⇒ on, its mode, THE switch --proxy-pac-url=http://127.0.0.1:<the door>/tailnet-<token>.pac (comma-free; r3: a random 128-bit token)', gateOf(v.on) && v.mode === 'userspace' && !!v.arg && v.arg === `--proxy-pac-url=${door.url()}` && gateOf(new RegExp(`^--proxy-pac-url=http://127\\.0\\.0\\.1:${door.port()}/tailnet-[0-9a-f]{32}\\.pac$`).test(v.arg)) && !v.arg.includes(','), v);
   const token = (/tailnet-([0-9a-f]{32})\.pac/.exec(String(v.arg)) || [])[1] || 'none';
   const guess = await Promise.all(['/tailnet.pac', `/tailnet-${'0'.repeat(32)}.pac`, '/', `/tailnet-${token}.pac/x`].map((p) => get(door.port(), { pathName: p })));
   const st = (() => { try { return fs.statSync(path.join(D1, DOOR.STATE_FILE)); } catch { return null; } })();
   ok('r3 N2 — the PAC is on its TOKEN path only: /tailnet.pac, a wrong token, any other path ⇒ 404 (no device name); the token kept with the port in data/tailnet-door.json 0600, never in a console line',
-    guess.every((g) => g.status === 404 && !/peer-alpha/.test(g.body)) && !!st && (st.mode & 0o777) === 0o600 && doorLines.length > 0 && !doorLines.some((l) => l.includes(token)), { guess: guess.map((g) => g.status), lines: doorLines });
+    gateOf(guess.every((g) => g.status === 404 && !/peer-alpha/.test(g.body))) && !!st && (st.mode & 0o777) === 0o600 && doorLines.length > 0 && !doorLines.some((l) => l.includes(token)), { guess: guess.map((g) => g.status), lines: doorLines });
   const so = await (async () => { const was = reachNow; reachNow = { ...R, loggedIn: false, state: 'NeedsLogin' }; const x = await door.launch({ label: 'Signed out' }); reachNow = was; return x; })();
   ok('r3 N3 — a launch while Tailscale is signed out carries NO PAC (Chrome would keep an empty one for its life): off, why signed-out, no switch', so.on === false && so.why === 'signed-out' && so.arg === null, so);
   const pac = await get(door.port(), { pathName: pacPathOf(door) });
   const F = evalPac(pac.body);
   ok('GET /tailnet.pac (userspace): served LIVE — the devices\' names + addresses AND Self ⇒ SOCKS5 127.0.0.1:1055; nosniff (never a script a page can include)',
-    pac.status === 200 && /x-ns-proxy-autoconfig/.test(pac.type) && pac.headers['x-content-type-options'] === 'nosniff' && F('', 'peer-alpha') === 'SOCKS5 127.0.0.1:1055' && F('', `peer-beta.${SUF}`) === 'SOCKS5 127.0.0.1:1055' && F('', PEER_IP) === 'SOCKS5 127.0.0.1:1055' && F('', `hub.${SUF}`) === 'SOCKS5 127.0.0.1:1055', pac);
+    pac.status === 200 && gateOf(/x-ns-proxy-autoconfig/.test(pac.type)) && pac.headers['x-content-type-options'] === 'nosniff' && F('', 'peer-alpha') === 'SOCKS5 127.0.0.1:1055' && F('', `peer-beta.${SUF}`) === 'SOCKS5 127.0.0.1:1055' && F('', PEER_IP) === 'SOCKS5 127.0.0.1:1055' && F('', `hub.${SUF}`) === 'SOCKS5 127.0.0.1:1055', pac);
   ok('GET /tailnet.pac (userspace): N2 — a Funnel / other-tailnet name, an unlisted *.<suffix> name, a CGNAT non-device, a public host, a loopback ⇒ DIRECT (no blanket *.ts.net rule)',
     F('', FUNNEL) === 'DIRECT' && F('', `ghost.${SUF}`) === 'DIRECT' && F('', CGNAT) === 'DIRECT' && F('', 'example.com') === 'DIRECT' && F('', '127.0.0.1') === 'DIRECT', [F('', FUNNEL), F('', `ghost.${SUF}`)]);
   const rebind = await get(door.port(), { pathName: pacPathOf(door), host: 'attacker.example' });
@@ -396,31 +396,31 @@ let ARG = null;
   const h0 = peerHits.length;
   const g = await get(door.port(), { pathName: `http://peer-alpha:${PEER_PORT}/x`, host: `peer-alpha:${PEER_PORT}` });
   const c = await connectVia(door.port(), `peer-alpha.${SUF}:${PEER_PORT}`);
-  ok('the kernel door: a device NAME (bare, absolute GET; FQDN, CONNECT) is resolved from the plugin\'s table and dialled — the device answers', g.status === 200 && g.body === `PEER-OK peer-alpha:${PEER_PORT}` && /200 Connection Established[\s\S]*PEER-OK/.test(c) && peerHits.length === h0 + 2, { g, c });
+  ok('the kernel door: a device NAME (bare, absolute GET; FQDN, CONNECT) is resolved from the plugin\'s table and dialled — the device answers', g.status === 200 && g.body === `PEER-OK peer-alpha:${PEER_PORT}` && gateOf(/200 Connection Established[\s\S]*PEER-OK/.test(c)) && peerHits.length === h0 + 2, { g, c });
   const dd = await driveDoor(door);
   ok('N2 — the kernel door: THIS machine\'s own name (Self) is a device and loads; a name the table does not list (a PAC older than a table change) and a Funnel name are dialled by DNS — never a 403; an address / loopback target is refused by name',
-    /200 Connection Established[\s\S]*PEER-OK hub\./.test(dd.self) && /200 Connection Established[\s\S]*PUBLIC-OK/.test(dd.ghost) && /200 Connection Established[\s\S]*PUBLIC-OK/.test(dd.funnel) && /^HTTP\/1\.1 403/.test(dd.addr) && /not a tailnet name/.test(dd.addr), dd);
+    gateOf(/200 Connection Established[\s\S]*PEER-OK hub\./.test(dd.self)) && gateOf(/200 Connection Established[\s\S]*PUBLIC-OK/.test(dd.ghost)) && gateOf(/200 Connection Established[\s\S]*PUBLIC-OK/.test(dd.funnel)) && gateOf(/^HTTP\/1\.1 403/.test(dd.addr)) && verdictOf(/not a tailnet name/.test(dd.addr)), dd);
   const at = await driveAttack(door);
   ok('r3 N2 — NEVER A WAY BACK INTO THE HUB: a name that resolves to loopback (localhost.localdomain — absolute GET and CONNECT), to the metadata address, to this hub\'s own address, a name with ONE loopback answer among public ones ⇒ 403 by name; the hub-bound server never reached; a public (Funnel) name still loads',
-    at.get.status === 403 && /resolves to 127\.0\.0\.1 — a loopback address/.test(at.get.body) && /^HTTP\/1\.1 403/.test(at.connect) && /a loopback address/.test(at.connect) && /^HTTP\/1\.1 403/.test(at.meta) && /a cloud metadata address/.test(at.meta)
-      && /^HTTP\/1\.1 403/.test(at.mine) && /this machine's own addresses/.test(at.mine) && /^HTTP\/1\.1 403/.test(at.mixed) && at.hubHits === 0 && /200 Connection Established[\s\S]*PUBLIC-OK/.test(at.funnel),
+    at.get.status === 403 && gateOf(/resolves to 127\.0\.0\.1 — a loopback address/.test(at.get.body)) && gateOf(/^HTTP\/1\.1 403/.test(at.connect)) && gateOf(/a loopback address/.test(at.connect)) && gateOf(/^HTTP\/1\.1 403/.test(at.meta)) && gateOf(/a cloud metadata address/.test(at.meta))
+      && gateOf(/^HTTP\/1\.1 403/.test(at.mine)) && gateOf(/this machine's own addresses/.test(at.mine)) && gateOf(/^HTTP\/1\.1 403/.test(at.mixed)) && at.hubHits === 0 && verdictOf(/200 Connection Established[\s\S]*PUBLIC-OK/.test(at.funnel)),
     { get: at.get.status + ' ' + at.get.body.slice(0, 120), connect: at.connect.slice(0, 160), meta: at.meta.slice(0, 120), mine: at.mine.slice(0, 120), mixed: at.mixed.slice(0, 120), hub: at.hubHits });
   const life = await driveLife(DOOR);
   ok('r3 N2 — THE DOOR LISTENS ONLY WHILE THE ROAD IS ON: a boot with the plugin DOWN opens nothing (its kept port refuses); the plugin\'s start (its broadcast) opens it on the kept port with the SAME token; the row off closes it, on opens it; a daemon that died without a word ⇒ the first request is refused in the person\'s words («peer-alpha is a Tailscale name — the Tailscale plugin is off: start it…») and the door closes',
-    !!life.port0 && life.bootDown === null && life.bootDownGet === 0 && life.up === life.port0 && life.upUrl === life.url0 && life.upGet === 200 && life.rowOff === null && life.rowOffGet === 0 && life.again === life.port0 && /^HTTP\/1\.1 403/.test(life.silent) && life.silent.includes('peer-alpha is a Tailscale name — the Tailscale plugin is off: start it in ⚙ → Plugins → Tailscale') && !/road/.test(life.silent) && life.silentAfter === null,
+    !!life.port0 && life.bootDown === null && life.bootDownGet === 0 && life.up === life.port0 && life.upUrl === life.url0 && life.upGet === 200 && life.rowOff === null && life.rowOffGet === 0 && life.again === life.port0 && gateOf(/^HTTP\/1\.1 403/.test(life.silent)) && gateOf(life.silent.includes('peer-alpha is a Tailscale name — the Tailscale plugin is off: start it in ⚙ → Plugins → Tailscale')) && !/road/.test(life.silent) && life.silentAfter === null,
     { ...life, silent: String(life.silent).slice(0, 120) });
   const hg = await driveHung(DOOR);
   ok('r3 N5 — ONE WAIT PER LAUNCH + ITS PAC: a stale table whose status read hangs ⇒ the launch waits its bound once and the PAC right after serves the persisted table AT ONCE (fresh() called once; launch + PAC under two bounds) — «names as of» in it',
-    hg.v.on === true && hg.pac.status === 200 && /\/\/ names as of 2026-11-05T09:30/.test(hg.pac.body) && hg.calls === 1 && hg.took >= SETTLE_MS && hg.took < 2 * SETTLE_MS, { took: hg.took, calls: hg.calls, on: hg.v.on, pac: hg.pac.status });
+    hg.v.on === true && hg.pac.status === 200 && gateOf(/\/\/ names as of 2026-11-05T09:30/.test(hg.pac.body)) && hg.calls === 1 && hg.took >= SETTLE_MS && hg.took < 2 * SETTLE_MS, { took: hg.took, calls: hg.calls, on: hg.v.on, pac: hg.pac.status });
   const po = await drivePacOff(DOOR);
   ok('r4 N3 — A PAC ASKED WHILE THE ROAD IS OFF IS ANSWERED, NEVER RESET: a daemon that died without a word ⇒ the PAC on its token path gets a clean 404 «reaching Tailscale devices from browsers is off» (a failed fetch: Chrome asks again in 8 s / 32 s / 2 min — an empty 200 would be a success it keeps 12 h), and THEN the door closes',
-    po.status === 404 && /^reaching Tailscale devices from browsers is off/.test(po.body) && !/road|peer-alpha/.test(po.body) && po.after === null, po);
+    po.status === 404 && gateOf(/^reaching Tailscale devices from browsers is off/.test(po.body)) && !/road|peer-alpha/.test(po.body) && po.after === null, po);
   const gone = await driveGone(DOOR);
   ok('r4 N2 — NO DIAL FOR A CLIENT THAT IS GONE: a verdict still pending (its name\'s lookup held) when the client resets (CONNECT, absolute GET) or the door is cut ⇒ nothing dialled after the verdict, no upstream connection, no fd left',
-    ['connect-reset', 'get-reset', 'connect-cut'].every((k) => gone[k].asked === 1 && gone[k].dials === 0 && gone[k].arrived === 0 && gone[k].live === 0 && gone[k].fds <= 0), gone);
+    verdictOf(['connect-reset', 'get-reset', 'connect-cut'].every((k) => gone[k].asked === 1 && gone[k].dials === 0 && gone[k].arrived === 0 && gone[k].live === 0 && gone[k].fds <= 0)), gone);
   const mid = await driveMidLookup(DOOR);
   ok('r5 m2 — THE REFUSAL REACHES THE CLIENT: the road off without a word while a name the PAC listed is looked up ⇒ the client READS the 403 in the person\'s words, in the owner\'s language, by the input that is off (absolute GET, the plugin stopped, en: «left.… is a Tailscale name — the Tailscale plugin is off: start it…»; CONNECT, the row off, zh: «…从浏览器访问 Tailscale 设备已关闭：…打开「从浏览器访问 tailnet 里的机器」») — nothing dialled — and the door closes AFTER it',
-    mid.get && mid.get.asked === 1 && mid.get.status === 'HTTP/1.1 403 Forbidden' && mid.get.body === `left.${SUF} is a Tailscale name — the Tailscale plugin is off: start it in ⚙ → Plugins → Tailscale\n` && mid.get.dials === 0 && mid.get.after === null
+    gateOf(mid.get) && mid.get.asked === 1 && mid.get.status === 'HTTP/1.1 403 Forbidden' && mid.get.body === `left.${SUF} is a Tailscale name — the Tailscale plugin is off: start it in ⚙ → Plugins → Tailscale\n` && mid.get.dials === 0 && mid.get.after === null
       && mid.connect.asked === 1 && mid.connect.status === 'HTTP/1.1 403 Forbidden' && mid.connect.body === `left.${SUF} 是 Tailscale 里的名字 — 从浏览器访问 Tailscale 设备已关闭：在 ⚙ → 插件 → Tailscale 打开「从浏览器访问 tailnet 里的机器」\n` && mid.connect.dials === 0 && mid.connect.after === null, mid);
   const sib = await driveSibling(DOOR);
   ok('B-05e8 ① A SIBLING STILL LOOKED UP IS NEVER CUT: the road off without a word, one request refused at once closes the door while another\'s name is being looked up ⇒ that one is not cut — it READS its own 403 in the person\'s words, nothing is dialled, and the door is closed after',
@@ -432,24 +432,24 @@ let ARG = null;
   const sysW = ['en', 'zh', 'ja'].map((l) => TR.WORDS[l] && TR.WORDS[l].system);
   ok('B-05e8 ② UNDER A SYSTEM TAILSCALED the refusal says so — this machine\'s own Tailscale, the door off, the plugin unable to start — never «start it in ⚙ → Plugins» (that start refuses there); in en, zh and ja',
     sys.status === 'HTTP/1.1 403 Forbidden' && sys.body === `sys.${SUF} is a Tailscale name — this machine runs its own Tailscale (managed outside VibeSpace), so VibeSpace's door stays off and the plugin cannot start here: the name opens only through that Tailscale\n`
-      && sysW.every((w) => typeof w === 'string' && w.includes('{host}') && w.includes('{what}')) && !/start it in|里启动它|で起動してください/.test(sysW.join(' ')), { sys, sysW });
+      && gateOf(sysW.every((w) => typeof w === 'string' && w.includes('{host}') && w.includes('{what}'))) && !/start it in|里启动它|で起動してください/.test(sysW.join(' ')), { sys, sysW });
   const psrc = read('src/plugin-settings.js');
-  ok('B-05e8 ③ the row «Reach tailnet hosts from browsers» says the in-page browser follows AT ITS NEXT CONNECTION (its pooled keep-alive sockets keep the old route), never «at once»', psrc.includes('the in-page browser follows at its next connection.') && !psrc.includes('the in-page browser always follows at once')); // stale-pins: kept — the deliberate absence check: the old «always follows at once» words are GONE
+  ok('B-05e8 ③ the row «Reach tailnet hosts from browsers» says the in-page browser follows AT ITS NEXT CONNECTION (its pooled keep-alive sockets keep the old route), never «at once»', gateOf(psrc.includes('the in-page browser follows at its next connection.')) && !psrc.includes('the in-page browser always follows at once')); // stale-pins: kept — the deliberate absence check: the old «always follows at once» words are GONE
   const EP0 = require('../src/server/egress-proxy.js');
   const cn = await driveCancel(DOOR, EP0);
   ok('r5 m1 — A CLIENT THAT LEAVES IS NOT A DEVICE FAILURE: a GET dialled to a device, its client gone before the device answered (a cancelled request) ⇒ its upstream ends (none left), the door\'s words for that device keep the browser\'s own code («…failed (ERR_TUNNEL_CONNECTION_FAILED)…», never ECONNRESET), the shared proxy (the engine\'s egress) counts no error; CONTROL: the device itself dropping the request ⇒ a 502, its ECONNRESET remembered',
-    cn.leave.got === 1 && cn.leave.live === 0 && /\(ERR_TUNNEL_CONNECTION_FAILED\)/.test(String(cn.leave.words)) && cn.engine.got === 1 && cn.engine.live === 0 && cn.engine.allowed === 1 && cn.engine.errors === 0
-      && cn.drop.got === 1 && cn.drop.said === 'HTTP/1.1 502 Bad Gateway' && /\(ECONNRESET\)/.test(String(cn.drop.words)), cn);
+    cn.leave.got === 1 && cn.leave.live === 0 && gateOf(/\(ERR_TUNNEL_CONNECTION_FAILED\)/.test(String(cn.leave.words))) && cn.engine.got === 1 && cn.engine.live === 0 && cn.engine.allowed === 1 && cn.engine.errors === 0
+      && cn.drop.got === 1 && cn.drop.said === 'HTTP/1.1 502 Bad Gateway' && verdictOf(/\(ECONNRESET\)/.test(String(cn.drop.words))), cn);
   const dt = detailsOf(DOOR);
   ok('r4 N5 — THE HINT FILTER NAMES THE HINT: a host pve-node-2 / node-3 / xn--… keeps its own text in the detail line; Node\'s «if the root CA is installed locally, try running Node.js with --use-system-ca» is dropped by its own words',
-    !!dt && dt[0].includes('Host: pve-node-2.') && dt[1] === 'ENOTFOUND — getaddrinfo ENOTFOUND node-3' && dt[2].includes('xn--bcher-kva.tail-mint.ts.net') && dt[3] === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE — unable to verify the first certificate', dt || 'DOOR.plainDetail missing');
+    !!dt && gateOf(dt[0].includes('Host: pve-node-2.')) && dt[1] === 'ENOTFOUND — getaddrinfo ENOTFOUND node-3' && gateOf(dt[2].includes('xn--bcher-kva.tail-mint.ts.net')) && dt[3] === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE — unable to verify the first certificate', dt || 'DOOR.plainDetail missing');
   reachNow = { ...KERNEL };
   const down = await get(door.port(), { pathName: `http://peer-alpha:${CLOSED}/`, host: `peer-alpha:${CLOSED}` });
   const tun = await connectVia(door.port(), `peer-alpha:${CLOSED}`);
   const told = door.missFor(`https://peer-alpha:${CLOSED}/`, { failed: true, cause: 'ERR_TUNNEL_CONNECTION_FAILED', launched: { arg: ARG, mode: 'kernel', why: null } });
   reachNow = { ...R };
   ok('N5 — a device that refuses the port: the door\'s http answer is LAW 2\'s page by the cause («peer-alpha answered through Tailscale, but refused the connection on port N»); a CONNECT\'s 502 (Chrome: ERR_TUNNEL_CONNECTION_FAILED) is named by the failure the door saw',
-    down.status === 502 && /text\/html/.test(down.type) && down.body.includes(`peer-alpha answered through Tailscale, but refused the connection on port ${CLOSED}`) && /^HTTP\/1\.1 502/.test(tun) && !!told && told.why === 'refused' && told.text.includes(`port ${CLOSED}`), { down, tun: tun.slice(0, 80), told });
+    down.status === 502 && gateOf(/text\/html/.test(down.type)) && gateOf(down.body.includes(`peer-alpha answered through Tailscale, but refused the connection on port ${CLOSED}`)) && gateOf(/^HTTP\/1\.1 502/.test(tun)) && !!told && told.why === 'refused' && verdictOf(told.text.includes(`port ${CLOSED}`)), { down, tun: tun.slice(0, 80), told });
   const flood = await floodLines(DOOR);
   ok('N6 h — the door\'s console: 50 refused tries at one target ⇒ ONE line (once per target + reason per 10 minutes — never per request)', flood.length === 1, flood);
   const kept = JSON.parse(fs.readFileSync(path.join(D1, DOOR.STATE_FILE), 'utf8')).port;
@@ -505,11 +505,11 @@ let kk;
   const w = await driveProfile(k, { label: 'Work' });
   const arg = `--proxy-pac-url=${kdoor.url()}`;
   ok('a profile\'s LAUNCH config carries the switch, read back whole from the driver\'s ONE line (the person\'s switches kept before it)', !!w.la && argsOf(w.la.config).at(-1) === arg && argsOf(w.la.config).filter((a) => /proxy-pac-url/.test(a)).length === 1, w.la && w.la.config);
-  ok('EVERY call of its session (the launch, cdp-url, the stop) names the SAME config file, which carries it — the launch view never differs (a differing one relaunches Chrome)', w.cs.length >= 3 && w.files.length === 1 && w.fileArgs[0] && w.fileArgs[0].includes(arg), { calls: w.cs.map((c) => c.verb), files: w.files });
+  ok('EVERY call of its session (the launch, cdp-url, the stop) names the SAME config file, which carries it — the launch view never differs (a differing one relaunches Chrome)', w.cs.length >= 3 && w.files.length === 1 && gateOf(w.fileArgs[0]) && verdictOf(w.fileArgs[0].includes(arg)), { calls: w.cs.map((c) => c.verb), files: w.files });
   ok('the record\'s stamp: {arg, mode: userspace} (the audit\'s words read it)', w.stamp.arg === arg && w.stamp.mode === 'userspace' && w.stamp.why === null, w.stamp);
   reachNow = { ...STOPPED };
   const off = await driveProfile(k, { label: 'Off' });
-  ok('the plugin OFF ⇒ no switch on any call; stamped {arg: null, why: plugin-off}', !!off.la && !hasPac(off) && off.fileArgs.every((a) => a && !a.some((x) => /proxy-pac-url/.test(x))) && off.stamp.arg === null && off.stamp.why === 'plugin-off', off.stamp);
+  ok('the plugin OFF ⇒ no switch on any call; stamped {arg: null, why: plugin-off}', !!off.la && !hasPac(off) && gateOf(off.fileArgs.every((a) => a && !a.some((x) => /proxy-pac-url/.test(x)))) && off.stamp.arg === null && off.stamp.why === 'plugin-off', off.stamp);
   reachNow = { ...R };
   const own = await driveProfile(k, { label: 'Own proxy', proxy: 'socks5://127.0.0.1:9' }, { stop: false });
   ok('a profile with its OWN proxy keeps it: no PAC beside it (Chromium ranks a PAC above --proxy-server), stamped explicit-proxy', !!own.la && !hasPac(own) && own.stamp.why === 'explicit-proxy', own.stamp);
@@ -529,17 +529,17 @@ let kk;
   const cf = k.configFileFor({ ephemeral: true, pairs });
   let cfg = null; try { cfg = JSON.parse(fs.readFileSync(cf, 'utf8')); } catch { cfg = null; }
   const ev = k.ephemeralFor(KEY_E);
-  ok('a CONVERSATION\'s own browser (ensureEphemeral) launches with it, and the file the agent\'s own commands are named (/resolve) carries the same switch', !ephErr && !!la && argsOf(la.config).includes(arg) && !!cfg && argsOf(cfg).includes(arg) && ev && (stampOf(k, ev.profileId) || {}).arg === arg, ephErr ? ephErr.message : { la: la && la.config, cfg });
+  ok('a CONVERSATION\'s own browser (ensureEphemeral) launches with it, and the file the agent\'s own commands are named (/resolve) carries the same switch', !ephErr && !!la && gateOf(argsOf(la.config).includes(arg)) && !!cfg && gateOf(argsOf(cfg).includes(arg)) && gateOf(ev) && (stampOf(k, ev.profileId) || {}).arg === arg, ephErr ? ephErr.message : { la: la && la.config, cfg });
   const av = AT.attachArgv({ profileDir: '/p', mark: '--vibespace-keeper=x', extra: [arg] });
   const ks = read('src/server/browser-keeper.js');
   const attachFn = ks.slice(ks.indexOf('  async function attachStart('), ks.indexOf('  async function stop(profileId'));
   ok('the ATTACH road: the switch goes IN through the builder (its census passes, the argv carries it whole) — the keeper pushes the stamp\'s switch into engineArgs, never beside the builder',
-    av.ok && av.argv.includes(arg) && /\n {4}if \(rec\.tailnet && rec\.tailnet\.arg\) engineArgs\.push\(rec\.tailnet\.arg\);/.test(attachFn) && attachFn.indexOf('engineArgs.push(rec.tailnet.arg)') < attachFn.indexOf('AT.attachArgv('), av);
+    gateOf(av.ok) && gateOf(av.argv.includes(arg)) && gateOf(/\n {4}if \(rec\.tailnet && rec\.tailnet\.arg\) engineArgs\.push\(rec\.tailnet\.arg\);/.test(attachFn)) && attachFn.indexOf('engineArgs.push(rec.tailnet.arg)') < attachFn.indexOf('AT.attachArgv('), av);
   const tv = tokenViews(k, w.p.id, arg);
   const rt0 = read('src/routes/browser.js');
   ok('r4 N4 — THE TOKEN NEVER IN AN ANSWER: the keeper\'s list() (the owner\'s routes + the browser-profiles-updated broadcast) and statusFor (an agent\'s `vibespace-browser status`, the agent\'s profiles `me`) carry the stamp as {on, mode, why} — the PAC token in none; GET /api/browser/profiles/:id strips it the same way',
     !!tv.token && !tv.list && !tv.status && JSON.stringify(tv.view) === JSON.stringify({ on: true, mode: 'userspace', why: null }) && tv.agent === true
-      && rt0.includes("browser: k.browserOf(p.id) ? { ...k.browserOf(p.id), cdpUrl: undefined, tailnet: require('../tailnet-reach.js').stampView(k.browserOf(p.id).tailnet) } : null });"), tv);
+      && verdictOf(rt0.includes("browser: k.browserOf(p.id) ? { ...k.browserOf(p.id), cdpUrl: undefined, tailnet: require('../tailnet-reach.js').stampView(k.browserOf(p.id).tailnet) } : null });")), tv);
 }
 
 console.log('③ the in-page browser (/proxy: the real node-unblocker with the door\'s agents)');
@@ -590,41 +590,41 @@ async function driveEmbedded(d, only = null) {
 const ed = mkDoor(path.join(ROOT, 'data-e'), { lang: () => 'zh' });
 const emb = await driveEmbedded(ed);
 {
-  ok('kernel: a device\'s NAME is answered from the plugin\'s table (never the system resolver) — the page comes back', emb.kernel.status === 200 && emb.kernel.body === `PEER-OK peer-alpha:${PEER_PORT}` && emb.kernelHit, emb.kernel);
-  ok('userspace: through the plugin\'s HTTP proxy — the CONNECT stub saw the device\'s name (and only it), the page comes back', emb.user.status === 200 && /^PEER-OK /.test(emb.user.body) && JSON.stringify(emb.userSeen) === JSON.stringify([`peer-beta.${SUF}:${PEER_PORT}`]), { u: emb.user, seen: emb.userSeen });
+  ok('kernel: a device\'s NAME is answered from the plugin\'s table (never the system resolver) — the page comes back', emb.kernel.status === 200 && emb.kernel.body === `PEER-OK peer-alpha:${PEER_PORT}` && verdictOf(emb.kernelHit), emb.kernel);
+  ok('userspace: through the plugin\'s HTTP proxy — the CONNECT stub saw the device\'s name (and only it), the page comes back', emb.user.status === 200 && gateOf(/^PEER-OK /.test(emb.user.body)) && JSON.stringify(emb.userSeen) === JSON.stringify([`peer-beta.${SUF}:${PEER_PORT}`]), { u: emb.user, seen: emb.userSeen });
   ok('a public host goes DIRECT — nothing reaches the plugin\'s proxy', emb.pub.status === 200 && emb.pub.body === 'PUBLIC-OK' && emb.pubSeen.length === 0, { p: emb.pub, seen: emb.pubSeen });
   ok('N1 — THE ROAD IS ADDED, NEVER A GATE: the acceptance\'s four cases load AS ON THE BASE (no plugin: a Funnel name, a CGNAT address; the plugin stopped: a LAN short name; kernel + the row off: a 100.x address) + a Funnel name while up — the ordinary road, nothing through the plugin\'s proxy',
-    emb.four.every(([, st, b]) => st === 200 && b === 'PUBLIC-OK') && emb.fourSeen.length === 0, emb.four);
+    gateOf(emb.four.every(([, st, b]) => st === 200 && b === 'PUBLIC-OK')) && emb.fourSeen.length === 0, emb.four);
   ok('N4 — keep-alive stays: 5 sequential requests through /proxy ⇒ ONE upstream connection (the door\'s agents keep Node\'s own options)', emb.conns === 1, emb.conns);
   ok('the person\'s OWN device while the plugin is off, after the ordinary road failed ⇒ LAW 2\'s page in the owner\'s language (zh) — «peer-alpha 是 Tailscale 里的名字 — Tailscale 插件没有开…» — the error\'s own text under it',
-    emb.off.status === 502 && emb.off.body.includes('data-tailnet="plugin-off"') && emb.off.body.includes('peer-alpha 是 Tailscale 里的名字 — Tailscale 插件没有开') && emb.off.body.includes('data-error="ENOTFOUND"') && !/STACK|无法解析/.test(emb.off.body), emb.off);
-  ok('a *.ts.net name no device holds, after the ordinary road failed ⇒ «… 不是你 tailnet 里的设备（已知：peer-alpha, peer-beta, hub）» (the list: the owner\'s own page)', emb.ghost.status === 502 && emb.ghost.body.includes('ghost-two.tail-mint.ts.net 不是你 tailnet 里的设备（已知：peer-alpha, peer-beta, hub）'), emb.ghost);
-  ok('a public host\'s failure keeps the BASE\'s own error (never replaced on the base\'s road)', emb.base.status === 500 && /^STACK getaddrinfo ENOTFOUND down\.example\.test/.test(emb.base.body), emb.base);
-  ok('r3 N4 — a bare label no device holds (intranet — a LAN name, a compose service) while the road is UP keeps the BASE\'s own error (no Tailscale page)', emb.bare.status === 500 && /^STACK getaddrinfo ENOTFOUND intranet/.test(emb.bare.body), emb.bare);
+    emb.off.status === 502 && gateOf(emb.off.body.includes('data-tailnet="plugin-off"')) && gateOf(emb.off.body.includes('peer-alpha 是 Tailscale 里的名字 — Tailscale 插件没有开')) && gateOf(emb.off.body.includes('data-error="ENOTFOUND"')) && !/STACK|无法解析/.test(emb.off.body), emb.off);
+  ok('a *.ts.net name no device holds, after the ordinary road failed ⇒ «… 不是你 tailnet 里的设备（已知：peer-alpha, peer-beta, hub）» (the list: the owner\'s own page)', emb.ghost.status === 502 && verdictOf(emb.ghost.body.includes('ghost-two.tail-mint.ts.net 不是你 tailnet 里的设备（已知：peer-alpha, peer-beta, hub）')), emb.ghost);
+  ok('a public host\'s failure keeps the BASE\'s own error (never replaced on the base\'s road)', emb.base.status === 500 && verdictOf(/^STACK getaddrinfo ENOTFOUND down\.example\.test/.test(emb.base.body)), emb.base);
+  ok('r3 N4 — a bare label no device holds (intranet — a LAN name, a compose service) while the road is UP keeps the BASE\'s own error (no Tailscale page)', emb.bare.status === 500 && verdictOf(/^STACK getaddrinfo ENOTFOUND intranet/.test(emb.bare.body)), emb.bare);
   if (TLS_PORT) ok('N5 + r3 N6 — a device with a SELF-SIGNED certificate (the user\'s :8006 shape) answered: «peer-alpha 经 Tailscale 有回应，但用的是页内浏览器不信任的证书（自签名？）— 在这里打不开它…（tailscale cert）» — never «offline»; the detail line a person\'s: the code + plain words (no Node hint, no backticks); the device saw the connection',
-    emb.cert.status === 502 && emb.cert.body.includes('data-tailnet="untrusted-cert"') && emb.cert.body.includes('peer-alpha 经 Tailscale 有回应，但用的是页内浏览器不信任的证书（自签名？）— 在这里打不开它：给那台设备换一张可信的证书（tailscale cert）') && emb.cert.body.includes('data-error="DEPTH_ZERO_SELF_SIGNED_CERT"')
-      && emb.cert.body.includes('>DEPTH_ZERO_SELF_SIGNED_CERT — self-signed certificate</p>') && !/use-system-ca|Node\.js|`/.test(emb.cert.body) && emb.certConns >= 1 && !/在线吗/.test(emb.cert.body), { cert: emb.cert, conns: emb.certConns });
+    emb.cert.status === 502 && gateOf(emb.cert.body.includes('data-tailnet="untrusted-cert"')) && gateOf(emb.cert.body.includes('peer-alpha 经 Tailscale 有回应，但用的是页内浏览器不信任的证书（自签名？）— 在这里打不开它：给那台设备换一张可信的证书（tailscale cert）')) && gateOf(emb.cert.body.includes('data-error="DEPTH_ZERO_SELF_SIGNED_CERT"'))
+      && gateOf(emb.cert.body.includes('>DEPTH_ZERO_SELF_SIGNED_CERT — self-signed certificate</p>')) && !/use-system-ca|Node\.js|`/.test(emb.cert.body) && emb.certConns >= 1 && !/在线吗/.test(emb.cert.body), { cert: emb.cert, conns: emb.certConns });
   else ok('openssl present (the self-signed device leg)', false, 'no openssl');
-  ok('N5 — a refused port ⇒ «peer-alpha 经 Tailscale 有回应，但拒绝了端口 N 上的连接…»', emb.refused.status === 502 && emb.refused.body.includes(`拒绝了端口 ${CLOSED} 上的连接`) && emb.refused.body.includes('data-tailnet="refused"'), emb.refused);
+  ok('N5 — a refused port ⇒ «peer-alpha 经 Tailscale 有回应，但拒绝了端口 N 上的连接…»', emb.refused.status === 502 && gateOf(emb.refused.body.includes(`拒绝了端口 ${CLOSED} 上的连接`)) && verdictOf(emb.refused.body.includes('data-tailnet="refused"')), emb.refused);
 }
 
 console.log('④ the agent\'s navigate answer (the audit route, the CLI) + the console');
 {
   const rt = read('src/routes/browser.js'), cli = read('data/bin/vibespace-browser'), sv = read('server.js'), wiring = read('src/server/mounts-plugins-wiring.js');
   ok('the audit route: a FAILED navigation\'s url + its NETWORK cause (the CLI\'s net::ERR_* only — r3: a CDP timeout `timedOut` is never one) → the door\'s missFor with the browser\'s launch stamp, audience agent → `tailnet: {why, text}`; no network cause ⇒ no tailnet words',
-    /const netCause = typeof req\.body\?\.netError === 'string' \? req\.body\.netError\.slice\(0, 80\) : null;/.test(rt) && !/timedOut === true \? 'TIMEOUT'/.test(rt) && /if \(req\.body\?\.ok === false && typeof req\.body\?\.url === 'string' && netCause\)/.test(rt)
-      && /missFor\(req\.body\.url\.slice\(0, 4096\), \{ failed: true, cause: netCause, audience: 'agent', launched: profileId && typeof k\.tailnetOf === 'function' \? k\.tailnetOf\(profileId\) : undefined \}\)/.test(rt) && /\.\.\.\(tailnet \? \{ tailnet \} : \{\}\)/.test(rt));
-  ok('the CLI: a failed navigation sends its net::ERR_* (`netError`) and prints the answer: `note: <words> [tailnet]`', /const navErr = navVerb && navUrl && code !== 0 \? \(\(\/net::\(ERR_\[A-Z0-9_\]\+\)\/\.exec\(outText \+ '\\n' \+ errText\) \|\| \[\]\)\[1\] \|\| null\) : null;/.test(cli) && cli.includes('...(navErr ? { netError: navErr } : {})') && /if \(navVerb && au && !au\._failed && au\.tailnet && au\.tailnet\.text\) console\.error\(`note: \$\{au\.tailnet\.text\} \[tailnet\]`\);/.test(cli));
+    gateOf(/const netCause = typeof req\.body\?\.netError === 'string' \? req\.body\.netError\.slice\(0, 80\) : null;/.test(rt)) && !/timedOut === true \? 'TIMEOUT'/.test(rt) && gateOf(/if \(req\.body\?\.ok === false && typeof req\.body\?\.url === 'string' && netCause\)/.test(rt))
+      && gateOf(/missFor\(req\.body\.url\.slice\(0, 4096\), \{ failed: true, cause: netCause, audience: 'agent', launched: profileId && typeof k\.tailnetOf === 'function' \? k\.tailnetOf\(profileId\) : undefined \}\)/.test(rt)) && verdictOf(/\.\.\.\(tailnet \? \{ tailnet \} : \{\}\)/.test(rt)));
+  ok('the CLI: a failed navigation sends its net::ERR_* (`netError`) and prints the answer: `note: <words> [tailnet]`', gateOf(/const navErr = navVerb && navUrl && code !== 0 \? \(\(\/net::\(ERR_\[A-Z0-9_\]\+\)\/\.exec\(outText \+ '\\n' \+ errText\) \|\| \[\]\)\[1\] \|\| null\) : null;/.test(cli)) && gateOf(cli.includes('...(navErr ? { netError: navErr } : {})')) && verdictOf(/if \(navVerb && au && !au\._failed && au\.tailnet && au\.tailnet\.text\) console\.error\(`note: \$\{au\.tailnet\.text\} \[tailnet\]`\);/.test(cli)));
   ok('r4 N1 — the wiring: ONE follow(plugins) (the door\'s every input through plugins.watch — its runs are test-tailscale-dns ④b, the real settings store) and no second road into the door (no broadcast hook, no bare configure); server.js\'s settings write hook hands every write to plugins.onSettingsWrite',
     wiring.split("require('./tailnet-door.js').follow(plugins, { dataDir: path.join(rootDir, 'data'), lang: () => require('./owner-facts.js').tray().lang });").length === 2 && !wiring.includes('roadChanged') && !wiring.includes("tailnet-door.js').configure(") && typeof DOOR.follow === 'function'
-      && /onSettingsWrite: \(next, prev\) => \{[\s\S]{0,1500}?try \{ plugins\.onSettingsWrite\(next, prev\); \} catch \{ \}/.test(sv));
-  ok('the wiring: server.js hands the unblocker the door\'s agents + its LAW 2 middleware', sv.includes("prefix: '/proxy/', ...require('./src/server/tailnet-door.js').agents(),") && sv.includes("app.use(require('./src/server/tailnet-door.js').embedded(unblocker));"));
+      && verdictOf(/onSettingsWrite: \(next, prev\) => \{[\s\S]{0,1500}?try \{ plugins\.onSettingsWrite\(next, prev\); \} catch \{ \}/.test(sv)));
+  ok('the wiring: server.js hands the unblocker the door\'s agents + its LAW 2 middleware', gateOf(sv.includes("prefix: '/proxy/', ...require('./src/server/tailnet-door.js').agents(),")) && verdictOf(sv.includes("app.use(require('./src/server/tailnet-door.js').embedded(unblocker));")));
   const ownProf = typeof kk.list === 'function' ? kk.list().profiles.find((p) => p.label === 'Own proxy') : null;
   const st = ownProf ? stampOf(kk, ownProf.id) : null;
   const f = (u, o) => door.missFor(u, { failed: true, ...o });
   const words = [f('https://peer-alpha:8006/', { launched: st, cause: 'ERR_TUNNEL_CONNECTION_FAILED' }), f('https://peer-alpha:8006/', { launched: null, cause: 'ERR_NAME_NOT_RESOLVED' }), f('https://peer-alpha:8006/', { launched: { arg: ARG }, cause: 'ERR_CONNECTION_TIMED_OUT' }), f('https://peer-alpha:8006/', { launched: { arg: ARG }, cause: 'ERR_CERT_AUTHORITY_INVALID' })];
   ok('the words by the stamp AND the cause: its own proxy won · started before Tailscale was up · no answer (a timeout) · a certificate Chrome does not trust (r3: «Chrome shows a certificate warning: accept it in the live view») — never «cannot resolve», never «offline» for an answered host',
-    words.map((m) => m && m.why).join() === 'explicit-proxy,started-before,no-answer,cert-warning' && words.every((m) => /Tailscale|tailnet/.test(m.text) && !/cannot resolve/i.test(m.text)) && /Chrome shows a certificate warning: accept it in the live view/.test(words[3].text), words);
+    words.map((m) => m && m.why).join() === 'explicit-proxy,started-before,no-answer,cert-warning' && gateOf(words.every((m) => /Tailscale|tailnet/.test(m.text) && !/cannot resolve/i.test(m.text))) && verdictOf(/Chrome shows a certificate warning: accept it in the live view/.test(words[3].text)), words);
   const agent = f('https://ghost.tail-mint.ts.net/', { cause: 'ERR_NAME_NOT_RESOLVED' }), dialog = f('https://peer-alpha:8006/', { cause: null });
   ok('N6 g — an AGENT\'s answer never lists the person\'s devices: «ghost.… is not a device on your tailnet» (no «known:»); a failure with no network cause (a dialog, a prompt) says nothing of Tailscale', !!agent && agent.text === `ghost.${SUF} is not a device on your tailnet` && !/peer-alpha|peer-beta|hub/.test(agent.text) && dialog === null, { agent, dialog });
   const lines = [];
@@ -632,7 +632,7 @@ console.log('④ the agent\'s navigate answer (the audit route, the CLI) + the c
   for (let i = 0; i < 60; i++) { reachNow = i % 2 ? { ...R } : { ...STOPPED }; await fd.launch({ label: 'Flappy' }); await fd.launch({ label: 'Work' }); }
   reachNow = { ...R }; await fd.close();
   const offLines = lines.filter((l) => /starts without tailnet reach/.test(l));
-  ok('N6 h — a FLAPPING plugin (60 up/down launches × 2 profiles) ⇒ ONE console line per profile + reason (10-minute window)', offLines.length === 2 && offLines.some((l) => l.includes('"Flappy"')) && offLines.some((l) => l.includes('"Work"')), offLines);
+  ok('N6 h — a FLAPPING plugin (60 up/down launches × 2 profiles) ⇒ ONE console line per profile + reason (10-minute window)', offLines.length === 2 && gateOf(offLines.some((l) => l.includes('"Flappy"'))) && verdictOf(offLines.some((l) => l.includes('"Work"'))), offLines);
 }
 
 console.log('⑤ MUTANTS (copies outside the tree)');
@@ -651,13 +651,13 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   ok('MUTANT keep-alive off on the door\'s agents ⇒ ③\'s keep-alive leg RED (5 connections)', !!m4 && m4.conns > 1, m4 && m4.conns);
   const D5 = dm([["    return lookupAll(h).then((addrs) => {", "    return refusal(`${h} is not a device on your tailnet`);\n    return lookupAll(h).then((addrs) => {"]], 'refusing-door');
   const m5 = D5 ? await driveDoor(mkDoor(null, {}, D5)) : null;
-  ok('MUTANT the r1 refusing door (only the table\'s names admitted) ⇒ ①\'s N2 leg RED (a name it does not list gets a 403)', !!m5 && /^HTTP\/1\.1 403/.test(m5.ghost), m5 && m5.ghost.slice(0, 120));
+  ok('MUTANT the r1 refusing door (only the table\'s names admitted) ⇒ ①\'s N2 leg RED (a name it does not list gets a 403)', !!m5 && verdictOf(/^HTTP\/1\.1 403/.test(m5.ghost)), m5 && m5.ghost.slice(0, 120));
   const D6 = dm([['    if (at !== undefined && t - at < sayWindowMs) return;\n', '']], 'per-request-lines');
   const m6 = D6 ? await floodLines(D6) : null;
   ok('MUTANT a console line per request ⇒ ①\'s N6 h leg RED (50 lines)', !!m6 && m6.length > 1, m6 && m6.length);
   const D7 = dm([['      if (bad) return refusal(', '      if (bad && false) return refusal(']], 'no-vet');
   const m7 = D7 ? await driveAttack(mkDoor(null, {}, D7)) : null;
-  ok('MUTANT r3 N2: the door dials a name WITHOUT vetting its answer (r2) ⇒ ①\'s never-back leg RED (the hub-bound server answered through the door)', !!m7 && m7.hubHits > 0 && /HUB-SECRET-PAGE/.test(m7.get.body), m7 && { hub: m7.hubHits, get: m7.get.status });
+  ok('MUTANT r3 N2: the door dials a name WITHOUT vetting its answer (r2) ⇒ ①\'s never-back leg RED (the hub-bound server answered through the door)', !!m7 && m7.hubHits > 0 && verdictOf(/HUB-SECRET-PAGE/.test(m7.get.body)), m7 && { hub: m7.hubHits, get: m7.get.status });
   const D8 = dm([['  function boot() { return stateFile ? sync() : Promise.resolve(); }', '  function boot() { if (stateFile && kept().port) ensure().catch(() => { }); }']], 'boot-blind');
   const m8 = D8 ? await driveLife(D8) : null;
   ok('MUTANT r3 N2: a boot blind to the road (r2: the kept port listens whatever the plugin\'s state) ⇒ ①\'s life leg RED (open at a boot with the plugin down)', !!m8 && m8.bootDown !== null, m8 && { bootDown: m8.bootDown });
@@ -666,7 +666,7 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   ok('MUTANT r3 N2: a door that never closes with the road ⇒ ①\'s life leg RED (open with the row off)', !!m9 && m9.rowOff !== null, m9 && { rowOff: m9.rowOff });
   const D10 = dm([['  const isPac = (p) => {', "  const isPac = (p) => p === '/tailnet.pac' || isPac0(p);\n  const isPac0 = (p) => {"]], 'guessable');
   const m10 = D10 ? await (async () => { const d = mkDoor(null, {}, D10); reachNow = { ...R }; await d.launch({ label: 'G' }); const g = await get(d.port(), { pathName: '/tailnet.pac' }); await d.close(); return g; })() : null;
-  ok('MUTANT r3 N2: the PAC on a guessable path (/tailnet.pac) ⇒ ①\'s token leg RED (the device list served)', !!m10 && m10.status === 200 && /peer-alpha/.test(m10.body), m10 && m10.status);
+  ok('MUTANT r3 N2: the PAC on a guessable path (/tailnet.pac) ⇒ ①\'s token leg RED (the device list served)', !!m10 && m10.status === 200 && verdictOf(/peer-alpha/.test(m10.body)), m10 && m10.status);
   const D11 = dm([['      hungAt = !f || f.stale ? Date.now() : 0;', '      hungAt = 0; inflight = null;']], 'second-wait');
   const m11 = D11 ? await driveHung(D11) : null;
   ok('MUTANT r3 N5: a second wait (the PAC asks fresh() again, as r2) ⇒ ①\'s one-wait leg RED (fresh() twice, two bounds)', !!m11 && (m11.calls > 1 || m11.took >= 2 * SETTLE_MS), m11 && { calls: m11.calls, took: m11.took });
@@ -674,7 +674,7 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const m12 = D12 && TLS_PORT ? await driveEmbedded(mkDoor(null, {}, D12), ['miss']) : null;
   // what turns ③'s certificate leg red under the mutant on EVERY Node: the person's line («code — plain words») is gone and Node's
   // own «code: message» stands — Node 24's message adds its developer hint (use-system-ca), Node 22's (the CI runner's) has none
-  ok('MUTANT r3 N6: Node\'s raw message under the sentence ⇒ ③\'s certificate leg RED (the person\'s detail line gone, Node\'s own «code: message» shown)', !!m12 && m12.cert.body.includes('data-error="DEPTH_ZERO_SELF_SIGNED_CERT"') && !m12.cert.body.includes('>DEPTH_ZERO_SELF_SIGNED_CERT — self-signed certificate</p>') && />DEPTH_ZERO_SELF_SIGNED_CERT: [^<]+<\/p>/.test(m12.cert.body), m12 && m12.cert.body.slice(-300));
+  ok('MUTANT r3 N6: Node\'s raw message under the sentence ⇒ ③\'s certificate leg RED (the person\'s detail line gone, Node\'s own «code: message» shown)', !!m12 && gateOf(m12.cert.body.includes('data-error="DEPTH_ZERO_SELF_SIGNED_CERT"')) && !m12.cert.body.includes('>DEPTH_ZERO_SELF_SIGNED_CERT — self-signed certificate</p>') && verdictOf(/>DEPTH_ZERO_SELF_SIGNED_CERT: [^<]+<\/p>/.test(m12.cert.body)), m12 && m12.cert.body.slice(-300));
   const D13 = dm([["    if (!TR.roadOn(reachNow())) { res.once('close', () => sync()); head(404,", '    if (!TR.roadOn(reachNow())) sync(); if (false) { head(404,']], 'reset-pac');
   const m13 = D13 ? await drivePacOff(D13) : null;
   ok('MUTANT r4 N3: r3\'s order (the door cut BEFORE the PAC is answered) ⇒ ①\'s road-off PAC leg RED (the request reset)', !!m13 && m13.status !== 404, m13 && { status: m13.status, body: String(m13.body).slice(0, 60) });
@@ -688,7 +688,7 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const m16 = D16 ? await driveMidLookup(D16) : null;
   // B-05e8 ① added a second guard: the proxy never cuts a socket still asked (it answers, then ends) — r4's order ALONE is now held
   // by it (the client still reads its refusal); the control that goes red removes BOTH (below, after the proxy's mutants)
-  ok('r5 m2 restated (B-05e8 ①): r4\'s order ALONE (the door cut before the refusal is written) is held by the proxy\'s asked-socket guard — the client still reads its 403', !!m16 && /403/.test(String(m16.get.status)) && /403/.test(String(m16.connect.status)), m16 && { get: m16.get.status, connect: m16.connect.status });
+  ok('r5 m2 restated (B-05e8 ①): r4\'s order ALONE (the door cut before the refusal is written) is held by the proxy\'s asked-socket guard — the client still reads its 403', !!m16 && gateOf(/403/.test(String(m16.get.status))) && verdictOf(/403/.test(String(m16.connect.status))), m16 && { get: m16.get.status, connect: m16.connect.status });
   const D17 = dm([['      const r2 = reachNow({ now: true });\n      if (!TR.roadOn(r2)) return offRoad(r2, h);', '      const r2 = null;\n      if (false) return offRoad(r2, h);']], 'no-reread');
   const m17 = D17 ? await driveMidLookup(D17) : null;
   ok('MUTANT r5 m2: no re-read of the road after the lookup (r3) ⇒ ①\'s mid-lookup leg RED (dialled on a road that is off)', !!m17 && m17.get.dials > 0 && m17.connect.dials > 0, m17 && { get: m17.get.dials, connect: m17.connect.dials });
@@ -697,7 +697,7 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const viaProxy = (src, tag) => { const em = MC.load('src/server/egress-proxy.js', src, `${tag}-proxy`); const dd = dm([["const EgressProxy = require('./egress-proxy.js');", `const EgressProxy = require(${JSON.stringify(MC.files[MC.files.length - 1])});`]], tag); return dd ? { D: dd, EP: em } : null; };
   const G18 = esrc.includes(eA2) ? viaProxy(esrc.replace(eA2, 'const upFailed = (e) => { stats.errors++;'), 'gone-failure') : null;
   const m18 = G18 ? await driveCancel(G18.D, G18.EP) : null;
-  ok('MUTANT r5 m1: r4\'s proxy (a cancelled request booked as the upstream\'s failure) ⇒ ①\'s client-leaves leg RED (the door\'s words say ECONNRESET; the engine\'s egress counts an error)', !!m18 && /\(ECONNRESET\)/.test(String(m18.leave.words)) && m18.engine.errors > 0, m18 && { words: m18.leave.words, errors: m18.engine.errors });
+  ok('MUTANT r5 m1: r4\'s proxy (a cancelled request booked as the upstream\'s failure) ⇒ ①\'s client-leaves leg RED (the door\'s words say ECONNRESET; the engine\'s egress counts an error)', !!m18 && gateOf(/\(ECONNRESET\)/.test(String(m18.leave.words))) && m18.engine.errors > 0, m18 && { words: m18.leave.words, errors: m18.engine.errors });
   const G19 = esrc.includes(eA3) ? viaProxy(esrc.replace(eA3, ''), 'get-upstream') : null;
   const m19 = G19 ? await driveCancel(G19.D, G19.EP, 20) : null;
   ok('MUTANT r4 N2 / r5: the GET\'s upstream left when its client goes (r3) ⇒ ①\'s client-leaves leg RED (an upstream still open at the device)', !!m19 && m19.leave.live > 0 && m19.engine.live > 0, m19 && { door: m19.leave.live, engine: m19.engine.live });
@@ -724,7 +724,7 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const mtv = mt ? tokenViews(kt, mt.p.id, mt.stamp.arg) : null;
   ok('MUTANT r4 N4: the keeper\'s view spreading the whole stamp (r3) ⇒ ②\'s token leg RED (the PAC token in list())', !!mtv && mtv.list === true, mtv);
   const kA1 = 'const eff2 = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1;', kA2 = 'envProxy: !!require(\'../tailnet-reach.js\').envProxyOf(env), tailnet: true';   // B-8b87: the env term now rides THE ONE ranking (proxyRoadOf)
-  ok('the keeper mutants\' anchors are in browser-keeper.js', ksrc.includes(kA1) && ksrc.includes(kA2));
+  ok('the keeper mutants\' anchors are in browser-keeper.js', gateOf(ksrc.includes(kA1)) && verdictOf(ksrc.includes(kA2)));
   reachNow = { ...R };
   const D3 = path.join(ROOT, 'data-km'); fs.mkdirSync(D3, { recursive: true });
   const KM = ksrc.includes(kA1) ? MC.load('src/server/browser-keeper.js', editAnchor(ksrc, kA1, 'const eff2 = eff1;', "src/server/browser-keeper.js"), 'no-stamp-calls') : null;
@@ -733,8 +733,8 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const D5k = path.join(ROOT, 'data-kenv'); fs.mkdirSync(D5k, { recursive: true });
   const KE = ksrc.includes(kA2) ? MC.load('src/server/browser-keeper.js', editAnchor(ksrc, kA2, 'envProxy: false, tailnet: true', "src/server/browser-keeper.js"), 'env-ignored') : null;
   const me = KE ? await driveProfile(mkKeeper(KE, D5k, { HTTPS_PROXY: 'http://127.0.0.1:9' }), { label: 'Env mutant' }, { stop: false }) : null;
-  ok('MUTANT the env proxy ignored ⇒ ②\'s N6 j leg RED (the PAC rides beside the person\'s proxy)', !!me && hasPac(me), me && me.stamp);
-  ok('the copies live outside the tree', MC.files.length === 29 && MC.files.every((f) => !f.startsWith(path.join(REPO, 'src'))), MC.files);
+  ok('MUTANT the env proxy ignored ⇒ ②\'s N6 j leg RED (the PAC rides beside the person\'s proxy)', !!me && verdictOf(hasPac(me)), me && me.stamp);
+  ok('the copies live outside the tree', MC.files.length === 29 && verdictOf(MC.files.every((f) => !f.startsWith(path.join(REPO, 'src')))), MC.files);
 }
 await kdoor.close(); await ed.close();
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -15,7 +15,7 @@ const wt = process.argv[2] || '/tmp/vs-cleanbuild';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].find((p) => fs.existsSync(p));
 const PORT = 3988, CDP_PORT = 9338;
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
@@ -83,7 +83,7 @@ try {
   let id = await openExplorer();
   let r = await closeViaButton(id);
   check('plain: close button found+clicked', r === 'clicked', r);
-  check('plain: window actually closes', await winGone(id));
+  check('plain: window actually closes', verdictOf(await winGone(id)));
 
   // 2. stage ENABLED (not active)
   await evalJs(`(app.settings.set('desktop.dynamicEnabled', true), true)`);
@@ -91,7 +91,7 @@ try {
   id = await openExplorer();
   r = await closeViaButton(id);
   check('stage-enabled: close clicked', r === 'clicked', r);
-  check('stage-enabled: window closes', await winGone(id));
+  check('stage-enabled: window closes', verdictOf(await winGone(id)));
 
   // 3. ON the stage
   await evalJs('(app.stage.enter(), true)');
@@ -99,7 +99,7 @@ try {
   id = await openExplorer();  // aux window on stage
   r = await closeViaButton(id);
   check('on-stage: close clicked', r === 'clicked', r);
-  check('on-stage: window closes', await winGone(id));
+  check('on-stage: window closes', verdictOf(await winGone(id)));
 
   // 4. after leaving the stage
   const deskId = await evalJs('app.desktopManager.desktops[0].id');
@@ -108,7 +108,7 @@ try {
   id = await openExplorer();
   r = await closeViaButton(id);
   check('post-leave: close clicked', r === 'clicked', r);
-  check('post-leave: window closes', await winGone(id));
+  check('post-leave: window closes', verdictOf(await winGone(id)));
 
   // 5. THE 2.151.1 resurrect repro: window recorded in _savedStates via a
   // desktop round-trip, THEN closed, then another round-trip — merge-preserve
@@ -119,9 +119,9 @@ try {
   id = await openExplorer(); // on A
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(dB)})`); await sleep(1400);
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(dA)})`); await sleep(1400);
-  check('round-trip: window still present while open', await evalJs(`app.wm.windows.has(${JSON.stringify(id)})`));
+  check('round-trip: window still present while open', verdictOf(await evalJs(`app.wm.windows.has(${JSON.stringify(id)})`)));
   r = await closeViaButton(id);
-  check('resurrect repro: closed on home desktop', r === 'clicked' && await winGone(id), r);
+  check('resurrect repro: closed on home desktop', r === 'clicked' && verdictOf(await winGone(id)), r);
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(dB)})`); await sleep(1400);
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(dA)})`); await sleep(1800);
   const resurrected = await evalJs(`app.wm.windows.has(${JSON.stringify(id)}) || !![...app.wm.windows.values()].find(w => w.type === 'files')`);
@@ -137,4 +137,4 @@ try {
 } finally { try { ws.close(); } catch {} }
 
 console.log(failed ? `\n${failed} FAILED` : '\nclose smoke passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

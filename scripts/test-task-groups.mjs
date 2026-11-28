@@ -40,7 +40,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => { try { return fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch { return ''; } };   // a missing file reads empty (the base has no task-membership.js — its legs go RED, never crash)
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 let M = {};
@@ -49,7 +49,7 @@ const has = (fn) => typeof M[fn] === 'function';
 
 console.log('① PURE src/task-membership.js — the folder rule and the birth bind verdict');
 {
-  ok(has('folderOf') && has('insideFolder') && has('birthBindVerdict'), 'the module exports folderOf / insideFolder / birthBindVerdict');
+  ok(gateOf(has('folderOf')) && gateOf(has('insideFolder')) && verdictOf(has('birthBindVerdict')), 'the module exports folderOf / insideFolder / birthBindVerdict');
   const fo = (x) => (has('folderOf') ? M.folderOf(x) : 'missing');
   const rows = [
     ['/var/tmp/lanes/**', { path: '/var/tmp/lanes', recursive: true }], [{ path: '/var/tmp/lanes/**', recursive: true }, { path: '/var/tmp/lanes', recursive: true }],
@@ -69,10 +69,10 @@ console.log('① PURE src/task-membership.js — the folder rule and the birth b
   const badIn = rowsIn.filter(([c, f, want]) => inn(c, f) !== want).map(([c, f, want]) => ({ c, f, want, got: inn(c, f) }));
   ok(badIn.length === 0, `insideFolder: ${rowsIn.length} rows — a folder INCLUDES ITSELF, a recursive one every path under it on a whole segment, a non-recursive one only itself`, badIn);
   const bv = (s) => (has('birthBindVerdict') ? M.birthBindVerdict(s) : 'missing');
-  ok(same(bv({}), { none: true }) && same(bv({ _birthBind: null, claudeSessionId: 'a' }), { none: true }) && same(bv({ _birthBind: { groupId: 'T-1' } }), { wait: true, why: 'no-id-yet' })
-    && same(bv({ _birthBind: { groupId: 'T-1' }, claudeSessionId: 'p', _forkRequested: true }), { wait: true, why: 'fork-source-id' })
-    && same(bv({ _birthBind: { groupId: 'T-1' }, backendSessionId: 'th-1' }), { bind: true, groupId: 'T-1', groupIds: ['T-1'] })
-    && same(bv({ _birthBind: { groupId: 'T-1', groupIds: ['T-1', 'T-2'] }, backendSessionId: 'th-1' }), { bind: true, groupId: 'T-1', groupIds: ['T-1', 'T-2'] }), 'birthBindVerdict: none · wait (no own id yet / a fork still on its source\'s id) · bind (int346: every group the create named)');
+  ok(gateOf(same(bv({}), { none: true })) && gateOf(same(bv({ _birthBind: null, claudeSessionId: 'a' }), { none: true })) && gateOf(same(bv({ _birthBind: { groupId: 'T-1' } }), { wait: true, why: 'no-id-yet' }))
+    && gateOf(same(bv({ _birthBind: { groupId: 'T-1' }, claudeSessionId: 'p', _forkRequested: true }), { wait: true, why: 'fork-source-id' }))
+    && gateOf(same(bv({ _birthBind: { groupId: 'T-1' }, backendSessionId: 'th-1' }), { bind: true, groupId: 'T-1', groupIds: ['T-1'] }))
+    && verdictOf(same(bv({ _birthBind: { groupId: 'T-1', groupIds: ['T-1', 'T-2'] }, backendSessionId: 'th-1' }), { bind: true, groupId: 'T-1', groupIds: ['T-1', 'T-2'] })), 'birthBindVerdict: none · wait (no own id yet / a fork still on its source\'s id) · bind (int346: every group the create named)');
   ok(!!read('src/task-membership.js') && !/require\(|\bimport\b/.test(read('src/task-membership.js').replace(/^\s*(\/\/|\*|\/\*\*).*$/gm, '')), 'task-membership.js imports nothing (PURE — the test-architecture PURE row)');
 }
 
@@ -95,23 +95,23 @@ console.log('② the REAL store over the owner\'s stored folder shape (`<folder>
   const tgm = freshStore();
   const g = tgm.create({ title: 'Lanes', folders: [{ path: LANES + '/**', recursive: true }] });
   const ids = (cwd) => tgm.groupsForSession({ cwd }).map((t) => t.id);
-  ok(ids(LANES).includes(g.id), 'a conversation started EXACTLY at the group\'s folder is a member (the lanes\' own cwd)', { folders: tgm.get(g.id).folders });
-  ok(ids(path.join(LANES, 'wt-x')).includes(g.id) && !ids(LANES + '-old').includes(g.id) && !ids(path.dirname(LANES)).includes(g.id), 'under it ⇒ a member; a sibling with the same prefix, the parent ⇒ not');
+  ok(verdictOf(ids(LANES).includes(g.id)), 'a conversation started EXACTLY at the group\'s folder is a member (the lanes\' own cwd)', { folders: tgm.get(g.id).folders });
+  ok(gateOf(ids(path.join(LANES, 'wt-x')).includes(g.id)) && !ids(LANES + '-old').includes(g.id) && !ids(path.dirname(LANES)).includes(g.id), 'under it ⇒ a member; a sibling with the same prefix, the parent ⇒ not');
   // int346: lane task-group-context — a group's folders are its Context table's 自动发现会话 rows (the live record keeps
   // `ctx`; `folders` is DERIVED on the wire, view() / list())
-  ok(same(tgm.view(g.id).folders, [{ path: LANES, recursive: true }]) && tgm.get(g.id).ctx[0].path === LANES, 'the store keeps the folder NORMALIZED (the glob tail is the recursive switch, not part of the path)', { folders: tgm.view(g.id).folders, ctx: tgm.get(g.id).ctx });
+  ok(gateOf(same(tgm.view(g.id).folders, [{ path: LANES, recursive: true }])) && tgm.get(g.id).ctx[0].path === LANES, 'the store keeps the folder NORMALIZED (the glob tail is the recursive switch, not part of the path)', { folders: tgm.view(g.id).folders, ctx: tgm.get(g.id).ctx });
   const raw = { tasks: { 'T-260101-old': { id: 'T-260101-old', title: 'Old', sessions: [], folders: [{ path: LANES + '/**', recursive: true }, LANES], createdAt: 1, updatedAt: 1 } } };
   const old = freshStore(raw);
   // int346: a store from before the Context table reads its folders once the boot's one migration has run
   // (2026-10-task-group-context-rows — lane task-group-context's RED control: before it a cwd joins nothing)
   old.migrateContextRows();
   const listed = (old.list().find((t) => t.id === 'T-260101-old') || {}).folders;
-  ok(same(listed, [{ path: LANES, recursive: true }]) && old.groupsForSession({ cwd: LANES }).some((t) => t.id === 'T-260101-old'),
+  ok(gateOf(same(listed, [{ path: LANES, recursive: true }])) && verdictOf(old.groupsForSession({ cwd: LANES }).some((t) => t.id === 'T-260101-old')),
     'a store written BEFORE the fix (the glob folder on disk): every reader sees it normalized + deduped (the panel\'s list, groupsForSession) and it matches at once', listed);
   // int346: lane task-group-context — a linked folder IS a 自动发现会话 row and membership is recursive (no non-recursive
   // folder remains; the migration counts any it meets): the folder itself and under it
   const plain = tgm.create({ title: 'Plain', folders: [{ path: LANES, recursive: false }] });
-  ok(ids(LANES).includes(plain.id) && ids(path.join(LANES, 'wt-x')).includes(plain.id), 'a folder linked non-recursive: itself AND under it (the Context table\'s discover rows are recursive)');
+  ok(gateOf(ids(LANES).includes(plain.id)) && verdictOf(ids(path.join(LANES, 'wt-x')).includes(plain.id)), 'a folder linked non-recursive: itself AND under it (the Context table\'s discover rows are recursive)');
 }
 
 console.log('③ THE BIRTH BIND — conversations.open --task through the real conversation-ops into the real store');
@@ -124,9 +124,9 @@ const SPEC = (() => { try { return require(path.join(ROOT, 'src/new-session-spec
 const spawnOf = (data) => (SPEC ? SPEC.spawnGroupIds(data) : []);
 const birthFn = birthLine ? new Function('data', 'spawnGroups', `return ${birthLine};`) : null;   // ws-create's OWN expression, evaluated over the frame
 const birthOf = (data) => (birthFn ? birthFn(data, spawnOf(data)) : undefined);
-ok(!!birthLine && same(birthOf({ taskId: 'T-261002-vibespace' }), { groupId: 'T-261002-vibespace', groupIds: ['T-261002-vibespace'], by: null }) && birthOf({ taskId: 'T-1; rm' }) === null && birthOf({}) === null,
+ok(!!birthLine && gateOf(same(birthOf({ taskId: 'T-261002-vibespace' }), { groupId: 'T-261002-vibespace', groupIds: ['T-261002-vibespace'], by: null })) && birthOf({ taskId: 'T-1; rm' }) === null && birthOf({}) === null,
   'ws-create marks `_birthBind` from the create\'s taskId under the SAME id shape as _initialGroupId (a junk id marks nothing)', birthLine);
-ok(!!birthLine && same(birthOf({ taskId: 'T-a', taskIds: ['T-a', 'T-b', 'T-a', 'T-1; rm'] }), { groupId: 'T-a', groupIds: ['T-a', 'T-b'], by: null }),
+ok(!!birthLine && verdictOf(same(birthOf({ taskId: 'T-a', taskIds: ['T-a', 'T-b', 'T-a', 'T-1; rm'] }), { groupId: 'T-a', groupIds: ['T-a', 'T-b'], by: null })),
   'int346: a create naming SEVERAL groups (taskIds) marks every one, in the order picked (a duplicate / junk id marks nothing)', birthLine && birthOf({ taskId: 'T-a', taskIds: ['T-a', 'T-b'] }));
 const TABLES = { backends: ['claude'], chatBackends: ['claude'], byBackend: { claude: { models: ['opus'], modelFree: true, efforts: ['high'], effortFree: true, permissionModes: ['bypassPermissions'] } } };
 function world(tgm) {
@@ -155,17 +155,17 @@ const lines = (tgm, gid) => (tgm.get(gid).progress || []).map((p) => p.note).fil
   const V = OPS.automationVerbs({ activeSessions: W.activeSessions, ops: W.ops, waitMs: 500, sleep: async () => { } });
   const o = await V['conversations.open']({ cwd: '/srv/fixture/elsewhere', name: 'lane x', task: g.id }, ctx);
   const s = W.activeSessions.get(o.sessionId);
-  ok(o.ok && o.pending === true && !tgm.get(g.id).sessions.length, 'open --task: the conversation has no id yet ⇒ answered pending, no membership yet (nothing to key it by)', { o, sessions: tgm.get(g.id).sessions });
+  ok(gateOf(o.ok) && o.pending === true && !tgm.get(g.id).sessions.length, 'open --task: the conversation has no id yet ⇒ answered pending, no membership yet (nothing to key it by)', { o, sessions: tgm.get(g.id).sessions });
   W.notify();
   ok(!tgm.get(g.id).sessions.length, 'the notify point before the id: still nothing (waits, never keys a membership by the webui id)');
   s.claudeSessionId = s.backendSessionId = 'ee55aa01';   // the stream parser adopts its id, then broadcasts
   const n = W.notify();
   const key = 'claude:ee55aa01';
-  ok(n === 1 && same(tgm.get(g.id).sessions, [key]), 'the id adopted + the session list\'s notify point ⇒ the conversation is IN the group\'s sessions (the panel, its counts)', { n, sessions: tgm.get(g.id).sessions });
-  ok(tgm.groupsForSession({ sessionKey: key, cwd: '/srv/fixture/elsewhere' }).some((t) => t.id === g.id), 'groupsForSession agrees WITHOUT the birth note (a membership, not a note — one truth for the agent and the owner)');
-  ok(same(lines(tgm, g.id), ['[automation] session ee55aa01 bound by coordinator (key ak-000000000001)']), 'ONE activity line, conversations.bind\'s own spelling (who bound it, with which key)', lines(tgm, g.id));
+  ok(n === 1 && verdictOf(same(tgm.get(g.id).sessions, [key])), 'the id adopted + the session list\'s notify point ⇒ the conversation is IN the group\'s sessions (the panel, its counts)', { n, sessions: tgm.get(g.id).sessions });
+  ok(verdictOf(tgm.groupsForSession({ sessionKey: key, cwd: '/srv/fixture/elsewhere' }).some((t) => t.id === g.id)), 'groupsForSession agrees WITHOUT the birth note (a membership, not a note — one truth for the agent and the owner)');
+  ok(verdictOf(same(lines(tgm, g.id), ['[automation] session ee55aa01 bound by coordinator (key ak-000000000001)'])), 'ONE activity line, conversations.bind\'s own spelling (who bound it, with which key)', lines(tgm, g.id));
   W.notify(); W.notify();
-  ok(same(tgm.get(g.id).sessions, [key]) && lines(tgm, g.id).length === 1 && s._birthBind === null, 'asked again ⇒ nothing more (the mark is spent: one bind, one line)');
+  ok(gateOf(same(tgm.get(g.id).sessions, [key])) && lines(tgm, g.id).length === 1 && s._birthBind === null, 'asked again ⇒ nothing more (the mark is spent: one bind, one line)');
   const created = W.creates;
   const refused = await V['conversations.open']({ cwd: '/srv/fixture/x', task: 'T-261231-other' }, ctx);
   ok(refused.code === 'not_granted' && W.creates === created, '--task into a group the CALLER is not in ⇒ not_granted, nothing spawned (conversations.bind\'s own rule — the open now writes what a bind writes)', refused);
@@ -173,7 +173,7 @@ const lines = (tgm, gid) => (tgm.get(gid).progress || []).map((p) => p.note).fil
   let ticks = 0;
   const V2 = OPS.automationVerbs({ activeSessions: W.activeSessions, ops: W.ops, waitMs: 2000, sleep: async () => { if (++ticks === 2) for (const x of W.activeSessions.values()) if (!x.claudeSessionId) x.claudeSessionId = x.backendSessionId = 'ff66bb02'; } });
   const o2 = await V2['conversations.open']({ cwd: '/srv/fixture/elsewhere', name: 'lane y', task: g.id }, ctx);
-  ok(o2.ok && o2.pending === false && tgm.get(g.id).sessions.includes('claude:ff66bb02'), 'an id inside the open\'s wait ⇒ a member BEFORE the answer (the verb settles once the id is here)', { o2, sessions: tgm.get(g.id).sessions });
+  ok(gateOf(o2.ok) && o2.pending === false && verdictOf(tgm.get(g.id).sessions.includes('claude:ff66bb02')), 'an id inside the open\'s wait ⇒ a member BEFORE the answer (the verb settles once the id is here)', { o2, sessions: tgm.get(g.id).sessions });
 }
 {
   const tgm = freshStore();
@@ -187,7 +187,7 @@ const lines = (tgm, gid) => (tgm.get(gid).progress || []).map((p) => p.note).fil
   const f = W.activeSessions.get('sess-7-f'); f._forkRequested = false; f.claudeSessionId = f.backendSessionId = 'aa00f002';
   const w = W.activeSessions.get('sess-7-w'); w.claudeSessionId = w.backendSessionId = 'aa00w003';
   W.notify();
-  ok(same(tgm.get(a.id).sessions.slice().sort(), ['claude:aa00f002', 'claude:aa00w003']) && lines(tgm, a.id).length === 0, 'the fork\'s own id ⇒ bound under it; a window\'s open ⇒ bound, no activity line (the owner\'s own bind route writes none)', tgm.get(a.id).sessions);
+  ok(gateOf(same(tgm.get(a.id).sessions.slice().sort(), ['claude:aa00f002', 'claude:aa00w003'])) && lines(tgm, a.id).length === 0, 'the fork\'s own id ⇒ bound under it; a window\'s open ⇒ bound, no activity line (the owner\'s own bind route writes none)', tgm.get(a.id).sessions);
   W.activeSessions.set('sess-7-g', { backend: 'claude', claudeSessionId: 'aa00g004', backendSessionId: 'aa00g004', _birthBind: { groupId: 'T-261231-gone', by: null } });
   let threw = null; const warn = console.warn; console.warn = () => { };
   try { W.notify(); } catch (e) { threw = e.message; } finally { console.warn = warn; }
@@ -207,9 +207,9 @@ console.log('③b (int346) THE NEW SESSION FORM × THE BIRTH BIND — a create n
   s.claudeSessionId = s.backendSessionId = 'ab00ab01';
   const n = W.notify();
   const key = 'claude:ab00ab01';
-  ok(n === 2 && same(tgm.get(b.id).sessions, [key]) && same(tgm.get(a.id).sessions, [key]) && !lines(tgm, a.id).length && !lines(tgm, b.id).length,
+  ok(n === 2 && gateOf(same(tgm.get(b.id).sessions, [key])) && gateOf(same(tgm.get(a.id).sessions, [key])) && !lines(tgm, a.id).length && !lines(tgm, b.id).length,
     'the id adopted + the notify point ⇒ a MEMBER of BOTH groups (each one\'s sessions[]), through bindConversation; a window\'s create writes no line', { n, a: tgm.get(a.id).sessions, b: tgm.get(b.id).sessions });
-  ok(same(tgm.groupsForSession({ sessionKey: key, cwd: '/srv/fixture/two' }).map((g) => g.id).sort(), [a.id, b.id].sort()), 'groupsForSession agrees for both WITHOUT the birth note');
+  ok(verdictOf(same(tgm.groupsForSession({ sessionKey: key, cwd: '/srv/fixture/two' }).map((g) => g.id).sort(), [a.id, b.id].sort())), 'groupsForSession agrees for both WITHOUT the birth note');
   W.notify();
   ok(s._birthBind === null && tgm.get(a.id).sessions.length === 1 && tgm.get(b.id).sessions.length === 1, 'asked again ⇒ nothing more (the mark is spent)');
 }
@@ -238,7 +238,7 @@ console.log('④ the panel\'s own resolver (sidebar-tasks.js, evaluated from the
       { sessionKey: 'claude:ee55aa01', cwd: '/srv/fixture/elsewhere' }, { sessionKey: 'claude:ab12', cwd: LANES }, { sessionKey: 'claude:cd34', cwd: path.join(LANES, 'wt-y') }, { sessionKey: 'claude:ef56', cwd: LANES + '-old' },
     ])].sort();
   } catch (e) { err = e.message; }
-  ok(same(keys, ['claude:ab12', 'claude:cd34', 'claude:ee55aa01']), 'the panel lists the conversation bound by its opening, the one started AT the folder and the one under it — not the same-prefix sibling', { keys, err });
+  ok(verdictOf(same(keys, ['claude:ab12', 'claude:cd34', 'claude:ee55aa01'])), 'the panel lists the conversation bound by its opening, the one started AT the folder and the one under it — not the same-prefix sibling', { keys, err });
 }
 
 console.log('⑥ B-06de: a Task Group folder row matches conversations of ITS OWN machine — a hub row the hub\'s, `R::/x` machine R\'s');
@@ -264,7 +264,7 @@ console.log('⑥ B-06de: a Task Group folder row matches conversations of ITS OW
   const bad = cur.filter((c) => c.index !== c.want || c.walk !== c.want);
   ok(bad.length === 0, `the REAL store (the member index AND the walk), ${cur.length} cases: ${cur.map((c) => c.what).join(' · ')}`, bad);
   const mf = has('memberFolders') ? M.memberFolders([{ path: '/a', tags: ['discover'] }, { path: 'h1::/b/', tags: ['discover'] }, { path: '/c', tags: ['notes'] }, { path: '/f.md', tags: ['discover'] }], [{ abs: '/a', kind: 'dir' }, { abs: 'h1::/b/', kind: 'remote', host: 'h1' }, { abs: '/c', kind: 'dir' }, { abs: '/f.md', kind: 'file' }]) : null;
-  ok(same(mf, [{ path: '/a', recursive: true, host: null }, { path: '/b', recursive: true, host: 'h1' }]) && has('folderOnHost') && M.folderOnHost({ path: '/a', host: null }, null) && M.folderOnHost({ path: '/a', host: null }, 'local') && !M.folderOnHost({ path: '/a', host: null }, 'h1') && M.folderOnHost({ path: '/b', host: 'h1' }, 'h1') && !M.folderOnHost({ path: '/b', host: 'h1' }, null) && !M.folderOnHost({ path: '/b', host: 'h1' }, 'h2'),
+  ok(gateOf(same(mf, [{ path: '/a', recursive: true, host: null }, { path: '/b', recursive: true, host: 'h1' }])) && gateOf(has('folderOnHost')) && gateOf(M.folderOnHost({ path: '/a', host: null }, null)) && gateOf(M.folderOnHost({ path: '/a', host: null }, 'local')) && !M.folderOnHost({ path: '/a', host: null }, 'h1') && gateOf(M.folderOnHost({ path: '/b', host: 'h1' }, 'h1')) && !M.folderOnHost({ path: '/b', host: 'h1' }, null) && !M.folderOnHost({ path: '/b', host: 'h1' }, 'h2'),
     'PURE memberFolders (discover rows only, a file never, `h1::/b/` → {/b, host h1}) and folderOnHost (a hub row: the hub\'s only — none / local; an R row: R\'s only)', mf);
   // CONTROL — the release's matcher (the folders with no machine, matched by spelling — anchored on the source)
   const { anchored } = await import('./scratch.mjs');
@@ -297,18 +297,18 @@ console.log('⑥ B-06de: a Task Group folder row matches conversations of ITS OW
     first.tgm.update(first.g.id, { ctx: [{ path: 'h1::/srv/app', note: 'h1 app', tags: ['discover'] }, { path: HUBW, note: 'hub', tags: ['discover'] }] });
     keys.firstFolder = sb._firstFolder(first.tgm.list().find((t) => t.id === first.g.id));
   } catch (e) { err = e.message; }
-  ok(!!keys && same(keys.board, ['claude:h1app', 'claude:hub1']) && same(keys.perSession, ['claude:h1app', 'claude:hub1']), 'the PAGE lists the same members — the board (_getTaskSessionKeys) AND each session\'s groups (_getSessionTaskGroups): the hub\'s conversation under the hub row and h1\'s under h1\'s row — never h1\'s at the hub spelling, the hub\'s at h1\'s path, h2\'s', { keys, err });
+  ok(!!keys && gateOf(same(keys.board, ['claude:h1app', 'claude:hub1'])) && verdictOf(same(keys.perSession, ['claude:h1app', 'claude:hub1'])), 'the PAGE lists the same members — the board (_getTaskSessionKeys) AND each session\'s groups (_getSessionTaskGroups): the hub\'s conversation under the hub row and h1\'s under h1\'s row — never h1\'s at the hub spelling, the hub\'s at h1\'s path, h2\'s', { keys, err });
   // THE PAGE'S WRITE DOORS write the machine's row for another machine's folder, and a New Session from a group opens on its row's machine
   const FE = read('src/lib/file-explorer-ops.js'), SR = read('src/lib/sidebar-render.js'), ST = read('src/lib/sidebar-tasks.js');
-  ok(/const fullPath = this\.currentPath \+ '\/' \+ dataset\.name;\n *const fullHost = this\._host \|\| '';/.test(FE) && /_taskAddFolder\(t\.id, fullHost \? `\$\{fullHost\}::\$\{fullPath\}` : fullPath\)/.test(FE)
-    && /folderHost = e\.dataTransfer\.getData\('application\/x-file-host'\)/.test(ST) && /this\._taskAddFolder\(task\.id, folderHost \? `\$\{folderHost\}::\$\{folderPath\}` : folderPath\)/.test(ST)
-    && /const groupHost = hosts\.size === 1 \? \[\.\.\.hosts\]\[0\] : '';/.test(SR) && /const linkPath = groupHost \? `\$\{groupHost\}::\$\{stripCwdHostLabel\(cwd\)\}` : cwd;/.test(SR),
+  ok(gateOf(/const fullPath = this\.currentPath \+ '\/' \+ dataset\.name;\n *const fullHost = this\._host \|\| '';/.test(FE)) && gateOf(/_taskAddFolder\(t\.id, fullHost \? `\$\{fullHost\}::\$\{fullPath\}` : fullPath\)/.test(FE))
+    && gateOf(/folderHost = e\.dataTransfer\.getData\('application\/x-file-host'\)/.test(ST)) && gateOf(/this\._taskAddFolder\(task\.id, folderHost \? `\$\{folderHost\}::\$\{folderPath\}` : folderPath\)/.test(ST))
+    && gateOf(/const groupHost = hosts\.size === 1 \? \[\.\.\.hosts\]\[0\] : '';/.test(SR)) && verdictOf(/const linkPath = groupHost \? `\$\{groupHost\}::\$\{stripCwdHostLabel\(cwd\)\}` : cwd;/.test(SR)),
     'the write doors: Files «Add to task» (the machine taken WITH the path), a folder dragged from another machine\'s Files, the sidebar folder-group link (another machine\'s row only when EVERY session of the group is that machine\'s — a shared home\'s hub group stays the hub\'s)');
   // B-06de cure (主开发 08:04Z MUST 1): every New Session opened FROM a group goes through ONE door, sidebar-tasks _openGroupSession —
   // the one showNewSessionDialog with a taskId is its own (the folder from _firstFolder: another machine's row opens on THAT machine)
   const nsCalls = ['src/lib/sidebar-tasks.js', 'src/lib/task-detail.js', 'src/lib/sidebar.js', 'src/lib/sidebar-render.js', 'src/lib/app.js'].flatMap((f) => [...read(f).matchAll(/showNewSessionDialog\(\{([^\n]*?)\}\)/g)].map((m) => ({ f, args: m[1] }))).filter((c) => /taskId/.test(c.args) && !/\} = \{/.test(c.args));   // the calls, never the method's own definition
   const doorCalls = ['src/lib/sidebar-tasks.js', 'src/lib/task-detail.js'].flatMap((f) => [...read(f).matchAll(/_openGroupSession\((?:t|g|task)\)/g)].map(() => f));
-  ok(nsCalls.length === 1 && nsCalls[0].f === 'src/lib/sidebar-tasks.js' && /^ \.\.\.first, \.\.\.extra, taskId: task\.id $/.test(nsCalls[0].args) && /proto\._openGroupSession = async function\(task, extra = \{\}\) \{\n\s*const first = this\._firstFolder\(task\);/.test(ST) && doorCalls.length === 4,
+  ok(nsCalls.length === 1 && nsCalls[0].f === 'src/lib/sidebar-tasks.js' && gateOf(/^ \.\.\.first, \.\.\.extra, taskId: task\.id $/.test(nsCalls[0].args)) && gateOf(/proto\._openGroupSession = async function\(task, extra = \{\}\) \{\n\s*const first = this\._firstFolder\(task\);/.test(ST)) && doorCalls.length === 4,
     `every New Session opened FROM a group (${doorCalls.length} doors: the group menu, the flat view's plus, the card's plus, the group window's «Start a conversation here») goes through _openGroupSession — the ONE dialog call with a taskId, its folder from _firstFolder`, { nsCalls, doorCalls });
   // …BEHAVIOUR (the methods evaluated from their source, as ④): a gone machine refused by name (nothing opened), an unreadable machines
   // list refused, a paired one opens ON it; MUST 2: the rule change's loss counted per hub row and machine; WITH IT: a machine's root
@@ -359,40 +359,40 @@ console.log('⑥ B-06de: a Task Group folder row matches conversations of ITS OW
     cure.fallback = [sb2._firstFolder({ id: 'T-f', ctx: [{ path: 'x' }], ctxRes: [], folders: ['h1::/srv/app'] }), sb2._firstFolder({ id: 'T-l', ctx: [{ path: 'x' }], ctxRes: [], folders: ['local::/srv/l'] }), sb2._firstFolder({ id: 'T-r', ctx: [{ path: 'x' }], ctxRes: [], folders: ['h1::/'] })];
     sb2._allSessions = SESS; cure.hubIn = [sb2._hubSessionsIn(cure.hubPath), sb2._hubSessionsIn('/srv/app')]; sb2._allSessions = [];
   } catch (e) { cureErr = e.stack || e.message; }
-  ok(!!cure && same(cure.lost, [{ path: cure.hubPath, host: 'h1', n: 2 }]), 'MUST 2: the rule change\'s loss is COUNTED per hub row and machine — h1\'s two conversations in the hub row\'s spelling (not gathered any more), never the hub\'s own, h1\'s under its own row, or h2\'s outside the hub row', { cure, cureErr });
-  ok(!!cure && same(cure.on, { hub: [cure.hubPath], local: [cure.hubPath], h1: ['/srv/app'], h2: [] }) && same(cure.label, ['Build box: /srv/app', 'h9: /x', '/srv']), 'WITH IT: the group\'s folders ON one machine (a chip, a base) — the hub\'s rows for the hub, `h1::/srv/app` → /srv/app on h1, none on h2; a row as a person reads it says its machine by name, never the raw `host::/path`', cure && { on: cure.on, label: cure.label });
-  ok(!!cure && same(cure.add, { updates: [['h1::/srv/x|discover']], toasts: ['warn', 'warn', 'warn'] }), 'WITH IT: a machine\'s ROOT (h1::/, /, h1:://) is never written — said where the person pressed (the three doors meet in _taskAddFolder); another machine\'s folder is written as ITS row', cure && cure.add);
-  ok(!!cure && same(cure.chips, { hub: [cure.hubPath], h1: ['/srv/app'], h2: [] }) && !JSON.stringify(cure.chips).includes('::') && same(cure.fallback, [{ cwd: '/srv/app', hostId: 'h1' }, { cwd: '/srv/l', hostId: 'local' }, { cwd: '/', hostId: 'h1' }]) && same(cure.hubIn, [true, false]) && cure.perRow === 3 && cure.lostKeys === 2 && cure.root.join() === 'true,true,true,true,false,false,false',
+  ok(!!cure && verdictOf(same(cure.lost, [{ path: cure.hubPath, host: 'h1', n: 2 }])), 'MUST 2: the rule change\'s loss is COUNTED per hub row and machine — h1\'s two conversations in the hub row\'s spelling (not gathered any more), never the hub\'s own, h1\'s under its own row, or h2\'s outside the hub row', { cure, cureErr });
+  ok(!!cure && gateOf(same(cure.on, { hub: [cure.hubPath], local: [cure.hubPath], h1: ['/srv/app'], h2: [] })) && verdictOf(same(cure.label, ['Build box: /srv/app', 'h9: /x', '/srv'])), 'WITH IT: the group\'s folders ON one machine (a chip, a base) — the hub\'s rows for the hub, `h1::/srv/app` → /srv/app on h1, none on h2; a row as a person reads it says its machine by name, never the raw `host::/path`', cure && { on: cure.on, label: cure.label });
+  ok(!!cure && verdictOf(same(cure.add, { updates: [['h1::/srv/x|discover']], toasts: ['warn', 'warn', 'warn'] })), 'WITH IT: a machine\'s ROOT (h1::/, /, h1:://) is never written — said where the person pressed (the three doors meet in _taskAddFolder); another machine\'s folder is written as ITS row', cure && cure.add);
+  ok(!!cure && gateOf(same(cure.chips, { hub: [cure.hubPath], h1: ['/srv/app'], h2: [] })) && !JSON.stringify(cure.chips).includes('::') && gateOf(same(cure.fallback, [{ cwd: '/srv/app', hostId: 'h1' }, { cwd: '/srv/l', hostId: 'local' }, { cwd: '/', hostId: 'h1' }])) && gateOf(same(cure.hubIn, [true, false])) && cure.perRow === 3 && cure.lostKeys === 2 && cure.root.join() === 'true,true,true,true,false,false,false',
     'the read\'s M1 + S2: the LIVE New Session chips (app.js _taskCwdSuggestions, its source) are the group\'s folders ON the machine chosen — the hub row on This machine, /srv/app on h1, none on h2, never a raw `host::/path`; a first folder the fallback carries raw still opens on ITS machine (the fallback parses the row); the Members line counts DISTINCT conversations (2); a machine\'s whole disk is said by ONE linear test (a 5000-slash row answers)', cure && { chips: cure.chips, fallback: cure.fallback, lostKeys: cure.lostKeys, root: cure.root, perRow: cure.perRow, hubIn: cure.hubIn });
   { const TD = read('src/lib/task-detail.js'), APs = read('src/lib/app.js');
-    ok(/const repoint = kind === 'missing' && lostNow\.filter\(\(q\) => q\.path === o\.path\)\.length === 1 && !\(sidebar\._hubSessionsIn && sidebar\._hubSessionsIn\(o\.path\)\);/.test(TD) && /fetchJson\('\/api\/hosts'\)\.then\(\(d\) => \{\n\s*if \(closed \|\| !d/.test(TD) && /winInfo\.onClose = \(\) => \{ closed = true;/.test(TD)
-      && /if \(hostId && !this\._nsHostPicked && hostSel\.value !== hostId\) \{[^\n]*hostSel\.value = hostId; this\._updateAcctRow\?\.\(\); \}/.test(APs) && /chip\('notes', [^\n]*\{ disabled: isFile \|\| \(kind === 'remote' && !tags\.includes\('notes'\)\),/.test(TD)
-      && /if \(\/\^\[\^:\/\\s\]\+::\\\/\/\.test\(text\)\) rows\[j\]\.tags = \(rows\[j\]\.tags \|\| \[\]\)\.filter\(\(g\) => g !== 'notes'\);/.test(TD) && /if \(repoint && !\(sidebar\._hubSessionsIn && sidebar\._hubSessionsIn\(o\.path\)\)\) \{ const rows = rowsOf\(\)[^\n]*tags: \(rows\[j\]\.tags \|\| \[\]\)\.filter\(\(g\) => g !== 'notes'\)/.test(TD),
+    ok(gateOf(/const repoint = kind === 'missing' && lostNow\.filter\(\(q\) => q\.path === o\.path\)\.length === 1 && !\(sidebar\._hubSessionsIn && sidebar\._hubSessionsIn\(o\.path\)\);/.test(TD)) && gateOf(/fetchJson\('\/api\/hosts'\)\.then\(\(d\) => \{\n\s*if \(closed \|\| !d/.test(TD)) && gateOf(/winInfo\.onClose = \(\) => \{ closed = true;/.test(TD))
+      && gateOf(/if \(hostId && !this\._nsHostPicked && hostSel\.value !== hostId\) \{[^\n]*hostSel\.value = hostId; this\._updateAcctRow\?\.\(\); \}/.test(APs)) && gateOf(/chip\('notes', [^\n]*\{ disabled: isFile \|\| \(kind === 'remote' && !tags\.includes\('notes'\)\),/.test(TD))
+      && gateOf(/if \(\/\^\[\^:\/\\s\]\+::\\\/\/\.test\(text\)\) rows\[j\]\.tags = \(rows\[j\]\.tags \|\| \[\]\)\.filter\(\(g\) => g !== 'notes'\);/.test(TD)) && verdictOf(/if \(repoint && !\(sidebar\._hubSessionsIn && sidebar\._hubSessionsIn\(o\.path\)\)\) \{ const rows = rowsOf\(\)[^\n]*tags: \(rows\[j\]\.tags \|\| \[\]\)\.filter\(\(g\) => g !== 'notes'\)/.test(TD)),
       'the delta reads\' pins: a hub row is RE-POINTED only when one machine\'s loss is on it and no conversation of This machine sits there; a machines answer landing after the window closed paints nothing; the dialog keeps the machine it was opened on when the list lands without it; another machine\'s row takes no notes (its chip can only be turned off; a typed `host::` path and the re-point drop it; the press re-checks This machine\'s members)'); }
-  ok(!!cure && cure.open.gone === null && cure.open.unread === null && cure.open.paired === 'opened' && same(cure.open.opened, [{ cwd: '/srv/app', hostId: 'h1', prompt: 'p', taskId: cure.open.opened[0] && cure.open.opened[0].taskId }]) && cure.open.toasts.length === 2,
+  ok(!!cure && cure.open.gone === null && cure.open.unread === null && cure.open.paired === 'opened' && gateOf(same(cure.open.opened, [{ cwd: '/srv/app', hostId: 'h1', prompt: 'p', taskId: cure.open.opened[0] && cure.open.opened[0].taskId }])) && cure.open.toasts.length === 2,
     'MUST 1: a group whose first row is on a machine NOT PAIRED any more opens NOTHING (said by name), an unreadable machines list the same; paired, it opens ON that machine at the row\'s path', cure && cure.open);
-  ok(!!keys && same(keys.firstFolder, { cwd: '/srv/app', hostId: 'h1' }), 'a New Session from a group whose first folder is `h1::/srv/app` opens ON h1 at /srv/app (never a hub session with the literal row as its cwd)', keys && keys.firstFolder);
+  ok(!!keys && verdictOf(same(keys.firstFolder, { cwd: '/srv/app', hostId: 'h1' })), 'a New Session from a group whose first folder is `h1::/srv/app` opens ON h1 at /srv/app (never a hub session with the literal row as its cwd)', keys && keys.firstFolder);
 }
 
 console.log('⑤ the wiring pins + THE CENSUS (one folder rule, one bind writer)');
 {
   const server = read('server.js'), ops = read('src/server/conversation-ops.js');
   const bcast = (server.match(/function broadcastActiveSessions\(\) \{[\s\S]*?\n\}/) || [''])[0];
-  ok(/try \{ convOps\.settleBirthGroups\(\); \} catch \{ \}/.test(bcast), 'server.js broadcastActiveSessions (the session list\'s ONE notify point) asks settleBirthGroups');
-  ok(/const \{ birthBindVerdict \} = require\('\.\.\/task-membership\.js'\);/.test(ops) && /for \(const groupId of v\.groupIds\) \{[^\n]*\n\s*try \{\n\s*bindConversation\(\{ webuiId: id \}, groupId,/.test(ops) && /\{ birthBy \}\);/.test(ops) && /if \(s && s\._birthBind && birthBy\) s\._birthBind\.by = birthBy;/.test(ops),
+  ok(verdictOf(/try \{ convOps\.settleBirthGroups\(\); \} catch \{ \}/.test(bcast)), 'server.js broadcastActiveSessions (the session list\'s ONE notify point) asks settleBirthGroups');
+  ok(gateOf(/const \{ birthBindVerdict \} = require\('\.\.\/task-membership\.js'\);/.test(ops)) && gateOf(/for \(const groupId of v\.groupIds\) \{[^\n]*\n\s*try \{\n\s*bindConversation\(\{ webuiId: id \}, groupId,/.test(ops)) && gateOf(/\{ birthBy \}\);/.test(ops)) && verdictOf(/if \(s && s\._birthBind && birthBy\) s\._birthBind\.by = birthBy;/.test(ops)),
     'conversation-ops: the verdict is the PURE one, the bind is bindConversation (the owner\'s route\'s writer), the verb hands who bound it to the headless create');
   ok((ops.match(/\[automation\] session \$\{/g) || []).length === 1 && (ops.match(/boundNote\(/g) || []).length === 2, 'ONE spelling of the automation bind line (boundNote — conversations.bind and the --task open)');
-  ok(/import \{ folderOf, insideFolder, membershipCwds, memberFolders, folderOnHost, onOtherMachine, isRootRow \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js')) && /import \{ insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js'))
-    && /const \{ folderOf, insideFolder, membersWithout, onOtherMachine, memberFolders, folderOnHost \} = require\('\.\/task-membership\.js'\);/.test(read('src/task-groups.js')), 'the store, the panel and the New Session chips import THE folder rule (lane task-group-fanout: + THE unbind rule; B-df5f: + THE hub-real-path rule, membershipCwds / onOtherMachine)');
+  ok(gateOf(/import \{ folderOf, insideFolder, membershipCwds, memberFolders, folderOnHost, onOtherMachine, isRootRow \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js'))) && gateOf(/import \{ insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js')))
+    && verdictOf(/const \{ folderOf, insideFolder, membersWithout, onOtherMachine, memberFolders, folderOnHost \} = require\('\.\/task-membership\.js'\);/.test(read('src/task-groups.js'))), 'the store, the panel and the New Session chips import THE folder rule (lane task-group-fanout: + THE unbind rule; B-df5f: + THE hub-real-path rule, membershipCwds / onOtherMachine)');
   // THE CENSUS: a Task Group folder file (it reads a group's folders) never hand-rolls the prefix test
   const HAND = /startsWith\(\s*[\w$.]*\.path\s*\+\s*'\/'\s*\)/;
   const FOLDER_FILE = /_folderRec\b|_sanitizeFolders\b|\b(?:t|task|tg|g|group)\.folders\b/;
   const walk = (d) => fs.readdirSync(path.join(ROOT, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(path.join(d, e.name))) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const files = walk('src').filter((f) => FOLDER_FILE.test(read(f)));
   const hits = files.flatMap((f) => read(f).split('\n').map((l, i) => (HAND.test(l) ? `${f}:${i + 1}` : null)).filter(Boolean));
-  ok(files.length >= 4 && files.includes('src/task-groups.js') && files.includes('src/lib/sidebar-tasks.js') && files.includes('src/lib/app.js'), `the census reads every Task Group folder file (${files.length})`, files);
+  ok(files.length >= 4 && gateOf(files.includes('src/task-groups.js')) && gateOf(files.includes('src/lib/sidebar-tasks.js')) && verdictOf(files.includes('src/lib/app.js')), `the census reads every Task Group folder file (${files.length})`, files);
   ok(hits.length === 0, 'CENSUS: no hand-rolled `startsWith(<folder>.path + \'/\')` in a Task Group folder file — insideFolder is the rule (a folder includes itself)', hits);
-  ok(HAND.test("          if (cwds.some(c => c === f.path || (f.recursive && c.startsWith(f.path + '/')))) { member = true; break; }") && HAND.test("          const under = s.cwd.startsWith(rec.path + '/') || (s.realCwd && s.realCwd.startsWith(rec.path + '/'));"),
+  ok(gateOf(HAND.test("          if (cwds.some(c => c === f.path || (f.recursive && c.startsWith(f.path + '/')))) { member = true; break; }")) && verdictOf(HAND.test("          const under = s.cwd.startsWith(rec.path + '/') || (s.realCwd && s.realCwd.startsWith(rec.path + '/'));")),
     'CONTROL: the census catches the base\'s two spellings (task-groups.js groupsForSession, app.js _taskCwdSuggestions)');
 }
 
@@ -400,51 +400,51 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
 {
   const st = freshStore();
   const G = st.create({ title: 'Grand' }), P = st.create({ title: 'Parent', parents: [G.id] }), C = st.create({ title: 'Child', parents: [P.id] });
-  ok(same(st.get(P.id).parents, [G.id]) && same(st.view(C.id).parents, [P.id]) && st.view(C.id).parents !== st.get(C.id).parents && st.get(G.id).parents === undefined, 'create names parents; the view carries a COPY; a group with none stores no field');
+  ok(gateOf(same(st.get(P.id).parents, [G.id])) && gateOf(same(st.view(C.id).parents, [P.id])) && st.view(C.id).parents !== st.get(C.id).parents && st.get(G.id).parents === undefined, 'create names parents; the view carries a COPY; a group with none stores no field');
   const code = (fn) => { try { fn(); return 'written'; } catch (e) { return e.code || e.message; } };
   const before = JSON.stringify(st.get(G.id));
   let msg = '';
   try { st.update(G.id, { title: 'Moved', parents: [C.id] }); } catch (e) { msg = e.message; ok(e.code === 'parent_cycle', 'a CYCLE (the grandparent under its own grandchild) is refused parent_cycle', e.code); }
   ok(JSON.stringify(st.get(G.id)) === before, '…and NOTHING moved — not even the title the same patch carried (the refusal comes first)');
-  ok(/«Child» already sits below «Grand» \(Grand › Parent › Child\)/.test(msg), 'the refusal names the path, top down', msg);
+  ok(verdictOf(/«Child» already sits below «Grand» \(Grand › Parent › Child\)/.test(msg)), 'the refusal names the path, top down', msg);
   ok(code(() => st.update(P.id, { parents: [P.id] })) === 'parent_self' && code(() => st.update(P.id, { parents: ['T-nope'] })) === 'unknown_parent' && code(() => st.update(P.id, { parents: 'T-x' })) === 'bad_parents', 'itself ⇒ parent_self, a group the store does not hold ⇒ unknown_parent, not a list ⇒ bad_parents (each by name)');
   const many = Array.from({ length: 9 }, (_, i) => st.create({ title: `M${i}` }).id);
   ok(code(() => st.update(C.id, { parents: many })) === 'too_many_parents' && code(() => st.create({ title: 'Z', parents: many })) === 'too_many_parents', 'more than eight parents ⇒ too_many_parents (at the update and at the create)');
   const Q = st.create({ title: 'Other parent' });
   st.update(C.id, { parents: [P.id, Q.id, P.id] });
-  ok(same(st.get(C.id).parents, [P.id, Q.id]), 'several parents (rule ①: the union), duplicates collapsed, the order kept');
-  ok(same(st.ancestorsOf([C.id]), [P.id, Q.id, G.id]), 'ancestorsOf: every ancestor, nearest first, never the group itself', st.ancestorsOf([C.id]));
+  ok(verdictOf(same(st.get(C.id).parents, [P.id, Q.id])), 'several parents (rule ①: the union), duplicates collapsed, the order kept');
+  ok(verdictOf(same(st.ancestorsOf([C.id]), [P.id, Q.id, G.id])), 'ancestorsOf: every ancestor, nearest first, never the group itself', st.ancestorsOf([C.id]));
   const D = st.create({ title: 'Diamond', parents: [P.id, Q.id] });
   st.update(Q.id, { parents: [G.id] });
-  ok(same(st.ancestorsOf([D.id]), [P.id, Q.id, G.id]), 'a diamond reaches the grandparent ONCE');
-  ok(same(st.grantGroupsOf([st.get(C.id), D.id]), { ids: [C.id, D.id], inherited: [P.id, Q.id, G.id] }), 'grantGroupsOf (the doors\' ONE reader): own ids + their ancestors, from records or ids');
-  ok(same(st.grantGroupsOf([C.id, P.id]).inherited, [Q.id, G.id]), '…an own group is never in the inherited list (a conversation directly in the parent too)');
-  ok(same(st.childrenOf(P.id), [C.id, D.id]) && same(st.parentsOf(C.id), [P.id, Q.id]), 'childrenOf / parentsOf read the edges');
+  ok(verdictOf(same(st.ancestorsOf([D.id]), [P.id, Q.id, G.id])), 'a diamond reaches the grandparent ONCE');
+  ok(verdictOf(same(st.grantGroupsOf([st.get(C.id), D.id]), { ids: [C.id, D.id], inherited: [P.id, Q.id, G.id] })), 'grantGroupsOf (the doors\' ONE reader): own ids + their ancestors, from records or ids');
+  ok(verdictOf(same(st.grantGroupsOf([C.id, P.id]).inherited, [Q.id, G.id])), '…an own group is never in the inherited list (a conversation directly in the parent too)');
+  ok(gateOf(same(st.childrenOf(P.id), [C.id, D.id])) && verdictOf(same(st.parentsOf(C.id), [P.id, Q.id])), 'childrenOf / parentsOf read the edges');
   st.update(Q.id, { archived: true });
-  ok(same(st.ancestorsOf([C.id]), [P.id, G.id]) && !st.ancestorsOf([D.id]).includes(Q.id), 'an ARCHIVED parent gives nothing ITSELF (G still comes, by way of P and through Q)');
+  ok(gateOf(same(st.ancestorsOf([C.id]), [P.id, G.id])) && !st.ancestorsOf([D.id]).includes(Q.id), 'an ARCHIVED parent gives nothing ITSELF (G still comes, by way of P and through Q)');
   const E = st.create({ title: 'Under archived', parents: [Q.id] });
-  ok(same(st.ancestorsOf([E.id]), [G.id]), '…and the road runs THROUGH it: a child under an archived parent still inherits the grandparent (a grandparent\'s «除了» still covers it — the U3a read, MAJOR 4)', st.ancestorsOf([E.id]));
+  ok(verdictOf(same(st.ancestorsOf([E.id]), [G.id])), '…and the road runs THROUGH it: a child under an archived parent still inherits the grandparent (a grandparent\'s «除了» still covers it — the U3a read, MAJOR 4)', st.ancestorsOf([E.id]));
   ok(code(() => st.update(G.id, { parents: [E.id] })) === 'parent_cycle', 'the cycle check walks THROUGH an archived group (E › archived Q › G: an unarchive never closes a cycle)');
   st.update(Q.id, { archived: false });
   st.remove(P.id);
-  ok(same(st.get(C.id).parents, [Q.id]) && st.get(D.id).parents.length === 1 && !st.ancestorsOf([C.id]).includes(P.id), 'a removed parent leaves every child\'s list');
+  ok(gateOf(same(st.get(C.id).parents, [Q.id])) && st.get(D.id).parents.length === 1 && !st.ancestorsOf([C.id]).includes(P.id), 'a removed parent leaves every child\'s list');
   st.update(C.id, { parents: [] });
   ok(st.get(C.id).parents === undefined, 'an empty list removes the field');
   // a cycle hand-written on disk: the walk ends, nothing loops
   const raw = { version: 1, tasks: { 'T-a': { id: 'T-a', title: 'A', parents: ['T-b'], createdAt: 1 }, 'T-b': { id: 'T-b', title: 'B', parents: ['T-a', 'T-gone'], createdAt: 2 } } };
   const st2 = freshStore(raw);
-  ok(same(st2.ancestorsOf(['T-a']), ['T-b']) && same(st2.parentsOf('T-b'), []), 'a cycle written on disk by hand is healed at the LOAD (its last edge dropped — the walk never meets it); a parent the store no longer holds is skipped', { a: st2.parentsOf('T-a'), b: st2.parentsOf('T-b') });
+  ok(gateOf(same(st2.ancestorsOf(['T-a']), ['T-b'])) && verdictOf(same(st2.parentsOf('T-b'), [])), 'a cycle written on disk by hand is healed at the LOAD (its last edge dropped — the walk never meets it); a parent the store no longer holds is skipped', { a: st2.parentsOf('T-a'), b: st2.parentsOf('T-b') });
   // an imported bundle is healed: gone ids, itself and a cycle-closing edge dropped
   const st3 = freshStore();
   const n = st3.importBundle({ tasks: [{ id: 'T-x', title: 'X', parents: ['T-y', 'T-x', 'T-none'], createdAt: 1 }, { id: 'T-y', title: 'Y', parents: ['T-x'], createdAt: 2 }] });
   const px = st3.get('T-x').parents, py = st3.get('T-y').parents;
-  ok(n === 2 && same(px, ['T-y']) && py === undefined, 'importBundle heals the lineage: a gone id and itself dropped, the edge that would close a cycle dropped (groups in id order)', { px, py });
+  ok(n === 2 && gateOf(same(px, ['T-y'])) && py === undefined, 'importBundle heals the lineage: a gone id and itself dropped, the edge that would close a cycle dropped (groups in id order)', { px, py });
   // the manager agent's verb never takes parents (a parent WIDENS what the child may use — the owner's door only)
   const ar = read('src/agent-routes.js');
   const adminUpd = (ar.match(/if \(update && update\.id\) \{[\s\S]*?tasks\.update\(update\.id, patch\);/) || [''])[0];
-  ok(adminUpd.length > 100 && !/parents/.test(adminUpd) && /app\.patch\('\/api\/tasks\/:id', \(req, res\) => \{\n(?:    \/\/[^\n]*\n|    if \(req\.body && req\.body\.backlog !== undefined\)[^\n]*\n)*(?:    const rowWrite = [^\n]*\n)?    try \{ onDisk\(res, \{ success: true, task: tasks\.update\(req\.params\.id, req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)(?:, \.\.\.\(rowWrite \? \{ backlogRows: 1 \} : \{\}\))? \}\); \}/.test(read('src/server/task-groups-wiring.js'))
-    && /tasks\.create\(req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)/.test(read('src/server/task-groups-wiring.js'))
-    && /importBundle\?\.\(d, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)/.test(read('src/routes/persistence.js')), 'the manager agent\'s group-admin update never passes `parents`; the owner\'s create / PATCH and the config import hand the store WHO is asking (a bearer never sets a lineage)');
+  ok(adminUpd.length > 100 && !/parents/.test(adminUpd) && gateOf(/app\.patch\('\/api\/tasks\/:id', \(req, res\) => \{\n(?:    \/\/[^\n]*\n|    if \(req\.body && req\.body\.backlog !== undefined\)[^\n]*\n)*(?:    const rowWrite = [^\n]*\n)?    try \{ onDisk\(res, \{ success: true, task: tasks\.update\(req\.params\.id, req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)(?:, \.\.\.\(rowWrite \? \{ backlogRows: 1 \} : \{\}\))? \}\); \}/.test(read('src/server/task-groups-wiring.js')))
+    && gateOf(/tasks\.create\(req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)/.test(read('src/server/task-groups-wiring.js')))
+    && verdictOf(/importBundle\?\.\(d, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)/.test(read('src/routes/persistence.js'))), 'the manager agent\'s group-admin update never passes `parents`; the owner\'s create / PATCH and the config import hand the store WHO is asking (a bearer never sets a lineage)');
   // ⑥b the U2 adversarial read's findings, each a leg
   {
     const s4 = freshStore();
@@ -452,31 +452,31 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const nextId = s4._genId('Gamma');
     s4.get(Bq.id).parents = [A.id, nextId];   // an edge an older build / a hand edit left to an id nobody holds yet
     const Gm = s4.create({ title: 'Gamma' });
-    ok(Gm.id === nextId && !s4.get(Bq.id).parents.includes(Gm.id) && same(s4.ancestorsOf([Bq.id]), [A.id]), 'read 1 (MAJOR): a NEW group never adopts a child through an edge left on disk for its id (the create clears it)', { id: Gm.id, next: nextId, b: s4.get(Bq.id).parents });
+    ok(Gm.id === nextId && !s4.get(Bq.id).parents.includes(Gm.id) && verdictOf(same(s4.ancestorsOf([Bq.id]), [A.id])), 'read 1 (MAJOR): a NEW group never adopts a child through an edge left on disk for its id (the create clears it)', { id: Gm.id, next: nextId, b: s4.get(Bq.id).parents });
     const s5 = freshStore({ version: 1, tasks: { 'T-c': { id: 'T-c', title: 'C', parents: ['T-gone', 'constructor', '__proto__', 'T-c', 'T-d'], createdAt: 1 }, 'T-d': { id: 'T-d', title: 'D', parents: ['T-c'], createdAt: 2 } } });
     const pc = s5.get('T-c').parents, pd = s5.get('T-d').parents;
-    ok(same(pc, ['T-d']) && pd === undefined && same(s5.ancestorsOf(['T-c']), ['T-d']), 'read 1 + 6: the LOAD heals the lineage — a gone id, built-in names, itself and a cycle\'s last edge dropped', { pc, pd });
+    ok(gateOf(same(pc, ['T-d'])) && pd === undefined && verdictOf(same(s5.ancestorsOf(['T-c']), ['T-d'])), 'read 1 + 6: the LOAD heals the lineage — a gone id, built-in names, itself and a cycle\'s last edge dropped', { pc, pd });
     let thr = '';
     try { s4.update(Bq.id, { parents: [Gm.id], color: '{x' }); } catch (e) { thr = e.message; }
-    ok(thr && same(s4.get(Bq.id).parents, [A.id]) && same(s4.ancestorsOf([Bq.id]), [A.id]), 'read 2 (MAJOR): a patch refused by a LATER check (a bad colour) moves no lineage — parents are applied last', { thr, p: s4.get(Bq.id).parents });
+    ok(gateOf(thr) && gateOf(same(s4.get(Bq.id).parents, [A.id])) && verdictOf(same(s4.ancestorsOf([Bq.id]), [A.id])), 'read 2 (MAJOR): a patch refused by a LATER check (a bad colour) moves no lineage — parents are applied last', { thr, p: s4.get(Bq.id).parents });
     const logs = [];
     s4.importBundle({ tasks: [{ id: A.id, title: 'Alpha', parents: [Bq.id], createdAt: 1 }] }, { log: (m) => logs.push(m) });
-    ok(same(s4.get(Bq.id).parents, [A.id]) && s4.get(A.id).parents === undefined && logs.some((l) => /1 parent link\(s\) not taken/.test(l)), 'read 3: a bundle\'s edge that would close a cycle with the store\'s OWN is the one dropped — and the import says so', { a: s4.get(A.id).parents, b: s4.get(Bq.id).parents, logs });
+    ok(gateOf(same(s4.get(Bq.id).parents, [A.id])) && s4.get(A.id).parents === undefined && verdictOf(logs.some((l) => /1 parent link\(s\) not taken/.test(l))), 'read 3: a bundle\'s edge that would close a cycle with the store\'s OWN is the one dropped — and the import says so', { a: s4.get(A.id).parents, b: s4.get(Bq.id).parents, logs });
     const gone = Array.from({ length: 8 }, (_, i) => `T-none-${i}`);
     s4.importBundle({ tasks: [{ id: 'T-kid', title: 'Kid', parents: [...gone, A.id], createdAt: 9 }] }, { log: () => { } });
-    ok(same(s4.get('T-kid').parents, [A.id]), 'read 4: the cap of eight is applied AFTER the gone ids are dropped (the real parent kept)', s4.get('T-kid').parents);
+    ok(verdictOf(same(s4.get('T-kid').parents, [A.id])), 'read 4: the cap of eight is applied AFTER the gone ids are dropped (the real parent kept)', s4.get('T-kid').parents);
     const f = path.join(SCR, 'repo-file.md');
     await s4.exportToFile(Bq.id, f);
     s4.importFromFile(f);
-    ok(same(s4.get(Bq.id).parents, [A.id]), 'read 5: the .md repo export / import never erases the lineage (it is the store\'s, as the table is)', s4.get(Bq.id).parents);
+    ok(verdictOf(same(s4.get(Bq.id).parents, [A.id])), 'read 5: the .md repo export / import never erases the lineage (it is the store\'s, as the table is)', s4.get(Bq.id).parents);
     const no = (fn) => { try { fn(); return 'written'; } catch (e) { return e.code || e.message; } };
     ok(no(() => s4.update(Gm.id, { parents: [A.id] }, { bearer: true })) === 'parents_owner_only' && no(() => s4.create({ title: 'Via bearer', parents: [A.id] }, { bearer: true })) === 'parents_owner_only' && s4.get(Gm.id).parents === undefined, 'read 7: a BEARER never sets a lineage (update and create refuse parents_owner_only; nothing written)');
     s4.importBundle({ tasks: [{ id: Bq.id, title: 'Beta', parents: [Gm.id], createdAt: 2 }, { id: 'T-new-b', title: 'New', parents: [A.id], createdAt: 3 }] }, { bearer: true, log: () => { } });
-    ok(same(s4.get(Bq.id).parents, [A.id]) && s4.get('T-new-b').parents === undefined, 'read 7: a bearer\'s config import brings no lineage — an existing group keeps its own, a new one has none');
+    ok(gateOf(same(s4.get(Bq.id).parents, [A.id])) && s4.get('T-new-b').parents === undefined, 'read 7: a bearer\'s config import brings no lineage — an existing group keeps its own, a new one has none');
     const r = s4.update(Bq.id, { title: 'Beta 2' });
-    ok(Array.isArray(r.parents) && r.parents !== s4.get(Bq.id).parents && s4.create({ title: 'Copy', parents: [A.id] }).parents !== undefined, 'read 8: what create / update hand back carries a COPY of the parents list');
+    ok(gateOf(Array.isArray(r.parents)) && r.parents !== s4.get(Bq.id).parents && s4.create({ title: 'Copy', parents: [A.id] }).parents !== undefined, 'read 8: what create / update hand back carries a COPY of the parents list');
     s4.update(A.id, { archived: true });
-    ok(same(s4.grantGroupsOf([A.id]).inherited, []) && same(s4.ancestorsOf(['T-nobody']), []), 'read 9: an archived or unknown START gives nothing');
+    ok(gateOf(same(s4.grantGroupsOf([A.id]).inherited, [])) && verdictOf(same(s4.ancestorsOf(['T-nobody']), [])), 'read 9: an archived or unknown START gives nothing');
     s4.update(A.id, { archived: false });
     s4.update(Bq.id, { parents: null });
     ok(s4.get(Bq.id).parents === undefined, 'read 10: parents:null clears (as the sibling fields read null)');
@@ -485,9 +485,9 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
   {
     const s6 = freshStore();
     const A = s6.create({ title: 'A6' }), B6 = s6.create({ title: 'B6', parents: [A.id] }), C6 = s6.create({ title: 'C6', parents: [B6.id] });
-    ok(same(s6.view(C6.id).ancestors, [B6.id, A.id]) && same(s6.view(A.id).descendants, [B6.id, C6.id]) && s6.get(C6.id).ancestors === undefined && !('descendants' in s6.get(A.id)) && same(s6.list().find((g) => g.id === B6.id).ancestors, [A.id]), 'U5a: the view carries the lineage DERIVED (ancestors nearest first, every descendant) — the record never stores it');
+    ok(gateOf(same(s6.view(C6.id).ancestors, [B6.id, A.id])) && gateOf(same(s6.view(A.id).descendants, [B6.id, C6.id])) && s6.get(C6.id).ancestors === undefined && !('descendants' in s6.get(A.id)) && verdictOf(same(s6.list().find((g) => g.id === B6.id).ancestors, [A.id])), 'U5a: the view carries the lineage DERIVED (ancestors nearest first, every descendant) — the record never stores it');
     const td = read('src/lib/task-detail.js');
-    ok(/const parSec = section\(host, t\('Parent groups'\)/.test(td) && /setParents\(\[\.\.\.parentsNow\(\), g\.id\]\)/.test(td) && /setParents\(parentsNow\(\)\.filter\(\(p\) => p !== pid\)\)/.test(td) && /await patch\(\{ parents: next, parentsBase: /.test(td) && /const below = new Set\(Array\.isArray\(task\.descendants\) \? task\.descendants : \[\]\);/.test(td) && /off: t\('sits below this group — it cannot also be its parent'\)/.test(td) && !/disabled: true/.test(td) && /chip\('children', t\('Child groups see it'\)/.test(td) && /children: r\.children !== true/.test(td) && /task\.ancestors/.test(td), 'U5a: the Settings tab — the parents row writes through PATCH (the store judges), greys a group below this one from the view\'s descendants; each Context row\'s 含子组 chip; the inherited rules and rows drawn from the view\'s ancestors');
+    ok(gateOf(/const parSec = section\(host, t\('Parent groups'\)/.test(td)) && gateOf(/setParents\(\[\.\.\.parentsNow\(\), g\.id\]\)/.test(td)) && gateOf(/setParents\(parentsNow\(\)\.filter\(\(p\) => p !== pid\)\)/.test(td)) && gateOf(/await patch\(\{ parents: next, parentsBase: /.test(td)) && gateOf(/const below = new Set\(Array\.isArray\(task\.descendants\) \? task\.descendants : \[\]\);/.test(td)) && gateOf(/off: t\('sits below this group — it cannot also be its parent'\)/.test(td)) && !/disabled: true/.test(td) && gateOf(/chip\('children', t\('Child groups see it'\)/.test(td)) && gateOf(/children: r\.children !== true/.test(td)) && verdictOf(/task\.ancestors/.test(td)), 'U5a: the Settings tab — the parents row writes through PATCH (the store judges), greys a group below this one from the view\'s descendants; each Context row\'s 含子组 chip; the inherited rules and rows drawn from the view\'s ancestors');
   }
   // the chain's cure (A, the U5a must): the last parent removed, then a parent added BEFORE any broadcast — the page's copy
   // merges the store's answer ({...old, ...answer}, the sidebar's _upsertTaskLocal) and its next edit reads that copy
@@ -501,9 +501,9 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
   };
   {
     const r7 = lastParentScene(freshStore());
-    ok(same(r7.stored, [r7.Q]), 'cure (A): removing the LAST parent and adding one before any broadcast stores ONLY the new parent (the answer says [] — the removed parent never comes back)', r7);
+    ok(verdictOf(same(r7.stored, [r7.Q])), 'cure (A): removing the LAST parent and adding one before any broadcast stores ONLY the new parent (the answer says [] — the removed parent never comes back)', r7);
     const td7 = read('src/lib/task-detail.js');
-    ok(/const r = await patch\(\{ parents: next, parentsBase: \(Array\.isArray\(was\.parents\) \? was\.parents : \[\]\)\.join\(','\) \}\); const m = r && r\.task \? \(sidebar\._tasks \|\| \[\]\)\.find\(\(g\) => g\.id === task\.id\) : null; if \(m\) m\.parents = Array\.isArray\(r\.task\.parents\) \? \[\.\.\.r\.task\.parents\] : \[\];/.test(td7), 'cure (A): the page sets its copy\'s parents from the store\'s answer at once (an absent list is the empty list)');
+    ok(verdictOf(/const r = await patch\(\{ parents: next, parentsBase: \(Array\.isArray\(was\.parents\) \? was\.parents : \[\]\)\.join\(','\) \}\); const m = r && r\.task \? \(sidebar\._tasks \|\| \[\]\)\.find\(\(g\) => g\.id === task\.id\) : null; if \(m\) m\.parents = Array\.isArray\(r\.task\.parents\) \? \[\.\.\.r\.task\.parents\] : \[\];/.test(td7)), 'cure (A): the page sets its copy\'s parents from the store\'s answer at once (an absent list is the empty list)');
   }
   // the chain's cure (E): every group a change rewrote or touched is NAMED in the change notice (a reader of the code need not
   // know the fan-out to trust it — the U2 / U4 reads)
@@ -513,7 +513,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const P8 = s8.create({ title: 'P8' }), C8 = s8.create({ title: 'C8', parents: [P8.id] }), G8 = s8.create({ title: 'G8', parents: [C8.id] });
     seen8.length = 0; s8.update(P8.id, { objective: 'the parent\'s rules' }); const onEdit = seen8.slice();
     seen8.length = 0; s8.remove(P8.id); const onRemove = seen8.slice();
-    ok(onEdit.includes(P8.id) && onEdit.includes(C8.id) && onEdit.includes(G8.id) && onRemove.includes(C8.id) && onRemove.includes(G8.id) && s8.get(C8.id).parents === undefined, 'cure (E): a parent\'s edit and its removal name every descendant they touched or rewrote in the change notice', { onEdit, onRemove });
+    ok(gateOf(onEdit.includes(P8.id)) && gateOf(onEdit.includes(C8.id)) && gateOf(onEdit.includes(G8.id)) && gateOf(onRemove.includes(C8.id)) && gateOf(onRemove.includes(G8.id)) && s8.get(C8.id).parents === undefined, 'cure (E): a parent\'s edit and its removal name every descendant they touched or rewrote in the change notice', { onEdit, onRemove });
   }
   // the chain's cure (E): the parent refusals carry their CODE — every code the store throws is in the ONE list the routes hand on
   {
@@ -522,9 +522,9 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const codeOf = (f) => { try { f(); return null; } catch (e) { return (e && e.code) || null; } };
     const codes = [codeOf(() => s9.update(A9.id, { parents: [B9.id] })), codeOf(() => s9.update(A9.id, { parents: [A9.id] })), codeOf(() => s9.update(A9.id, { parents: ['T-nobody'] })), codeOf(() => s9.update(A9.id, { parents: 'x' })), codeOf(() => s9.update(A9.id, { parents: [B9.id] }, { bearer: true }))];
     const { PARENT_REFUSALS } = require(path.join(ROOT, 'src/task-groups.js'));
-    ok(same(codes, ['parent_cycle', 'parent_self', 'unknown_parent', 'bad_parents', 'parents_owner_only']) && codes.every((c) => PARENT_REFUSALS.includes(c)), 'cure (E): every parent refusal the store throws carries a code in PARENT_REFUSALS', codes);
+    ok(gateOf(same(codes, ['parent_cycle', 'parent_self', 'unknown_parent', 'bad_parents', 'parents_owner_only'])) && verdictOf(codes.every((c) => PARENT_REFUSALS.includes(c))), 'cure (E): every parent refusal the store throws carries a code in PARENT_REFUSALS', codes);
     const srv = read('src/server/task-groups-wiring.js');   // restack 411: the routes live in the wiring (the release's «make room» move)
-    ok((srv.match(/require\('\.\.\/task-groups\.js'\)\.PARENT_REFUSALS\.includes\(e\.code\)/g) || []).length === 2 && /catch \(e\) \{ res\.status\(e\.code === 'parents_owner_only' \? 403 : 400\)\.json\(\{ error: e\.message, \.\.\.\(require\('\.\.\/task-groups\.js'\)\.PARENT_REFUSALS/.test(srv), 'cure (E): both /api/tasks routes hand a parent refusal\'s code on; a bearer\'s create naming parents answers 403, as the update does');
+    ok((srv.match(/require\('\.\.\/task-groups\.js'\)\.PARENT_REFUSALS\.includes\(e\.code\)/g) || []).length === 2 && verdictOf(/catch \(e\) \{ res\.status\(e\.code === 'parents_owner_only' \? 403 : 400\)\.json\(\{ error: e\.message, \.\.\.\(require\('\.\.\/task-groups\.js'\)\.PARENT_REFUSALS/.test(srv)), 'cure (E): both /api/tasks routes hand a parent refusal\'s code on; a bearer\'s create naming parents answers 403, as the update does');
   }
   // the chain's cure (B): the ONE name door of the lineage words — a group's title as ONE line piece of the belt; nothing unknown
   {
@@ -541,7 +541,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const stale = codeOf11(() => s11.update(C11.id, { parents: [P11.id, Q11.id], parentsBase: P11.id }));   // this window still read [P]
     const fresh = codeOf11(() => s11.update(C11.id, { parents: [Q11.id], parentsBase: '' }));
     const { PARENT_REFUSALS: PR11 } = require(path.join(ROOT, 'src/task-groups.js'));
-    ok(stale === 'parents_stale' && fresh === null && same(s11.get(C11.id).parents, [Q11.id]) && codeOf11(() => s11.update(C11.id, { parents: [P11.id] })) === null && PR11.includes('parents_stale') && /e\.code === 'except_unnamed' \|\| e\.code === 'parents_stale' (?:\|\| e\.code === 'backlog_row_gone' \|\| e\.code === 'backlog_row_moved' )?\? 409/.test(read('src/server/task-groups-wiring.js')), 'cure\'s cure (2): a parents write whose base is stale is refused parents_stale (409) and writes nothing — the removed parent never comes back; a matching base writes; a write with no base (an API caller) is not checked', { stale, fresh });
+    ok(stale === 'parents_stale' && fresh === null && gateOf(same(s11.get(C11.id).parents, [Q11.id])) && codeOf11(() => s11.update(C11.id, { parents: [P11.id] })) === null && gateOf(PR11.includes('parents_stale')) && verdictOf(/e\.code === 'except_unnamed' \|\| e\.code === 'parents_stale' (?:\|\| e\.code === 'backlog_row_gone' \|\| e\.code === 'backlog_row_moved' )?\? 409/.test(read('src/server/task-groups-wiring.js'))), 'cure\'s cure (2): a parents write whose base is stale is refused parents_stale (409) and writes nothing — the removed parent never comes back; a matching base writes; a write with no base (an API caller) is not checked', { stale, fresh });
   }
   // cure 3 (a): the stale answer carries the store's list — the page's copy adopts it at once and the tab redraws from it (a missed
   // broadcast never leaves every later press refused until the tab is reopened)
@@ -551,7 +551,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     s12.update(C12.id, { parents: [Q12.id] });   // another window moved it to [Q]
     let e12 = null; try { s12.update(C12.id, { parents: [], parentsBase: P12.id }); } catch (e) { e12 = e; }
     const sb12 = read('src/lib/sidebar-tasks.js'), td12 = read('src/lib/task-detail.js');
-    ok(!!e12 && e12.code === 'parents_stale' && same(e12.parents, [Q12.id]) && same(s12.get(C12.id).parents, [Q12.id]) && /\.\.\.\(e\.code === 'parents_stale' && Array\.isArray\(e\.parents\) \? \{ parents: e\.parents \} : \{\}\) \}\); \}/.test(read('src/server/task-groups-wiring.js')) && /if \(typeof onRefused === 'function'\) \{ try \{ said = onRefused\(data, res\.status\) === true; \} catch \{ \} \}/.test(sb12) && /patch, \(d\) => \{ if \(d && d\.code === 'parents_stale' && Array\.isArray\(d\.parents\) && \(this\._tasks \|\| \[\]\)\.some\(\(x\) => x && x\.id === id\)\) this\._upsertTaskLocal\(\{ id, parents: d\.parents\.map\(String\) \}\); return typeof onRefused === 'function' \? onRefused\(d\) : false; \}\);/.test(sb12) && /if \(!r\) render\(\); \} finally \{ parentsBusy = false;/.test(td12), 'cure 3 (a): a stale parents write is refused WITH the store\'s list (the 409 carries it); the page\'s copy adopts it and the tab redraws from it', { code: e12 && e12.code, parents: e12 && e12.parents });
+    ok(!!e12 && e12.code === 'parents_stale' && gateOf(same(e12.parents, [Q12.id])) && gateOf(same(s12.get(C12.id).parents, [Q12.id])) && gateOf(/\.\.\.\(e\.code === 'parents_stale' && Array\.isArray\(e\.parents\) \? \{ parents: e\.parents \} : \{\}\) \}\); \}/.test(read('src/server/task-groups-wiring.js'))) && gateOf(/if \(typeof onRefused === 'function'\) \{ try \{ said = onRefused\(data, res\.status\) === true; \} catch \{ \} \}/.test(sb12)) && gateOf(/patch, \(d\) => \{ if \(d && d\.code === 'parents_stale' && Array\.isArray\(d\.parents\) && \(this\._tasks \|\| \[\]\)\.some\(\(x\) => x && x\.id === id\)\) this\._upsertTaskLocal\(\{ id, parents: d\.parents\.map\(String\) \}\); return typeof onRefused === 'function' \? onRefused\(d\) : false; \}\);/.test(sb12)) && verdictOf(/if \(!r\) render\(\); \} finally \{ parentsBusy = false;/.test(td12)), 'cure 3 (a): a stale parents write is refused WITH the store\'s list (the 409 carries it); the page\'s copy adopts it and the tab redraws from it', { code: e12 && e12.code, parents: e12 && e12.parents });
   }
   // the restack's carry (B-55dc meets B-91a7): the lineage of an UNREAD membership is unread — grantGroupsOf keeps the drawing door's flag
   {
@@ -559,7 +559,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const P13 = s13.create({ title: 'P13' }), C13 = s13.create({ title: 'C13', parents: [P13.id] });
     const unreadIds = [C13.id]; Object.defineProperty(unreadIds, 'unread', { value: true, enumerable: false });
     const g13 = s13.grantGroupsOf(unreadIds), plain13 = s13.grantGroupsOf([C13.id]);
-    ok(g13.ids.unread === true && g13.inherited.unread === true && same(g13.inherited, [P13.id]) && Object.keys(g13.inherited).length === 1 && !plain13.ids.unread && !plain13.inherited.unread && same(plain13.inherited, [P13.id]), 'the restack\'s carry: a membership still being read hands an UNREAD lineage (the flag on both lists, never enumerable); a read one hands none', { ids: g13.ids.unread, inherited: g13.inherited.unread });
+    ok(g13.ids.unread === true && g13.inherited.unread === true && gateOf(same(g13.inherited, [P13.id])) && Object.keys(g13.inherited).length === 1 && !plain13.ids.unread && !plain13.inherited.unread && verdictOf(same(plain13.inherited, [P13.id])), 'the restack\'s carry: a membership still being read hands an UNREAD lineage (the flag on both lists, never enumerable); a read one hands none', { ids: g13.ids.unread, inherited: g13.inherited.unread });
   }
   // the release's hold (2.369.411) meets the chain: while the store is HELD unread, grantGroupsOf answers the hold BY NAME (a parent's
   // members unknown, never «no parents»); once read, the lineage as before
@@ -571,7 +571,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     let e14 = null; try { s14.grantGroupsOf([C14.id]); } catch (e) { e14 = e; }
     s14._unread = null;
     const after14 = s14.grantGroupsOf([C14.id]);
-    ok(same(before14.inherited, [P14.id]) && !!e14 && e14.code === 'TASK_GROUPS_UNREAD' && same(after14.inherited, [P14.id]), 'the hold meets the lineage: while the store is held, grantGroupsOf is refused BY NAME (TASK_GROUPS_UNREAD — a parent\'s members unknown, never «no parents»); read, the lineage as before', { code: e14 && e14.code });
+    ok(gateOf(same(before14.inherited, [P14.id])) && !!e14 && e14.code === 'TASK_GROUPS_UNREAD' && verdictOf(same(after14.inherited, [P14.id])), 'the hold meets the lineage: while the store is held, grantGroupsOf is refused BY NAME (TASK_GROUPS_UNREAD — a parent\'s members unknown, never «no parents»); read, the lineage as before', { code: e14 && e14.code });
   }
   // CONTROL: the writer without its cycle check writes the cycle
   const MZ = mutantCopies('task-groups-parents', ROOT);
@@ -584,17 +584,17 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const sm = new MT({ dataDir: dm });
     const a = sm.create({ title: 'A' }), b = sm.create({ title: 'B', parents: [a.id] });
     let threw = false; try { sm.update(a.id, { parents: [b.id] }); } catch { threw = true; }
-    ok(!threw && same(sm.get(a.id).parents, [b.id]), 'CONTROL: a store without the cycle check WRITES the cycle — ⑥ «refused parent_cycle» would be red');
+    ok(!threw && verdictOf(same(sm.get(a.id).parents, [b.id])), 'CONTROL: a store without the cycle check WRITES the cycle — ⑥ «refused parent_cycle» would be red');
     // CONTROL (A): an answer that omits an empty list (the unit's own spelling) lets the merged copy keep the removed parent
     const OUT = '  _out(t) { return { ...t, parents: Array.isArray(t.parents) ? [...t.parents] : [] }; }';
     ok(src.split(OUT).length === 2, 'CONTROL setup: the answer\'s list line is found exactly once');
     const MO = MZ.load('src/task-groups.js', anchored(src, OUT, '  _out(t) { return Array.isArray(t.parents) ? { ...t, parents: [...t.parents] } : { ...t }; }', 'answer-omits-empty'), 'answer-omits-empty').TaskGroupManager;   // stale-pins: kept (the mutant restores the unit's own answer line)
     const dmo = path.join(SCR, 'data-mut-out'); fs.mkdirSync(dmo, { recursive: true });
     const ro = lastParentScene(new MO({ dataDir: dmo }));
-    ok(same(ro.stored, [ro.P, ro.Q]), 'CONTROL (A): a store whose answer omits the empty list lets the next edit PUT THE REMOVED PARENT BACK — the leg above would be red', ro);
+    ok(verdictOf(same(ro.stored, [ro.P, ro.Q])), 'CONTROL (A): a store whose answer omits the empty list lets the next edit PUT THE REMOVED PARENT BACK — the leg above would be red', ro);
   } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }
 
 console.log(`\ntest-task-groups: ${pass} passed, ${fail} failed`);
 if (fail) { console.log('FAIL'); process.exit(1); }
-console.log(`ALL PASS (${pass})`);
+console.log(`ALL PASS (${pass})`); import { verdictOf, gateOf } from './lib/check.mjs';

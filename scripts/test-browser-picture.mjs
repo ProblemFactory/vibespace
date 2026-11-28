@@ -44,7 +44,7 @@ const SS = require('../src/server/stream-sources.js');
 const BS = require('../src/server/browser-stream.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -67,7 +67,7 @@ console.log('§1 the source verdict (PURE pictureSourceOf)');
   const attach = { profileId: 'bp-a1', launch: 'attach', state: 'ready', displaySession: { id: 'da-x1', display: ':2' }, host: 'this-machine', launchWhy: 'Google Chrome on its own display (xpra)' };
   const v = PIC.pictureSourceOf(attach);
   ok(v.source === 'x' && v.why === 'attach' && v.displaySession === 'da-x1' && v.words === "the browser's own window", `the attach road's live record ⇒ 'x' on its display session, "the browser's own window" (${JSON.stringify(v)})`);
-  ok(PIC.isX(v) && !PIC.isX(PIC.pictureSourceOf(null)), 'isX reads the verdict');
+  ok(gateOf(PIC.isX(v)) && !PIC.isX(PIC.pictureSourceOf(null)), 'isX reads the verdict');
   const rows = [
     ['no xpra (the hidden window)', { launch: 'driver', state: 'ready', launchWhy: AT.HIDDEN_WINDOW_WHY }, 'no-display', "the page's picture — this machine has no display"],
     ['a paired machine (hostId)', { ...attach, hostId: 'h-mac' }, 'remote', "the page's picture — the browser runs on another machine"],
@@ -80,8 +80,8 @@ console.log('§1 the source verdict (PURE pictureSourceOf)');
   ];
   for (const [name, rec, why, words, ctx] of rows) { const r = PIC.pictureSourceOf(rec, ctx); ok(r.source === 'screencast' && r.why === why && (words === null || r.words === words) && r.displaySession === null, `${name} ⇒ the screencast (${r.why}${words ? `, "${r.words}"` : ''})`, r); }
   ok(PIC.pictureSourceOf({ ...attach, host: 'some-other-name' }).source === 'x', "MEASURED TRAP: a record's `host` names the machine that LAUNCHED it (this one) — never \"another machine\" (only `hostId` is)");
-  ok(AT.HIDDEN_WINDOW_WHY.startsWith(PIC.NO_XPRA_WHY_HEAD), `the no-display why is browser-attach's own sentence head ("${PIC.NO_XPRA_WHY_HEAD}")`);
-  ok(Object.keys(PIC.SOURCE_WORDS).length === 11 && Object.values(PIC.SOURCE_WORDS).every((w) => typeof w === 'string' && w.length > 10), 'one phrase per why (11)');
+  ok(verdictOf(AT.HIDDEN_WINDOW_WHY.startsWith(PIC.NO_XPRA_WHY_HEAD)), `the no-display why is browser-attach's own sentence head ("${PIC.NO_XPRA_WHY_HEAD}")`);
+  ok(Object.keys(PIC.SOURCE_WORDS).length === 11 && verdictOf(Object.values(PIC.SOURCE_WORDS).every((w) => typeof w === 'string' && w.length > 10)), 'one phrase per why (11)');
 }
 
 // ═══ §2 THE DISPLAY'S ROWS ═══
@@ -104,7 +104,7 @@ const ROWS = [
   ok(PIC.xWindowOf({ bounds: { left: 21, top: 20, width: 1050, height: 980 }, rows: ROWS, profileDir: DIR }).wid === null, '…a pixel off is no match (never a guess among several windows)');
   const twins = [...ROWS, { ...ROWS[1], id: 0x400099, frame: 0x200099 }];
   const a = PIC.xWindowOf({ bounds: { left: 20, top: 20, width: 1050, height: 980 }, rows: twins, profileDir: DIR });
-  ok(a.wid === null && a.why === 'ambiguous' && same(a.candidates, [0x40000c, 0x400099]), 'two windows with the very bounds ⇒ ambiguous (the keeper moves its window one pixel and asks again)', a);
+  ok(a.wid === null && a.why === 'ambiguous' && verdictOf(same(a.candidates, [0x40000c, 0x400099])), 'two windows with the very bounds ⇒ ambiguous (the keeper moves its window one pixel and asks again)', a);
   ok(PIC.xWindowOf({ bounds: { left: 0, top: 0, width: 1, height: 1 }, rows: [ROWS[2], ROWS[3]], profileDir: DIR }).wid === 0x400003, 'the ONLY browser window of the display is the holder\'s whatever its bounds');
   ok(PIC.xWindowOf({ bounds: null, rows: ROWS.filter((r) => r.instance !== INST), profileDir: DIR }).why === 'no-window', 'no browser window ⇒ none');
   ok(!PIC.isBrowserRow({ ...ROWS[1], instance: 'google-chrome (/elsewhere)' }, DIR), "another profile's Chrome window (another user-data-dir) is never this profile's");
@@ -116,10 +116,10 @@ const XPRA = { id: 0x200004, title: 'Xpra-FRAME_EXTENTS', instance: 'xpra', cls:
 {
   const rows = [CHOOSER, MENU, WITHDRAWN, XPRA, ...ROWS];
   const d = PIC.nativeDialogsOf(rows, { profileDir: DIR });
-  ok(same(d.map((x) => x.wid), [CHOOSER.id]) && d[0].title === 'Open File', `Chrome's own dialog windows: the GTK chooser ("Open File") — never the ⋮ menu, the GTK leader, Chromium's clipboard, xpra's own window, a window xpra does not manage (${d.map((x) => x.title).join(', ')})`, d);
+  ok(gateOf(same(d.map((x) => x.wid), [CHOOSER.id])) && d[0].title === 'Open File', `Chrome's own dialog windows: the GTK chooser ("Open File") — never the ⋮ menu, the GTK leader, Chromium's clipboard, xpra's own window, a window xpra does not manage (${d.map((x) => x.title).join(', ')})`, d);
   ok(PIC.nativeDialogOwner(CHOOSER, rows, { profileDir: DIR }) === 0x40000f, 'the dialog is over the TOPMOST browser window holding its centre (xwininfo prints topmost first — the rows\' order)');
-  ok(same(PIC.dialogsOver(0x40000f, rows, { profileDir: DIR }).map((x) => x.wid), [CHOOSER.id]) && PIC.dialogsOver(0x40000c, rows, { profileDir: DIR }).length === 0, '…said to THAT holder, never to the one under it');
-  ok(same(PIC.dialogsOver(0x400003, [CHOOSER, ROWS[2]], { profileDir: DIR }).map((x) => x.wid), [CHOOSER.id]), 'a lone browser window owns every dialog of the display');
+  ok(gateOf(same(PIC.dialogsOver(0x40000f, rows, { profileDir: DIR }).map((x) => x.wid), [CHOOSER.id])) && PIC.dialogsOver(0x40000c, rows, { profileDir: DIR }).length === 0, '…said to THAT holder, never to the one under it');
+  ok(verdictOf(same(PIC.dialogsOver(0x400003, [CHOOSER, ROWS[2]], { profileDir: DIR }).map((x) => x.wid), [CHOOSER.id])), 'a lone browser window owns every dialog of the display');
   ok(PIC.dialogsOver(null, rows, { profileDir: DIR }).length === 0, 'no holder window ⇒ nothing said (never a guess)');
   // RED controls: the corral rule and the class rule are load-bearing
   const src = read('src/browser-picture.js');
@@ -128,7 +128,7 @@ const XPRA = { id: 0x200004, title: 'Xpra-FRAME_EXTENTS', instance: 'xpra', cls:
   ok(noCorral !== src && noClass !== src, 'the two control anchors are found');
   fs.writeFileSync(path.join(ROOT, 'pic-nocorral.js'), noCorral); fs.writeFileSync(path.join(ROOT, 'pic-noclass.js'), noClass);
   const A = require(path.join(ROOT, 'pic-nocorral.js')), B = require(path.join(ROOT, 'pic-noclass.js'));
-  ok(A.nativeDialogsOf(rows, { profileDir: DIR }).some((x) => x.wid === WITHDRAWN.id), 'CONTROL (RED): without the corral rule a window xpra does not manage (withdrawn) is said as an open dialog');
+  ok(verdictOf(A.nativeDialogsOf(rows, { profileDir: DIR }).some((x) => x.wid === WITHDRAWN.id)), 'CONTROL (RED): without the corral rule a window xpra does not manage (withdrawn) is said as an open dialog');
   ok(B.nativeDialogsOf([{ ...MENU, title: 'Untitled', frame: 0x2000aa }], { profileDir: DIR }).length === 1 && PIC.nativeDialogsOf([{ ...MENU, title: 'Untitled', frame: 0x2000aa }], { profileDir: DIR }).length === 0, 'CONTROL (RED): without the class rule a classless top-level (a menu) is said as a dialog');
 }
 
@@ -138,22 +138,22 @@ console.log('§3 what the agent is told — the native sheet by its title, a dia
   const rec = ST.promptFromCdp('http-auth', { authChallenge: { origin: 'http://127.0.0.1:9', realm: 'bxw realm', scheme: 'Basic', source: 'Server' } }, { targetId: 'T1', now: 1000, seq: 3 });
   rec.native = true;
   const block = ST.promptBlock(rec, { now: 1500 });
-  ok(block.native === true && block.title === 'Sign in' && /^Chrome's own sign-in sheet \("Sign in", "http:\/\/127\.0\.0\.1:9", realm "bxw realm"\) is open on your browser window/.test(block.text) && /you never see them/.test(block.text), 'the native sheet\'s block: native, titled "Sign in", THE sentence (the origin + realm, only a person answers it, the credential never seen)', block);
+  ok(block.native === true && block.title === 'Sign in' && gateOf(/^Chrome's own sign-in sheet \("Sign in", "http:\/\/127\.0\.0\.1:9", realm "bxw realm"\) is open on your browser window/.test(block.text)) && verdictOf(/you never see them/.test(block.text)), 'the native sheet\'s block: native, titled "Sign in", THE sentence (the origin + realm, only a person answers it, the credential never seen)', block);
   const f = PIC.nativeDialogFact({ prompt: block });
   ok(f.kind === 'http-auth' && f.title === 'Sign in' && f.text === block.text, "the fact a verb answers dialog_open with IS the watch's sentence (one place)");
   const plain = { ...rec }; delete plain.native;
-  ok(PIC.nativeDialogFact({ prompt: ST.promptBlock(plain, { now: 1500 }) }) === null && /in the live view/.test(ST.promptText(plain)), 'the screencast road\'s held sign-in is no native dialog (its own sentence, as before)');
+  ok(PIC.nativeDialogFact({ prompt: ST.promptBlock(plain, { now: 1500 }) }) === null && verdictOf(/in the live view/.test(ST.promptText(plain))), 'the screencast road\'s held sign-in is no native dialog (its own sentence, as before)');
   const w = PIC.nativeDialogFact({ windows: [{ wid: 0x60000a, title: 'Open File' }] });
-  ok(w.kind === 'window' && w.title === 'Open File' && /^A window of Chrome's own, "Open File", is open over your browser window/.test(w.text) && /nothing you send reaches it and no snapshot shows it/.test(w.text), 'a dialog WINDOW is said by its title', w);
+  ok(w.kind === 'window' && w.title === 'Open File' && gateOf(/^A window of Chrome's own, "Open File", is open over your browser window/.test(w.text)) && verdictOf(/nothing you send reaches it and no snapshot shows it/.test(w.text)), 'a dialog WINDOW is said by its title', w);
   ok(PIC.nativeDialogFact({ prompt: block, windows: [{ wid: 1, title: 'Open File' }] }).kind === 'http-auth', 'the sheet is said before a window');
   ok(PIC.nativeDialogFact({}) === null, 'nothing open ⇒ nothing said');
   for (const t of [block.text, w.text]) {
     const named = [...t.matchAll(/`(?:vibespace-browser )?([a-z-]+)[^`]*`/g)].map((m) => m[1]);
-    ok(named.length >= 4 && named.every((v) => ST.busyPasses(v)), `every way out the sentence names still runs (${named.join(', ')} — the page-busy set the CLI lets through)`, named);
+    ok(named.length >= 4 && verdictOf(named.every((v) => ST.busyPasses(v))), `every way out the sentence names still runs (${named.join(', ')} — the page-busy set the CLI lets through)`, named);
   }
-  ok(/the sign-in sheet Chrome showed for "http:\/\/127\.0\.0\.1:9" closed in its window at/.test(ST.promptAnsweredNote({ prompt: rec, how: 'window', at: Date.now() })), 'the note after it closed: in its window, the page moved on (who typed what is never known)');
+  ok(verdictOf(/the sign-in sheet Chrome showed for "http:\/\/127\.0\.0\.1:9" closed in its window at/.test(ST.promptAnsweredNote({ prompt: rec, how: 'window', at: Date.now() }))), 'the note after it closed: in its window, the page moved on (who typed what is never known)');
   const pw = ST.promptWords(rec, (k) => k);
-  ok(pw.native === true && pw.form === false && pw.dismiss === null && /in its window below/.test(pw.title) && /never sees them/.test(pw.hint), 'the bar\'s words for the native sheet: no form of ours, no Cancel of ours — the sheet is in the picture', pw);
+  ok(pw.native === true && pw.form === false && pw.dismiss === null && gateOf(/in its window below/.test(pw.title)) && verdictOf(/never sees them/.test(pw.hint)), 'the bar\'s words for the native sheet: no form of ours, no Cancel of ours — the sheet is in the picture', pw);
 }
 
 // ═══ §4 THE BAR'S WORDS ═══
@@ -167,7 +167,7 @@ console.log("§4 the bar's words — literal t() keys with zh + ja");
   ok(!missing.length, `every source phrase is a LITERAL t() in the live view (${keys.length})`, missing);
   const untranslated = [...keys, 'Chrome asks you to sign in — in its window below', 'Take over and type the username and password into Chrome’s sheet — the agent never sees them', 'This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward', 'This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward', 'This tab does not answer (a busy or hung page) — Bring it forward, then reload it in the browser, or switch to another tab', 'Brought this tab to the front of its window', 'Nothing ran: this is the conversation’s own browser, and VibeSpace does not bring its tabs forward — press the tab in the browser’s own tab strip', 'The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers'].filter((k) => !zh[k] || !ja[k]);
   ok(!untranslated.length, 'every one has zh + ja', untranslated);
-  ok(/\{ const pw = pictureWords\(\); if \(pw\) modeBadge\.title = `\$\{modeBadge\.title\} · \$\{pw\}`; \}/.test(live), "the badge's tooltip carries the source (the bar itself unchanged)");
+  ok(verdictOf(/\{ const pw = pictureWords\(\); if \(pw\) modeBadge\.title = `\$\{modeBadge\.title\} · \$\{pw\}`; \}/.test(live)), "the badge's tooltip carries the source (the bar itself unchanged)");
 }
 
 // ═══ §5 THE BROWSER FACT CARRIES A PROMPT ═══
@@ -177,7 +177,7 @@ console.log('§5 the browser fact carries a prompt (the bar read a state the fac
   const pr = { state: 'prompt', prompt: { id: 'prm-t1-3', type: 'http-auth', native: true, origin: 'http://127.0.0.1:9' }, since: 1, profileId: 'bp-a1' };
   const sess = { browserKey: 'bk-00000001', variant: null, pin: null };
   let f = null; try { f = BF.browserFactFor(sess, view(pr)); } catch (e) { f = { err: e.message }; }
-  ok(f && f.stuck && f.stuck.state === 'prompt' && f.stuck.prompt.native === true, 'a prompt stands ⇒ the fact carries it (the live view\'s bar reads it)', f);
+  ok(gateOf(f) && gateOf(f.stuck) && f.stuck.state === 'prompt' && f.stuck.prompt.native === true, 'a prompt stands ⇒ the fact carries it (the live view\'s bar reads it)', f);
   const f2 = BF.browserFactFor(sess, view({ ...pr, prompt: { ...pr.prompt, id: 'prm-t1-4' } }));
   const f3 = BF.browserFactFor(sess, view({ ...pr, prompt: { ...pr.prompt, native: false } }));
   const f0 = BF.browserFactFor(sess, view(null));
@@ -187,7 +187,7 @@ console.log('§5 the browser fact carries a prompt (the bar read a state the fac
   ok(pre !== src, 'the control anchor is found');
   fs.writeFileSync(path.join(ROOT, 'fact-pre.js'), pre.replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`));
   let fp = null; try { fp = require(path.join(ROOT, 'fact-pre.js')).browserFactFor(sess, view(pr)); } catch (e) { fp = { err: e.message }; }
-  ok(fp && !fp.err && !fp.stuck, 'CONTROL (RED): the pre-lane allowlist drops the prompt — the live view\'s bar never said it', fp);
+  ok(gateOf(fp) && !fp.err && !fp.stuck, 'CONTROL (RED): the pre-lane allowlist drops the prompt — the live view\'s bar never said it', fp);
 }
 
 // ═══ §6 THE SIZE SEAT ═══
@@ -198,15 +198,15 @@ const typesOf = (b) => { const out = []; for (let x = b || Buffer.alloc(0); x.le
   const bytes = Buffer.concat([pkt(['configure-window', 7, 0, 0, 1298, 814, {}]), pkt(['desktop_size', 1298, 814]), pkt(['key-action', 7, 'u', 1, [], 117, 'u', 30, 0]), pkt(['button-action', 7, 1, 1, [10, 10], []]), pkt(['focus', 7, []]), pkt(['keyboard-config', {}]), pkt(['buffer-refresh', 7, 0, 100, {}, {}]), pkt(['damage-sequence', 1, 7, 10, 10, 0, ''])]);
   const sz = XR.xpraInputSieve().strip(bytes, false, { geometry: true });
   const got = typesOf(sz.relay);
-  ok(got.includes('configure-window') && got.includes('desktop_size') && got.includes('buffer-refresh') && got.includes('damage-sequence'), `SIZE: the window's geometry, the display size, the repaint ask and the acks reach xpra (${got.join(', ')})`);
+  ok(gateOf(got.includes('configure-window')) && gateOf(got.includes('desktop_size')) && gateOf(got.includes('buffer-refresh')) && verdictOf(got.includes('damage-sequence')), `SIZE: the window's geometry, the display size, the repaint ask and the acks reach xpra (${got.join(', ')})`);
   ok(!got.includes('key-action') && !got.includes('button-action') && !got.includes('focus') && !got.includes('keyboard-config') && sz.dropped === 4, `SIZE: a key, a click, the focus and the keymap never do (${sz.dropped} cut)`, got);
   const sv = XR.xpraInputSieve();
   const w = sv.strip(bytes, false, {});
   ok(!typesOf(w.relay).includes('configure-window') && sv.state().heldGeometry > 0 && sv.state().heldKeymap > 0, 'CONTROL (RED): a WATCH seat cuts the geometry the window needs (held, like the keymap)');
   const g = sv.releaseGeometry();
-  ok(same(g.kinds, ['display size', 'window geometry']) && typesOf(g.relay).includes('configure-window') && sv.state().heldKeymap > 0 && sv.state().heldGeometry === 0, 'watch → SIZE releases the held geometry + display size, never the keymap (the keymap waits for a takeover)', g.kinds);
+  ok(gateOf(same(g.kinds, ['display size', 'window geometry'])) && gateOf(typesOf(g.relay).includes('configure-window')) && sv.state().heldKeymap > 0 && sv.state().heldGeometry === 0, 'watch → SIZE releases the held geometry + display size, never the keymap (the keymap waits for a takeover)', g.kinds);
   const relaySrc = read('src/server/stream-relay-xpra.js');
-  ok(/else if \(s === 'size'\) \{ allow = false; sizes = true;/.test(relaySrc) && /sieve\.strip\(buf, allow, \{ pinned: pinnedNow\(\), geometry: sizes \}\)/.test(relaySrc) && /else if \(s === 'size'\) \{ const g = sieve\.releaseGeometry\(\);/.test(relaySrc), "the relay applies the seat per packet and releases the held geometry on the way to 'size'");
+  ok(gateOf(/else if \(s === 'size'\) \{ allow = false; sizes = true;/.test(relaySrc)) && gateOf(/sieve\.strip\(buf, allow, \{ pinned: pinnedNow\(\), geometry: sizes \}\)/.test(relaySrc)) && verdictOf(/else if \(s === 'size'\) \{ const g = sieve\.releaseGeometry\(\);/.test(relaySrc)), "the relay applies the seat per packet and releases the held geometry on the way to 'size'");
 }
 
 // ═══ §7 THE SOURCES + THE SEATS ═══
@@ -219,13 +219,13 @@ console.log('§7 the sources + the seats');
   const src = SS.create({ vnc: { port: 5900 }, keeper, engine, browserSeat: (id, v) => { asked.push([id, v]); return v === 'xt-driver' ? 'active' : 'watch'; } });
   const b = SS.sourceOf(src, 'da-1'), k = SS.sourceOf(src, 'app-1');
   ok(b.name === 'browser-display' && k.name === 'keeper' && !k.seat, `a display-for-browser id is the browser-display source's, a desktop app's the keeper's (${b.name}, ${k.name})`);
-  ok(b.seat('da-1', 'xt-driver') === 'active' && b.seat('da-1', 'xt-other') === 'watch' && same(asked, [['da-1', 'xt-driver'], ['da-1', 'xt-other']]), "its SEAT is the browser's (the live-view relay's ticket verdict)");
+  ok(b.seat('da-1', 'xt-driver') === 'active' && b.seat('da-1', 'xt-other') === 'watch' && verdictOf(same(asked, [['da-1', 'xt-driver'], ['da-1', 'xt-other']])), "its SEAT is the browser's (the live-view relay's ticket verdict)");
   ok(SS.sourceOf(SS.create({ vnc: { port: 5900 }, keeper, engine }), 'da-1').name === 'keeper', 'without the live-view relay wired, the keeper owns it (as before)');
   const ds = read('src/server/desktop-stream.js');
-  ok(/return s === 'active' \|\| s === 'blocked' \|\| s === 'watch' \|\| s === 'size' \? s : 'free';/.test(ds), "the desktop bridge KNOWS 'size' (MEASURED: read as 'free' it fell to the window engine's no-lease relay — a sizing pane typed)");
+  ok(verdictOf(/return s === 'active' \|\| s === 'blocked' \|\| s === 'watch' \|\| s === 'size' \? s : 'free';/.test(ds)), "the desktop bridge KNOWS 'size' (MEASURED: read as 'free' it fell to the window engine's no-lease relay — a sizing pane typed)");
   const wl = read('src/server/window-live-wiring.js');
-  ok(/src\(id\)\.seat \? \(src\(id\)\.seat\(id, viewerId\) === 'active' \? \{ relay: true \} : \{ relay: false, code: 'watch-mode'/.test(wl), "the wiring's input policy relays a SEATED source's input for its driver only — never the window engine's no-lease relay");
-  ok(/state: \(id, viewerId\) => \(src\(id\)\.seat \? src\(id\)\.seat\(id, viewerId\)/.test(wl) && /const governed = \(id\) => !own\(id\) && !src\(id\)\.seat &&/.test(wl) && /browserStream\?\.onXSeats\?\.\(\(id\) => stream\.refresh\(id\)\)/.test(wl), "the seat is the source's (never the desktop keeper's election), and a takeover re-seats that display's sockets at once");
+  ok(verdictOf(/src\(id\)\.seat \? \(src\(id\)\.seat\(id, viewerId\) === 'active' \? \{ relay: true \} : \{ relay: false, code: 'watch-mode'/.test(wl)), "the wiring's input policy relays a SEATED source's input for its driver only — never the window engine's no-lease relay");
+  ok(gateOf(/state: \(id, viewerId\) => \(src\(id\)\.seat \? src\(id\)\.seat\(id, viewerId\)/.test(wl)) && gateOf(/const governed = \(id\) => !own\(id\) && !src\(id\)\.seat &&/.test(wl)) && verdictOf(/browserStream\?\.onXSeats\?\.\(\(id\) => stream\.refresh\(id\)\)/.test(wl)), "the seat is the source's (never the desktop keeper's election), and a takeover re-seats that display's sockets at once");
 }
 
 // ═══ §8 THE RELAY'S TICKET ═══
@@ -258,31 +258,31 @@ console.log("§8 the relay's ticket — the REAL live-view bridge over a fake up
   const A = viewer(); await A.open; await until(() => A.last('hello'));
   A.send({ type: 'x-ticket' });
   const ta = await until(() => A.last('x-ticket'));
-  ok(ta && ta.ok && /^xt-[0-9a-f]{36}$/.test(ta.ticket) && ta.displaySession === 'da-x1' && ta.wid === 4194311 && ta.source.source === 'x', `the X picture's TICKET: a per-viewer secret, its display session and its window (${ta && ta.ticket && ta.ticket.slice(0, 8)}…)`, ta);
+  ok(gateOf(ta) && gateOf(ta.ok) && gateOf(/^xt-[0-9a-f]{36}$/.test(ta.ticket)) && ta.displaySession === 'da-x1' && ta.wid === 4194311 && ta.source.source === 'x', `the X picture's TICKET: a per-viewer secret, its display session and its window (${ta && ta.ticket && ta.ticket.slice(0, 8)}…)`, ta);
   ok(xCalls.length === 1 && xCalls[0][0] === 'bp-x1' && xCalls[0][1].browserKey === 'bk-0000000a', 'the window is asked of the keeper for THIS conversation (its browser key)', xCalls);
   ok(bridge.xSeat('da-x1', 'xt-unknown') === 'watch' && bridge.xSeat('da-OTHER', ta.ticket) === 'watch', "a stranger's socket, or the ticket on another display ⇒ 'watch'");
   ok(bridge.xSeat('da-x1', ta.ticket) === 'watch', "no pane reported yet ⇒ 'watch' (nobody sizes the window)");
   A.send({ type: 'fit', width: 1298, height: 814, dpr: 1, visible: true });
   const seatA = await until(() => (A.last('x-seat') && A.last('x-seat').seat === 'size' ? A.last('x-seat') : null), 3000);
-  ok(bridge.xSeat('da-x1', ta.ticket) === 'size' && !!seatA && reseated.includes('da-x1'), "its pane reported ⇒ the RULING pane: 'size' (the geometry only), told to the viewer, the display re-seated");
+  ok(bridge.xSeat('da-x1', ta.ticket) === 'size' && !!seatA && verdictOf(reseated.includes('da-x1')), "its pane reported ⇒ the RULING pane: 'size' (the geometry only), told to the viewer, the display re-seated");
   const B = viewer(); await B.open; await until(() => B.last('hello'));
   B.send({ type: 'x-ticket' }); const tb = await until(() => B.last('x-ticket'));
   B.send({ type: 'fit', width: 600, height: 400, dpr: 1, visible: true }); await sleep(400);
-  ok(tb && tb.ok && tb.ticket !== ta.ticket && bridge.xSeat('da-x1', tb.ticket) === 'watch' && bridge.xSeat('da-x1', ta.ticket) === 'size', "a second, SMALLER pane watches (one ticket each; the largest visible pane rules)");
+  ok(gateOf(tb) && gateOf(tb.ok) && tb.ticket !== ta.ticket && bridge.xSeat('da-x1', tb.ticket) === 'watch' && bridge.xSeat('da-x1', ta.ticket) === 'size', "a second, SMALLER pane watches (one ticket each; the largest visible pane rules)");
   A.send({ type: 'takeover' }); await until(() => A.last('mode-ack'));
   ok(bridge.xSeat('da-x1', ta.ticket) === 'active' && bridge.xSeat('da-x1', tb.ticket) === 'watch', "the TAKEOVER (the keeper's input side): the driver 'active', every other ticket 'watch'");
-  ok((await until(() => (B.last('x-seat') && B.last('x-seat').seat === 'watch' ? B.last('x-seat') : null))) && (await until(() => (A.last('x-seat') && A.last('x-seat').seat === 'active' ? 1 : null))), 'each viewer is told its seat');
+  ok((gateOf(await until(() => (B.last('x-seat') && B.last('x-seat').seat === 'watch' ? B.last('x-seat') : null)))) && (verdictOf(await until(() => (A.last('x-seat') && A.last('x-seat').seat === 'active' ? 1 : null)))), 'each viewer is told its seat');
   A.send({ type: 'handback' }); await sleep(300);
   ok(bridge.xSeat('da-x1', ta.ticket) === 'size', "the handback: the ruling pane sizes again ('size')");
   A.ws.close(); await sleep(300);
   ok(bridge.xSeat('da-x1', ta.ticket) === 'watch' && bridge.xSeat('da-x1', tb.ticket) === 'size', "a closed viewer's ticket is dead ('watch'); the remaining pane rules now");
   const Ag = viewer({ Authorization: 'Bearer vsst_agenttoken' }); await Ag.open; await until(() => Ag.last('hello'));
   Ag.send({ type: 'x-ticket' }); const tg = await until(() => Ag.last('x-ticket'));
-  ok(tg && !tg.ok && tg.code === 'not_yours', "an AGENT's token never gets the X picture's ticket (its verbs are its own)", tg);
+  ok(gateOf(tg) && !tg.ok && tg.code === 'not_yours', "an AGENT's token never gets the X picture's ticket (its verbs are its own)", tg);
   xRoad = false;
   const C = viewer(); await C.open; await until(() => C.last('hello'));
   C.send({ type: 'x-ticket' }); const tc = await until(() => C.last('x-ticket'));
-  ok(tc && !tc.ok && tc.code === 'screencast' && tc.why === 'driver', "a browser on another road gets no ticket: the page's picture (and why)", tc);
+  ok(gateOf(tc) && !tc.ok && tc.code === 'screencast' && tc.why === 'driver', "a browser on another road gets no ticket: the page's picture (and why)", tc);
   for (const v of [B, Ag, C]) v.ws.close();
   bridge.shutdown(); srv.close(); up.close();
 }
@@ -304,7 +304,7 @@ console.log("§8b the picture shows the tab the view says it shows — across wi
     moved: P.xTicketMoved({ ticketWid: 1, wid: 2 }) && !P.xTicketMoved({ ticketWid: 2, wid: 2 }) && !P.xTicketMoved({ ticketWid: 2, wid: null }),
   });
   const pr = pureRows(PIC);
-  ok(pr.shown && pr.order && pr.moved, 'PURE: the tab on show = the watched tab, else the agent\'s (xShownTarget); the keeper reads THAT tab\'s window first, then the lease\'s own window, then its other tabs — no tab named ⇒ the own window first, as before (xWindowLookups); a known, different window re-issues the ticket, the same or an untold one keeps it (xTicketMoved)', pr);
+  ok(gateOf(pr.shown) && gateOf(pr.order) && verdictOf(pr.moved), 'PURE: the tab on show = the watched tab, else the agent\'s (xShownTarget); the keeper reads THAT tab\'s window first, then the lease\'s own window, then its other tabs — no tab named ⇒ the own window first, as before (xWindowLookups); a known, different window re-issues the ticket, the same or an untold one keeps it (xTicketMoved)', pr);
   // ── the RELEASE's rules as the mutants (each the same file with the release's lines) ──
   const Module = require('node:module');
   const compileAt = (rel, from, to) => { const file = path.join(REPO, rel), src = fs.readFileSync(file, 'utf8'); if (src.split(from).length !== 2) throw new Error(`the mutant's anchor moved in ${rel} — update this suite`); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(editAnchor(src, from, to, rel), file); return m.exports; };
@@ -411,7 +411,7 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
   };
   const nw = noWindow(PIC), nw0 = noWindow(PIC0);
   ok(nw.n === 72 && !nw.out.length, `PURE xFollowVerdict, cure r4: an empty text and a text that is no number, as the X window or as the CDP window, are «no window» — the verdict of an untold id in all ${nw.n} scenes (never window 0, never NaN)`, nw.out.slice(0, 6).join('\n    '));
-  ok(nw0.out.some((s) => s.startsWith('wid=""')) && nw0.out.some((s) => s.startsWith('windowId=""')), `CONTROL (RED): today's reads (Number(answer.wid) / Number(answer.windowId)) judge ${nw0.out.length} of ${nw0.n} scenes otherwise — an empty text read as window 0`, nw0.out.slice(0, 4).join('\n    '));
+  ok(gateOf(nw0.out.some((s) => s.startsWith('wid=""'))) && verdictOf(nw0.out.some((s) => s.startsWith('windowId=""'))), `CONTROL (RED): today's reads (Number(answer.wid) / Number(answer.windowId)) judge ${nw0.out.length} of ${nw0.n} scenes otherwise — an empty text read as window 0`, nw0.out.slice(0, 4).join('\n    '));
   /** the real bridge over a keeper whose answers the leg scripts: answer(targetId, fresh, n, sinceTabsMs) → wid (its CDP window is C[t]) */
   async function rig(B, answer, { owners = null, delayMs = 0, waitBoundMs = 400, instance = null } = {}) {
     const upPort = await freePort();
@@ -525,13 +525,13 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
   // the scenes run SIDE BY SIDE (each its own bridge, ports and fake keeper): the section costs its longest scene, not their sum
   const [l1, sw, st, sc, l2, c2, l3, c3, bu, cbu, rs, crs] = await Promise.all([law1(BS), sameWin(), stall(BS, 3500), stall(BStip, STALL_MS + 350), law2(BS), law2(BSl2), law3(BS), law3(BSl3), burst(BS), burst(BSco), restart(BS), restart(BSrun)]);
   ok(l1.saidFirst === 'waiting-window' && l1.moved === W2 && !l1.connectedOnOld, `LAW 1 — a STALE first look (the old window's row for the new tab's CDP window): the wait is SAID («${l1.saidFirst}») and the fresh look moves the picture to its window ${l1.moved} — never a ticket for the old window`, l1);
-  ok(l1.waitedFirst === 'waiting-window' && l1.untold && l1.untoldLooks >= 3, `LAW 1 — a tab whose window is never told: «waiting-window» said, ${l1.untoldLooks} looks, then «untold-tab» at the bound — the page stays on its own picture of the tab`, l1);
+  ok(l1.waitedFirst === 'waiting-window' && gateOf(l1.untold) && l1.untoldLooks >= 3, `LAW 1 — a tab whose window is never told: «waiting-window» said, ${l1.untoldLooks} looks, then «untold-tab» at the bound — the page stays on its own picture of the tab`, l1);
   ok(sw.answers === 0 && sw.looks === 1, `a tab in the SAME CDP window: ONE look (${sw.looks}), no ticket re-issued, nothing said (${sw.answers})`, sw);
   ok(st.said === 'waiting-window' && st.moved === W2 && !st.oldTicket, `THE LATE WINDOW (a STALL: the new window's row held back ${STALL_MS} ms, past the old 1.95 s): «${st.said}» said at once, then the picture moved to ${st.moved} — no ticket for the old window meanwhile`, st);
   ok(sc.moved == null && sc.said == null, `RED CONTROL — the tip's rule (the X rows' «same window» trusted, the CDP window forgotten): nothing said, the picture never left the old window (${JSON.stringify(sc)})`, sc);
   ok(l2.seat0 === 'size' && l2.wid === W5 && l2.told === 'watch' && l2.bridge === 'watch', `LAW 2 — this pane rules its holder's window (${l2.seat0}); its chip on ANOTHER conversation's tab draws that window ${l2.wid} with the WATCH seat (told ${l2.told}, the bridge ${l2.bridge}) — it never sizes a window that is not its holder's`, l2);
   ok(c2.bridge === 'size', `RED CONTROL — without the foreign rule the chip's ticket would SIZE the other conversation's window (${c2.bridge})`, c2);
-  ok(l3.answered && l3.ok, `LAW 3 — the page's own ask, superseded by a follow that found the same window, is ANSWERED (${JSON.stringify(l3)})`, l3);
+  ok(gateOf(l3.answered) && verdictOf(l3.ok), `LAW 3 — the page's own ask, superseded by a follow that found the same window, is ANSWERED (${JSON.stringify(l3)})`, l3);
   ok(!c3.answered, `RED CONTROL — without law 3 the follow swallows the page's ask: no answer comes, the page stays «asking» for good (${JSON.stringify(c3)})`, c3);
   ok(bu.asks === 1 && bu.afterLeft === 0, `five tab flips in a burst are ONE keeper ask for the viewer (${bu.asks}); after the viewer LEFT a flip asks nothing for it (${bu.afterLeft})`, bu);
   ok(rs.first === 'ticket' && rs.wid === W1, `CURE r3 — a NEW BROWSER RUN (the same X id ${W1} under a NEW CDP window): a ticket is MINTED (${rs.first}), never a wait for an id the old run owned`, rs);
@@ -541,8 +541,8 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
   const WAIT = 'Waiting for this tab’s window to appear on the display — showing the page’s own picture of it meanwhile', UNTOLD = 'This tab could not be shown as a window — showing the page’s own picture of it';
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-  ok(live.includes(`if (m && m.why === 'waiting-window') { xp.untoldSaid = true; setStatus(t('${WAIT}')); }`) && live.includes(`if (m && m.why === 'untold-tab') { xp.untoldSaid = true; setStatus(t('${UNTOLD}')); }`)
-    && /xp\.view = null; xp\.mode = null; xp\.status = null;/.test(live) && zh.includes(`"${WAIT}":`) && zh.includes(`"${UNTOLD}":`) && ja.includes(`"${WAIT}":`) && ja.includes(`"${UNTOLD}":`),
+  ok(gateOf(live.includes(`if (m && m.why === 'waiting-window') { xp.untoldSaid = true; setStatus(t('${WAIT}')); }`)) && gateOf(live.includes(`if (m && m.why === 'untold-tab') { xp.untoldSaid = true; setStatus(t('${UNTOLD}')); }`))
+    && gateOf(/xp\.view = null; xp\.mode = null; xp\.status = null;/.test(live)) && gateOf(zh.includes(`"${WAIT}":`)) && gateOf(zh.includes(`"${UNTOLD}":`)) && gateOf(ja.includes(`"${WAIT}":`)) && verdictOf(ja.includes(`"${UNTOLD}":`)),
     'the page says «waiting-window» and «untold-tab» in its status line in plain words (en / zh / ja), takes them back when a ticket comes, and an unmounted X view never reads «connected»');
 }
 
@@ -550,18 +550,18 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
 console.log('§9 the wiring (source pins)');
 {
   const k = read('src/server/browser-keeper.js');
-  ok(/pictureSourceFor, xWindowFor, nativeDialogsFor, \/\/ lane browser-x-in-window/.test(k) && /function pictureSourceFor\(profileId\) \{[\s\S]{0,200}PIC\.pictureSourceOf\(rec, \{ remote: !!rec && !isLocalRec\(rec\) \}\)/.test(k), "the keeper's three doors; its verdict is PURE pictureSourceOf over its record (a non-local record is remote)");
-  ok(/displayKeeper\.windows\(dsId\)/.test(k) && !/spawn\(|execFile\(/.test(k.slice(k.indexOf('LANE BROWSER-X-IN-WINDOW'), k.indexOf('async function stop(profileId'))), "the display's rows are the desktop keeper's own windows(id) — no spawn of the keeper's here");
+  ok(gateOf(/pictureSourceFor, xWindowFor, nativeDialogsFor, \/\/ lane browser-x-in-window/.test(k)) && verdictOf(/function pictureSourceFor\(profileId\) \{[\s\S]{0,200}PIC\.pictureSourceOf\(rec, \{ remote: !!rec && !isLocalRec\(rec\) \}\)/.test(k)), "the keeper's three doors; its verdict is PURE pictureSourceOf over its record (a non-local record is remote)");
+  ok(gateOf(/displayKeeper\.windows\(dsId\)/.test(k)) && !/spawn\(|execFile\(/.test(k.slice(k.indexOf('LANE BROWSER-X-IN-WINDOW'), k.indexOf('async function stop(profileId'))), "the display's rows are the desktop keeper's own windows(id) — no spawn of the keeper's here");
   const r = read('src/routes/browser.js');
-  ok(/native = require\('\.\.\/browser-picture\.js'\)\.nativeDialogFact\(\{ prompt: fct\.prompt && fct\.prompt\.native \? fct\.prompt : null, windows: !fct\.open && !t\.ephemeral && typeof k\.nativeDialogsFor === 'function' \? await k\.nativeDialogsFor\(t\.profileId, \{ browserKey: t\.browserKey \}\) : \[\] \}\)/.test(r) && /!fct\.prompt && !native && typeof D\.pageAnswers/.test(r) && /\.\.\.\(native \? \{ native \} : \{\}\)/.test(r), "/resolve: the dialog answer carries `native` (the watch's native sheet, else Chrome's dialog windows over THIS conversation's window), said before page_busy");
+  ok(gateOf(/native = require\('\.\.\/browser-picture\.js'\)\.nativeDialogFact\(\{ prompt: fct\.prompt && fct\.prompt\.native \? fct\.prompt : null, windows: !fct\.open && !t\.ephemeral && typeof k\.nativeDialogsFor === 'function' \? await k\.nativeDialogsFor\(t\.profileId, \{ browserKey: t\.browserKey \}\) : \[\] \}\)/.test(r)) && gateOf(/!fct\.prompt && !native && typeof D\.pageAnswers/.test(r)) && verdictOf(/\.\.\.\(native \? \{ native \} : \{\}\)/.test(r)), "/resolve: the dialog answer carries `native` (the watch's native sheet, else Chrome's dialog windows over THIS conversation's window), said before page_busy");
   const cli = read('data/bin/vibespace-browser');
-  ok(/const nativeStand = dlg && dlg\.native && typeof dlg\.native === 'object' \? dlg\.native : null;/.test(cli) && /if \(nativeStand && DS && typeof DS\.busyPasses === 'function' && !DS\.busyPasses\(words0\[0\] \|\| ''\)\) \{\s*printDialogOpen\(\{ open: \{ type: 'native'/.test(cli) && /else if \(promptHit && promptHit\.native\) \{/.test(cli) && /console\.error\('\[native_dialog\]'\);/.test(cli), 'the CLI: a native stand answers a page verb [dialog_open] by name (the ways out run), the in-flight sheet too; `dialog accept|dismiss` cannot answer it');
+  ok(gateOf(/const nativeStand = dlg && dlg\.native && typeof dlg\.native === 'object' \? dlg\.native : null;/.test(cli)) && gateOf(/if \(nativeStand && DS && typeof DS\.busyPasses === 'function' && !DS\.busyPasses\(words0\[0\] \|\| ''\)\) \{\s*printDialogOpen\(\{ open: \{ type: 'native'/.test(cli)) && gateOf(/else if \(promptHit && promptHit\.native\) \{/.test(cli)) && verdictOf(/console\.error\('\[native_dialog\]'\);/.test(cli)), 'the CLI: a native stand answers a page verb [dialog_open] by name (the ways out run), the in-flight sheet too; `dialog accept|dismiss` cannot answer it');
   const d = read('src/server/browser-dialogs.js');
-  ok(/if \(type === 'http-auth' && xRoad\(w\.profileId\)\) \{ rec\.native = true; call\(w, 'Fetch\.continueWithAuth', \{ requestId: String\(p\.requestId \|\| ''\), authChallengeResponse: \{ response: 'Default' \} \}/.test(d) && /const NATIVE_SHEET_PAGE_RE = \/\^chrome-error:/.test(d), "the watch hands the X road's sign-in to Chrome's own sheet (Default) and settles it only on a commit that is not chrome-error://");
-  ok(/browserStream, groupsOf:/.test(read('server.js')), 'server.js hands the live-view relay to the window-live wiring (one existing line)');
+  ok(gateOf(/if \(type === 'http-auth' && xRoad\(w\.profileId\)\) \{ rec\.native = true; call\(w, 'Fetch\.continueWithAuth', \{ requestId: String\(p\.requestId \|\| ''\), authChallengeResponse: \{ response: 'Default' \} \}/.test(d)) && verdictOf(/const NATIVE_SHEET_PAGE_RE = \/\^chrome-error:/.test(d)), "the watch hands the X road's sign-in to Chrome's own sheet (Default) and settles it only on a commit that is not chrome-error://");
+  ok(verdictOf(/browserStream, groupsOf:/.test(read('server.js'))), 'server.js hands the live-view relay to the window-live wiring (one existing line)');
   const live = read('src/lib/browser-live-window.js');
-  ok(/import \{ pictureSourceOf, pictureForView, BG_SETTLE_MS \} from '\.\.\/browser-picture\.js';/.test(live) && /send\(\{ type: 'x-ticket' \}\)/.test(live) && /case 'x-seat':/.test(live) && /canvas\.style\.display = 'none'; xHost\.style\.display = '';/.test(live), 'the live view asks the source, the ticket and its seat, and swaps the canvas for the X picture');
-  ok(/if \(H\) \{ if \(xp\.view\) unmountX\(\); return; \}/.test(live) && /if \(H\) return ''; \/\/ BROWSE YOURSELF/.test(live), 'BROWSE YOURSELF keeps the page\'s picture in this lane (his window is built on it — a follow-up), and its own badge words');
+  ok(gateOf(/import \{ pictureSourceOf, pictureForView, BG_SETTLE_MS \} from '\.\.\/browser-picture\.js';/.test(live)) && gateOf(/send\(\{ type: 'x-ticket' \}\)/.test(live)) && gateOf(/case 'x-seat':/.test(live)) && verdictOf(/canvas\.style\.display = 'none'; xHost\.style\.display = '';/.test(live)), 'the live view asks the source, the ticket and its seat, and swaps the canvas for the X picture');
+  ok(gateOf(/if \(H\) \{ if \(xp\.view\) unmountX\(\); return; \}/.test(live)) && verdictOf(/if \(H\) return ''; \/\/ BROWSE YOURSELF/.test(live)), 'BROWSE YOURSELF keeps the page\'s picture in this lane (his window is built on it — a follow-up), and its own badge words');
 }
 
 console.log('§10 the picture the view says it shows, in ONE window (the owner\'s report 2026-11-19, the second of its kind)');
@@ -657,49 +657,49 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
     `r178: over ${recs.length} unresponsive records a view that does not drive never shows the window (its own last picture, or none: ${watchWrong.length ? 'WRONG ' + JSON.stringify(watchWrong) : 'all right'}); the driver keeps the window in all ${recs.length}; RED (the tip's verdict, 434847bd7): ${tipX} of them show a watcher the window — every one not polled`, { watchWrong, driveWrong, tipX });
   // the hub's «a picture OF this tab» — PURE over its roads
   const OV = WINw.ownPictureVerdict, ovRoads = [[{ id: 'a1b2', lastFrameOf: 'A1B2' }, true], [{ id: 'A1B2', lastFrameOf: 'C3D4' }, false], [{ id: 'A1B2', lastFrameOf: null }, false], [{ id: null, lastFrameOf: 'A1B2' }, false]];
-  ok(ovRoads.every(([a, want]) => OV(a) === want), `the hub's own-picture verdict over ${ovRoads.length} roads: its last frame showed this tab (ids in either case) — never another tab's, never none`);
+  ok(verdictOf(ovRoads.every(([a, want]) => OV(a) === want)), `the hub's own-picture verdict over ${ovRoads.length} roads: its last frame showed this tab (ids in either case) — never another tab's, never none`);
   { // pins: the hub says it (the act's ack → frontBackground; the switch's clear carries its cause); the page reads both
     const bs4 = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), lv4 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-    ok(bs4.includes('        if (r && WIN.broughtFrontVerdict({ state: relay.bg.state, id: relay.bg.targetId, ack: r })) frontBackground(relay);') && bs4.includes('    relay.lastBg = JSON.stringify({ ...was, polled: false, front: true });') && bs4.includes("clearBackground(relay, 'another tab is on show', 'switch');") && bs4.includes("broadcast(relay, { type: 'tab-background', targetId: null, why, ...(cause ? { cause } : {}) });")
-      && lv4.includes(', polled: m.polled === true, own: m.own === true } : null;') && lv4.includes('if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && ') && lv4.includes("import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js';"),
+    ok(gateOf(bs4.includes('        if (r && WIN.broughtFrontVerdict({ state: relay.bg.state, id: relay.bg.targetId, ack: r })) frontBackground(relay);')) && gateOf(bs4.includes('    relay.lastBg = JSON.stringify({ ...was, polled: false, front: true });')) && gateOf(bs4.includes("clearBackground(relay, 'another tab is on show', 'switch');")) && gateOf(bs4.includes("broadcast(relay, { type: 'tab-background', targetId: null, why, ...(cause ? { cause } : {}) });"))
+      && gateOf(lv4.includes(', polled: m.polled === true, own: m.own === true } : null;')) && gateOf(lv4.includes('if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && ')) && verdictOf(lv4.includes("import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js';")),
       'PIN (its read 4): the hub re-says a hung tab brought forward as in front (replayed to a late viewer); a switch\'s clear says its cause; the page reads the re-said `polled` and skips the settle on a switch');
   }
   // the watch line says the last picture, and 'hello' re-renders it on the new socket's verdict (pins)
   const live2 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(live2.includes(": st.bg.polled || st.bg.own ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers')") && live2.includes("renderWatchLine(); // its read (N1): a page-picture view mounts no X"), 'PIN: the stuck tab\'s line says its last picture is shown; hello re-renders the line');
+  ok(gateOf(live2.includes(": st.bg.polled || st.bg.own ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers')")) && verdictOf(live2.includes("renderWatchLine(); // its read (N1): a page-picture view mounts no X")), 'PIN: the stuck tab\'s line says its last picture is shown; hello re-renders the line');
   // the hub's record says it, and the page keeps it (pins)
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-  ok(bsrc.includes("const polled = WIN.stuckPolledVerdict({ state, id, prevTargetId: b.targetId, shotOf: b.shotOf });") && bsrc.includes("pollMs: 0, polled, own });") && bsrc.includes('b.frameTimes = []; b.shotOf = null;') && bsrc.includes('      b.shotOf = id;   // a picture OF this tab landed')
-    && fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8').includes(", polled: m.polled === true, own: m.own === true }"), 'PIN: the hub\'s unresponsive record says `polled` (a hidden tab that hung), replayed to a late viewer; the view keeps it on its verdict');
+  ok(gateOf(bsrc.includes("const polled = WIN.stuckPolledVerdict({ state, id, prevTargetId: b.targetId, shotOf: b.shotOf });")) && gateOf(bsrc.includes("pollMs: 0, polled, own });")) && gateOf(bsrc.includes('b.frameTimes = []; b.shotOf = null;')) && gateOf(bsrc.includes('      b.shotOf = id;   // a picture OF this tab landed'))
+    && verdictOf(fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8').includes(", polled: m.polled === true, own: m.own === true }")), 'PIN: the hub\'s unresponsive record says `polled` (a hidden tab that hung), replayed to a late viewer; the view keeps it on its verdict');
   { // r178 pins: the hub notes which tab its last picture shows and says `own`; the page hides a picture it does not have, words the
     // watcher's line by it, names a tab with no title «this tab», and says a press that ran nothing
     const bs5 = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), lv5 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-    ok(bs5.split('relay.lastFrame = text; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;').length === 2 && bs5.includes('relay.lastFrame = outText; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;') && /* B-0e4a r4421: the driver's frame site keeps its scanned record (outText) */ bs5.includes('relay.lastFrame = text; relay.lastFrameOf = id; relay.stats.frames++;') && bs5.includes('const own = WIN.ownPictureVerdict({ id, lastFrameOf: relay.lastFrameOf });') && bs5.includes('pollMs: 0, polled, own });')
-      && lv5.includes("{ const vis = v.why === 'unresponsive-none' ? 'hidden' : ''; if (canvas.style.visibility !== vis) canvas.style.visibility = vis; }") && lv5.includes(": st.bg.polled || st.bg.own ? t('The agent’s tab is not responding — its last picture is shown;")
-      && lv5.includes("showToast(pend && pend.title ? t('Brought “{title}” to the front of its window', { title: pend.title }) : t('Brought this tab to the front of its window'), { duration: 3000 });") && lv5.includes("else if (act === 'switch' && m.noop) showToast(t('Nothing ran: this is the conversation’s own browser, and VibeSpace does not bring its tabs forward — press the tab in the browser’s own tab strip'), { duration: 4500 });"),
+    ok(bs5.split('relay.lastFrame = text; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;').length === 2 && gateOf(bs5.includes('relay.lastFrame = outText; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;')) && /* B-0e4a r4421: the driver's frame site keeps its scanned record (outText) */ gateOf(bs5.includes('relay.lastFrame = text; relay.lastFrameOf = id; relay.stats.frames++;')) && gateOf(bs5.includes('const own = WIN.ownPictureVerdict({ id, lastFrameOf: relay.lastFrameOf });')) && gateOf(bs5.includes('pollMs: 0, polled, own });'))
+      && gateOf(lv5.includes("{ const vis = v.why === 'unresponsive-none' ? 'hidden' : ''; if (canvas.style.visibility !== vis) canvas.style.visibility = vis; }")) && gateOf(lv5.includes(": st.bg.polled || st.bg.own ? t('The agent’s tab is not responding — its last picture is shown;"))
+      && gateOf(lv5.includes("showToast(pend && pend.title ? t('Brought “{title}” to the front of its window', { title: pend.title }) : t('Brought this tab to the front of its window'), { duration: 3000 });")) && verdictOf(lv5.includes("else if (act === 'switch' && m.noop) showToast(t('Nothing ran: this is the conversation’s own browser, and VibeSpace does not bring its tabs forward — press the tab in the browser’s own tab strip'), { duration: 4500 });")),
       'PIN (r178): the hub says whether its last picture is the hung tab\'s own (three frame sites, the record); the page shows none when it has none, says the last picture when it has one, names an untitled tab «this tab», and says a press that ran nothing');
   }
   // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
   // one-window row says the blanks it folds
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(live.includes("const bgNow = st.watch ? (st.watch.mode === 'polling' ? { targetId: st.watch.targetId, state: 'hidden' } : null) : st.bg;")
-    && live.includes("return pictureForView(pictureSourceOf(rec || null), { bg: bgNow, driving: st.mode === 'takeover' && st.mine && st.connected, shownWhy: st.pictureSource && st.pictureSource.why, clearedAt: st.bgClearedAt || 0, now: Date.now() });")
-    && live.includes("else if (st.bg && (st.bg.state === 'hidden' || st.bg.state === 'unresponsive')) { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }")   // its read's should: a clear out of the stuck state settles too
-    && live.includes("renderWatchLine(); renderPicture(); // the owner's report 2026-11-19") && live.includes("renderPicture(); // the owner's report 2026-11-19: a takeover drives the window"),
+  ok(gateOf(live.includes("const bgNow = st.watch ? (st.watch.mode === 'polling' ? { targetId: st.watch.targetId, state: 'hidden' } : null) : st.bg;"))
+    && gateOf(live.includes("return pictureForView(pictureSourceOf(rec || null), { bg: bgNow, driving: st.mode === 'takeover' && st.mine && st.connected, shownWhy: st.pictureSource && st.pictureSource.why, clearedAt: st.bgClearedAt || 0, now: Date.now() });"))
+    && gateOf(live.includes("else if (st.bg && (st.bg.state === 'hidden' || st.bg.state === 'unresponsive')) { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }"))   // its read's should: a clear out of the stuck state settles too
+    && gateOf(live.includes("renderWatchLine(); renderPicture(); // the owner's report 2026-11-19")) && verdictOf(live.includes("renderPicture(); // the owner's report 2026-11-19: a takeover drives the window")),
     'PIN: the view\'s picture is pictureForView over the hub\'s background verdict, re-judged when the verdict or the takeover moves');
-  ok(live.includes("const drawn = driving && xOn() && xp.status === 'connected';") && live.includes("const behind = drawn && st.bg.polled === true, unplaced = drawn && !behind;") && live.includes("text = behind ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : unplaced ? t('This tab does not answer (a busy or hung page) — Bring it forward, then reload it in the browser, or switch to another tab') : driving ? ")
-    && live.includes("if (behind || unplaced) { btn = t('Bring it forward'); act = () => tabAct('switch', stuckRow); }") && live.includes("const stuckRow = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === stuckId) || { targetId: stuckId, title: '' };") && live.includes("const stuckId = String(st.bg.targetId || '').toUpperCase();") && live.includes("const driving = st.mode === 'takeover' && st.mine && st.connected;"), 'PIN (ruling S2 + its read 4): on the DRAWN window a HUNG tab hidden in its window says where to press, never «Reload it» (the browser\'s reload would reload the tab in front); every other hung tab there (placed nowhere, or brought to the front — a stale `front` once the person presses another tab in the browser\'s strip) is told in words true in both places, its button drawn; the button always has its tab; the watch line and the picture read ONE takeover rule');
-  ok(live.includes("text = xOn() && xp.status === 'connected' ? t('This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward')"), 'PIN: a takeover on the DRAWN window says where to press, never whose the tab in front is (主开发\'s law 3, ruling S3)');
+  ok(gateOf(live.includes("const drawn = driving && xOn() && xp.status === 'connected';")) && gateOf(live.includes("const behind = drawn && st.bg.polled === true, unplaced = drawn && !behind;")) && gateOf(live.includes("text = behind ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : unplaced ? t('This tab does not answer (a busy or hung page) — Bring it forward, then reload it in the browser, or switch to another tab') : driving ? "))
+    && gateOf(live.includes("if (behind || unplaced) { btn = t('Bring it forward'); act = () => tabAct('switch', stuckRow); }")) && gateOf(live.includes("const stuckRow = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === stuckId) || { targetId: stuckId, title: '' };")) && gateOf(live.includes("const stuckId = String(st.bg.targetId || '').toUpperCase();")) && verdictOf(live.includes("const driving = st.mode === 'takeover' && st.mine && st.connected;")), 'PIN (ruling S2 + its read 4): on the DRAWN window a HUNG tab hidden in its window says where to press, never «Reload it» (the browser\'s reload would reload the tab in front); every other hung tab there (placed nowhere, or brought to the front — a stale `front` once the person presses another tab in the browser\'s strip) is told in words true in both places, its button drawn; the button always has its tab; the watch line and the picture read ONE takeover rule');
+  ok(verdictOf(live.includes("text = xOn() && xp.status === 'connected' ? t('This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward')")), 'PIN: a takeover on the DRAWN window says where to press, never whose the tab in front is (主开发\'s law 3, ruling S3)');
   // its read's M1–M3 (pins): the width fold keeps the blanks' count; a ticket that lands after the picture left the window mounts
   // nothing; a new socket and another browser start with no verdict
-  ok(live.includes("for (const d of dividers) d.style.display = d.dataset.group === 'blanks' ||")
-    && live.includes("    if (!st.pictureSource || st.pictureSource.source !== 'x') { xp.ticket = null; return; }")
-    && live.includes("st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // its read's M3")
-    && live.includes("st.error = null; st.target = null; st.bg = null; st.bgClearedAt = 0;")
-    && live.includes("renderPicture(); // its read's S3: a watch moves the picture's verdict"),
+  ok(gateOf(live.includes("for (const d of dividers) d.style.display = d.dataset.group === 'blanks' ||"))
+    && gateOf(live.includes("    if (!st.pictureSource || st.pictureSource.source !== 'x') { xp.ticket = null; return; }"))
+    && gateOf(live.includes("st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // its read's M3"))
+    && gateOf(live.includes("st.error = null; st.target = null; st.bg = null; st.bgClearedAt = 0;"))
+    && verdictOf(live.includes("renderPicture(); // its read's S3: a watch moves the picture's verdict")),
     'PIN: the blanks said through the width fold; no late ticket mounts the window; no verdict outlives its socket or its browser; a watch re-judges the picture');
-  ok(live.includes('if (!m.grouped && m.blanks > 0) {') && live.includes("const txt = t('+{n} blank', { n: m.blanks })"), 'PIN: a one-window tab row says the blank tabs it folds (the lease held three tabs, the row showed one chip)');
+  ok(gateOf(live.includes('if (!m.grouped && m.blanks > 0) {')) && verdictOf(live.includes("const txt = t('+{n} blank', { n: m.blanks })")), 'PIN: a one-window tab row says the blank tabs it folds (the lease held three tabs, the row showed one chip)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

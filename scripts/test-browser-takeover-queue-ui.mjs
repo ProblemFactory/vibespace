@@ -33,7 +33,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = await pred(); if (v) return v; } catch { } await sleep(every); } try { return await pred(); } catch { return null; } };
@@ -143,7 +143,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 200), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 200)), 'the worktree server booted', journal.slice(-800))) return;
   const j = async (method, p, body, headers = {}) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   await j('PATCH', '/api/settings', { 'browser.autoBindLiveView': false }); // the suite binds / unbinds by hand
 
@@ -155,7 +155,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   procs.add({ kill: () => { try { wsMain.close(); } catch { } } });
   const create = async (reqId, sessionName) => { wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: ROOT, cols: 80, rows: 24, reqId, sessionName })); return until(() => msgs.find((m) => m.type === 'created' && m.reqId === reqId), 20000); };
   const c1 = await create('r1', SESSION_NAME), c2 = await create('r2', 'Mail sweep');
-  if (!ok(c1 && c1.sessionId && c2 && c2.sessionId, 'two chat sessions were created (one will browse, one never does)', journal.slice(-600))) return;
+  if (!ok(gateOf(c1) && gateOf(c1.sessionId) && gateOf(c2) && verdictOf(c2.sessionId), 'two chat sessions were created (one will browse, one never does)', journal.slice(-600))) return;
   const S1 = c1.sessionId, S2 = c2.sessionId;
   await sleep(1500);
   // THE OWNER'S PATH: the agent starts its browser with `vibespace-browser open <url>` from inside the session —
@@ -222,10 +222,10 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     ok(o2.code === 0, 'the second conversation browses too (its own browser)', o2.o.slice(0, 300));
     const W1 = 'Log in to Lark with the shared account, then hand back', W2 = 'Solve the captcha on the mail page';
     const a1 = await runCli(env1, ['ask-human', W1]), a2 = await runCli(env2, ['ask-human', W2]);
-    ok(a1.code === 0 && a2.code === 0 && /request tr-[0-9a-f]{8}/.test(a1.o) && /request tr-[0-9a-f]{8}/.test(a2.o), '① each conversation asks a person from inside its session (the shipped CLI\'s verb)', a1.o.slice(0, 300) + ' | ' + a2.o.slice(0, 300));
+    ok(a1.code === 0 && a2.code === 0 && gateOf(/request tr-[0-9a-f]{8}/.test(a1.o)) && verdictOf(/request tr-[0-9a-f]{8}/.test(a2.o)), '① each conversation asks a person from inside its session (the shipped CLI\'s verb)', a1.o.slice(0, 300) + ' | ' + a2.o.slice(0, 300));
     const q0 = await j('GET', '/api/browser/takeovers');
     const R1 = (q0.json.requests || []).find((r) => r.text === W1), R2 = (q0.json.requests || []).find((r) => r.text === W2);
-    if (!ok(R1 && R2 && q0.json.requests.length === 2, '① the hub lists both requests (the owner\'s GET)', q0.json)) return;
+    if (!ok(gateOf(R1) && gateOf(R2) && q0.json.requests.length === 2, '① the hub lists both requests (the owner\'s GET)', q0.json)) return;
     const VWd = 1400, VHd = 900;
     await send('Emulation.setDeviceMetricsOverride', { width: VWd, height: VHd, deviceScaleFactor: 1, mobile: false });
     await load('zh', 'dark');
@@ -244,14 +244,14 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     })()`);
     const v1 = await look();
     const r1 = v1.rows.find((r) => r.id === R1.id), r2 = v1.rows.find((r) => r.id === R2.id);
-    ok(v1.firstIsQueue && v1.title === tr('zh', 'takeover::Waiting for you') && v1.title === '等你接管', '① the Agent browser window\'s FIRST section is «等你接管» (above Profiles)', v1);
-    ok(r1 && r2 && r1.conv === 'Bank reconcile' && r2.conv === 'Mail sweep' && r1.words === 'agent 请你：' + W1 && /^在等你 · /.test(r1.state) && JSON.stringify(r1.acts) === JSON.stringify(['接管', '已处理好 · 告诉 agent', '回复 agent…']) /* lane ui-plain-words browser-live-15 */, '① one row per request: the conversation, «agent 请你：<words>», «在等你 · …», 接管 / 已完成 / 回复', v1.rows);
-    ok(r1 && r1.prof === '它自己的浏览器', '① …and which browser (the conversation\'s own one here)', r1);
+    ok(gateOf(v1.firstIsQueue) && v1.title === tr('zh', 'takeover::Waiting for you') && v1.title === '等你接管', '① the Agent browser window\'s FIRST section is «等你接管» (above Profiles)', v1);
+    ok(gateOf(r1) && gateOf(r2) && r1.conv === 'Bank reconcile' && r2.conv === 'Mail sweep' && r1.words === 'agent 请你：' + W1 && gateOf(/^在等你 · /.test(r1.state)) && JSON.stringify(r1.acts) === JSON.stringify(['接管', '已处理好 · 告诉 agent', '回复 agent…']) /* lane ui-plain-words browser-live-15 */, '① one row per request: the conversation, «agent 请你：<words>», «在等你 · …», 接管 / 已完成 / 回复', v1.rows);
+    ok(gateOf(r1) && r1.prof === '它自己的浏览器', '① …and which browser (the conversation\'s own one here)', r1);
     ok(v1.winTitle === 'Agent 浏览器 · 2 等你接管' && v1.badge === '2', '① the window title and the rail\'s Browser badge say the count (2)', { title: v1.winTitle, badge: v1.badge });
     // the For-you tray: the SAME two requests as urgent items with the takeover button
     const ut = await j('GET', '/api/user-todos');
     const tItems = ((ut.json && ut.json.todos && ut.json.todos.open) || []).filter((i) => i.action && i.action.type === 'browser-takeover');
-    ok(tItems.length === 2 && tItems.every((i) => i.urgency === 'urgent') && tItems.map((i) => i.action.requestId).sort().join() === [R1.id, R2.id].sort().join(), '① For you holds the SAME two requests as urgent items (one record, two places)', tItems.map((i) => ({ u: i.urgency, r: i.action && i.action.requestId })));
+    ok(tItems.length === 2 && gateOf(tItems.every((i) => i.urgency === 'urgent')) && tItems.map((i) => i.action.requestId).sort().join() === [R1.id, R2.id].sort().join(), '① For you holds the SAME two requests as urgent items (one record, two places)', tItems.map((i) => ({ u: i.urgency, r: i.action && i.action.requestId })));
     // ② the rect census of the section (desk)
     const CENSUS = `(() => {
       const w = ${panelSel}; const sec = w.content.querySelector('.btq-section'); const sr = sec.getBoundingClientRect(); const bad = [];
@@ -285,28 +285,28 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     };
     const rowEl = (id) => `${panelSel}.content.querySelector('.btq-row[data-request-id="${id}"]')`;
     const row2Mark = await evaluate(`(() => { const r = ${rowEl(R2.id)}; r.dataset.mark = 'kept'; return 1; })()`);
-    ok(await press(`${rowEl(R1.id)}.querySelector('.btq-take')`), '③ the row\'s 接管 is pressed (a real mouse press where it is drawn)');
+    ok(verdictOf(await press(`${rowEl(R1.id)}.querySelector('.btq-take')`)), '③ the row\'s 接管 is pressed (a real mouse press where it is drawn)');
     const liveSel = `[...window.app.wm.windows.values()].find((w) => w.type === 'browser-live' && w._browserLive && w._browserLive.state().sessionId === ${JSON.stringify(S1)})`;
     const lv = await until(() => evaluate(`(() => { const w = ${liveSel}; if (!w) return null; const s = w._browserLive.state(); const a = w._browserLive.ask(); return s.mode === 'takeover' && s.mine && a.shown ? { mode: s.mode, mine: s.mine, ask: a } : null; })()`), 20000);
-    ok(lv && lv.ask.text === 'agent 请你：' + W1, '③ Take over opens THAT session\'s live view with the input side TAKEN (mode takeover, mine) and the agent\'s words in its bar', lv);
+    ok(gateOf(lv) && lv.ask.text === 'agent 请你：' + W1, '③ Take over opens THAT session\'s live view with the input side TAKEN (mode takeover, mine) and the agent\'s words in its bar', lv);
     await until(() => evaluate(`(() => { const r = ${rowEl(R1.id)}; return !!(r && r.classList.contains('btq-taken')); })()`), 10000);
     const v3 = await look();
     const r1t = v3.rows.find((r) => r.id === R1.id);
-    ok(r1t && r1t.taken && /^你正在操作 · 自 \d\d:\d\d/.test(r1t.state) && JSON.stringify(r1t.acts) === JSON.stringify(['打开实时视图', '交还控制']) && v3.winTitle === 'Agent 浏览器 · 1 等你接管' && v3.badge === '1', '③ the row says «你正在操作 · 自 …» with 交还控制; the title and the badge count 1', v3);
+    ok(gateOf(r1t) && gateOf(r1t.taken) && gateOf(/^你正在操作 · 自 \d\d:\d\d/.test(r1t.state)) && JSON.stringify(r1t.acts) === JSON.stringify(['打开实时视图', '交还控制']) && v3.winTitle === 'Agent 浏览器 · 1 等你接管' && v3.badge === '1', '③ the row says «你正在操作 · 自 …» with 交还控制; the title and the badge count 1', v3);
     await winShot('desk-zh-one-driven');
     const liveShot = await evaluate(`(() => { const w = ${liveSel}; const r = w.element.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: Math.min(r.height, 160) }; })()`); if (liveShot) await shot(path.join(SHOTS, 'live-zh-ask-line.png'), liveShot);
     // ④ HAND BACK in the live view
-    ok(await press(`${liveSel}.element.querySelector('.browser-live-handback')`), '④ the live view\'s 交还控制 is pressed');
+    ok(verdictOf(await press(`${liveSel}.element.querySelector('.browser-live-handback')`)), '④ the live view\'s 交还控制 is pressed');
     const gone = await until(() => evaluate(`(() => { const w = ${liveSel}; return !${rowEl(R1.id)} && w && !w._browserLive.ask().shown && w._browserLive.state().mode !== 'takeover'; })()`), 15000);
     const v4 = await look();
     const keptRow = await evaluate(`(() => { const r = ${rowEl(R2.id)}; return r ? r.dataset.mark : null; })()`);
-    ok(gone && v4.rows.length === 1 && keptRow === 'kept' && v4.winTitle === 'Agent 浏览器 · 1 等你接管', '④ Hand back resolves the request: its row leaves, the line hides, the other row is the SAME element (keyed, patched in place)', { gone, v4, keptRow });
+    ok(gateOf(gone) && v4.rows.length === 1 && keptRow === 'kept' && v4.winTitle === 'Agent 浏览器 · 1 等你接管', '④ Hand back resolves the request: its row leaves, the line hides, the other row is the SAME element (keyed, patched in place)', { gone, v4, keptRow });
     const q4 = await j('GET', '/api/browser/takeovers');
     const n1 = await runCli(env1, ['open', URL0]);
     ok(q4.json.requests.length === 1 && n1.code === 0 && !/human_asked/.test(n1.o), '④ …the hub agrees (one left) and the agent\'s next verb runs', n1.o.slice(0, 300));
     // ⑤ DONE on row 2 (the panel raised over the live view ③ opened — a press lands where it is drawn)
     await evaluate(`(() => { const w = ${panelSel}; window.app.wm.focusWindow(w.id); return 1; })()`); await frames();
-    ok(await press(`${rowEl(R2.id)}.querySelector('.btq-done')`), '⑤ the row\'s 已完成 is pressed');
+    ok(verdictOf(await press(`${rowEl(R2.id)}.querySelector('.btq-done')`)), '⑤ the row\'s 已完成 is pressed');
     await until(() => evaluate(`!${rowEl(R2.id)}`), 10000);
     const v5 = await look();
     ok(v5.rows.length === 0 && v5.empty === '没有等你接管的浏览器' && v5.winTitle === 'Agent 浏览器' && v5.badge === null, '⑤ Done resolves it without a takeover: the quiet empty line, the plain title, no badge', v5);
@@ -316,17 +316,17 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await until(() => evaluate(`(window.app._browserTakeovers || []).length === 1`), 10000);
     await evaluate(`(() => { for (const w of [...window.app.wm.windows.values()]) if (w.type === 'browser-live') { try { window.app.wm.closeWindow(w.id); } catch {} } return 1; })()`);
     await sleep(400);
-    ok(await press(`document.getElementById('taskbar-user-todos')`), '⑥ the For-you button is pressed');
+    ok(verdictOf(await press(`document.getElementById('taskbar-user-todos')`)), '⑥ the For-you button is pressed');
     const btn = await until(() => evaluate(`!!document.querySelector('#user-todos-popup .ut-action-takeover')`), 10000);
-    ok(btn && await press(`document.querySelector('#user-todos-popup .ut-action-takeover')`), '⑥ the request\'s item carries the takeover button in the tray — pressed');
+    ok(gateOf(btn) && verdictOf(await press(`document.querySelector('#user-todos-popup .ut-action-takeover')`)), '⑥ the request\'s item carries the takeover button in the tray — pressed');
     const live2Sel = `[...window.app.wm.windows.values()].find((w) => w.type === 'browser-live' && w._browserLive && w._browserLive.state().sessionId === ${JSON.stringify(S2)})`;
     const lv2 = await until(() => evaluate(`(() => { const w = ${live2Sel}; if (!w) return null; const s = w._browserLive.state(); const a = w._browserLive.ask(); return s.connected !== false && a.shown ? { mode: s.mode, mine: s.mine, ask: a, take: getComputedStyle(w.element.querySelector('.browser-live-mode-btn')).display } : null; })()`), 20000);
-    ok(a3.code === 0 && lv2 && lv2.mode !== 'takeover' && lv2.ask.text === 'agent 请你：Pick the right mailbox' && lv2.take !== 'none', '⑥ the For-you door opens the live view with the input side OFFERED (watching, the agent\'s words shown, its 接管 there)', lv2);
+    ok(a3.code === 0 && gateOf(lv2) && lv2.mode !== 'takeover' && lv2.ask.text === 'agent 请你：Pick the right mailbox' && lv2.take !== 'none', '⑥ the For-you door opens the live view with the input side OFFERED (watching, the agent\'s words shown, its 接管 there)', lv2);
     const wd = await runCli(env2, ['ask-human', '--withdraw']);
     const hid = await until(() => evaluate(`(() => { const w = ${live2Sel}; return w && !w._browserLive.ask().shown; })()`), 10000);
     const ut2 = await j('GET', '/api/user-todos');
     const open2 = ((ut2.json && ut2.json.todos && ut2.json.todos.open) || []).filter((i) => i.action && i.action.type === 'browser-takeover' && i.status === 'open');
-    ok(wd.code === 0 && hid && open2.length === 0, '⑥ the agent\'s withdraw hides the line and resolves the item', { wd: wd.o.slice(0, 200), hid, open2: open2.length });
+    ok(wd.code === 0 && gateOf(hid) && open2.length === 0, '⑥ the agent\'s withdraw hides the line and resolves the item', { wd: wd.o.slice(0, 200), hid, open2: open2.length });
     // ⑦ THE PHONE
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
     await load('zh', 'dark');
@@ -338,11 +338,11 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const cs7 = await evaluate(CENSUS);
     await winShot('phone-zh-one-waiting');
     ok(a4.code === 0 && cs7.bad.length === 0 && cs7.docW <= cs7.vw + 1, '⑦ the phone census: inside the section, nothing overlapping, no cut words, nothing past the screen\'s width', cs7);
-    ok(cs7.acts.length === 3 && cs7.acts.every((h) => h >= 36), '⑦ every act of a waiting row is ≥ 36 px tall on the phone (a thumb\'s target)', cs7.acts);
+    ok(cs7.acts.length === 3 && verdictOf(cs7.acts.every((h) => h >= 36)), '⑦ every act of a waiting row is ≥ 36 px tall on the phone (a thumb\'s target)', cs7.acts);
     await evaluate(`(() => { const s = document.createElement('style'); s.id = 'tq-ctl'; s.textContent = '.file-tool-btn.bprof-btn.btq-act { min-height: 0 !important; height: 22px !important; }'; document.head.appendChild(s); return 1; })()`);
     await frames();
     const ctl = await evaluate(CENSUS);
-    ok(ctl.acts.some((h) => h < 36), 'CONTROL ⑦: the phone rule removed at runtime ⇒ the 36 px census goes RED (it can fail)', ctl.acts);
+    ok(verdictOf(ctl.acts.some((h) => h < 36)), 'CONTROL ⑦: the phone rule removed at runtime ⇒ the 36 px census goes RED (it can fail)', ctl.acts);
     await evaluate(`(() => { document.getElementById('tq-ctl').remove(); return 1; })()`);
     await runCli(env1, ['ask-human', '--withdraw']);
   } catch (e) {
@@ -352,4 +352,4 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
 })();
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -60,7 +60,7 @@ const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[proce
 for (const d of [stubDir, WORK, SHOTS]) fs.mkdirSync(d, { recursive: true });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0, skipped = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CONV = 'fake-poll/fake-poll-ops';
 
@@ -289,12 +289,12 @@ try {
     const t0 = await A.evalJs(TAILQ);
     await A.shot('desktop-1280-tail.png');
     check(`setup: six asks, then ${total - 11} records of history — the window loaded at the tail (records ${t0 && t0.ws}–${t0 && t0.we} of ${t0 && t0.total}), the asks' records far above it`, ids.length === 6 && total >= 300 && !!t0 && t0.ws > 200 && t0.we === t0.total, { ids: ids.length, total, t0 });
-    check(`r10 R1 (RED on 90c995a3: six cards stacked at the end; on bd5c5fd98: ONE docked card, «停靠在末尾 — 它是在对话更上面提出的 · 共 6 个在等你») the end holds NO card (${t0 && t0.n} open in the window, ${t0 && t0.atLast} under the last record); the strip «${t0 && t0.chip}» shows the NEWEST`, !!t0 && t0.n === 0 && t0.atLast === 0 && t0.strip === ids[5] && /· 6 questions/.test(t0.chip), t0);
+    check(`r10 R1 (RED on 90c995a3: six cards stacked at the end; on bd5c5fd98: ONE docked card, «停靠在末尾 — 它是在对话更上面提出的 · 共 6 个在等你») the end holds NO card (${t0 && t0.n} open in the window, ${t0 && t0.atLast} under the last record); the strip «${t0 && t0.chip}» shows the NEWEST`, !!t0 && t0.n === 0 && t0.atLast === 0 && t0.strip === ids[5] && verdictOf(/· 6 questions/.test(t0.chip)), t0);
     // R1 at 390×844 (the phone): the same
     await toConv(A, sid, [], 390, 844, true); await atTail(A, 6); await sleep(1200);
     const p0 = await A.evalJs(TAILQ);
     await A.shot('phone-390-tail.png');
-    check(`r10 R1 at 390×844 touch: NO card at the end (${p0 && p0.n}); the strip «${p0 && p0.chip}» shows the newest`, !!p0 && p0.n === 0 && p0.atLast === 0 && p0.strip === ids[5] && /· 6 /.test(p0.chip + ' '), p0);
+    check(`r10 R1 at 390×844 touch: NO card at the end (${p0 && p0.n}); the strip «${p0 && p0.chip}» shows the newest`, !!p0 && p0.n === 0 && p0.atLast === 0 && p0.strip === ids[5] && verdictOf(/· 6 /.test(p0.chip + ' ')), p0);
     // R2 (r10) — the strip's question lands the NEWEST ask (its record ~300 records above the window: the window loaded up to
     //      it); the OLDEST through its For-you door (the For-you window is the index of every ask now — «View all»)
     await toConv(A, sid, [], 1280, 800, false); await atTail(A, 6); await sleep(900);
@@ -306,18 +306,18 @@ try {
     await landed(ids[5], 76); await sleep(900);
     const l6 = await A.evalJs(INPLACE(ids[5])), fl6 = await A.evalJs('window.__cnFlash || []');
     await A.shot('desktop-1280-dock-landed.png');
-    check(`r10 R2 (RED on bd5c5fd98: no strip — the chip listed them) a tap on the strip's question loads the window UP to the newest ask (records ${l6 && l6.ws}–${l6 && l6.we} of ${l6 && l6.total}) and opens its card IN ITS tool card («${l6 && l6.cmd}»), whole in view, flashed`, !!l6 && l6.ws < t0.ws && /Longer question 76/.test(l6.cmd) && l6.open && l6.inView && fl6.includes(ids[5]), { l6, fl6 });
+    check(`r10 R2 (RED on bd5c5fd98: no strip — the chip listed them) a tap on the strip's question loads the window UP to the newest ask (records ${l6 && l6.ws}–${l6 && l6.we} of ${l6 && l6.total}) and opens its card IN ITS tool card («${l6 && l6.cmd}»), whole in view, flashed`, !!l6 && l6.ws < t0.ws && gateOf(/Longer question 76/.test(l6.cmd)) && gateOf(l6.open) && gateOf(l6.inView) && verdictOf(fl6.includes(ids[5])), { l6, fl6 });
     await A.evalJs(`(() => { const it = app._inboxModel.byId(${J(ids[0])}); window.__cnFlash = []; app._inboxModel.jump(it.sessionKey, it); return 1; })()`);
     await landed(ids[0], 71); await sleep(900);
     const l1 = await A.evalJs(INPLACE(ids[0])), fl1 = await A.evalJs('window.__cnFlash || []');
     await A.shot('desktop-1280-door-oldest-landed.png');
-    check(`R2 the OLDEST ask's For-you door loads the window UP to it (records ${l1 && l1.ws}–${l1 && l1.we} of ${l1 && l1.total}) and opens its card IN ITS tool card («${l1 && l1.cmd}»), whole in view, flashed once; no dock in a window that ends mid-history`, !!l1 && l1.we < l1.total && l1.ws < t0.ws && /Stress question 71/.test(l1.cmd) && l1.open && l1.inView && l1.docks === 0 && fl1.includes(ids[0]), { l1, fl1 });
+    check(`R2 the OLDEST ask's For-you door loads the window UP to it (records ${l1 && l1.ws}–${l1 && l1.we} of ${l1 && l1.total}) and opens its card IN ITS tool card («${l1 && l1.cmd}»), whole in view, flashed once; no dock in a window that ends mid-history`, !!l1 && l1.we < l1.total && l1.ws < t0.ws && gateOf(/Stress question 71/.test(l1.cmd)) && gateOf(l1.open) && gateOf(l1.inView) && l1.docks === 0 && verdictOf(fl1.includes(ids[0])), { l1, fl1 });
     // R4 — A FOLDED ROW KEEPS ITS AGE: the window narrowed to 380 px (the questions must give way) — each folded card in the
     //      landed window is ONE line, the question cut if it must, its age whole and the last thing on it
     await A.evalJs(`(() => { const w = ${CHAT(sid)}; if (!w) return false; if (w.isMaximized) app.wm.toggleMaximize(w.id); app.wm.resizeWindowTo(w.id, { w: 380, h: 720 }); return true; })()`); await sleep(900);
     const folds = await A.evalJs(`[...document.querySelectorAll('.cn-card.cn-fold')].filter((c) => c.getClientRects().length).map((c) => { const row = c.querySelector('.cn-rows > .ut-item'), tx = row && row.querySelector('.ut-text'), m = row && row.querySelector('.ut-meta'); if (!row || !tx || !m) return { id: c.dataset.item, ok: false }; const r = row.getBoundingClientRect(), a = m.getBoundingClientRect(), q = tx.getBoundingClientRect(); return { id: c.dataset.item, ok: a.width > 8 && a.right <= r.right + 0.5 && a.left >= q.right - 0.5 && Math.abs(a.bottom - q.bottom) < 6, cut: tx.scrollWidth > tx.clientWidth + 1, age: m.textContent.trim(), w: Math.round(r.width) }; })`);
     await A.shot('desktop-380-folded-ages.png');
-    check(`R4 a folded row keeps its age: ${folds.length} folded cards in a 380 px window, ${folds.filter((f) => f.cut).length} questions cut — every age whole, the last thing on its one line («${folds.map((f) => f.age).join('», «')}»)`, folds.length >= 2 && folds.some((f) => f.cut) && folds.every((f) => f.ok), folds);
+    check(`R4 a folded row keeps its age: ${folds.length} folded cards in a 380 px window, ${folds.filter((f) => f.cut).length} questions cut — every age whole, the last thing on its one line («${folds.map((f) => f.age).join('», «')}»)`, folds.length >= 2 && gateOf(folds.some((f) => f.cut)) && verdictOf(folds.every((f) => f.ok)), folds);
     // R3 (r10) — the newest answered elsewhere: the strip's row goes to the next newest IN THE SAME FRAME its count says 5
     await toConv(A, sid, [], 1280, 800, false); await atTail(A, 6); await sleep(900);
     await A.evalJs(`(() => { window.__cnTail = []; const t0 = performance.now(); const f = () => { const c = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'), d = document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item'); window.__cnTail.push(((c && c.offsetParent ? (/· (\\d+)/.exec(c.textContent) || [])[1] : '0') || '?') + '/' + (d ? d.dataset.id : '')); if (performance.now() - t0 < 3000) requestAnimationFrame(f); }; requestAnimationFrame(f); return 1; })()`);
@@ -335,7 +335,7 @@ try {
     await landed(ids[1], 72); await sleep(900);
     const d1 = await A.evalJs(INPLACE(ids[1]));
     await A.shot('desktop-1280-door-landed.png');
-    check(`R5 (RED on 90c995a3: the window stays at the tail, the ask out of sight) the tray row's door lands on the record that filed it — the window loaded up to it (records ${d1 && d1.ws}–${d1 && d1.we}), its card open in its tool card («${d1 && d1.cmd}»), whole in view`, !!d1 && d1.we < d1.total && /Stress question 72/.test(d1.cmd) && d1.open && d1.inView, d1);
+    check(`R5 (RED on 90c995a3: the window stays at the tail, the ask out of sight) the tray row's door lands on the record that filed it — the window loaded up to it (records ${d1 && d1.ws}–${d1 && d1.we}), its card open in its tool card («${d1 && d1.cmd}»), whole in view`, !!d1 && d1.we < d1.total && gateOf(/Stress question 72/.test(d1.cmd)) && gateOf(d1.open) && verdictOf(d1.inView), d1);
     // R5 (b) — an ask with NO record (filed before what the conversation's record holds — the asks filed before 2.369.360):
     //          no record names it (do:h73) and its createdAt is set before the first record (this page's copy — nothing at or
     //          before its filing, no CLI call before it) ⇒ the door docks it at the end and says why
@@ -349,7 +349,7 @@ try {
     await A.waitFor(`(() => { const v = ${VIEW}; return !!v && v._windowEnd >= v._total && (window.__cnToast || []).some((x) => /record was kept/.test(x)); })()`, 15000); await sleep(900);
     const n1 = await A.evalJs(`(() => { const v = ${VIEW}, l = v._messageList; return { atEnd: v._windowEnd >= v._total, gap: Math.round(l.scrollHeight - l.clientHeight - l.scrollTop), card: !!document.querySelector('.cn-card[data-item="${ids[2]}"]'), toast: (window.__cnToast || []).join(' | '), strip: !!v._attnDock && !v._attnDock.hidden }; })()`);
     await A.shot('desktop-1280-no-record-said.png');
-    check(`r10 R5 an ask with no record at all (RED on bd5c5fd98: the door DOCKED it at the end, «asked before this conversation's record was kept») ⇒ the door lands at the live END and SAYS it («${n1 && n1.toast}»); no card for it anywhere in the flow; the strip stands`, shifted && firstTs > 0 && !!n1 && n1.atEnd && n1.gap <= 2 && !n1.card && /Asked before this conversation's record was kept/.test(n1.toast) && n1.strip, n1);
+    check(`r10 R5 an ask with no record at all (RED on bd5c5fd98: the door DOCKED it at the end, «asked before this conversation's record was kept») ⇒ the door lands at the live END and SAYS it («${n1 && n1.toast}»); no card for it anywhere in the flow; the strip stands`, gateOf(shifted) && firstTs > 0 && !!n1 && gateOf(n1.atEnd) && n1.gap <= 2 && !n1.card && gateOf(/Asked before this conversation's record was kept/.test(n1.toast)) && verdictOf(n1.strip), n1);
     // R5 (c) — AN OPEN CONVERSATION THE PERSON SCROLLED: a broadcast (a new filing) never moves it; a press on a door lands
     const lc = await A.evalJs(`(() => { const r = ${VIEW}._messageList.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
     for (let i = 0; i < 4; i++) { await A.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: lc.x, y: lc.y, deltaX: 0, deltaY: -240 }); await sleep(120); }
@@ -366,7 +366,7 @@ try {
     await door(ids[3]);
     await landed(ids[3], 74); await sleep(900);
     const c1 = await A.evalJs(INPLACE(ids[3]));
-    check(`R5 …a PRESS on its tray row's door does: the view lands on the record that filed it («${c1 && c1.cmd}»), its card open, whole in view`, !!c1 && /Stress question 74/.test(c1.cmd) && c1.open && c1.inView, c1);
+    check(`R5 …a PRESS on its tray row's door does: the view lands on the record that filed it («${c1 && c1.cmd}»), its card open, whole in view`, !!c1 && gateOf(/Stress question 74/.test(c1.cmd)) && gateOf(c1.open) && verdictOf(c1.inView), c1);
   } catch (e) { fail++; console.log('  ✗ ⑬ threw: ' + (e?.message || e)); }
   lap('⑬ done');
 
@@ -393,7 +393,7 @@ try {
     }
     const all = (await page(0, total)).messages || [];
     const where = q.map((it) => (it ? all.findIndex((m) => m.role === 'tool' && JSON.stringify(m.content || '').includes(it.id)) : -1));
-    check(`setup: three asks spread over ${total} records — their records at ${where.join(' · ')}`, q.every(Boolean) && total >= 900 && where.every((k) => k >= 0) && where[1] > 250 && where[2] > 550 && where[2] < total - 250, { total, where });
+    check(`setup: three asks spread over ${total} records — their records at ${where.join(' · ')}`, gateOf(q.every(Boolean)) && total >= 900 && gateOf(where.every((k) => k >= 0)) && where[1] > 250 && where[2] > 550 && where[2] < total - 250, { total, where });
     const ids = q.map((it) => it && it.id);
     const DOMQ = `(() => { const v = ${VIEW}, l = v._messageList; const kids = [...l.querySelectorAll(':scope > .chat-msg:not(.chat-gap-msg)')], lastKid = kids[kids.length - 1]; const cards = [...l.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-open')]; const lr = l.getBoundingClientRect(), chip = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'), srow = v._attnDock && !v._attnDock.hidden ? v._attnDock.querySelector('.cad-rows > .ut-item') : null;
       return { strip: srow ? srow.dataset.id : null, ws: v._windowStart, we: v._windowEnd, total: v._total, pinned: v._pinned, gap: Math.round(l.scrollHeight - l.clientHeight - l.scrollTop), nDom: kids.length, chip: chip ? chip.textContent.trim() : '',
@@ -404,7 +404,7 @@ try {
     // #1 THE END IS THE DISPLAY ORDER'S: at the tail, then one older page loaded by the reader's own wheel, then back down
     await toConv(A, sid, [], 1280, 800, false); await atTailN(3); await sleep(1500);
     const w0 = await A.evalJs(DOMQ);
-    check(`r10 #1 at the tail (records ${w0.ws}–${w0.we} of ${w0.total}) NO card at the end (RED on bd5c5fd98: ONE docked under the last record) — the strip shows the newest ask`, !w0.cards.some((c) => c.atDomEnd) && docked(w0).length === 0 && w0.strip === ids[2] && /· 3 /.test(w0.chip + ' '), w0);
+    check(`r10 #1 at the tail (records ${w0.ws}–${w0.we} of ${w0.total}) NO card at the end (RED on bd5c5fd98: ONE docked under the last record) — the strip shows the newest ask`, !w0.cards.some((c) => c.atDomEnd) && docked(w0).length === 0 && w0.strip === ids[2] && verdictOf(/· 3 /.test(w0.chip + ' ')), w0);
     await wheel(4, -240);
     const w1 = await A.evalJs(DOMQ);
     await A.shot('desktop-1280-r2-after-4-wheels.png');
@@ -413,19 +413,19 @@ try {
     await sleep(1500);
     const w2 = await A.evalJs(DOMQ);
     await A.shot('desktop-1280-r2-back-at-bottom.png');
-    check(`#1 (RED on 9de5c902: no card at the end while the chip says «· 3 questions») back down at the bottom (r10): no card at the end, the strip «${w2.chip}» — the newest`, w2.gap <= 2 && !w2.cards.some((c) => c.atDomEnd) && w2.strip === ids[2] && /· 3 /.test(w2.chip + ' '), w2);
+    check(`#1 (RED on 9de5c902: no card at the end while the chip says «· 3 questions») back down at the bottom (r10): no card at the end, the strip «${w2.chip}» — the newest`, w2.gap <= 2 && !w2.cards.some((c) => c.atDomEnd) && w2.strip === ids[2] && verdictOf(/· 3 /.test(w2.chip + ' ')), w2);
     // #2 A LANDING READS BOTH WAYS: the walk the chip invites — the oldest (the window loads at the top), then one filed BELOW
     const ST = (id) => `(() => { const v = ${VIEW}, c = document.querySelector('.cn-card[data-item="' + ${J(id)} + '"]'); const raw = c && c.closest('.chat-msg')?._rawMsg; const lr = v._messageList.getBoundingClientRect(), r = c ? c.getBoundingClientRect() : null; return { ws: v._windowStart, we: v._windowEnd, total: v._total, card: !!c, docked: !!c && c.classList.contains('cn-docked'), dock: c ? (c.querySelector('.cn-dock') || {}).textContent || '' : '', cmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '').slice(0, 40) : '', inView: !!r && r.height > 0 && r.top >= lr.top - 1 && r.bottom <= lr.bottom + 1 }; })()`;
     // (r10: the chip's list is gone — an ask CHOSEN lands through its For-you door: model.jump → landOnFiling, THE ONE LANDING)
     const pick = async (id) => { await A.evalJs(`(() => { const it = app._inboxModel.byId(${J(id)}); app._inboxModel.jump(it.sessionKey, it); return 1; })()`); };
     const choose = async (id, n) => { await pick(id); await A.waitFor(`(() => { const x = ${ST(id)}; return x.card && x.inView && (/question ${n}/.test(x.cmd) || x.docked); })()`, 15000).catch(() => {}); await sleep(1200); return A.evalJs(ST(id)); };
     const s1 = await choose(ids[0], 81);
-    check(`#2 the oldest (q81) lands at its record — the window loaded up to it (records ${s1.ws}–${s1.we})`, s1.card && !s1.docked && /question 81/.test(s1.cmd) && s1.ws === 0, s1);
+    check(`#2 the oldest (q81) lands at its record — the window loaded up to it (records ${s1.ws}–${s1.we})`, gateOf(s1.card) && !s1.docked && gateOf(/question 81/.test(s1.cmd)) && s1.ws === 0, s1);
     const s2 = await choose(ids[2], 83);
     await A.shot('desktop-1280-r2-below-window.png');
-    check(`#2 (RED on 9de5c902: docked at the live end with «asked before this conversation's record was kept») from that window, q83 — its record BELOW it, at ${where[2]} — lands AT its record (records ${s2.ws}–${s2.we})`, s2.card && !s2.docked && /question 83/.test(s2.cmd) && s2.ws <= where[2] && s2.we > where[2], s2);
+    check(`#2 (RED on 9de5c902: docked at the live end with «asked before this conversation's record was kept») from that window, q83 — its record BELOW it, at ${where[2]} — lands AT its record (records ${s2.ws}–${s2.we})`, gateOf(s2.card) && !s2.docked && gateOf(/question 83/.test(s2.cmd)) && s2.ws <= where[2] && s2.we > where[2], s2);
     const s3 = await choose(ids[1], 82);
-    check(`#2 …and q82 (its record at ${where[1]}, ABOVE that window) lands at its record (records ${s3.ws}–${s3.we})`, s3.card && !s3.docked && /question 82/.test(s3.cmd) && s3.ws <= where[1] && s3.we > where[1], s3);
+    check(`#2 …and q82 (its record at ${where[1]}, ABOVE that window) lands at its record (records ${s3.ws}–${s3.we})`, gateOf(s3.card) && !s3.docked && gateOf(/question 82/.test(s3.cmd)) && s3.ws <= where[1] && s3.we > where[1], s3);
     // #3 THE DISPLACEMENT LAW: q82 on screen; a slow page read (2.5 s each — a remote transcript), q81 pressed (its read
     // upward in flight), then q82 — the person's latest choice
     await A.evalJs(`(() => { const v = ${VIEW}; v.__slowFetch = v._fetchMessages; v._fetchMessages = (o, l) => new Promise((r) => setTimeout(r, 2500)).then(() => v.__slowFetch.call(v, o, l)); return 1; })()`);
@@ -436,7 +436,7 @@ try {
     const r2 = await A.evalJs(ST(ids[1])), r81 = await A.evalJs(ST(ids[0]));
     await A.evalJs(`(() => { const v = ${VIEW}; if (v.__slowFetch) { v._fetchMessages = v.__slowFetch; delete v.__slowFetch; } return 1; })()`);
     await A.shot('desktop-1280-r2-race.png');
-    check(`#3 (RED on 9de5c902: 9 s later the stale q81 landing dragged the view to records 0–50) the LATEST press stands — q82 in view (records ${r2.ws}–${r2.we}), the older landing's read finished and moved nothing`, r1.card && r1.inView && r2.card && r2.inView && /question 82/.test(r2.cmd) && r2.ws === r1.ws, { r1, r2, r81 });
+    check(`#3 (RED on 9de5c902: 9 s later the stale q81 landing dragged the view to records 0–50) the LATEST press stands — q82 in view (records ${r2.ws}–${r2.we}), the older landing's read finished and moved nothing`, gateOf(r1.card) && gateOf(r1.inView) && gateOf(r2.card) && gateOf(r2.inView) && gateOf(/question 82/.test(r2.cmd)) && r2.ws === r1.ws, { r1, r2, r81 });
     // minor THE DOCKED ASK ANSWERED ELSEWHERE MOVES NO READER: the tail, 4 wheels up, q83 (docked) answered by another client
     await toConv(A, sid, [], 1280, 800, false); await atTailN(3); await sleep(1500);
     await wheel(4, -240);
@@ -456,7 +456,7 @@ try {
     await sleep(1600);
     const f1 = await A.evalJs(FOLD);
     await A.shot('desktop-1280-r2-folded-door.png');
-    check(`#4 (RED on 9de5c902: «card» returned, the record display:none, the list run to scrollTop 0) the For-you door of the ANSWERED q83 (its record folded in a closed run) opens the run and lands on it — its quiet record visible, in view (records ${f1.ws}–${f1.we}, scrollTop ${f1.st})`, f1.card && /cn-done/.test(f1.cls) && f1.rects > 0 && !f1.hostFolded && f1.hostDisplay !== 'none' && f1.inView, f1);
+    check(`#4 (RED on 9de5c902: «card» returned, the record display:none, the list run to scrollTop 0) the For-you door of the ANSWERED q83 (its record folded in a closed run) opens the run and lands on it — its quiet record visible, in view (records ${f1.ws}–${f1.we}, scrollTop ${f1.st})`, gateOf(f1.card) && gateOf(/cn-done/.test(f1.cls)) && f1.rects > 0 && !f1.hostFolded && f1.hostDisplay !== 'none' && verdictOf(f1.inView), f1);
     // ── ⑮ THE TAIL, ROUND 3 (lane needs-card-tail r3 — the r2 delta verdict on ed660f19: the tail road's jumpToBottom took no
     // `stale` — an older landing's tail fetch replaced the window a newer landing, or the reader's own wheel, had just made).
     // q84 is filed with no record (no record names it, its createdAt set before the first record — this page's copy, as R5
@@ -476,8 +476,8 @@ try {
     await pick(ids[1]); await sleep(4200);    // press 2, the person's latest choice: q82, on screen — then the tail page returns
     const t1 = await A.evalJs(ST(ids[1])), ro1 = await roads15();
     await A.shot('desktop-1280-r3-tail-race.png');
-    check(`#1 precondition: press 1 (q84, no record) TOOK the tail road — its tail page was out when press 2 landed q82 (${ro1.join(' → ')})`, shifted15 && ro1[0] === 'land:' + q84.id && ro1.some((r) => /^tailPage\(/.test(r)) && ro1.indexOf('land:' + ids[1]) > ro1.findIndex((r) => /^tailPage\(/.test(r)), ro1);
-    check(`#1 (RED on ed660f19: the slow tail page came back and rebuilt the window at the live end — q82 gone, pinned) the LATEST press stands: q82 in view in the window it was landed in (records ${t1.ws}–${t1.we} of ${t1.total}); the older landing's tail read finished and replaced nothing`, shifted15 && t0.card && t1.card && t1.inView && /question 82/.test(t1.cmd) && t1.ws === t0.ws && t1.we < t1.total, { t0, t1, roads: ro1 });
+    check(`#1 precondition: press 1 (q84, no record) TOOK the tail road — its tail page was out when press 2 landed q82 (${ro1.join(' → ')})`, gateOf(shifted15) && ro1[0] === 'land:' + q84.id && gateOf(ro1.some((r) => /^tailPage\(/.test(r))) && ro1.indexOf('land:' + ids[1]) > ro1.findIndex((r) => /^tailPage\(/.test(r)), ro1);
+    check(`#1 (RED on ed660f19: the slow tail page came back and rebuilt the window at the live end — q82 gone, pinned) the LATEST press stands: q82 in view in the window it was landed in (records ${t1.ws}–${t1.we} of ${t1.total}); the older landing's tail read finished and replaced nothing`, gateOf(shifted15) && gateOf(t0.card) && gateOf(t1.card) && gateOf(t1.inView) && gateOf(/question 82/.test(t1.cmd)) && t1.ws === t0.ws && t1.we < t1.total, { t0, t1, roads: ro1 });
     // …the reader's own wheel while a landing's tail page is out (from a window mid-history again: q82 landed first)
     const t0b = await choose(ids[1], 82);
     await pick(q84.id); await sleep(700);
@@ -485,7 +485,7 @@ try {
     await sleep(1500);
     const t2 = await A.evalJs(DOMQ), ro2 = (await roads15()).slice(ro1.length);
     await A.shot('desktop-1280-r3-tail-wheel.png');
-    check(`#1 (RED on ed660f19: yanked to the live end, pinned) the reader's wheel while the tail page is out ⇒ the page's result is dropped: the window stays mid-history (records ${t2.ws}–${t2.we} of ${t2.total}), not pinned (${ro2.join(' → ')})`, t0b.card && t0b.we < t0b.total && ro2.some((r) => /^tailPage\(/.test(r)) && t2.we < t2.total && !t2.pinned, { t0b, t2, roads: ro2 });
+    check(`#1 (RED on ed660f19: yanked to the live end, pinned) the reader's wheel while the tail page is out ⇒ the page's result is dropped: the window stays mid-history (records ${t2.ws}–${t2.we} of ${t2.total}), not pinned (${ro2.join(' → ')})`, gateOf(t0b.card) && t0b.we < t0b.total && gateOf(ro2.some((r) => /^tailPage\(/.test(r))) && t2.we < t2.total && !t2.pinned, { t0b, t2, roads: ro2 });
     await SLOW(false);
     // ── ⑯ THE TAIL, ROUND 4 (lane needs-card-tail r4 — the r3 delta verdict on b3fef024; its accdisp probe's (d) (e) (f3) and
     // the index road's failed show): the law both ways (the ↓ pressed BEFORE a landing), a failed tail page moves nothing, a
@@ -521,7 +521,7 @@ try {
       await wait16(/^tailPageBack$/, 8000); await sleep(2000);
       const a2 = await A.evalJs(ST16(ids[1])), ra = await r16();
       await A.shot('desktop-1280-r4-down-then-landing.png');
-      check(`(a) (RED on b3fef024: the older ↓'s tail page came back and rebuilt the window at the live end — q82 gone, pinned) the ↓ (${howDown}) pressed BEFORE a landing: the newer landing stands — q82 in view in the window it was landed in (records ${a2.ws}–${a2.we} of ${a2.total}), not pinned; the ↓'s page dropped (${ra.join(' → ')})`, a0.card && a1.card && a2.card && a2.inView && /question 82/.test(a2.cmd) && a2.ws === a1.ws && a2.we < a2.total && !a2.pinned && ra.includes('trace:jumpToBottom:stale'), { a0, a1, a2, ra });
+      check(`(a) (RED on b3fef024: the older ↓'s tail page came back and rebuilt the window at the live end — q82 gone, pinned) the ↓ (${howDown}) pressed BEFORE a landing: the newer landing stands — q82 in view in the window it was landed in (records ${a2.ws}–${a2.we} of ${a2.total}), not pinned; the ↓'s page dropped (${ra.join(' → ')})`, gateOf(a0.card) && gateOf(a1.card) && gateOf(a2.card) && gateOf(a2.inView) && gateOf(/question 82/.test(a2.cmd)) && a2.ws === a1.ws && a2.we < a2.total && !a2.pinned && verdictOf(ra.includes('trace:jumpToBottom:stale')), { a0, a1, a2, ra });
       // (b) A FAILED TAIL PAGE MOVES NOTHING (the probe's (e) — older than r3): q84 (no record ⇒ the tail road), its tail page fails
       await TAIL16({ n: 0 }); await choose(ids[1], 82); const b0 = await A.evalJs(ST16(ids[1]));
       await A.evalJs('(window.__r16 = [], 1)');
@@ -530,7 +530,7 @@ try {
       await wait16(new RegExp('^landed:' + q84.id + '='), 12000); await sleep(1200);
       const b1 = await A.evalJs(ST16(ids[1])), rb = await r16(), sb = await A.evalJs(STATUS16);
       await A.shot('desktop-1280-r4-tail-failed.png');
-      check(`(b) (RED on b3fef024: «end» — the mid-history window force-scrolled to its bottom, scrollTop 362 → 757, and q84 kept the dock pick) the tail page failed (${rb.join(' → ')}): said ONCE («${sb && sb.text}»), and nothing moved — scrollTop ${b0.st} → ${b1.st}, q82 in view ${b0.inView} → ${b1.inView}, the pin ${b0.pinned} → ${b1.pinned}, the pick ${b0.pick} → ${b1.pick}`, rb.includes('tailPageFAILED') && rb.includes('landed:' + q84.id + '=null') && !!sb && sb.shown && /Couldn.t load the latest messages/.test(sb.text) && Math.abs(b1.st - b0.st) <= 2 && b1.inView && b1.ws === b0.ws && b1.pinned === b0.pinned && b1.pick === b0.pick, { b0, b1, rb, sb });
+      check(`(b) (RED on b3fef024: «end» — the mid-history window force-scrolled to its bottom, scrollTop 362 → 757, and q84 kept the dock pick) the tail page failed (${rb.join(' → ')}): said ONCE («${sb && sb.text}»), and nothing moved — scrollTop ${b0.st} → ${b1.st}, q82 in view ${b0.inView} → ${b1.inView}, the pin ${b0.pinned} → ${b1.pinned}, the pick ${b0.pick} → ${b1.pick}`, gateOf(rb.includes('tailPageFAILED')) && gateOf(rb.includes('landed:' + q84.id + '=null')) && !!sb && gateOf(sb.shown) && gateOf(/Couldn.t load the latest messages/.test(sb.text)) && Math.abs(b1.st - b0.st) <= 2 && gateOf(b1.inView) && b1.ws === b0.ws && b1.pinned === b0.pinned && b1.pick === b0.pick, { b0, b1, rb, sb });
       // (c) A STALE LANDING COUNTS ITS HELD TURN ONCE (the probe's (d) — new in r3: +14 for the server's +7): q84's tail page out
       //     6 s, q82 pressed (q84 is stale), a live turn (do:fill3) arrives while the page is out — held, replayed on the stale return
       await TAIL16({ n: 0 }); await choose(ids[1], 82);
@@ -547,7 +547,7 @@ try {
       T1 = (await page(0, 1)).total || 0;
       const c1 = await A.evalJs(ST16(ids[1])), rc = await r16();
       await A.shot('desktop-1280-r4-stale-total.png');
-      check(`(c) (RED on b3fef024: the stale tail page's total applied, then each replayed create counted again) the live turn arrived while q84's stale tail page was out (${held} ops held) — the window that stays counts it ONCE: its total ${c0.total} → ${c1.total} (+${c1.total - c0.total}) vs the server's ${T0} → ${T1} (+${T1 - T0}); q82 in view (records ${c1.ws}–${c1.we}) (${rc.join(' → ')})`, held > 0 && T1 >= T0 + 7 && rc.includes('trace:jumpToBottom:stale') && rc.includes('landed:' + q84.id + '=null') && c1.total - c0.total === T1 - T0 && c1.card && c1.inView && c1.ws === c0.ws, { c0, c1, T0, T1, held, rc });
+      check(`(c) (RED on b3fef024: the stale tail page's total applied, then each replayed create counted again) the live turn arrived while q84's stale tail page was out (${held} ops held) — the window that stays counts it ONCE: its total ${c0.total} → ${c1.total} (+${c1.total - c0.total}) vs the server's ${T0} → ${T1} (+${T1 - T0}); q82 in view (records ${c1.ws}–${c1.we}) (${rc.join(' → ')})`, held > 0 && T1 >= T0 + 7 && gateOf(rc.includes('trace:jumpToBottom:stale')) && gateOf(rc.includes('landed:' + q84.id + '=null')) && c1.total - c0.total === T1 - T0 && gateOf(c1.card) && gateOf(c1.inView) && c1.ws === c0.ws, { c0, c1, T0, T1, held, rc });
       // (d) A SHOW THAT FAILS AFTER A JUMP PUTS BACK WHAT THE JUMP CHANGED: q81's record hidden by a CSS rule (B-2adb's shape —
       //     an element, no box); its landing reads up, jumpToIndex rebuilds the window there, the show fails
       await TAIL16(null);
@@ -563,7 +563,7 @@ try {
       await A.waitFor(`(() => { const v = ${VIEW}; return v._pinned && v._windowEnd >= v._total; })()`, 10000).catch(() => { }); await sleep(1500);
       const d1 = await A.evalJs(ST16(ids[1])), t1 = await toasts16(), rd1 = await r16();
       await A.shot('desktop-1280-r4-failed-show-pinned.png');
-      check(`(d1) (RED on b3fef024: left at records 0–50, unpinned, only a toast) a PINNED reader presses q81, whose record a CSS rule hides: the jump rebuilt the window there, the show failed — put back: pinned at the live tail again (records ${d1.ws}–${d1.we} of ${d1.total}, gap ${d1.gap}); the toast «${t1}» (${rd1.join(' → ')})`, !!rid81 && d0.pinned && rd1.includes('landed:' + ids[0] + '=null') && d1.pinned && d1.we >= d1.total && d1.gap <= 2 && /not drawn in this chat/.test(t1), { rid81, d0, d1, t1, rd1 });
+      check(`(d1) (RED on b3fef024: left at records 0–50, unpinned, only a toast) a PINNED reader presses q81, whose record a CSS rule hides: the jump rebuilt the window there, the show failed — put back: pinned at the live tail again (records ${d1.ws}–${d1.we} of ${d1.total}, gap ${d1.gap}); the toast «${t1}» (${rd1.join(' → ')})`, !!rid81 && gateOf(d0.pinned) && gateOf(rd1.includes('landed:' + ids[0] + '=null')) && gateOf(d1.pinned) && d1.we >= d1.total && d1.gap <= 2 && verdictOf(/not drawn in this chat/.test(t1)), { rid81, d0, d1, t1, rd1 });
       // (d2) a reader mid-history (q82 landed): put back at the record they were reading
       await choose(ids[1], 82); await sleep(3000);
       const READ16 = `(() => { const v = ${VIEW}, l = v._messageList, lr = l.getBoundingClientRect(); const m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => { const r = x.getBoundingClientRect(); return r.height > 0 && r.bottom > lr.top; }); return { id: m ? m.dataset.msgId : null, top: m ? Math.round(m.getBoundingClientRect().top) : null, ws: v._windowStart, we: v._windowEnd, pinned: v._pinned }; })()`;
@@ -573,7 +573,7 @@ try {
       await wait16(new RegExp('^landed:' + ids[0] + '='), 15000); await sleep(2500);
       const e1 = await A.evalJs(READ16), at1 = await A.evalJs(`(() => { const v = ${VIEW}, l = v._messageList, m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(e0.id)}); return m ? Math.round(m.getBoundingClientRect().top) : null; })()`), t2 = await toasts16(), rd2 = await r16();
       await A.shot('desktop-1280-r4-failed-show-reader.png');
-      check(`(d2) (RED on b3fef024: left at records 0–50) a reader mid-history (records ${e0.ws}–${e0.we}, reading ${e0.id} at ${e0.top}) presses q81 (hidden): put back at the record they were reading — ${e0.id} at ${at1} (records ${e1.ws}–${e1.we}), not pinned (${rd2.join(' → ')})`, !!e0.id && rd2.includes('landed:' + ids[0] + '=null') && at1 != null && Math.abs(at1 - e0.top) <= 4 && e1.ws > 0 && !e1.pinned && /not drawn in this chat/.test(t2), { e0, e1, at1, t2, rd2 });
+      check(`(d2) (RED on b3fef024: left at records 0–50) a reader mid-history (records ${e0.ws}–${e0.we}, reading ${e0.id} at ${e0.top}) presses q81 (hidden): put back at the record they were reading — ${e0.id} at ${at1} (records ${e1.ws}–${e1.we}), not pinned (${rd2.join(' → ')})`, !!e0.id && gateOf(rd2.includes('landed:' + ids[0] + '=null')) && at1 != null && Math.abs(at1 - e0.top) <= 4 && e1.ws > 0 && !e1.pinned && verdictOf(/not drawn in this chat/.test(t2)), { e0, e1, at1, t2, rd2 });
       // (d3) / (d4) B-43f3 — THE RACE, NAMED AND PLACED (the hosted red of 2026-11-07: the reader put back at 121 where they read
       //     at 63): the put-back's anchor is ONE shot measured in the rebuild's own task, and a row ABOVE the reading place whose height
       //     resolves late (content-visibility's off-screen estimate replaced by its real size) moves the reader after it. A stand-in
@@ -601,11 +601,11 @@ try {
         return { p0, p1, rd, moved: p1.at != null && p0.top != null ? p1.at - p0.top : null };
       };
       const pbB = await putBackScene('before');
-      check(`(d3) B-43f3: a row ABOVE the reading place grows 58 px BEFORE the put-back's anchor (held inside the rebuild): the reader put back at the record they were reading — ${pbB.p0.id} at ${pbB.p1.at} (read at ${pbB.p0.top})`, pbB.p1.grown && pbB.p1.calls >= 2 && pbB.moved != null && Math.abs(pbB.moved) <= 4 && pbB.rd.includes('landed:' + ids[0] + '=null'), pbB);
+      check(`(d3) B-43f3: a row ABOVE the reading place grows 58 px BEFORE the put-back's anchor (held inside the rebuild): the reader put back at the record they were reading — ${pbB.p0.id} at ${pbB.p1.at} (read at ${pbB.p0.top})`, gateOf(pbB.p1.grown) && pbB.p1.calls >= 2 && pbB.moved != null && Math.abs(pbB.moved) <= 4 && verdictOf(pbB.rd.includes('landed:' + ids[0] + '=null')), pbB);
       const pbA = await putBackScene('after');
-      check(`(d4) B-43f3: the same row grows AFTER the put-back's anchor (held until the anchor was taken — the hosted red's order): the reader is HELD at the record they were reading while the heights resolve — ${pbA.p0.id} at ${pbA.p1.at} (read at ${pbA.p0.top})`, pbA.p1.grown && pbA.p1.calls >= 2 && pbA.moved != null && Math.abs(pbA.moved) <= 4 && pbA.rd.includes('landed:' + ids[0] + '=null'), pbA);
+      check(`(d4) B-43f3: the same row grows AFTER the put-back's anchor (held until the anchor was taken — the hosted red's order): the reader is HELD at the record they were reading while the heights resolve — ${pbA.p0.id} at ${pbA.p1.at} (read at ${pbA.p0.top})`, gateOf(pbA.p1.grown) && pbA.p1.calls >= 2 && pbA.moved != null && Math.abs(pbA.moved) <= 4 && verdictOf(pbA.rd.includes('landed:' + ids[0] + '=null')), pbA);
       const pbR = await putBackScene('after', { holdOut: true });
-      check(`(d4) RED CONTROL: the same order with the hold taken out (the one shot alone, as on the release) — the reader is MOVED off the record they were reading, ${pbR.moved} px (the hosted red moved it +58; with nothing anchoring the rows' own late heights move it too): the leg reads where the reader went and can fail`, pbR.p1.grown && pbR.p1.calls >= 2 && pbR.moved != null && Math.abs(pbR.moved) >= 40, pbR);
+      check(`(d4) RED CONTROL: the same order with the hold taken out (the one shot alone, as on the release) — the reader is MOVED off the record they were reading, ${pbR.moved} px (the hosted red moved it +58; with nothing anchoring the rows' own late heights move it too): the leg reads where the reader went and can fail`, gateOf(pbR.p1.grown) && pbR.p1.calls >= 2 && pbR.moved != null && Math.abs(pbR.moved) >= 40, pbR);
       // (d5) B-43f3's DRAG TERM (the coordinator's r2579 — A PERSON'S OWN SCROLL IS NEVER FOUGHT): the put-back's hold lets go at the
       //     person's own SCROLLBAR drag. The scene DEFERS the hold: its call is kept, and the guard it raises first is raised as the real
       //     hold raises it (a drag under it stamps no reader act — the hole); the person drags the list's scrollbar for real
@@ -669,11 +669,11 @@ try {
       // r3605: THE PRECONDITION, by name — the list's own scrollbar is DRAWN before the drag (a gutter wider than 0, the list overflowing),
       // else the drag proves nothing and its control cannot go red; the facts say which (the emulation's error, the class, the width rule)
       const barSaid = (d) => `its gutter ${d.bar ? d.bar.sbw : '?'} px, the list ${d.bar && d.bar.over ? 'overflowing' : 'NOT overflowing'} (${d.bar ? d.bar.sh + ' over ' + d.bar.ch : '?'} px), scrollbar-width ${d.bar ? d.bar.sw : '?'}, the minimap's class ${d.bar && d.bar.cls ? 'ON' : 'off'} (put back ${d.readded || 0}× by a redraw, held off) — in the second Chrome (no hide flag)`;
-      check(`(d5) PRECONDITION: the list's own scrollbar is drawn before the drag — ${barSaid(dg)}`, !!dg.bar && dg.bar.sbw > 0 && dg.bar.over && !dg.bar.cls, { prep: dg.prep, bar: dg.bar, readded: dg.readded });
-      check(`(d5) B-43f3 / r2579: the person drags the list's scrollbar while the put-back's hold is due — its stop is asked (${dg.stops.length}×: ${dg.stops.join(',')}) and it lets go at once: the reader stays where they dragged (${dg.p0.id} at ${dg.after}, dragged to ${dg.dragged}, put back at ${dg.before})`, dg.asked === true && dg.dr.ok === true && !dg.stamped && dg.stops.length >= 1 && dg.stops.every((r) => r === true) && dg.movedByDrag != null && Math.abs(dg.movedByDrag) >= 20 && dg.after != null && Math.abs(dg.after - dg.dragged) <= 4, dg);
+      check(`(d5) PRECONDITION: the list's own scrollbar is drawn before the drag — ${barSaid(dg)}`, !!dg.bar && dg.bar.sbw > 0 && gateOf(dg.bar.over) && !dg.bar.cls, { prep: dg.prep, bar: dg.bar, readded: dg.readded });
+      check(`(d5) B-43f3 / r2579: the person drags the list's scrollbar while the put-back's hold is due — its stop is asked (${dg.stops.length}×: ${dg.stops.join(',')}) and it lets go at once: the reader stays where they dragged (${dg.p0.id} at ${dg.after}, dragged to ${dg.dragged}, put back at ${dg.before})`, dg.asked === true && dg.dr.ok === true && !dg.stamped && dg.stops.length >= 1 && gateOf(dg.stops.every((r) => r === true)) && dg.movedByDrag != null && Math.abs(dg.movedByDrag) >= 20 && dg.after != null && Math.abs(dg.after - dg.dragged) <= 4, dg);
       const dgR = await dragScene(B, { release: true });
-      check(`(d5) PRECONDITION (the red control's scene): the list's own scrollbar is drawn before the drag — ${barSaid(dgR)}`, !!dgR.bar && dgR.bar.sbw > 0 && dgR.bar.over && !dgR.bar.cls, { prep: dgR.prep, bar: dgR.bar, readded: dgR.readded });
-      check(`(d5) RED CONTROL: the release's hold question (only _navigatedSince) — the drag under the guard is no act, the hold's stop says no (${dgR.stops.length}×) and it pulls the reader back to the put-back's place (${dgR.p0.id} at ${dgR.after}, the put-back's aim ${dgR.aim}, dragged to ${dgR.dragged})`, dgR.asked === true && dgR.dr.ok === true && !dgR.stamped && dgR.stops.length >= 12 && dgR.stops.every((r) => r === false) && dgR.movedByDrag != null && Math.abs(dgR.movedByDrag) >= 20 && dgR.after != null && dgR.aim != null && Math.abs(dgR.after - dgR.aim) <= 4 && Math.abs(dgR.dragged - dgR.aim) >= 20, dgR);
+      check(`(d5) PRECONDITION (the red control's scene): the list's own scrollbar is drawn before the drag — ${barSaid(dgR)}`, !!dgR.bar && dgR.bar.sbw > 0 && gateOf(dgR.bar.over) && !dgR.bar.cls, { prep: dgR.prep, bar: dgR.bar, readded: dgR.readded });
+      check(`(d5) RED CONTROL: the release's hold question (only _navigatedSince) — the drag under the guard is no act, the hold's stop says no (${dgR.stops.length}×) and it pulls the reader back to the put-back's place (${dgR.p0.id} at ${dgR.after}, the put-back's aim ${dgR.aim}, dragged to ${dgR.dragged})`, dgR.asked === true && dgR.dr.ok === true && !dgR.stamped && dgR.stops.length >= 12 && gateOf(dgR.stops.every((r) => r === false)) && dgR.movedByDrag != null && Math.abs(dgR.movedByDrag) >= 20 && dgR.after != null && dgR.aim != null && Math.abs(dgR.after - dgR.aim) <= 4 && Math.abs(dgR.dragged - dgR.aim) >= 20, dgR);
       B.close(); try { chromeBars.kill('SIGKILL'); } catch { }   // r3653: the second Chrome ended by its own handle (the exit's cleanup removes its profile)
       await A.evalJs(`(() => { document.getElementById('hide16')?.remove(); return 1; })()`);
       await TAIL16(null);
@@ -719,7 +719,7 @@ try {
     const d1 = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-one.png');
     check(`r10 (RED on bd5c5fd98: no strip — the count was a status-bar chip) ONE item ⇒ the strip stands BETWEEN the transcript and the message box (dock ${d1 && d1.dock.top}–${d1 && d1.dock.bottom}, list ends ${d1 && d1.list.bottom}, box starts ${d1 && d1.comp && d1.comp.top}; never inside the list): «${d1 && d1.count}» · «${d1 && d1.q}» on ONE line (${d1 && d1.qH} px), its verbs (${d1 && d1.targets.map((x) => x.k).join(' / ')}), no «View all»`,
-      between(d1) && d1.rows === 1 && d1.id === a1.id && d1.all === null && /waiting for you · a question/.test(d1.count) && d1.qH <= 30 && VERBS4(d1), d1);
+      gateOf(between(d1)) && d1.rows === 1 && d1.id === a1.id && d1.all === null && gateOf(/waiting for you · a question/.test(d1.count)) && d1.qH <= 30 && verdictOf(VERBS4(d1)), d1);
     const s1 = await A.evalJs(`document.querySelectorAll('.chat-status-foryou').length`);
     check('r10 …and the status bar carries no «waiting for you» chip any more (ONE place says it: the strip)', s1 === 0, s1);
     // (2) THREE ⇒ the count, the newest, the door
@@ -730,7 +730,7 @@ try {
     const d3 = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-three.png');
     check(`r10 THREE ⇒ the count «${d3 && d3.count}», the NEWEST (${d3 && d3.q}), «${d3 && d3.all}» — one row, never a «show more» in the strip; the same height as one (${d1 && d1.dock.h} → ${d3 && d3.dock.h} px)`,
-      between(d3) && d3.rows === 1 && d3.id === a3.id && /^2 more · View all$/.test(d3.all || '') /* lane foryou-dock-layout: how many MORE, on the head's line */ && Math.abs(d3.dock.h - d1.dock.h) <= 2, d3);
+      gateOf(between(d3)) && d3.rows === 1 && d3.id === a3.id && gateOf(/^2 more · View all$/.test(d3.all || '')) /* lane foryou-dock-layout: how many MORE, on the head's line */ && Math.abs(d3.dock.h - d1.dock.h) <= 2, d3);
     // «View all» ⇒ the For-you window scoped to THIS conversation
     await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return 1; })()`);
     await A.press('.chat-attn-dock .cad-all', { touch: false });
@@ -743,12 +743,12 @@ try {
     await A.evalJs(`(() => { window.__d17 = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains('chat-ask-flash') && m.target.dataset?.item) window.__d17.push(m.target.dataset.item); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); return 1; })()`);
     await A.press('.chat-attn-dock .cad-jump', { touch: false }) /* the landing is its own worded door (lane ui-phone-and-fit pick 0: the question now opens the item in place) */; await sleep(900);
     const fl = await A.evalJs('window.__d17 || []'), c3 = await A.evalJs(CARD(a3 && a3.id));
-    check(`r10 a tap on the strip's question lands the ORIGINAL card in the flow — its card open in its tool card, in view, flashed (${J(fl)})`, fl.includes(a3.id) && !!c3 && c3.open && c3.rect.top >= c3.list.top - 1 && c3.rect.bottom <= c3.list.bottom + 1, { fl, c3 });
+    check(`r10 a tap on the strip's question lands the ORIGINAL card in the flow — its card open in its tool card, in view, flashed (${J(fl)})`, gateOf(fl.includes(a3.id)) && !!c3 && gateOf(c3.open) && c3.rect.top >= c3.list.top - 1 && c3.rect.bottom <= c3.list.bottom + 1, { fl, c3 });
     // ONE PRESS ANSWERS, the strip updates IN PLACE (the same element, the next newest)
     await A.press('.chat-attn-dock .cad-rows .ut-item .ut-done', { touch: false });
     await dockIs(A, a2 && a2.id, '2 questions'); await sleep(300);
     const d2 = await A.evalJs(DOCK), gone3 = !(await api()).open.some((i) => i.id === a3.id);
-    check(`r10 ONE PRESS on the strip's ✓ answers it (resolved on the hub: ${gone3}) and the strip updates IN PLACE — the same element (tag ${d2 && d2.tag}), the next newest «${d2 && d2.q}», «${d2 && d2.count}»`, gone3 && !!d2 && d2.tag === 3 && d2.id === a2.id, d2);
+    check(`r10 ONE PRESS on the strip's ✓ answers it (resolved on the hub: ${gone3}) and the strip updates IN PLACE — the same element (tag ${d2 && d2.tag}), the next newest «${d2 && d2.q}», «${d2 && d2.count}»`, gateOf(gone3) && !!d2 && d2.tag === 3 && d2.id === a2.id, d2);
     // (3) ANSWERED ON THE PHONE while the desktop shows it — B at 390×844 touch, the same conversation
     await B.front(); await toConv(B, sid, [], 390, 844, true);
     await dockIs(B, a2 && a2.id, '2 questions'); await sleep(500);
@@ -757,12 +757,12 @@ try {
     await B.shot('phone-390-dock-two.png');
     const small = p2 ? p2.targets.filter((x) => x.h < 44 || x.w < 44) : [];
     check(`r10 THE PHONE (390×844 touch): the same strip above the message box — its question ${p2 && p2.qPx} px (≥ 16), every target ≥ 44 × 44 with its word (${p2 && p2.targets.map((x) => x.k + ' ' + x.w + '×' + x.h).join(', ')})`,
-      overChat(p2) && p2.qPx >= 16 && small.length === 0 && VERBS4(p2), { p2, small }); // OPENED, it floats over the transcript on the message box (lane ui-phone-and-fit pick 0)
+      gateOf(overChat(p2)) && p2.qPx >= 16 && small.length === 0 && verdictOf(VERBS4(p2)), { p2, small }); // OPENED, it floats over the transcript on the message box (lane ui-phone-and-fit pick 0)
     await A.evalJs(`(() => { window.__d17s = []; const f = () => { const d = ${VIEW}._attnDock, r = d.querySelector('.cad-rows > .ut-item'); window.__d17s.push((r ? r.dataset.id : '-') + '/' + ((d.querySelector('.cad-count') || {}).textContent || '')); if (window.__d17s.length < 400) setTimeout(f, 10); }; f(); return 1; })()`);
     await B.press('.chat-attn-dock .cad-rows .ut-item .ut-done', { touch: true });
     await A.front(); const moved = await dockIs(A, a1 && a1.id, 'a question');
     const seen = [...new Set(await A.evalJs('window.__d17s || []'))];
-    check(`r10 the item answered ON THE PHONE leaves the desktop's strip live — the next one, the count in the same pass (${seen.join(' → ')})`, moved === true && seen.length === 2 && seen[0].startsWith(a2.id + '/') && seen[1].startsWith(a1.id + '/'), seen);
+    check(`r10 the item answered ON THE PHONE leaves the desktop's strip live — the next one, the count in the same pass (${seen.join(' → ')})`, moved === true && seen.length === 2 && gateOf(seen[0].startsWith(a2.id + '/')) && verdictOf(seen[1].startsWith(a1.id + '/')), seen);
     // (4) MANY ⇒ still ONE row, the same height. THE STORE'S FLOOD GUARD caps a conversation's OWN open items at 20
     //     (src/user-todos.js MAX_OPEN_PER_SESSION — an agent looping on add); 29 more asked ⇒ 19 taken, 10 refused by the
     //     store (said to the agent, by name). Thirty in one strip needs items filed ABOUT it under another key — PURE ④'s
@@ -775,7 +775,7 @@ try {
     const d30 = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-twenty.png');
     const refused = (cliLog().match(/already has 20 open items/g) || []).length;
-    check(`r10 MANY (29 more asked: the store took ${t20.length - 1}, refused ${refused} — its flood guard, 20 open per conversation) ⇒ «${d30 && d30.count}» + the newest + «${d30 && d30.all}» — still ONE row, the same height (${d30 && d30.dock.h} px)`, t20.length === 20 && refused === 10 && between(d30) && d30.rows === 1 && d30.id === newest20.id && /^19 more · View all$/.test(d30.all || '') && Math.abs(d30.dock.h - d1.dock.h) <= 2, { n: t20.length, refused, d30 });
+    check(`r10 MANY (29 more asked: the store took ${t20.length - 1}, refused ${refused} — its flood guard, 20 open per conversation) ⇒ «${d30 && d30.count}» + the newest + «${d30 && d30.all}» — still ONE row, the same height (${d30 && d30.dock.h} px)`, t20.length === 20 && refused === 10 && gateOf(between(d30)) && d30.rows === 1 && d30.id === newest20.id && gateOf(/^19 more · View all$/.test(d30.all || '')) && Math.abs(d30.dock.h - d1.dock.h) <= 2, { n: t20.length, refused, d30 });
     await B.front(); await toConv(B, sid, [], 390, 844, true); await dockIs(B, newest20 && newest20.id, '20 questions'); await sleep(400);
     await B.shot('phone-390-dock-twenty.png'); await A.front();
     for (const it of t20.slice(0, 5)) await done(it.id); // (room for the shapes below: 15 open)
@@ -787,7 +787,7 @@ try {
     const dB = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-400-chars.png');
     // THE OPTIONS LAW ② (the owner 2026-11-13): when options stand the question may take TWO lines before its cut (was: ONE line)
-    check(`r10 a ${big ? big.text.length : 0}-character question ⇒ at most TWO lines in the strip, cut at its clamp (${dB && dB.qCut}), the strip ${dB && dB.dock.h} px (one line more than ${d1 && d1.dock.h} at most)`, !!big && big.text.length >= 400 && between(dB) && dB.qCut && dB.qH <= 48 && dB.dock.h - d1.dock.h <= 24, dB);
+    check(`r10 a ${big ? big.text.length : 0}-character question ⇒ at most TWO lines in the strip, cut at its clamp (${dB && dB.qCut}), the strip ${dB && dB.dock.h} px (one line more than ${d1 && d1.dock.h} at most)`, !!big && big.text.length >= 400 && gateOf(between(dB)) && gateOf(dB.qCut) && dB.qH <= 48 && dB.dock.h - d1.dock.h <= 24, dB);
     // (6) SIX OPTIONS ⇒ the chips on ONE line beside the question's row (sideways if they must), never a wall
     sayTo(sid, 'six choices do:six');
     const [six] = await byText(/^Which region do we open next/, 1, 60000);
@@ -797,24 +797,24 @@ try {
     // THE OPTIONS LAW (lane ui-phone-and-fit pick 0 — the owner 2026-11-13, a 500 px window: «回复：保留 ag», the rest cut by the
     // window's edge; 主开发's law: the options on a line of their own, WRAPPING, never a sideways scroll): was «six chips on ONE line»
     const whole = (x) => !!x && x.chips.length === 6 && x.chips.every((c) => c.left >= x.dock.left - 1 && c.right <= x.dock.right + 1) && x.over <= 1 && !x.optsScroll;
-    check(`r10 SIX OPTIONS ⇒ six chips, each whole inside the strip (tops ${d6 && d6.chips.map((c) => c.top).join(',')}), no sideways scroll, the strip ${d6 && d6.dock.h} px`, between(d6) && whole(d6) && d6.dock.h <= 3 * d1.dock.h + 8, d6);
+    check(`r10 SIX OPTIONS ⇒ six chips, each whole inside the strip (tops ${d6 && d6.chips.map((c) => c.top).join(',')}), no sideways scroll, the strip ${d6 && d6.dock.h} px`, gateOf(between(d6)) && gateOf(whole(d6)) && d6.dock.h <= 3 * d1.dock.h + 8, d6);
     await B.front(); await toConv(B, sid, [], 390, 844, true); await dockIs(B, six && six.id, '17 questions'); await sleep(400);
     await openStrip(B); // (lane phone-dock-restore: opened)
     const p6 = await B.evalJs(DOCK);
     await B.shot('phone-390-dock-six-options.png'); await A.front(); await sleep(300);
-    check(`r10 …on the phone the six chips WRAP inside the opened strip (${p6 && p6.chips.length} chips, ${p6 && p6.chips.filter((c) => c.h >= 44).length} at ≥ 44 px), none past its edge, no sideways scroll; the strip ${p6 && p6.dock.h} px ≤ 45 % of the screen`, overChat(p6) && whole(p6) && p6.chips.every((c) => c.h >= 44) && p6.dock.h <= 0.45 * 844 + 8, p6);
+    check(`r10 …on the phone the six chips WRAP inside the opened strip (${p6 && p6.chips.length} chips, ${p6 && p6.chips.filter((c) => c.h >= 44).length} at ≥ 44 px), none past its edge, no sideways scroll; the strip ${p6 && p6.dock.h} px ≤ 45 % of the screen`, gateOf(overChat(p6)) && gateOf(whole(p6)) && gateOf(p6.chips.every((c) => c.h >= 44)) && p6.dock.h <= 0.45 * 844 + 8, p6);
     // (7) A WINDOW 320 px WIDE ⇒ the row under the head, nothing past the strip's edge
     await A.evalJs(`(() => { const w = ${CHAT(sid)}; if (!w) return false; if (w.isMaximized) app.wm.toggleMaximize(w.id); app.wm.resizeWindowTo(w.id, { w: 320, h: 700 }); return true; })()`); await sleep(900);
     const dN = await A.evalJs(DOCK);
     await A.shot('desktop-320-dock.png');
     const outside = dN ? dN.targets.filter((x) => x.left < dN.dock.left - 1 || x.right > dN.dock.right + 1) : [];   // the chips too (the options law)
-    check(`r10 a window 320 px wide: the strip fits (overflow ${dN && dN.over} px, ${outside.length} verbs or chips past its edge, the options wrap — no sideways scroll: ${dN && !dN.optsScroll}), still between the transcript and the message box`, between(dN) && dN.over <= 1 && outside.length === 0 && !dN.optsScroll && dN.dock.w <= 322, { dN, outside });
+    check(`r10 a window 320 px wide: the strip fits (overflow ${dN && dN.over} px, ${outside.length} verbs or chips past its edge, the options wrap — no sideways scroll: ${dN && !dN.optsScroll}), still between the transcript and the message box`, gateOf(between(dN)) && dN.over <= 1 && outside.length === 0 && !dN.optsScroll && dN.dock.w <= 322, { dN, outside });
     await A.evalJs(`(() => { const w = ${CHAT(sid)}; if (w && !w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`); await sleep(700);
     // (8) THE COMPOSER GROWN TO 6 LINES ⇒ the strip rides above it, whole
     await A.evalJs(`(() => { const ta = document.querySelector(${J('.chat-input-area textarea')}); ta.focus(); ta.value = 'one\\ntwo\\nthree\\nfour\\nfive\\nsix'; ta.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`); await sleep(700);
     const dC = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-composer-6-lines.png');
-    check(`r10 the message box grown to 6 lines (${dC && dC.comp && dC.comp.h} px): the strip stands above it, whole (${dC && dC.dock.h} px)`, between(dC) && dC.comp.h > 120 && Math.abs(dC.dock.h - d6.dock.h) <= 2, dC);
+    check(`r10 the message box grown to 6 lines (${dC && dC.comp && dC.comp.h} px): the strip stands above it, whole (${dC && dC.dock.h} px)`, gateOf(between(dC)) && dC.comp.h > 120 && Math.abs(dC.dock.h - d6.dock.h) <= 2, dC);
     await A.evalJs(`(() => { const ta = document.querySelector(${J('.chat-input-area textarea')}); ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); ta.blur(); return 1; })()`); await sleep(500);
     // (9) A FILING WHILE THE OWNER IS 5000 px UP ⇒ the strip shows it, the flow is untouched, no scroll jump; the strip never
     //     moves when the transcript scrolls
@@ -892,7 +892,7 @@ try {
     await A.shot('desktop-1280-announce-one.png');
     const hist = await A.evalJs(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').filter((h) => h.ref && h.ref.id === ${J(q401 && q401.id)}).map((h) => ({ m: h.m, ref: h.ref }))`);
     check(`r10+ r11 (RED on bd5c5fd98: a generic toast, no flash, no clock; RED on 7ec6c6dcf: the toast REPLACED, no history entry) ONE band-1 ask from a window not in front ⇒ THE TOAST, GROWN: its toast stands (its history entry ${J(hist[0] || null)}), that window FLASHES (title bar + its taskbar button: the waiting blink), its strip's count wears the fill (${a1.w1 && a1.w1.fill}); ONE card at the For-you button — above it, NO popover — «${a1.cards[0] && a1.cards[0].who} · ${a1.cards[0] && a1.cards[0].what}»; the button pulsed`,
-      !!q401 && hist.length === 1 && hist[0].ref.kind === 'todo' && !/Stress question/.test(hist[0].m) && a1.toasts.includes(q401.id) && a1.shown && !a1.popover && a1.above && a1.cards.length === 1 && a1.cards[0].id === q401.id && /Stress question 401/.test(a1.cards[0].what) && !!a1.w1 && a1.w1.waiting && a1.w1.announce && a1.w1.tbWaiting && a1.w1.fill && !/rgba\(0, 0, 0, 0\)|transparent/.test(a1.w1.fill) && !!a1.w2 && !a1.w2.announce && a1.blink, a1);
+      !!q401 && hist.length === 1 && hist[0].ref.kind === 'todo' && !/Stress question/.test(hist[0].m) && gateOf(a1.toasts.includes(q401.id)) && gateOf(a1.shown) && !a1.popover && gateOf(a1.above) && a1.cards.length === 1 && a1.cards[0].id === q401.id && gateOf(/Stress question 401/.test(a1.cards[0].what)) && !!a1.w1 && gateOf(a1.w1.waiting) && gateOf(a1.w1.announce) && gateOf(a1.w1.tbWaiting) && gateOf(a1.w1.fill) && !/rgba\(0, 0, 0, 0\)|transparent/.test(a1.w1.fill) && !!a1.w2 && !a1.w2.announce && verdictOf(a1.blink), a1);
     // (b) TEN IN A MINUTE (the owner's loop) ⇒ one stack: the newest three + «N more», one card per item
     await A.evalJs(`(() => { window.__annSeen18 = {}; const mark = () => { for (const c of document.querySelectorAll('.ut-announce > .uta-card[data-id]')) if (!(c.dataset.id in window.__annSeen18)) window.__annSeen18[c.dataset.id] = Date.now(); }; window.__annMo18 = new MutationObserver(mark); window.__annMo18.observe(document.body, { childList: true, subtree: true }); mark(); return 1; })()`);   // B-fbcc r2: (d) reads when each card was first drawn
     sayTo(s1, 'ten more do:par ' + Array.from({ length: 10 }, (_, k) => 'do:u' + (402 + k)).join(' '));
@@ -903,12 +903,12 @@ try {
     // r14: NOTHING TRANSIENT ON A WINDOW'S SEND (the acceptance's own shot of r13: the first card over Session 10's Send; the shot of
     // the first r14 commits: the four toasts there instead) — at every shown chat window's Send the topmost thing is the Send
     const sends = await A.evalJs(`[...document.querySelectorAll('.window .chat-input-area .chat-send-btn')].filter((b) => b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden').map((b) => { const r = b.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, h = document.elementFromPoint(x, y); const win = b.closest('.window'), front = h && h.closest('.window'); return { at: [Math.round(x), Math.round(y)], top: h === b || b.contains(h) ? 'send' : !h ? 'none' : h.closest('#global-toasts') ? 'a toast' : h.closest('.ut-announce') ? 'the stack' : front && front !== win ? 'another window' : (h.className || h.tagName).toString().slice(0, 24) }; })`);
-    check(`r14 TEN IN A MINUTE: no toast and no card on a window's Send — at each Send the topmost thing is the Send or a window in front of it (${J(sends.map((x) => x.top))})`, sends.length >= 1 && sends.every((x) => x.top === 'send' || x.top === 'another window'), sends);
+    check(`r14 TEN IN A MINUTE: no toast and no card on a window's Send — at each Send the topmost thing is the Send or a window in front of it (${J(sends.map((x) => x.top))})`, sends.length >= 1 && verdictOf(sends.every((x) => x.top === 'send' || x.top === 'another window')), sends);
     // the newest three BY FILING TIME, a same-ms tie by id — ONE order (PURE newestFirst: the stack's, the dock's, this oracle's;
     // r11 — the heavy on 7ec6c6dcf showed 408 where the leg's own sort had picked its same-ms twin: the stack broke a tie by
     // when its card was made)
     const want3 = [...t11].sort(FA.newestFirst).slice(0, 3).map((i) => i.id), ties = t11.length - new Set(t11.map((i) => i.createdAt)).size;
-    check(`r10+ r11 TEN IN A MINUTE ⇒ ONE stack: ${a2.all} cards (one per item), EXACTLY the newest three in order (${ties} same-ms tie(s) in the batch, broken by id) + «${a2.more}» — never a wall`, a2.all === 11 && a2.cards.length === 3 && a2.cards.map((c) => c.id).join() === want3.join() && /^8 more waiting/.test(a2.more || ''), { got: a2.cards.map((c) => c.id), want3, filed: [...t11].sort(FA.newestFirst).slice(0, 5).map((i) => [i.id, i.createdAt]) });
+    check(`r10+ r11 TEN IN A MINUTE ⇒ ONE stack: ${a2.all} cards (one per item), EXACTLY the newest three in order (${ties} same-ms tie(s) in the batch, broken by id) + «${a2.more}» — never a wall`, a2.all === 11 && a2.cards.length === 3 && a2.cards.map((c) => c.id).join() === want3.join() && verdictOf(/^8 more waiting/.test(a2.more || '')), { got: a2.cards.map((c) => c.id), want3, filed: [...t11].sort(FA.newestFirst).slice(0, 5).map((i) => [i.id, i.createdAt]) });
     // (c) ANSWERED ELSEWHERE ⇒ its card goes (multi-client live)
     const gone = a2.cards[0] && a2.cards[0].id;
     await done(gone);
@@ -944,7 +944,7 @@ try {
     const a4 = await A.evalJs(ANN), e1 = a4.cards.find((c) => c.id === exp), h1 = await A.evalJs(held18);
     await A.shot('desktop-1280-announce-expired.png');
     const said18 = (e) => (e ? e.clock : 'no card');
-    check(pin18 && pin18.short ? `r10+ a card whose item expires while it is up: the card's ${ANN_MS18} ms display time was nearly spent before (d) (first drawn ${pin18.seenAgo} ms ago) — the leg's precondition, named (B-fbcc r2)` : `r10+ a card whose item expires while it is up: «${said18(e0)}» → «${said18(e1)}» — it SAYS expired and stays (a late card), never vanishing like one answered`, ANN_MS18 > 0 && !!pin18 && pin18.stamped === 1 && left18 && over18 && !!e0 && /^\d s left$/.test(e0.clock) && !!e1 && e1.expired && e1.clock === 'expired', { e0, e1, pin: pin18, clockShown: left18, expiredShown: over18, held: [h0, h1], cards: a4.cards.map((c) => c.id) });
+    check(pin18 && pin18.short ? `r10+ a card whose item expires while it is up: the card's ${ANN_MS18} ms display time was nearly spent before (d) (first drawn ${pin18.seenAgo} ms ago) — the leg's precondition, named (B-fbcc r2)` : `r10+ a card whose item expires while it is up: «${said18(e0)}» → «${said18(e1)}» — it SAYS expired and stays (a late card), never vanishing like one answered`, ANN_MS18 > 0 && !!pin18 && pin18.stamped === 1 && gateOf(left18) && gateOf(over18) && !!e0 && gateOf(/^\d s left$/.test(e0.clock)) && !!e1 && gateOf(e1.expired) && e1.clock === 'expired', { e0, e1, pin: pin18, clockShown: left18, expiredShown: over18, held: [h0, h1], cards: a4.cards.map((c) => c.id) });
     await A.evalJs(`(() => { const m = app._inboxModel; if (window.__todos18) { Object.defineProperty(m, 'todos', window.__todos18); delete window.__todos18; delete window.__todosHeld18; } if (window.__gh18) { app.ws.globalHandlers.splice(0, window.__gh18.length, ...window.__gh18); delete window.__gh18; } if (window.__annMo18) { window.__annMo18.disconnect(); delete window.__annMo18; } return 1; })()`);
     // (e) TWO WINDOWS ASKING AT ONCE (the For-you window in front): both flash, a card each
     await A.evalJs(`(() => { app.openInbox(); return 1; })()`); await sleep(900);
@@ -953,19 +953,19 @@ try {
     await A.waitFor(`(() => { const x = ${ANN}; return x.cards.some((c) => c.id === ${J(q412 && q412.id)}) && x.cards.some((c) => c.id === ${J(q413 && q413.id)}) && x.w2 && x.w2.waiting; })()`, 10000); await sleep(500);
     const a5 = await A.evalJs(ANN);
     await A.shot('desktop-1280-announce-two-windows.png');
-    check(`r10+ TWO WINDOWS ASKING AT ONCE (another window in front) ⇒ both flash (their title bars + taskbar buttons), both strips filled, a card each at the top of the stack («${a5.cards.map((c) => c.who).join('», «')}»)`, !!a5.w1 && a5.w1.waiting && a5.w1.announce && !!a5.w2 && a5.w2.waiting && a5.w2.announce && a5.w2.tbWaiting && a5.cards.slice(0, 2).map((c) => c.id).sort().join() === [q412.id, q413.id].sort().join(), a5);
+    check(`r10+ TWO WINDOWS ASKING AT ONCE (another window in front) ⇒ both flash (their title bars + taskbar buttons), both strips filled, a card each at the top of the stack («${a5.cards.map((c) => c.who).join('», «')}»)`, !!a5.w1 && gateOf(a5.w1.waiting) && gateOf(a5.w1.announce) && !!a5.w2 && gateOf(a5.w2.waiting) && gateOf(a5.w2.announce) && gateOf(a5.w2.tbWaiting) && a5.cards.slice(0, 2).map((c) => c.id).sort().join() === [q412.id, q413.id].sort().join(), a5);
     await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return 1; })()`); await sleep(400);
     // (f) SEEN: a press on window 2 ⇒ its flash and its strip's fill end; window 1 still flashes
     const w2c = await A.evalJs(`(() => { const r = ${CHAT(s2)}.element.querySelector('.chat-message-list').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 40) }; })()`);
     await A.clickAt(w2c.x, w2c.y); await sleep(500);
     const a6 = await A.evalJs(ANN);
-    check('r10+ SEEN: a press on window 2 ends ITS flash and its strip\'s fill (the waiting blink\'s own clear); window 1, unseen, still flashes', !!a6.w2 && !a6.w2.waiting && !a6.w2.announce && !!a6.w1 && a6.w1.waiting && a6.w1.announce, a6);
+    check('r10+ SEEN: a press on window 2 ends ITS flash and its strip\'s fill (the waiting blink\'s own clear); window 1, unseen, still flashes', !!a6.w2 && !a6.w2.waiting && !a6.w2.announce && !!a6.w1 && gateOf(a6.w1.waiting) && verdictOf(a6.w1.announce), a6);
     // (g) ONE PRESS OPENS IT: the card of q412 ⇒ window 1 in front, the card landed; its stack card gone, its flash ends
     await A.evalJs(`(() => { window.__d18 = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains('chat-ask-flash') && m.target.dataset?.item) window.__d18.push(m.target.dataset.item); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); return 1; })()`);
     const top7 = await A.evalJs(`(() => { const c = document.querySelector('.ut-announce .uta-card[data-id="${q412 && q412.id}"] .uta-go'); if (!c) return null; const r = c.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return h === c || c.contains(h) ? 'the card' : h ? (h.closest('#global-toasts') ? 'a toast' : (h.className || h.tagName).toString().slice(0, 30)) : null; })()`);
     await A.press(`.ut-announce .uta-card[data-id="${q412 && q412.id}"] .uta-go`, { touch: false }); await sleep(1500);
     const a7 = await A.evalJs(ANN), fl = await A.evalJs('window.__d18 || []');
-    check(`r10+ ONE PRESS on a card opens its item (THE For-you door): the topmost thing at its centre is the card (${top7} — r14: on fb61162f9 a toast stood there, the stack having moved from under it), window 1 in front, its card landed (${J(fl)}), the stack card gone, window 1's flash ended (seen)`, top7 === 'the card' && !a7.cards.some((c) => c.id === q412.id) && !!a7.w1 && a7.w1.active && !a7.w1.waiting && !a7.w1.announce && fl.includes(q412.id), { top7, a7, fl });
+    check(`r10+ ONE PRESS on a card opens its item (THE For-you door): the topmost thing at its centre is the card (${top7} — r14: on fb61162f9 a toast stood there, the stack having moved from under it), window 1 in front, its card landed (${J(fl)}), the stack card gone, window 1's flash ended (seen)`, top7 === 'the card' && !a7.cards.some((c) => c.id === q412.id) && !!a7.w1 && gateOf(a7.w1.active) && !a7.w1.waiting && !a7.w1.announce && verdictOf(fl.includes(q412.id)), { top7, a7, fl });
     // (g2) r11 THE BLINK HAS REASONS (the r10 acceptance): window 2 (not in front) files a band-1 ask and its turn ENDS — the
     // announce's flash first, then the turn's «finished»; the ask answered on another client ⇒ the announce's part goes, the
     // turn's blink STAYS (7ec6c6dcf decided once whose blink it was and cleared it)
@@ -978,7 +978,7 @@ try {
     await A.waitFor(`(() => { const x = ${ANN}; return !x.cards.some((c) => c.id === ${J(q415 && q415.id)}); })()`, 8000); await sleep(600);
     const g2 = await A.evalJs(ANN);
     check(`RED-able (r11 — 7ec6c6dcf: the blink ended with the answer): THE BLINK HAS REASONS — window 2's band-1 ask flashed it, then its turn ended (reasons ${J(why0)}); the ask answered elsewhere ⇒ its card and the strip's fill go, the turn's blink STAYS (title bar + taskbar button) until the window is seen`,
-      J(why0) === J(['ask', 'turn']) && !!g2.w2 && g2.w2.waiting && g2.w2.tbWaiting && !g2.w2.announce && !g2.w2.active, { why0, w2: g2.w2 });
+      J(why0) === J(['ask', 'turn']) && !!g2.w2 && gateOf(g2.w2.waiting) && gateOf(g2.w2.tbWaiting) && !g2.w2.announce && !g2.w2.active, { why0, w2: g2.w2 });
     // (a point of window 2's own list that no other window covers — window 1, in front since (g), may overlap it)
     const w2d = await A.evalJs(`(() => { const w = ${CHAT(s2)}, r = w.element.querySelector('.chat-message-list').getBoundingClientRect(); for (let y = r.top + 12; y < r.bottom - 12; y += 16) for (let x = r.left + 12; x < r.right - 12; x += 16) { const h = document.elementFromPoint(x, y); if (h && w.element.contains(h) && h.closest('.chat-message-list')) return { x: Math.round(x), y: Math.round(y) }; } return null; })()`);
     if (w2d) await A.clickAt(w2d.x, w2d.y); await sleep(500);
@@ -991,7 +991,7 @@ try {
     for (const type of ['keyDown', 'keyUp']) await A.cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await sleep(400);
     const g4 = await A.evalJs(ANN);
-    check('RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: the first Esc removed it): the stack is a transient toast, NO popover — Esc goes to the real popover / window and the card stays; no [data-popover] is it', g4.shown && !g4.popover && g4.cards.some((c) => c.id === q416.id), g4);
+    check('RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: the first Esc removed it): the stack is a transient toast, NO popover — Esc goes to the real popover / window and the card stays; no [data-popover] is it', gateOf(g4.shown) && !g4.popover && verdictOf(g4.cards.some((c) => c.id === q416.id)), g4);
     // (g4) r11 A RESYNC'S BURST (an overnight sleep: one snapshot brings 20 band-1 asks and 20 plain questions filed meanwhile)
     for (const it of (await api()).open) await done(it.id);
     await A.waitFor(`(() => { const x = ${ANN}; return x.all === 0; })()`, 8000).catch(() => null);
@@ -1001,7 +1001,7 @@ try {
     const g5 = await A.evalJs(ANN);
     await A.shot('desktop-1280-announce-resync.png');
     check(`r11 A RESYNC'S BURST (20 band-1 asks + 20 plain questions in one snapshot) ⇒ ONE stack: ${g5.all} cards (the 20 inside the policy, none of the 20 outside it), the newest three shown + ONE «${g5.more}»; the toasts their own cap (${g5.toasts.length} ≤ 4) — never a storm`,
-      g5.all === 20 && g5.cards.length === 3 && g5.cards.map((c) => c.id).join() === 'ut-r11u019,ut-r11u018,ut-r11u017' && /^17 more waiting/.test(g5.more || '') && g5.toasts.length <= 4 && !g5.cards.some((c) => /^ut-r11q/.test(c.id)), g5);
+      g5.all === 20 && g5.cards.length === 3 && g5.cards.map((c) => c.id).join() === 'ut-r11u019,ut-r11u018,ut-r11u017' && gateOf(/^17 more waiting/.test(g5.more || '')) && g5.toasts.length <= 4 && !g5.cards.some((c) => /^ut-r11q/.test(c.id)), g5);
     await A.evalJs(PUSH('[]'));
     await A.waitFor(`(() => { const x = ${ANN}; return x.all === 0; })()`, 8000).catch(() => null);
     // (h) THE PHONE (390×844 touch): a page of its own on conversation 1; window 2's ask ⇒ the card UNDER the top bar, 44 px targets, the button pulsed
@@ -1018,7 +1018,7 @@ try {
         return { under: !!br && sr.top >= br.bottom - 1, nav: !!br, t, what: getComputedStyle(s.querySelector('.uta-what')).fontSize, blink: !!b && b.classList.contains('ut-blink'), w: Math.round(sr.width), vw: innerWidth }; })()`);
       await P3.shot('phone-390-announce.png');
       const small = ph.t.filter((x) => x.h < 44 || x.w < 44);
-      check(`r10+ THE PHONE: the card stands UNDER the top bar's For-you button, inside the screen (${ph.w} of ${ph.vw} px), its words ${ph.what}, every target ≥ 44 px (${ph.t.map((x) => x.k.split(' ')[0] + ' ' + x.w + '×' + x.h).join(', ')}), the button pulsed once`, ph.nav && ph.under && ph.w <= ph.vw && parseFloat(ph.what) >= 16 && !small.length && ph.blink, { ph, small });
+      check(`r10+ THE PHONE: the card stands UNDER the top bar's For-you button, inside the screen (${ph.w} of ${ph.vw} px), its words ${ph.what}, every target ≥ 44 px (${ph.t.map((x) => x.k.split(' ')[0] + ' ' + x.w + '×' + x.h).join(', ')}), the button pulsed once`, gateOf(ph.nav) && gateOf(ph.under) && ph.w <= ph.vw && parseFloat(ph.what) >= 16 && !small.length && verdictOf(ph.blink), { ph, small });
     } finally { await P3.close(); await A.cdp('Target.closeTarget', { targetId: tP3.id }).catch(() => null); }
     for (const it of (await api()).open) await done(it.id);
   } catch (e) { fail++; console.log('  ✗ ⑱ threw: ' + (e?.message || e)); }
@@ -1058,15 +1058,15 @@ try {
     const r1 = await A.evalJs(R9);
     await A.shot('desktop-1280-reach-card.png');
     check(`RED-able (r11 — 7ec6c6dcf: card=null, the dock's hidden copy took the check): the automation card stands in the flow and in the strip; its REACH radios are the card's alone (the strip draws ${r1.dockRadios} of them), ONE group of its own (${r1.names.join()} — ${r1.shared} radios of that name in the page), «opened» checked by default`,
-      r1.card && r1.dock && r1.dockRadios === 0 && r1.cardRadios === 3 && r1.names.length === 1 && r1.shared === 3 && r1.cardPick === 'opened', r1);
-    check(`RED-able (r12 — 9f8b8d846: the strip said no reach): the strip SAYS the reach its answers carry — «${r1.word}» (${r1.px} px) beside them, its Always «${r1.always}»; the card keeps «${r1.cardAlways}» beside its radios`, saysAll(r1, 'opened') && r1.cardAlways === 'Always for this conversation', r1);
+      gateOf(r1.card) && gateOf(r1.dock) && r1.dockRadios === 0 && r1.cardRadios === 3 && r1.names.length === 1 && r1.shared === 3 && r1.cardPick === 'opened', r1);
+    check(`RED-able (r12 — 9f8b8d846: the strip said no reach): the strip SAYS the reach its answers carry — «${r1.word}» (${r1.px} px) beside them, its Always «${r1.always}»; the card keeps «${r1.cardAlways}» beside its radios`, gateOf(saysAll(r1, 'opened')) && r1.cardAlways === 'Always for this conversation', r1);
     await A.press(`.cn-card .ut-item[data-id="ut-r11reach01"] .ut-ak-reach-groups`, { touch: false }); await sleep(300);
     const r2 = await A.evalJs(R9); // (no broadcast between: the pick alone)
-    check(`RED-able (r12 — 9f8b8d846): a pick made on the CARD rewords the strip BEFORE any press — «${r2.word}», «${r2.always}»`, r2.cardPick === 'groups' && saysAll(r2, 'groups'), r2);
+    check(`RED-able (r12 — 9f8b8d846): a pick made on the CARD rewords the strip BEFORE any press — «${r2.word}», «${r2.always}»`, r2.cardPick === 'groups' && verdictOf(saysAll(r2, 'groups')), r2);
     await A.evalJs(PUSH9(J(ak('first use — still waiting on you')))); await sleep(1200); // its words moved: both rows' signatures move ⇒ the card AND the strip repaint (the acceptance's PATH A, a minute's age, moves them the same way)
     const r3 = await A.evalJs(R9);
     await A.shot('desktop-1280-dock-reach.png');
-    check(`RED-able (r11 — 7ec6c6dcf: the repaint left card=null): the owner picks «groups» on the card (${r2.cardPick}); a pass that repaints the card AND the strip keeps it — the card still reads «${r3.cardPick}», the strip «${r3.word}»`, r3.card && r3.cardPick === 'groups' && saysAll(r3, 'groups') && r3.over <= 0, { r2, r3 });
+    check(`RED-able (r11 — 7ec6c6dcf: the repaint left card=null): the owner picks «groups» on the card (${r2.cardPick}); a pass that repaints the card AND the strip keeps it — the card still reads «${r3.cardPick}», the strip «${r3.word}»`, gateOf(r3.card) && r3.cardPick === 'groups' && gateOf(saysAll(r3, 'groups')) && r3.over <= 0, { r2, r3 });
     await A.evalJs(`(() => { const m = app._inboxModel; window.__ra19 = m.runAction; window.__got19 = []; m.runAction = (rec, answer, extra) => { window.__got19.push({ id: rec && rec.id, answer, extra }); return Promise.resolve(true); }; return 1; })()`);
     await sleep(1100); await A.press(`.cn-card .ut-item[data-id="ut-r11reach01"] .ut-hub-always`, { touch: false }); await sleep(400); // r12b (the r12 review F2): the CARD's own Always under a non-default pick («groups»)
     const pressDock = async (cls) => { await sleep(1100); const shown = (await A.evalJs(R9)).says; await A.press(`.chat-attn-dock .cad-rows .ut-item[data-id="ut-r11reach01"] .${cls}`, { touch: false }); await sleep(400); return shown; }; // (the press arm: an Allow shown under 700 ms ago is not the one read)
@@ -1088,9 +1088,9 @@ try {
     const got = await A.evalJs(`window.__got19 || []`);
     await A.evalJs(`(() => { const m = app._inboxModel; if (window.__ra19) m.runAction = window.__ra19; delete window.__ra19; return 1; })()`);
     check(`RED-able (r12 — 9f8b8d846: the strip said nothing, then sent 'instance'): THE OWNER'S SHAPE — «The whole VibeSpace» read in the tray and left: the strip says «${r4.word}» (red: ${r4.red}) and «${r4.always}» BEFORE the press, and its Always sends exactly that (${J(got[1] && got[1].extra)})`,
-      r4.cardPick === 'instance' && saysAll(r4, 'instance') && r4.red && sawI === 'instance' && !!got[1] && got[1].answer === 'always' && got[1].extra && got[1].extra.reach === 'instance', { r4, sawI, got1: got[1] });
+      r4.cardPick === 'instance' && gateOf(saysAll(r4, 'instance')) && gateOf(r4.red) && sawI === 'instance' && !!got[1] && got[1].answer === 'always' && gateOf(got[1].extra) && got[1].extra.reach === 'instance', { r4, sawI, got1: got[1] });
     check(`RED-able (r12): every press carries exactly the scope its press point shows — the strip said «${r5.word}» ⇒ its Allow once sent ${J(got[2] && got[2].extra)} (never 'instance'); the card's Always (its radio «opened») sent ${J(got[3] && got[3].extra)}, under «groups» ${J(got[0] && got[0].extra)}`,
-      saysAll(r5, 'opened') && sawO === 'opened' && got.length === 4 && got[0].answer === 'always' && got[0].extra && got[0].extra.reach === 'groups' && got[2].answer === 'once' && got[2].extra && got[2].extra.reach === 'opened' && got[3].answer === 'always' && got[3].extra && got[3].extra.reach === 'opened' && got.every((g) => g.id === 'ut-r11reach01'), got);
+      gateOf(saysAll(r5, 'opened')) && sawO === 'opened' && got.length === 4 && got[0].answer === 'always' && gateOf(got[0].extra) && got[0].extra.reach === 'groups' && got[2].answer === 'once' && gateOf(got[2].extra) && got[2].extra.reach === 'opened' && got[3].answer === 'always' && gateOf(got[3].extra) && got[3].extra.reach === 'opened' && verdictOf(got.every((g) => g.id === 'ut-r11reach01')), got);
     // r12b (the r12 review F1): A NARROW WINDOW — a chat window 380 px wide (desktop, a mouse) under the longest reach («The
     // conversations of its Task Groups»): the reach line on its own row, the answers on theirs (the Always wrapping its words) —
     // every answer inside the window and the strip (r12 kept them at max-content in one line: Deny past the window's edge)
@@ -1101,7 +1101,7 @@ try {
     await A.shot('desktop-380-dock-reach.png');
     const past380 = n9.answers.filter((b) => b.right > edge9.winRight || b.right > edge9.dockRight || b.left < 0);
     check(`RED-able (r12b — 45a9ca4b9: the answers never wrapped, Deny past the edge): a chat window ${edge9.win} px wide under the longest reach — the strip says «${n9.word}» on its own row, its answers (${n9.answers.map((b) => b.k + ' ' + b.left + '→' + b.right).join(', ')}) all inside the window (right edge ${edge9.winRight}) and the strip (${edge9.dockRight}), overflow ${n9.over} px`,
-      saysAll(n9, 'groups') && edge9.win <= 382 && n9.answers.length === 3 && !past380.length && n9.over <= 0 && !!n9.scope && n9.scope.top < n9.answers[0].top, { n9, edge9, past380 });
+      gateOf(saysAll(n9, 'groups')) && edge9.win <= 382 && n9.answers.length === 3 && !past380.length && n9.over <= 0 && !!n9.scope && n9.scope.top < n9.answers[0].top, { n9, edge9, past380 });
     await A.evalJs(PUSH9('[]')); await sleep(600);
     // THE PHONE (390×844 touch): the strip's words at 16 px on their own line, every answer ≥ 44 px on ONE row, the longest reach
     // in the Always's words («Always · The conversations of its Task Groups») wrapping inside it — nothing past the screen's edge
@@ -1116,7 +1116,7 @@ try {
     const small9 = p9.answers.filter((b) => b.h < 44 || b.w < 44), past9 = p9.answers.filter((b) => b.right > p9.vw || b.left < 0);
     const row9 = p9.answers.length === 3 && p9.answers.every((b) => b.top === p9.answers[0].top) && p9.scope && p9.scope.top < p9.answers[0].top;
     check(`r12 THE PHONE (390×844 touch): the strip says «${p9.word}» at ${p9.px} px (≥ 16) on its own line, and its answers are ≥ 44 px on ONE row below it (${p9.answers.map((b) => b.k + ' ' + b.w + '×' + b.h).join(', ')}) — none past the edge, each the topmost thing at its centre`,
-      saysAll(p9, 'groups') && p9.px >= 16 && row9 && !small9.length && !past9.length && p9.over <= 0 && seen9 === true, { p9, small9, past9, seen9 });
+      gateOf(saysAll(p9, 'groups')) && p9.px >= 16 && gateOf(row9) && !small9.length && !past9.length && p9.over <= 0 && seen9 === true, { p9, small9, past9, seen9 });
     await A.evalJs(PUSH9('[]')); await sleep(600);
   } catch (e) { fail++; console.log('  ✗ ⑲ threw: ' + (e?.message || e)); }
   lap('⑲ done');
@@ -1152,7 +1152,7 @@ try {
     await A.press(ALLOW, { touch: false }); await sleep(500);
     const got20 = await A.evalJs(`window.__got20 || []`);
     check(`RED-able (r13 — 3b8602717: the card stood at z 99999 over the tray it points to, the press landed on it): an exit ask announced (${J(up)}), the tray opened by a real press (its ${hit && hit.rows} row${hit && hit.rows === 1 ? '' : 's'}) — the stack yields (${J(hit && hit.stack)} left), the tray's Allow is the topmost thing where a real click lands (${hit && hit.top}), and the press reaches its answer (${J(got20)})`,
-      up.includes('ut-r13yield1') && !!hit && hit.hits && !hit.inAnn && !hit.stack.length && got20.length === 1 && got20[0].id === 'ut-r13yield1' && got20[0].answer === 'allow', { up, hit, got20 });
+      gateOf(up.includes('ut-r13yield1')) && !!hit && gateOf(hit.hits) && !hit.inAnn && !hit.stack.length && got20.length === 1 && got20[0].id === 'ut-r13yield1' && got20[0].answer === 'allow', { up, hit, got20 });
     await A.press('#taskbar-user-todos', { touch: false }); await sleep(400);
     // a DIALOG over a standing card: the dialog's overlay (z 99998) covers the stack — the card never sits above the owner's act
     await A.evalJs(PUSH20(J([ex('ut-r13yield1', 'echo pong'), ex('ut-r13yield2', 'echo two')]))); await A.waitFor(`${STACK}.includes('ut-r13yield2')`, 6000);
@@ -1163,7 +1163,7 @@ try {
     await A.shot('desktop-1280-announce-under-dialog.png');
     await A.evalJs(`(() => { const o = document.getElementById('dialog-overlay'); (o.querySelector('.dialog-close, [data-close], .btn-cancel') || {}).click?.(); if (!o.classList.contains('hidden')) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 1; })()`); await sleep(400);
     check(`RED-able (r13 — 3b8602717: the card at 99999 over a dialog's overlay at 99998 — the pairing sheet's 生成新命令 under it): a dialog opened while a card stands — the stack steps aside (${dlg && dlg.aside ? 'hidden, its card kept' : 'still shown'}) and at the card's own centre the topmost thing is the dialog's overlay (${dlg && dlg.top}), never the card`,
-      !!dlg && dlg.aside && !dlg.inAnn && dlg.inDlg, dlg);
+      !!dlg && gateOf(dlg.aside) && !dlg.inAnn && verdictOf(dlg.inDlg), dlg);
     await A.evalJs(`(() => { const m = app._inboxModel; if (window.__ra20) m.runAction = window.__ra20; delete window.__ra20; return 1; })()`);
     await A.evalJs(PUSH20('[]')); await sleep(600);
   } catch (e) { fail++; console.log('  ✗ ⑳ threw: ' + (e?.message || e)); }
@@ -1195,7 +1195,7 @@ try {
     const c1 = await A.evalJs(CLEAR);
     await A.shot('desktop-1280-announce-clear-composer.png');
     check(`RED-able (r14 — 5b4b36649: by the For-you button over a maximized chat's composer; the acceptance's shot desktop-1280-announce-ten.png had its first card over Session 10's Send): THE TOASTS' ONE RULE — the stack ${J(c1 && c1.stack)} stands clear of the composer ${J(c1 && c1.comp)}, the strip ${J(c1 && c1.strip)} and the title bar's buttons, shown (${c1 && c1.cards} card)`,
-      !!c1 && c1.max && !!c1.comp && !!c1.strip && !c1.onComp && !c1.onStrip && !c1.onCtl && !c1.aside && c1.cards === 1, c1);
+      !!c1 && gateOf(c1.max) && !!c1.comp && !!c1.strip && !c1.onComp && !c1.onStrip && !c1.onCtl && !c1.aside && c1.cards === 1, c1);
     // (b) MAJOR B: the strip's Allow over an age tick («1min ago» → «3min ago») — the same node, its arm kept: a press just after answers
     const SA = `.chat-attn-dock .cad-rows .ut-item[data-id="ut-r14clear1"] .ut-exit-allow`;
     await A.evalJs(`(() => { const b = ${CHAT(s21)}.element.querySelector(${J(SA)}); if (b) b.__r14 = 1; const m = app._inboxModel; window.__ra21 = m.runAction; window.__got21 = []; m.runAction = (rec, answer) => { window.__got21.push({ id: rec && rec.id, answer }); return Promise.resolve(true); }; return !!b; })()`);
@@ -1208,7 +1208,7 @@ try {
     const got21 = await A.evalJs(`window.__got21 || []`), said21 = await A.evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent).join(' | ')`);
     await A.evalJs(`(() => { if (window.__dn21) Date.now = window.__dn21; delete window.__dn21; return 1; })()`);
     check(`RED-able (r14 — 5b4b36649: the age in the row's signature rebuilt the strip's Allow, and nothing re-armed it — the acceptance's probe: {ok:false, code:'just-moved'}): an age tick («${age0.trim()}» → «${b1.age.trim()}») keeps the SAME Allow node (${b1.same}) — a press just after it answers (${J(got21)})`,
-      /1min ago/.test(age0) && /3min ago/.test(b1.age) && b1.same && got21.length === 1 && got21[0].id === 'ut-r14clear1' && got21[0].answer === 'allow' && !/moved under the pointer/i.test(said21), { age0, b1, got21, said21 });
+      gateOf(/1min ago/.test(age0)) && gateOf(/3min ago/.test(b1.age)) && gateOf(b1.same) && got21.length === 1 && got21[0].id === 'ut-r14clear1' && got21[0].answer === 'allow' && !/moved under the pointer/i.test(said21), { age0, b1, got21, said21 });
     await A.evalJs(`(() => { const m = app._inboxModel; if (window.__ra21) m.runAction = window.__ra21; delete window.__ra21; return 1; })()`);
     // (c) MINOR C: a vault-run ask in the strip — its command head, its three answers, its clock
     const FXR = JSON.parse(fs.readFileSync(new URL('./fixtures/vault-run-card-facts.json', import.meta.url), 'utf8')).variants.find((v) => v.name === 'hosts-known-always').facts;
@@ -1227,7 +1227,7 @@ try {
     const r1 = await A.evalJs(RUNM);
     await A.shot('desktop-1280-dock-run.png');
     check(`RED-able (r14 — 5b4b36649 hid .ut-run and .ut-deadline: a vault-run ask's strip showed its question and ⤢ only, yet the no-record toast says «answer it in the strip»): the strip draws the run card's command head («${r1 && r1.cmd && r1.cmd.text}», one line), its THREE answers (${J(r1 && r1.ans.map((a) => a.k))}) and its clock («${r1 && r1.clock}») — r15: beside what they decide on («${r1 && r1.gist && r1.gist.text}»), not the card's rows; nothing past the window's edge`,
-      !!r1 && r1.ans.map((a) => a.k).join() === 'once,always,deny' && !!r1.cmd && /psql/.test(r1.cmd.text) && r1.cmd.h <= 20 && /left|sec/.test(r1.clock || '') && !r1.facts && !!r1.gist && /Sends to db\.example\.com/.test(r1.gist.text) && r1.over <= 1, r1);
+      !!r1 && r1.ans.map((a) => a.k).join() === 'once,always,deny' && !!r1.cmd && gateOf(/psql/.test(r1.cmd.text)) && r1.cmd.h <= 20 && gateOf(/left|sec/.test(r1.clock || '')) && !r1.facts && !!r1.gist && gateOf(/Sends to db\.example\.com/.test(r1.gist.text)) && r1.over <= 1, r1);
     // (c2) r15 (the r14 acceptance — the strip offered «Always let this conversation use it (these hosts)» with the hosts, the
     // warning row and the «asked again» line hidden): A PRESS POINT NEVER SENDS A SCOPE IT DOES NOT SHOW — each ask in the strip
     const runV = (id, facts, action = {}, at = {}) => ({ ...RUN21, id, createdAt: Date.now() - 5e3, expiresAt: Date.now() + 55e3, ...at, action: { ...RUN21.action, askId: id.slice(-1).repeat(32), ...action }, facts });
@@ -1252,19 +1252,19 @@ try {
     const hostRow = (v, h) => !!v && !!v.gist && v.gist.rows.some((r) => r.k === 'hosts' && r.text.includes(h));
     const pv = v15.past, wv = v15.writable, av = v15.again, mv = v15.many;
     check(`RED-able (r15 — 2353267f1: «Always … (these hosts)» in the strip, the host only past the command's ellipsis): a run ask whose host lies past the ellipsis («${pv && pv.cmd && pv.cmd.text}…») ⇒ the strip SAYS its hosts row («${pv && pv.gist && pv.gist.rows.map((r) => r.text).join(' | ')}», whole, inside the window) before its ${J(ks(pv))} — or offers no Always`,
-      (hostRow(pv, 'exfil.attacker.example') && whole(pv) && ks(pv) === 'once,always,deny') || (!!pv && !pv.ans.some((a) => a.k === 'always')), pv);
+      (gateOf(hostRow(pv, 'exfil.attacker.example')) && gateOf(whole(pv)) && ks(pv) === 'once,always,deny') || (!!pv && !pv.ans.some((a) => a.k === 'always')), pv);
     const wr = wv && wv.gist && wv.gist.rows.find((r) => r.k === 'program'), hr = wv && wv.gist && wv.gist.rows.find((r) => r.k === 'hosts');
     check(`RED-able (r15 — 2353267f1 hid the warning row): a program an agent can write ⇒ its warning row in the strip («${wr && wr.text}», the warning accent ${wr && wr.color} — the hosts row's ${hr && hr.color}) beside ${J(ks(wv))}`,
-      !!wr && wr.warn && /in a folder an agent can write/.test(wr.text) && !!hr && wr.color !== hr.color && whole(wv) && ks(wv) === 'once,deny', wv);
+      !!wr && gateOf(wr.warn) && gateOf(/in a folder an agent can write/.test(wr.text)) && !!hr && wr.color !== hr.color && gateOf(whole(wv)) && ks(wv) === 'once,deny', wv);
     check(`RED-able (r15 — 2353267f1 hid the «asked again» line): a near-identical rerun ⇒ the strip says how it differs («${av && av.gist && av.gist.again}») before its ${J(ks(av))}`,
-      !!av && !!av.gist && /Asked again — it differs from the command you let through: its arguments changed/.test(av.gist.again || '') && whole(av) && ks(av) === 'once,always,deny', av);
+      !!av && !!av.gist && gateOf(/Asked again — it differs from the command you let through: its arguments changed/.test(av.gist.again || '')) && gateOf(whole(av)) && ks(av) === 'once,always,deny', av);
     check(`r15; r16 (the bound is the hosts row's): hosts too long for a strip (twelve) ⇒ their row says they are on its card («${mv && mv.gist && mv.gist.text}») and only ${J(ks(mv))} — «Always» is the card's`,
-      !!mv && !!mv.gist && mv.gist.out && /Sends to \(too long to show here — the hosts, and «Always», are on its card\)/.test(mv.gist.text) && !/replica-0/.test(mv.gist.text) && ks(mv) === 'once,deny' && whole(mv), mv);
+      !!mv && !!mv.gist && gateOf(mv.gist.out) && gateOf(/Sends to \(too long to show here — the hosts, and «Always», are on its card\)/.test(mv.gist.text)) && !/replica-0/.test(mv.gist.text) && ks(mv) === 'once,deny' && verdictOf(whole(mv)), mv);
     const mw = v15.manywarn, ma = v15.manyagain, mwr = mw && mw.gist && mw.gist.rows.find((r) => r.k === 'program'), mwh = mw && mw.gist && mw.gist.rows.find((r) => r.k === 'hosts');
     check(`RED-able (r16 — 882665da7: twelve hosts ⇒ «Too long to show here…» alone beside Allow once): twelve hosts + a program an agent can write ⇒ its warning row drawn («${mwr && mwr.text}», the warning accent ${mwr && mwr.color}), the hosts row on its card («${mwh && mwh.text}»), ${J(ks(mw))}`,
-      !!mwr && mwr.warn && /in a folder an agent can write/.test(mwr.text) && !!mwh && /too long to show here — the hosts are on its card/.test(mwh.text) && whole(mw) && ks(mw) === 'once,deny', mw);
+      !!mwr && gateOf(mwr.warn) && gateOf(/in a folder an agent can write/.test(mwr.text)) && !!mwh && gateOf(/too long to show here — the hosts are on its card/.test(mwh.text)) && gateOf(whole(mw)) && ks(mw) === 'once,deny', mw);
     check(`RED-able (r16 — 882665da7 hid the «asked again» line behind twelve hosts): twelve hosts + a near-identical rerun ⇒ the line drawn («${ma && ma.gist && ma.gist.again}»), «Always» with the hosts on its card — ${J(ks(ma))}`,
-      !!ma && !!ma.gist && /Asked again — it differs from the command you let through: its arguments changed/.test(ma.gist.again || '') && ma.gist.out && whole(ma) && ks(ma) === 'once,deny', ma);
+      !!ma && !!ma.gist && gateOf(/Asked again — it differs from the command you let through: its arguments changed/.test(ma.gist.again || '')) && gateOf(ma.gist.out) && gateOf(whole(ma)) && ks(ma) === 'once,deny', ma);
     // (d) MINOR D (1): a FORM the system opened — BEHIND the maximized chat, under the stack ⇒ the card shows; in front ⇒ aside
     const F21 = `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'form' && !x.isMinimized); return w || null; })()`;
     await A.evalJs(`(() => { window.__sh21 = app.pluginClient._hostApi({ id: 'r14probe', version: '1' }, new AbortController()).createModalShell({ id: 'r14form', title: 'A form the system opened', kind: 'form', opener: 'system', escapeToClose: true }); window.__sh21.body.innerHTML = '<label>Name <input class="r14-in"></label>'; return 1; })()`);
@@ -1282,13 +1282,13 @@ try {
     await A.evalJs(`(() => { const f = ${F21}; app.wm.focusWindow?.(f.id); return 1; })()`); await sleep(1300);
     const d2 = await A.evalJs(SEEN);
     check(`RED-able (r14 — 5b4b36649 judged rectangles: a form window BEHIND the window in front hid an urgent card for its whole clock): a system-opened form under the stack, behind the maximized chat (what is under the card: ${d1 && d1.front}) ⇒ the card shows (${d1 && (d1.aside ? 'hidden' : 'shown')}); the same form brought in front (${d2 && d2.front}) ⇒ it steps aside (${d2 && (d2.aside ? 'hidden' : 'shown')})`,
-      !!d1 && d1.formUnder && d1.front === 'chat' && !d1.aside && !!d2 && d2.front === 'form' && d2.aside, { d1, d2 });
+      !!d1 && gateOf(d1.formUnder) && d1.front === 'chat' && !d1.aside && !!d2 && d2.front === 'form' && verdictOf(d2.aside), { d1, d2 });
     await A.evalJs(`(() => { try { window.__sh21?.close?.(); } catch { } delete window.__sh21; const w = ${CHAT(s21)}; app.wm.focusWindow?.(w.id); return 1; })()`); await sleep(600);
     // (e) MINOR D (2): a dialog's OPEN asks at once — aside within two frames, never the next second's tick
     await A.evalJs(PUSH21(`[${J(ex21('ut-r14open1', 'echo open'))}]`)); await A.waitFor(`!!document.querySelector('.ut-announce .uta-card[data-id="ut-r14open1"]') && getComputedStyle(document.querySelector('.ut-announce')).visibility !== 'hidden'`, 8000); await sleep(300);
     const e1 = await A.evalJs(`(async () => { const s = document.querySelector('.ut-announce'); const t0 = performance.now(); app.showNewSessionDialog(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); return { aside: getComputedStyle(s).visibility === 'hidden', ms: Math.round(performance.now() - t0), open: !document.getElementById('dialog-overlay').classList.contains('hidden') }; })()`);
     await A.evalJs(`(() => { const o = document.getElementById('dialog-overlay'); (o.querySelector('.dialog-close, [data-close], .btn-cancel') || {}).click?.(); if (!o.classList.contains('hidden')) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 1; })()`); await sleep(400);
-    check(`RED-able (r14 — 5b4b36649 asked at its 1 s tick only: up to a second over the act just opened): a dialog opened while a card stands ⇒ the stack steps aside AT the open (${e1 && (e1.aside ? 'aside' : 'still shown')} ${e1 && e1.ms} ms after, two frames)`, !!e1 && e1.open && e1.aside, e1);
+    check(`RED-able (r14 — 5b4b36649 asked at its 1 s tick only: up to a second over the act just opened): a dialog opened while a card stands ⇒ the stack steps aside AT the open (${e1 && (e1.aside ? 'aside' : 'still shown')} ${e1 && e1.ms} ms after, two frames)`, !!e1 && gateOf(e1.open) && verdictOf(e1.aside), e1);
     await A.evalJs(`(() => { const w = ${CHAT(s21)}; if (w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`);
     // (c3) r15 MINOR 2 (the r14 acceptance: a LATE run's line, one line and no ellipsis, ran past a 700 px window's edge): a chat
     // window 700 px wide, a late run and a late run after a restart — the clock's line wraps inside the window, every word of it
@@ -1306,7 +1306,7 @@ try {
     }
     const inWin = (v) => !!v && !!v.dl && v.dl.r <= v.wr && v.dl.clip <= 1 && v.over <= 1 && v.ends && !v.onStrip; // (r15: and no announce card on the strip that grew — 700 ms after, never the next tick)
     check(`RED-able (r15 — 2353267f1: «flex: none; white-space: nowrap» — the late line cut at the window's edge): a chat window ${l15.late && l15.late.win} px wide — a late run's clock line («${l15.late && l15.late.clock}», ${l15.late && l15.late.dl && (l15.late.dl.b - l15.late.dl.t)} px tall) and a late run's after a restart (${l15.lost && l15.lost.dl && (l15.lost.dl.b - l15.lost.dl.t)} px tall) wrap inside it, every word (right edges ${l15.late && l15.late.dl && l15.late.dl.r} / ${l15.lost && l15.lost.dl && l15.lost.dl.r} ≤ the window's ${l15.late && l15.late.wr})`,
-      inWin(l15.late) && inWin(l15.lost) && l15.late.win <= 702, l15);
+      gateOf(inWin(l15.late)) && gateOf(inWin(l15.lost)) && l15.late.win <= 702, l15);
     await A.evalJs(PUSH21('d.todos.open')); await sleep(600);
     // (f) THE PHONE (375 × 812, touch): a card arriving while the phone's For-you page shows steps aside; the stack's layer is under the tray's
     await A.device(375, 812); await A.load();
@@ -1333,7 +1333,7 @@ try {
     if (h1) h1.tries = tries + 1;
     await A.shot('phone-375-announce-over-home.png');
     check(`RED-able (r14 — 5b4b36649 had no #phone-home in its list: a card arriving while the phone's For-you page shows stood over it — the tray bug's shape on the phone): the page shown (try ${h1 && h1.tries}), a card arrives ⇒ the stack steps aside (${h1 && (h1.aside ? 'hidden, its card kept' : 'shown')}), the page is what a tap at the card's place reaches (${h1 && (h1.inHome ? '#phone-home' : h1.inAnn ? 'the card' : '?')})`,
-      !!h1 && h1.home && h1.aside && !h1.inAnn && h1.inHome, h1);
+      !!h1 && gateOf(h1.home) && gateOf(h1.aside) && !h1.inAnn && verdictOf(h1.inHome), h1);
     // the tray SHEET (the phone's media list lays .usage-popup out full width under the nav — the compact badge opens the page,
     // so the sheet is opened by its own handler here): a card arriving while it is open stands UNDER it
     await A.evalJs(`(() => { app.phoneHome?.hide?.(); return 1; })()`); await sleep(400);
@@ -1346,20 +1346,20 @@ try {
         chain: document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2).slice(0, 7).map(D), card: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], trayBox: [Math.round(pr.left), Math.round(pr.top), Math.round(pr.right), Math.round(pr.bottom)] }; })()`);
     await A.shot('phone-375-announce-under-tray.png');
     check(`RED-able (r14 — 5b4b36649: 99990 over the phone's tray 90001 and mini inbox 90002, only a 1 s rectangle check between): ONE z table on the phone — the stack's ${t1 && t1.z} stands under the tray's ${t1 && t1.tray}; a card arriving while the tray is open is under it (${t1 && (t1.inTray ? 'the tray' : t1.inAnn ? 'the card' : '?')} at its place)`,
-      !!t1 && t1.z < t1.tray && t1.inTray && !t1.inAnn, t1);
+      !!t1 && t1.z < t1.tray && gateOf(t1.inTray) && !t1.inAnn, t1);
     await A.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return 1; })()`); await sleep(400);
     // …and the run ask's strip at 375: its head folds to one line, its three answers wrap to their own row, its clock shown
     await A.evalJs(`(() => { app.phoneHome?.hide?.(); for (const w of [...app.wm.windows.values()]) if (w.type === 'chat' && app.sessions.get(w.id)?.sessionId !== ${J(s21)}) app.wm.closeWindow(w.id); if (!${CHAT(s21)}) app.attachSession(${J(s21)}, 'clear', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); return 1; })()`);
     await A.waitFor(`!!${CHAT(s21)}`, 8000); await sleep(800);
     await A.evalJs(PUSH21(`[${J({ ...RUN21, createdAt: Date.now() - 5e3, expiresAt: Date.now() + 55e3 })}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]')`, 8000); await sleep(800);
     const fc14 = await A.evalJs(`(() => { const d = ${CHAT(s21)}.element.querySelector('.chat-attn-dock'), c = d && d.querySelector(':scope > .cad-clock'); return { folded: !!d && !d.classList.contains('cad-open'), vis: !!c && c.getClientRects().length > 0, text: c ? c.textContent : null, h: d ? Math.round(d.getBoundingClientRect().height) : 0 }; })()`);
-    check(`r14 (lane phone-dock-restore r2 — the deadline law: a card with a deadline shows its time left everywhere it renders) the run ask's FOLDED strip at 375 shows its clock on its one row («${fc14 && fc14.text}», ${fc14 && fc14.h} px)`, !!fc14 && fc14.folded && fc14.vis && /\d/.test(fc14.text || '') && fc14.h <= 56, fc14);
+    check(`r14 (lane phone-dock-restore r2 — the deadline law: a card with a deadline shows its time left everywhere it renders) the run ask's FOLDED strip at 375 shows its clock on its one row («${fc14 && fc14.text}», ${fc14 && fc14.h} px)`, !!fc14 && gateOf(fc14.folded) && gateOf(fc14.vis) && gateOf(/\d/.test(fc14.text || '')) && fc14.h <= 56, fc14);
     await openStrip(A); // (lane phone-dock-restore: the phone's row opened — the run card as before)
     const r2 = await A.evalJs(RUNM);
     const top2 = await A.evalJs(`(() => { const row = ${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]'); return row ? [...row.querySelectorAll('.ut-run-answer > button')].map((b) => { const q = b.getBoundingClientRect(), h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return h === b || b.contains(h) ? 'own' : h ? (h.closest('#global-toasts') ? 'toast' : h.closest('.ut-announce') ? 'announce' : (h.className || h.tagName).toString().slice(0, 30)) : 'none'; }) : []; })()`); // (the arrival toasts STAND: on this tier they rise above the composer — r14: and above the strip)
     await A.shot('phone-375-dock-run.png');
     check(`r14 the run ask's strip at 375 (touch): the command head on one line («${r2 && r2.cmd && r2.cmd.text}»), the three answers (${J(r2 && r2.ans.map((a) => a.k + ' ' + (a.b - a.t) + 'px'))}) each ≥ 44 px, inside the window and the topmost thing where a tap lands — the arrival toasts standing (${J(top2)}; the phone's toasts stood over the strip's answers before r14), the clock («${r2 && r2.clock}»); r15: what they decide on («${r2 && r2.gist && r2.gist.text}», inside the screen)`,
-      !!r2 && r2.ans.map((a) => a.k).join() === 'once,always,deny' && r2.ans.every((a) => a.b - a.t >= 44 && a.l >= 0 && a.r <= r2.vw) && top2.length === 3 && top2.every((x) => x === 'own') && !!r2.cmd && r2.cmd.h <= 24 && !!r2.clock && r2.over <= 1 && !!r2.gist && /Sends to db\.example\.com/.test(r2.gist.text) && r2.gist.r <= r2.vw && r2.gist.clip <= 1, { r2, top2 });
+      !!r2 && r2.ans.map((a) => a.k).join() === 'once,always,deny' && gateOf(r2.ans.every((a) => a.b - a.t >= 44 && a.l >= 0 && a.r <= r2.vw)) && top2.length === 3 && gateOf(top2.every((x) => x === 'own')) && !!r2.cmd && r2.cmd.h <= 24 && !!r2.clock && r2.over <= 1 && !!r2.gist && gateOf(/Sends to db\.example\.com/.test(r2.gist.text)) && r2.gist.r <= r2.vw && r2.gist.clip <= 1, { r2, top2 });
     // …and a program an agent can write, at 375: its warning row whole on the phone, Allow once / Deny
     const W375 = runV('ut-r15writ7', { ...FXR, tool: { ...FXR.tool, path: '~/workspace/ops/bin/psql', writable: true }, always: { offered: false, why: 'program-writable', directive: null } }, { always: false });
     await A.evalJs(PUSH21(`[${J(W375)}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r15writ7"]')`, 8000); await sleep(800);
@@ -1369,7 +1369,7 @@ try {
     await A.shot('phone-375-dock-run-writable.png');
     const w2r = w2 && w2.gist && w2.gist.rows.find((r) => r.k === 'program');
     check(`r15 at 375 (touch): a program an agent can write — its warning row («${w2r && w2r.text}») whole inside the screen (right ${w2r && w2r.r} ≤ ${w2 && w2.vw}), beside ${J(w2 && w2.ans.map((a) => a.k))}`,
-      !!w2r && w2r.warn && /in a folder an agent can write/.test(w2r.text) && w2r.r <= w2.vw && w2.gist.clip <= 1 && w2.ans.map((a) => a.k).join() === 'once,deny' && w2.over <= 1, w2);
+      !!w2r && gateOf(w2r.warn) && gateOf(/in a folder an agent can write/.test(w2r.text)) && w2r.r <= w2.vw && w2.gist.clip <= 1 && w2.ans.map((a) => a.k).join() === 'once,deny' && w2.over <= 1, w2);
     await A.evalJs(PUSH21('d.todos.open')); await sleep(400);
     await A.device(1280, 800, { mouse: true }); await A.load(); await sleep(600);
   } catch (e) { fail++; console.log('  ✗ ㉑ threw: ' + (e?.message || e)); }
@@ -1418,14 +1418,14 @@ try {
     // (a) four cards, (b) five, by the For-you button
     const h4 = await heldCase(4, 'a', 'desktop-1280-held-four.png'), h5 = await heldCase(5, 'b', 'desktop-1280-held-five.png');
     check(`RED-able (r16 — 882665da7: the card folded into «N more» unfolded below the read one — 4 cards ran onto the For-you button, 5 moved the read card by the clamp): the mouse on the second card, the top one answered elsewhere ⇒ the read card keeps ${J(h4.pinAt)} → ${J(h4.pinNow)} (4 cards: ${J(h4.held && h4.held.kids.map((x) => [x.t, x.b]))}), ${J(h5.pinAt)} → ${J(h5.pinNow)} (5 cards: ${J(h5.held && h5.held.kids.map((x) => [x.t, x.b]))}) — nothing below the button's top ${h4.held && h4.held.btn && h4.held.btn.t}; the mouse gone ⇒ the stack clear of the button`,
-      byBtn(h4) && byBtn(h5), { h4, h5 });
+      gateOf(byBtn(h4)) && verdictOf(byBtn(h5)), { h4, h5 });
     // (c) a maximized chat: its strip and composer under the stack's place — the same press
     await A.evalJs(`(() => { app.attachSession(${J(s22)}, 'held', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); return 1; })()`); await A.waitFor(`!!${CHATOF(s22)}`, 8000); await sleep(800);
     await A.evalJs(`(() => { const w = ${CHATOF(s22)}; app.wm.focusWindow?.(w.id); if (!w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`); await sleep(900);
     const hm = await heldCase(4, 'c', 'desktop-1280-held-maxchat.png'), hm5 = await heldCase(5, 'd', 'desktop-1280-held-maxchat-five.png');
     const clearMax = (v) => !!v && !!v.held && v.gone && v.held.hover && sameR(v.pinAt, v.pinNow) && !!v.held.strip && !!v.held.comp && v.held.kids.every((x) => !meets(x, v.held.strip) && !meets(x, v.held.comp));
     check(`RED-able (r16 — 882665da7: 318–560 → 390–600 / 390–632 on the strip's Allow / Deny): a maximized chat — the mouse on the second card, the top one answered elsewhere ⇒ the read card keeps ${J(hm.pinAt)} → ${J(hm.pinNow)}; the cards ${J(hm.held && hm.held.kids.map((x) => [x.t, x.b]))} (5: ${J(hm5.held && hm5.held.kids.map((x) => [x.t, x.b]))}) — nothing over the strip ${J(hm.held && hm.held.strip)} or the composer ${J(hm.held && hm.held.comp)}`,
-      clearMax(hm) && clearMax(hm5), { hm, hm5 });
+      gateOf(clearMax(hm)) && verdictOf(clearMax(hm5)), { hm, hm5 });
     await A.evalJs(PUSH22('[]')); await sleep(600);
     // (d) THE ONE ROAD: the strip re-wraps at its clock's words (tickDeadlines writes them — no broadcast, no _dockPass) and at
     // a window's resize ⇒ the stack is re-placed IN THAT FRAME (foryouRows.chromeMoved from the strip's observer), once a frame
@@ -1478,21 +1478,21 @@ try {
     await A.shot('desktop-dock-clock-rewrap.png');
     const inFrame = (sizes, placed) => sizes.length > 0 && sizes.every((z) => placed.some((p) => Math.abs(p - z.at) < 20)); // (each size the observer saw: a placement in its frame)
     check(`RED-able (r16 — 882665da7: a strip re-wrapped by its clock's words never reached chromeMoved — the stack followed at the 1 s tick): a ${W22} px chat at the For-you button's side (try ${Math.min(tries22, 2) + 1}), its clock turned to «${(rw.clock || '').trim().slice(0, 40)}…» — the strip ${J((rw.sizes || []).map((z) => z.h))} px, ${J(rw.after.map((z) => z.h))} after the turn ⇒ the stack re-placed in the frame of each (${(rw.placed || []).length} placement(s), ${rw.calls} call(s)); the stack ${J(rw.stack)} clear of the strip ${J(rw.strip)}`,
-      !!W22 && rw.live && rw.after.length > 0 && inFrame(rw.after, rw.placed) && rw.placed.length <= rw.calls && !meets(rw.stack, rw.strip), rw);
+      !!W22 && gateOf(rw.live) && rw.after.length > 0 && gateOf(inFrame(rw.after, rw.placed)) && rw.placed.length <= rw.calls && !meets(rw.stack, rw.strip), rw);
     const n0 = rw.placed.length, s0 = rw.sizes.length;
     await A.evalJs(AT22(Math.max(300, (W22 || 560) - 150))); await sleep(700);
     const rz = await A.evalJs(READ22), e2 = await A.evalJs(EDGE22);
     await A.shot('desktop-dock-resized.png');
     const newSizes = rz.sizes.slice(s0), newPlaced = rz.placed.slice(n0);
     check(`RED-able (r16 — 882665da7: a window's resize re-wrapped the strip outside _dockPass): the window resized ⇒ the strip ${J(newSizes.map((z) => z.h))} px, the stack re-placed in that frame — ${newPlaced.length} placement(s) for ${newSizes.length} size change(s) (the toasts asked with each); the stack ${J(rz.stack)} clear of the strip ${J(rz.strip)}`,
-      newSizes.length >= 1 && newPlaced.length === newSizes.length && newSizes.every((z) => newPlaced.some((p) => Math.abs(p - z.at) < 20)) && !meets(rz.stack, rz.strip), { rz, newSizes, newPlaced });
+      newSizes.length >= 1 && newPlaced.length === newSizes.length && gateOf(newSizes.every((z) => newPlaced.some((p) => Math.abs(p - z.at) < 20))) && !meets(rz.stack, rz.strip), { rz, newSizes, newPlaced });
     // (f) r17 — THE ANSWERS NEVER PASS THE WINDOW'S EDGE: the two shots above, and the acceptance's widths 592 and 670 (the run
     // ask: Allow once · Always let this conversation use it (these hosts) · Deny), each shot
     const edges = [['rewrap', e1], ['resized', e2]];
     for (const W of [592, 670]) { await A.evalJs(AT22(W)); await sleep(700); await A.evalJs(noToasts); edges.push([W, await A.evalJs(EDGE22)]); await A.shot(`desktop-dock-${W}.png`); }
     const edgeOk = edges.every(([, e]) => !!e && e.acts.length >= 2 && !e.over.length && !e.scrolls);
     check(`RED-able (r17 — e77f7a3f6: at 592 px «Always let this conversation use it (these hosts» cut at the window's edge, Deny outside it; at ~670 px Deny clipped): the strip's answers inside the window at every width — ${edges.map(([k, e]) => `${k}: ${e && e.W} px, ${J(e && e.acts.map((a) => [a.w.slice(0, 12), a.l, a.r, a.b - a.t]))}${e && e.over.length ? ' OVER ' + J(e.over) : ''}`).join('; ')}`,
-      edgeOk, edges);
+      verdictOf(edgeOk), edges);
     await A.evalJs(`(() => { if (window.__cmF22) app.foryouRows.chromeMoved = window.__cmF22; window.__ro22?.disconnect(); window.__mo22?.disconnect(); delete window.__cm22; delete window.__cmF22; return 1; })()`);
     await A.evalJs(PUSH22('[]')); await sleep(500);
     // (e) THE COST: four open strips, one broadcast that rewords each — the strip's layout reads in the passes (a counted
@@ -1535,7 +1535,7 @@ try {
     const noRoom = !!gFree && gFree.kids.some((x) => gFree.hard.some((c) => meets(x, c))); // (the precondition: the free rule found no room — it stands over a composer)
     const kidsOf = (v) => (v ? v.kids.filter((x) => x.id !== 'more').map((x) => [x.id, x.t, x.b]) : null);
     check(`RED-able (r17 — e77f7a3f6: the mouse on the middle card folded the other two and the «N more» line): the stack's column tiled as a 3×3 grid tiles it (composers ${J(gFree && gFree.hard.map((c) => [c.t, c.b]))}, title bars' buttons ${J(gFree && gFree.soft.map((c) => [c.t, c.b]))}) — no room, the free rule's own place over them (${noRoom}); the mouse resting on the middle card, two ticks ⇒ all three stay where they were (${J(kidsOf(gHeld))}; free ${J(kidsOf(gFree))})`,
-      noRoom && !!gHeld && gHeld.hover && J(kidsOf(gHeld)) === J(kidsOf(gFree)) && kidsOf(gHeld).length === 3, { gFree, gHeld });
+      gateOf(noRoom) && !!gHeld && gateOf(gHeld.hover) && J(kidsOf(gHeld)) === J(kidsOf(gFree)) && kidsOf(gHeld).length === 3, { gFree, gHeld });
     await A.evalJs(PUSH22('[]')); await sleep(500);
     await A.evalJs(PUSH22('d.todos.open')); await sleep(500);
     await A.evalJs(`(() => { for (const sid of ${J(more22)}) { const w = [...app.wm.windows.values()].find((x) => x.type === 'chat' && app.sessions.get(x.id)?.sessionId === sid); if (w) app.wm.closeWindow(w.id); } return 1; })()`); await sleep(400);
@@ -1555,8 +1555,8 @@ try {
     await mouse(40, 300); await sleep(700);
     const lAfter = await A.evalJs(STK), lNow = lHeld && lHeld.kids.find((x) => x.id === 'more');
     check(`RED-able (r18 — 34ebfcb93: the refill took the line from under the mouse, then the oldest card stood there): the mouse resting on «N more waiting» (${J(lAt)}), the top card answered elsewhere, two ticks ⇒ the line stays where it was read (${J(lNow)}) saying «${lSaid}», under the mouse ${lUnder && lUnder.id}; the mouse leaves ⇒ the stack refills (${J(lAfter && lAfter.kids.map((x) => x.id))})`,
-      !!lAt && !!lHeld && lHeld.hover && sameR(lAt, lNow) && /\b1\b/.test(lSaid || '') && !!lUnder && lUnder.id === 'more' && !lHeld.kids.some((x) => x.id === 'ut-r18line4')
-        && !!lAfter && !lAfter.hover && lAfter.kids.length === 3 && !lAfter.kids.some((x) => x.id === 'more') && lAfter.kids.some((x) => x.id === 'ut-r18line1'), { lFree, lHeld, lSaid, lAfter });
+      !!lAt && !!lHeld && gateOf(lHeld.hover) && gateOf(sameR(lAt, lNow)) && gateOf(/\b1\b/.test(lSaid || '')) && !!lUnder && lUnder.id === 'more' && !lHeld.kids.some((x) => x.id === 'ut-r18line4')
+        && !!lAfter && !lAfter.hover && lAfter.kids.length === 3 && !lAfter.kids.some((x) => x.id === 'more') && verdictOf(lAfter.kids.some((x) => x.id === 'ut-r18line1')), { lFree, lHeld, lSaid, lAfter });
     // (i) r19 — THE WINDOW LAYER ASKS THE STACK AT ONCE (.367: test-automation-keys-chrome ⑫'s class — between two 1 s ticks the
     // stack stood over a form whose window had moved, grown or been raised under it): three cards by the For-you button; a FORM
     // (the app's own createModalShell kind 'form', through a plugin's dialog door) opens centred; 400 ms later — past the open's
@@ -1602,7 +1602,7 @@ try {
     await sleep(400);
     const j1b = await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-cross'); return { sheet: !!f && f.classList.contains('form-sheet'), win: !!f && !!f.closest('.window'), vc: document.documentElement.dataset.vc }; })()`);
     check(`RED-able (r19 — 1c4261dcc read the phone's app.isMobile inside the settle: the form opened as a SHEET and jumped into its window 120 ms later): from the phone class (${J(j0)}) back to 1280 and a form opened at once (the page then ${J(j1 && j1.before)}) ⇒ it opens as its window (sheet ${j1 && j1.sheet}, window ${j1 && j1.win}; the class at the open: ${J(j1 && j1.after)}), and stays one, the page the desktop's (${J(j1b)})`,
-      !!j0 && j0.isMobile === true && !!j1 && !j1.sheet && j1.win && !!j1b && j1b.win && !j1b.sheet && j1b.vc === 'desktop', { j0, j1, j1b });   // (r25: the class settles at the open only when the switch heard the crossing — either way the form is its window)
+      !!j0 && j0.isMobile === true && !!j1 && !j1.sheet && gateOf(j1.win) && !!j1b && gateOf(j1b.win) && !j1b.sheet && j1b.vc === 'desktop', { j0, j1, j1b });   // (r25: the class settles at the open only when the switch heard the crossing — either way the form is its window)
     // (j2) a re-host never moves a form under a press (r20: on the crossing's real road): on the phone tier (700 px) the form is
     // its sheet; a real press goes DOWN on its button and the viewport goes back to 1280 while it is down ⇒ the crossing waits (a
     // sheet still, the page still the phone's); the press UP — the pointer kept on its button through the re-layout — ⇒ the click lands on
@@ -1624,7 +1624,7 @@ try {
       j2 = { jb, held, up, later };
     }
     check(`a re-host never moves a form under a press (r19's (j2) on the crossing's real road): the sheet on the phone tier (${J(jb)}), a press DOWN on its button, the viewport back to 1280 while it is down ⇒ the crossing waits (${J(j2 && j2.held)}); the press UP (on its button, re-laid out at the new width) ⇒ the click lands on it (${J(j2 && j2.up)}); then its window on the desktop (${J(j2 && j2.later)})`,
-      !!jb && jb.sheet && jb.vc === 'compact' && !!j2 && !!j2.held && j2.held.sheet && !j2.held.win && j2.held.vc === 'compact' && j2.up.hits === 1 && !!j2.later && j2.later.win && !j2.later.sheet && j2.later.vc === 'desktop', j2 || jb);
+      !!jb && gateOf(jb.sheet) && jb.vc === 'compact' && !!j2 && !!j2.held && gateOf(j2.held.sheet) && !j2.held.win && j2.held.vc === 'compact' && j2.up.hits === 1 && !!j2.later && gateOf(j2.later.win) && !j2.later.sheet && j2.later.vc === 'desktop', j2 || jb);
     // (j3) r20 — THE CROSSING WAITS AS ONE UNIT AND THE FORMS STILL GO FIRST (the r19 acceptance's MAJOR — b4271577f deferred the
     // forms alone: the phone's rules ran around the form window): the form a window on the desktop; a real press DOWN on the empty
     // workspace; the viewport goes to 700 px while it is down ⇒ nothing moves, no phone rule runs; the press UP ⇒ the crossing —
@@ -1638,14 +1638,14 @@ try {
     await A.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 120, y: 620, button: 'left', clickCount: 1 }); await sleep(800);
     const j3b = await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-cross'); return { win: !!f.closest('.window'), sheet: f.classList.contains('form-sheet'), vc: document.documentElement.dataset.vc, isMobile: app.isMobile, seen: window.__r20Seen }; })()`);
     check(`RED-able (r20 — b4271577f: the phone's rules ran around the form window, «setPhoneMode sees form windows=w1»): a form window on the desktop (${J(j3a)}), a press DOWN, the viewport to 700 px while it is down ⇒ nothing moves and no phone rule runs (${J(j3h)}); the press UP ⇒ the crossing, the form its sheet first — the phone's setPhoneMode saw ${J(j3b.seen)} form windows (${J(j3b)})`,
-      !!j3a && j3a.win && j3a.vc === 'desktop' && !!j3h && j3h.win && !j3h.sheet && j3h.vc === 'desktop' && j3h.seen === null && !!j3b && j3b.sheet && !j3b.win && j3b.vc === 'compact' && Array.isArray(j3b.seen) && j3b.seen.length === 0, { j3a, j3h, j3b });
+      !!j3a && gateOf(j3a.win) && j3a.vc === 'desktop' && !!j3h && gateOf(j3h.win) && !j3h.sheet && j3h.vc === 'desktop' && j3h.seen === null && !!j3b && gateOf(j3b.sheet) && !j3b.win && j3b.vc === 'compact' && gateOf(Array.isArray(j3b.seen)) && j3b.seen.length === 0, { j3a, j3h, j3b });
     await A.device(1280, 800, { mouse: true }); await sleep(800);
     await A.evalJs(`(() => { try { window.__r19Shells.cross.close(); } catch { } return true; })()`); await sleep(300);
     await A.evalJs(PUSH22('d.todos.open')); await sleep(500);
   } catch (e) { fail++; console.log('  ✗ ㉒ threw: ' + (e?.message || e)); }
   lap('㉒ done');
 
-  check('the shots are written (desktop 1280 + phone 390 / 375)', ['desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png', 'desktop-1280-held-four.png', 'desktop-1280-held-five.png', 'desktop-1280-held-maxchat.png', 'desktop-1280-held-maxchat-five.png', 'desktop-dock-clock-rewrap.png', 'desktop-dock-resized.png', 'desktop-dock-592.png', 'desktop-dock-670.png', 'desktop-1280-held-grid.png', 'desktop-1280-held-line.png', 'desktop-1280-form-under-stack.png', 'desktop-1280-dock-run-manywarn.png', 'desktop-1280-dock-run-manyagain.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  check('the shots are written (desktop 1280 + phone 390 / 375)', verdictOf(['desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png', 'desktop-1280-held-four.png', 'desktop-1280-held-five.png', 'desktop-1280-held-maxchat.png', 'desktop-1280-held-maxchat-five.png', 'desktop-dock-clock-rewrap.png', 'desktop-dock-resized.png', 'desktop-dock-592.png', 'desktop-dock-670.png', 'desktop-1280-held-grid.png', 'desktop-1280-held-line.png', 'desktop-1280-form-under-stack.png', 'desktop-1280-dock-run-manywarn.png', 'desktop-1280-dock-run-manyagain.png'].every((f) => fs.existsSync(path.join(SHOTS, f))))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 
@@ -1656,8 +1656,8 @@ try {
   cleanup();
   const ended = await browserEnded;
   cleanup();   // a profile file the browser wrote while it went down
-  check('the cleanup ran: the browser this suite started has exited and its profile folder is gone', ended && !fs.existsSync(chromeDir), chromeDir);
+  check('the cleanup ran: the browser this suite started has exited and its profile folder is gone', gateOf(ended) && !fs.existsSync(chromeDir), chromeDir);
 }
 console.log(`\nshots: ${SHOTS}`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

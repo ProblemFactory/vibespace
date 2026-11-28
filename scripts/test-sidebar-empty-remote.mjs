@@ -25,7 +25,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const wt = scratch('emptyremote-smoke');
 const fakeHome = scratch('emptyremote-home');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree, empty HOME, one fake host ───────────────
@@ -89,13 +89,13 @@ try {
     healed = await evl(`!!document.querySelector('#all-sessions-list .wb-recent-host')`);
     if (!healed) await sleep(500);
   }
-  check('workbench renders with a host switcher despite zero local sessions', healed);
+  check('workbench renders with a host switcher despite zero local sessions', verdictOf(healed));
   check('the early-return empty state is gone', !(await evl(
     `[...document.querySelectorAll('#all-sessions-list .empty-hint')].some(e => e.textContent.trim() === 'No sessions')`)));
   check('zone heads render (Active/Recent/History)', (await evl(
     `document.querySelectorAll('#all-sessions-list .wb-zone-head').length`)) >= 2);
-  check('the switcher lists the configured host', await evl(
-    `[...document.querySelectorAll('#all-sessions-list .wb-recent-host option')].some(o => o.textContent === 'SmokeBox')`));
+  check('the switcher lists the configured host', verdictOf(await evl(
+    `[...document.querySelectorAll('#all-sessions-list .wb-recent-host option')].some(o => o.textContent === 'SmokeBox')`)));
 
   // Switching to the host must not crash the render (discovery will fail —
   // port 2 — but the workbench should keep its structure).
@@ -108,4 +108,4 @@ try {
 }
 ws.close();
 console.log(failed ? `\n${failed} FAILED` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

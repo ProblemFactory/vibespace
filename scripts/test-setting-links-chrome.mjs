@@ -29,7 +29,7 @@ const chromeHome = path.join(root, 'chrome-home');
 for (const d of [fakeHome, stubDir, chromeHome]) fs.mkdirSync(d, { recursive: true });
 const CWD = path.join(fakeHome, 'project'); fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); if (typeof PAGE_ERRORS !== 'undefined' && PAGE_ERRORS.length) console.error('    the page said:', PAGE_ERRORS.splice(0).slice(-4).join(' | ')); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); if (typeof PAGE_ERRORS !== 'undefined' && PAGE_ERRORS.length) console.error('    the page said:', PAGE_ERRORS.splice(0).slice(-4).join(' | ')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SID = crypto.randomUUID();
 const K1 = 'spend.unattendedPerInstanceDay', K2 = 'spend.allowOverageTurns' /* tier advanced */, K3 = 'chat.uploadDir';
@@ -143,17 +143,17 @@ try {
   const b0 = settingsBytes();
   check('a real press on the ceiling\'s link', (await press(d1Link)) === true);
   const fo1 = await focusWhenIn(K1);
-  check('Settings opens ON THAT ROW: its section in view, the row in view and marked' + never(fo1), fo1.found && fo1.inView && fo1.marked && fo1.windows === 1, fo1);
+  check('Settings opens ON THAT ROW: its section in view, the row in view and marked' + never(fo1), gateOf(fo1.found) && gateOf(fo1.inView) && gateOf(fo1.marked) && fo1.windows === 1, fo1);
   await shot('zh-settings-row');
-  check('THE SETTINGS FILE IS BYTE FOR BYTE THE SAME after the press (a link opens, it never writes)', sameBytes(b0, settingsBytes()));
+  check('THE SETTINGS FILE IS BYTE FOR BYTE THE SAME after the press (a link opens, it never writes)', verdictOf(sameBytes(b0, settingsBytes())));
   await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p || p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
   await evalJs(`(() => { const d = [...document.querySelectorAll('#user-todos-popup .ut-item details.ut-detail-exp')].find((x) => x.querySelector('.fy-link[data-ref="${K2}"]')); if (d) d.open = true; return !!d; })()`);
   const dLink = `#user-todos-popup .ut-item .ut-detail .fy-link[data-fy="setting"][data-ref="${K2}"]`;
   check('the detail\'s second link is a link too', !!(await until(`!!document.querySelector(${JSON.stringify(dLink)})`, { timeout: 8000 })));
   check('a real press on it', (await press(dLink)) === true);
   const fo2 = await focusWhenIn(K2);
-  check('with Settings already open it MOVES there (one window): an ADVANCED row revealed for this open, the per-device switch untouched' + never(fo2), fo2.found && fo2.inView && fo2.marked && fo2.windows === 1 && fo2.advSwitch === null, fo2);
-  check('still not a byte written', sameBytes(b0, settingsBytes()));
+  check('with Settings already open it MOVES there (one window): an ADVANCED row revealed for this open, the per-device switch untouched' + never(fo2), gateOf(fo2.found) && gateOf(fo2.inView) && gateOf(fo2.marked) && fo2.windows === 1 && fo2.advSwitch === null, fo2);
+  check('still not a byte written', verdictOf(sameBytes(b0, settingsBytes())));
 
   console.log('③ the chat: an agent\'s message carries the link; a press opens the row of ANOTHER section');
   await evalJs(`(() => { app.attachSession(${JSON.stringify(HUB_SID)}, 'Setting links', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
@@ -163,8 +163,8 @@ try {
   await shot('zh-chat-link');
   check('a real press on it', (await press(cLink)) === true);
   const fo3 = await focusWhenIn(K3);
-  check('Settings moves to the Chat section\'s row' + never(fo3), fo3.found && fo3.inView && fo3.marked && fo3.windows === 1, fo3);
-  check('not a byte written', sameBytes(b0, settingsBytes()));
+  check('Settings moves to the Chat section\'s row' + never(fo3), gateOf(fo3.found) && gateOf(fo3.inView) && gateOf(fo3.marked) && fo3.windows === 1, fo3);
+  check('not a byte written', verdictOf(sameBytes(b0, settingsBytes())));
 
   console.log('④ a notice: the server\'s notice frame, fed to the page\'s own handler, draws the link as a button');
   await evalJs(`(() => { ${relayBroadcastJs(`{ type: 'server-notice', key: 'sl-' + Date.now(), level: 1, text: 'The instance ceiling is near — vibespace://settings/${K1}' }`, "app.ws.globalHandlers")} return true; })()`);
@@ -172,8 +172,8 @@ try {
   check('the toast carries the link as a button', !!(await until(`!!document.querySelector(${JSON.stringify(tLink)})`, { timeout: 8000 })));
   check('a real press on it', (await press(tLink)) === true);
   const fo4 = await focusWhenIn(K1);
-  check('Settings moves back to the ceiling\'s row' + never(fo4), fo4.found && fo4.inView && fo4.marked && fo4.windows === 1, fo4);
-  check('not a byte written', sameBytes(b0, settingsBytes()));
+  check('Settings moves back to the ceiling\'s row' + never(fo4), gateOf(fo4.found) && gateOf(fo4.inView) && gateOf(fo4.marked) && fo4.windows === 1, fo4);
+  check('not a byte written', verdictOf(sameBytes(b0, settingsBytes())));
 
   console.log('⑤ the phone (390 px): the tray sheet\'s link opens the one-section view on the row');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
@@ -195,9 +195,9 @@ try {
   check('the link\'s first line is on screen and under its press point (the state the press waits for)', !!(await until(firstLine(qLink), { timeout: 8000 })), await evalJs(`(() => { const l = [...document.querySelectorAll(${JSON.stringify(qLink)})].pop(); return l ? { rects: l.getClientRects().length } : null; })()`));
   check('a tap on the link', (await press(qLink, { touch: true })) === true);
   const fo5 = await focusWhenIn(K1);
-  check('on the phone: the row in view, marked, its section ALONE (the one-section view)' + never(fo5), fo5.found && fo5.inView && fo5.marked && fo5.sections.length === 1 && fo5.sections[0] === fo5.section, fo5);
+  check('on the phone: the row in view, marked, its section ALONE (the one-section view)' + never(fo5), gateOf(fo5.found) && gateOf(fo5.inView) && gateOf(fo5.marked) && fo5.sections.length === 1 && fo5.sections[0] === fo5.section, fo5);
   await shot('zh-phone-settings-row');
-  check('not a byte written, after every press', sameBytes(b0, settingsBytes()));
+  check('not a byte written, after every press', verdictOf(sameBytes(b0, settingsBytes())));
   // RED CONTROL: the same press on a link that is truly absent (no row carries it) presses nothing — the leg above fails without its link
   check('RED CONTROL: a tap on a link no row draws presses nothing (the leg would fail without the link)', (await press(`#user-todos-popup .ut-item .ut-text .fy-link[data-fy="setting"][data-ref="chat.nope"]`, { touch: true })) === false);
 
@@ -219,4 +219,4 @@ try {
 } catch (e) { failed++; console.error('  ✗ threw:', e && e.stack || e); }
 console.log(failed ? `✗ test-setting-links-chrome: ${passed} passed, ${failed} failed` : `ALL PASS (${passed})`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

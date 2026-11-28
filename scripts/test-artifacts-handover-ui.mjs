@@ -53,7 +53,7 @@ fs.writeFileSync(OTHER, '# not written by the helper\n');
 const SUB = path.join(fakeHome, '.claude/projects', CWD.lead.replace(/[^a-zA-Z0-9]/g, '-'), SIDS.lead, 'subagents'); // the CLI's sidechain layout
 const RUNLOG = path.join(stubDir, 'run.log'), PLAN = path.join(stubDir, 'plan.json');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -207,68 +207,68 @@ try {
   const tid = tg.body && tg.body.task && tg.body.task.id;
   const tgs = await api('GET', '/api/tasks');
   check('lead + helper share ONE Task Group (the outsider is in none)', ((tgs.body.tasks || []).find((t) => t.id === tid)?.sessions || []).length === 2, tgs.body);
-  check('lead\'s chat window attaches on the page', await waitFor(`!!document.querySelector('.chat-view .chat-input') && !!(${VIEW})`, 20000));
+  check('lead\'s chat window attaches on the page', verdictOf(await waitFor(`!!document.querySelector('.chat-view .chat-input') && !!(${VIEW})`, 20000)));
 
   console.log('① lead\'s Task: its sidechain Writes notes.md ⇒ ONE card at the Task result, "By subagent …", the chip');
-  check('lead\'s turn played (Task + its result carrying agentId)', await turn('lead', 'a1'));
+  check('lead\'s turn played (Task + its result carrying agentId)', verdictOf(await turn('lead', 'a1')));
   await waitFor(`(${CARDS}).length >= 1 && /Artifacts · 1/.test(${CHIP})`, 10000);
   const c1 = await cardsNow();
-  check('ONE card for notes.md, saying "By subagent Draft the notes"', c1.length === 1 && c1[0].key === ':' + NOTES && /By subagent Draft the notes/.test(c1[0].meta || ''), c1);
-  check('the chip reads "Artifacts · 1"', /Artifacts · 1/.test(await evalJs(CHIP)), await evalJs(CHIP));
+  check('ONE card for notes.md, saying "By subagent Draft the notes"', c1.length === 1 && c1[0].key === ':' + NOTES && verdictOf(/By subagent Draft the notes/.test(c1[0].meta || '')), c1);
+  check('the chip reads "Artifacts · 1"', verdictOf(/Artifacts · 1/.test(await evalJs(CHIP))), await evalJs(CHIP));
   await cdp('Page.reload', {}); await reattach();
   await waitFor(`(${CARDS}).length >= 1`, 15000); await sleep(600);
   const c1r = await cardsNow();
-  check('a reload shows the same card ONCE, still "By subagent Draft the notes"', c1r.length === 1 && c1r[0].key === ':' + NOTES && /By subagent Draft the notes/.test(c1r[0].meta || ''), c1r);
+  check('a reload shows the same card ONCE, still "By subagent Draft the notes"', c1r.length === 1 && c1r[0].key === ':' + NOTES && verdictOf(/By subagent Draft the notes/.test(c1r[0].meta || '')), c1r);
 
   console.log('② helper hands its design + report over with the REAL vibespace-msg send --artifact');
-  check('helper\'s first turn played (vibespace-design new ×2 + a Write of report.md)', await turn('helper', 'b1'), runs('b1'));
+  check('helper\'s first turn played (vibespace-design new ×2 + a Write of report.md)', verdictOf(await turn('helper', 'b1')), runs('b1'));
   await evalJs(`[...app.wm.windows.values()].filter((w) => w._design).forEach((w) => { try { app.wm.close ? app.wm.close(w.id) : w.close(); } catch {} }); true`);
   check('no Design window on the page before the hand-over (helper\'s own design opens on ITS user\'s view, not lead\'s)', (await evalJs(designWins(LANDING))).length === 0, await evalJs(designWins(LANDING)));
-  check('helper\'s hand-over turn played', await turn('helper', 'b2'));
+  check('helper\'s hand-over turn played', verdictOf(await turn('helper', 'b2')));
   const r2 = runs('b2')[0] || {};
-  check('the CLI says BOTH were handed over to "lead" (the design and report.md)', r2.rc === 0 && new RegExp(`handed over ${LANDING} \\(design\\) to "lead"`).test(r2.out) && new RegExp(`handed over ${REPORT} \\(doc\\) to "lead"`).test(r2.out) && !/NOT handed over/.test(r2.out), r2);
+  check('the CLI says BOTH were handed over to "lead" (the design and report.md)', r2.rc === 0 && gateOf(new RegExp(`handed over ${LANDING} \\(design\\) to "lead"`).test(r2.out)) && gateOf(new RegExp(`handed over ${REPORT} \\(doc\\) to "lead"`).test(r2.out)) && !/NOT handed over/.test(r2.out), r2);
   await waitFor(`(${CARDS}).length >= 3`, 10000);
   const c2 = await cardsNow();
   const ho = c2.filter((c) => /Handed over by helper/.test(c.meta || ''));
-  check('lead\'s chat gets TWO "Handed over by helper" cards — the design (named Landing) and report.md', ho.length === 2 && ho.some((c) => c.key === ':' + LANDING && c.kind === 'design' && c.name === 'Landing') && ho.some((c) => c.key === ':' + REPORT && c.name === 'report.md'), c2);
-  check('…and the message itself: the strip says a group message from helper waits for lead\'s next turn', await waitFor(`/helper/.test((${VIEW})?._chatInput?._stashStrip?.el?.textContent || '') && !(${VIEW})._chatInput._stashStrip.el.hidden`, 10000), await evalJs(`(${VIEW})?._chatInput?._stashStrip?.el?.textContent || null`));
-  check('lead\'s chip counts all three ("Artifacts · 3")', await waitFor(`/Artifacts · 3/.test(${CHIP})`, 8000), await evalJs(CHIP));
+  check('lead\'s chat gets TWO "Handed over by helper" cards — the design (named Landing) and report.md', ho.length === 2 && gateOf(ho.some((c) => c.key === ':' + LANDING && c.kind === 'design' && c.name === 'Landing')) && verdictOf(ho.some((c) => c.key === ':' + REPORT && c.name === 'report.md')), c2);
+  check('…and the message itself: the strip says a group message from helper waits for lead\'s next turn', verdictOf(await waitFor(`/helper/.test((${VIEW})?._chatInput?._stashStrip?.el?.textContent || '') && !(${VIEW})._chatInput._stashStrip.el.hidden`, 10000)), await evalJs(`(${VIEW})?._chatInput?._stashStrip?.el?.textContent || null`));
+  check('lead\'s chip counts all three ("Artifacts · 3")', verdictOf(await waitFor(`/Artifacts · 3/.test(${CHIP})`, 8000)), await evalJs(CHIP));
   const la = await api('GET', `/api/artifacts?sessionId=${encodeURIComponent(leadWid)}`);
   const lrow = (p) => (la.body?.items || []).find((b) => b.path === p);
-  check('lead\'s Artifacts list both handed rows, via the hand-over from helper', ['design', 'doc'].every((k, i) => { const r = lrow([LANDING, REPORT][i]); return r && r.kind === k && r.via && r.via.kind === 'handover' && r.via.from?.name === 'helper'; }), la.body);
+  check('lead\'s Artifacts list both handed rows, via the hand-over from helper', verdictOf(['design', 'doc'].every((k, i) => { const r = lrow([LANDING, REPORT][i]); return r && r.kind === k && r.via && r.via.kind === 'handover' && r.via.from?.name === 'helper'; })), la.body);
   const dw = await waitFor(`(${designWins(LANDING)}).length === 1`, 10000);
   const dws = await evalJs(designWins(LANDING));
-  check('the Design window OPENS on the page for the design, titled by its name', dw && /Landing/.test(dws[0]?.title || ''), dws);
+  check('the Design window OPENS on the page for the design, titled by its name', gateOf(dw) && verdictOf(/Landing/.test(dws[0]?.title || '')), dws);
   await evalJs(`app.openDesign({}); true`);
   const homeRow = (name) => `[...document.querySelectorAll('.design-home *')].map((e) => e.closest('[class*="design-home-row"], li, .design-home-item') || e).find((e) => e.textContent.includes(${JSON.stringify(name)}) && /via helper/.test(e.textContent))`;
-  check('the Design home lists Landing "via helper"', await waitFor(`!!(${homeRow('Landing')})`, 10000), await evalJs(`(document.querySelector('.design-home')?.textContent || '').slice(0, 600)`));
+  check('the Design home lists Landing "via helper"', verdictOf(await waitFor(`!!(${homeRow('Landing')})`, 10000)), await evalJs(`(document.querySelector('.design-home')?.textContent || '').slice(0, 600)`));
   const ha = await api('GET', `/api/artifacts?sessionId=${encodeURIComponent(wid.helper)}`);
   const hrow = (p) => (ha.body?.items || []).find((b) => b.path === p);
-  check('helper\'s own rows carry handedTo lead', [LANDING, REPORT].every((p) => JSON.stringify(hrow(p)?.handedTo || '').includes('lead')), ha.body);
+  check('helper\'s own rows carry handedTo lead', verdictOf([LANDING, REPORT].every((p) => JSON.stringify(hrow(p)?.handedTo || '').includes('lead'))), ha.body);
 
   console.log('③ refusals through the real CLI: not its file / an outsider / 21 paths ⇒ refused by name, nothing sent');
   const before3 = (await cardsNow()).length;
-  check('helper\'s refusal turn played', await turn('helper', 'b3'));
+  check('helper\'s refusal turn played', verdictOf(await turn('helper', 'b3')));
   const [nm, os, tm] = runs('b3');
-  check('a path helper does not own ⇒ refused (not-yours): "NOT handed over", the path named, nothing sent', nm && nm.rc !== 0 && /not-yours/.test(nm.out) && nm.out.includes(OTHER) && /nothing was sent/.test(nm.out) && /NOT handed over/.test(nm.out), nm);
-  check('the outsider (no shared group) ⇒ refused by name', os && os.rc !== 0 && /unreachable|not-found/.test(os.out) && /outsider/.test(os.out), os);
-  check('21 paths ⇒ refused (too-many): "NOT handed over", nothing sent', tm && tm.rc !== 0 && /too-many/.test(tm.out) && /\b21\b/.test(tm.out) && /nothing was sent/.test(tm.out) && /NOT handed over/.test(tm.out), tm);
+  check('a path helper does not own ⇒ refused (not-yours): "NOT handed over", the path named, nothing sent', gateOf(nm) && nm.rc !== 0 && gateOf(/not-yours/.test(nm.out)) && gateOf(nm.out.includes(OTHER)) && gateOf(/nothing was sent/.test(nm.out)) && verdictOf(/NOT handed over/.test(nm.out)), nm);
+  check('the outsider (no shared group) ⇒ refused by name', gateOf(os) && os.rc !== 0 && gateOf(/unreachable|not-found/.test(os.out)) && verdictOf(/outsider/.test(os.out)), os);
+  check('21 paths ⇒ refused (too-many): "NOT handed over", nothing sent', gateOf(tm) && tm.rc !== 0 && gateOf(/too-many/.test(tm.out)) && gateOf(/\b21\b/.test(tm.out)) && gateOf(/nothing was sent/.test(tm.out)) && verdictOf(/NOT handed over/.test(tm.out)), tm);
   await sleep(800);
   check('lead\'s chat unchanged by the refusals (no new card)', (await cardsNow()).length === before3, await cardsNow());
 
   console.log('④ vibespace-design open <dir> --for lead = the same design hand-over');
   // lane agent-window-no-pop: the person goes back to lead's conversation (② ended in the Design home, which took the focus) —
   // an agent's Design opens beside a chat only where the person looks at it, else the chat gets a card
-  check('the person is back in lead\'s conversation (its window active)', await evalJs(`(() => { const w = (${VIEW})?.winInfo; if (!w) return false; app.wm.focusWindow(w.id); return app.wm.activeWindowId === w.id; })()`));
-  check('helper\'s open --for turn played', await turn('helper', 'b4'));
+  check('the person is back in lead\'s conversation (its window active)', verdictOf(await evalJs(`(() => { const w = (${VIEW})?.winInfo; if (!w) return false; app.wm.focusWindow(w.id); return app.wm.activeWindowId === w.id; })()`)));
+  check('helper\'s open --for turn played', verdictOf(await turn('helper', 'b4')));
   const r4 = runs('b4')[0] || {};
-  check('the CLI says the poster was handed over to "lead"', r4.rc === 0 && new RegExp(`handed ${POSTER} over to "lead"`).test(r4.out), r4);
+  check('the CLI says the poster was handed over to "lead"', r4.rc === 0 && verdictOf(new RegExp(`handed ${POSTER} over to "lead"`).test(r4.out)), r4);
   await waitFor(`(${CARDS}).some((e) => e.dataset.key === ${JSON.stringify(':' + POSTER)})`, 10000);
   const c4 = (await cardsNow()).find((c) => c.key === ':' + POSTER);
-  check('lead\'s chat gets the Poster design card, "Handed over by helper"', c4 && c4.kind === 'design' && c4.name === 'Poster' && /Handed over by helper/.test(c4.meta || ''), await cardsNow());
-  check('the Design window opens on the poster, titled Poster', await waitFor(`(${designWins(POSTER)}).some((w) => /Poster/.test(w.title))`, 10000), await evalJs(designWins(POSTER)));
+  check('lead\'s chat gets the Poster design card, "Handed over by helper"', gateOf(c4) && c4.kind === 'design' && c4.name === 'Poster' && verdictOf(/Handed over by helper/.test(c4.meta || '')), await cardsNow());
+  check('the Design window opens on the poster, titled Poster', verdictOf(await waitFor(`(${designWins(POSTER)}).some((w) => /Poster/.test(w.title))`, 10000)), await evalJs(designWins(POSTER)));
   await evalJs(`app.openDesign({}); true`);
-  check('the Design home lists Poster "via helper"', await waitFor(`!!(${homeRow('Poster')})`, 10000), await evalJs(`(document.querySelector('.design-home')?.textContent || '').slice(0, 600)`));
+  check('the Design home lists Poster "via helper"', verdictOf(await waitFor(`!!(${homeRow('Poster')})`, 10000)), await evalJs(`(document.querySelector('.design-home')?.textContent || '').slice(0, 600)`));
 
   console.log('⑤ zh at 390 px: the cards say 移交自 / 子代理; the chip and the cards inside the viewport, no word clipped');
   await evalJs(`localStorage.setItem('vibespace.lang', 'zh'); true`);
@@ -276,7 +276,7 @@ try {
   await cdp('Page.reload', {}); await reattach();
   await waitFor(`(${CARDS}).length >= 4`, 20000); await sleep(600);
   const z = await cardsNow();
-  check('zh: the hand-over cards say "移交自 helper", the subagent card "子代理 Draft the notes"', z.filter((c) => /移交自 helper/.test(c.meta || '')).length === 3 && /子代理 Draft the notes/.test(z.find((c) => c.key === ':' + NOTES)?.meta || '') && !z.some((c) => /Handed over|By subagent/.test(c.meta || '')), z);
+  check('zh: the hand-over cards say "移交自 helper", the subagent card "子代理 Draft the notes"', z.filter((c) => /移交自 helper/.test(c.meta || '')).length === 3 && gateOf(/子代理 Draft the notes/.test(z.find((c) => c.key === ':' + NOTES)?.meta || '')) && !z.some((c) => /Handed over|By subagent/.test(c.meta || '')), z);
   const census = await evalJs(`(() => {
     const vw = innerWidth, bad = [];
     const inV = (r) => r.width > 0 && r.left >= -0.5 && r.right <= vw + 0.5;
@@ -302,7 +302,7 @@ try {
     const row = bar ? [...bar.children].filter((e) => !e.classList.contains('chat-status-folded')).map((e) => [e.getAttribute('data-chip'), e.offsetWidth]) : null;
     return { vw, bad, chip: chip && chip.textContent.trim(), rest, n: ${CARDS}.length, folded: !!(chip && chip.classList.contains('chat-status-folded')), row, barW: bar ? bar.clientWidth : null };
   })()`);
-  check('rect census at 390 px: every card and its kind / name / meta inside the viewport, no meta clipped; the chip IN the phone bar\'s ONE row (never folded behind ⋯), readable and counting 4', census.n >= 4 && census.bad.length === 0 && /4/.test(census.chip || ''), census);
+  check('rect census at 390 px: every card and its kind / name / meta inside the viewport, no meta clipped; the chip IN the phone bar\'s ONE row (never folded behind ⋯), readable and counting 4', census.n >= 4 && census.bad.length === 0 && verdictOf(/4/.test(census.chip || '')), census);
   const face = await drawnFace(cdp, '.chat-status-artifacts');
   check(`the leg's face, read back from Chrome: ${face} (${FONT === 'dejavu' ? "the hosted runner's DejaVu Sans" : "this box's own"})`, FONT === 'dejavu' ? face === 'DejaVu Sans' : !!face, face);
   { // CONTROL, RE-MADE AGAIN (lane mask-value-shape, the chat status strip's step two — its premise moved): the strip has no
@@ -322,4 +322,4 @@ try {
 }
 console.log(`\n${passed} passed, ${failed} failed`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

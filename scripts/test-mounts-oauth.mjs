@@ -19,7 +19,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -84,7 +84,7 @@ console.log('§2 live');
   await until(() => !MountManager.drivePresets().some((c) => c.key === 'org1'));
   ok(MountManager._driveClient({ clientPreset: 'org1' }) === null && MountManager.drivePresets().map((c) => c.key).join() === 'channels', 'a withdrawn client is gone for every mount that named it (null — never another preset), the override removed too (§4: a mount keeps the client its token was minted under)');
   let threw = null; try { mm.gmail._client({ clientPreset: 'org1' }); } catch (e) { threw = e.message; }
-  ok(threw && /needs an OAuth client/.test(threw), 'a Gmail mount whose preset was withdrawn, and which names no minted client, is refused by name (never a silent swap — §4: one that names its minted client keeps it)');
+  ok(gateOf(threw) && verdictOf(/needs an OAuth client/.test(threw)), 'a Gmail mount whose preset was withdrawn, and which names no minted client, is refused by name (never a silent swap — §4: one that names its minted client keeps it)');
   project(DIR, { 'integrations.json': '[]' });
   await until(() => MountManager.drivePresets().some((c) => c.key === 'envonly'));
   ok(MountManager.drivePresets().map((c) => c.key).join() === 'envonly,default', 'the Secret lost its gdriveClients key ⇒ the env rung answers again (the list, then the legacy pair as `default`)');
@@ -102,7 +102,7 @@ console.log('§3 the env fallback, unchanged');
   process.env.VIBESPACE_GDRIVE_CLIENTS = '{"key":"x"}';
   const out2 = MountManager.drivePresets();
   console.error = prevErr;
-  ok(out.length === 0 && out2.length === 0 && errs.length === 2 && !errs.join().includes(S_E.slice(-6)) && /not an array/.test(errs[1]), 'an unparseable / non-array env is logged (no secret bytes) and answers [] — never a throw');
+  ok(out.length === 0 && out2.length === 0 && errs.length === 2 && !errs.join().includes(S_E.slice(-6)) && verdictOf(/not an array/.test(errs[1])), 'an unparseable / non-array env is logged (no secret bytes) and answers [] — never a throw');
   delete process.env.VIBESPACE_GDRIVE_CLIENTS;
   ok(MountManager.drivePresets().length === 0, 'nothing anywhere ⇒ [] (the dialogs then say "ask your admin")');
 }
@@ -115,7 +115,7 @@ console.log('§3 the env fallback, unchanged');
   process.env.VIBESPACE_GDRIVE_CLIENTS = JSON.stringify([g('envonly', S_E)]);
   const src = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf-8');
   const anchor = "    const fromFile = clusterPresets.sharedPresets().entries('gdrive');";
-  ok(src.includes(anchor), 'the control\'s anchor exists in mounts.js');
+  ok(verdictOf(src.includes(anchor)), 'the control\'s anchor exists in mounts.js');
   const old = M.load('src/mounts.js', editAnchor(src, anchor, '    const fromFile = null;', "src/mounts.js"), 'envonly');
   ok(old.MountManager.drivePresets().map((c) => c.key).join() === 'envonly' && MountManager.drivePresets().map((c) => c.key).join() === 'org1', 'CONTROL: the env-only reader serves the env\'s boot-time list while the directory offers org1 — the §1/§2 asserts are red on it');
   delete process.env.VIBESPACE_GDRIVE_CLIENTS;
@@ -154,7 +154,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
   ok(mm._adoptClient(d, { clientId: swapped.clientId, clientSecret: S_N }) === false && sealed(d) === `${ORG1}|${S_R}`, 'the minted client is the truth: a refresh under ANOTHER id never re-names it');
   const said = []; const l0 = console.log; console.log = (...x) => said.push(x.join(' ')); MountManager._mintedSaid = null;
   try { rcl({ ...d, id: 'd-said', name: 'Drive said' }); rcl({ ...d, id: 'd-said', name: 'Drive said' }); } finally { console.log = l0; }
-  ok(said.length === 1 && /preset «org1» now names another OAuth client — this mount keeps the client its token was minted under/.test(said[0]) && !said[0].includes(S_R), 'the hub\'s log says it ONCE per mount and pair (no secret bytes) — the admin re-authorizes before deleting the old client', said);
+  ok(said.length === 1 && gateOf(/preset «org1» now names another OAuth client — this mount keeps the client its token was minted under/.test(said[0])) && !said[0].includes(S_R), 'the hub\'s log says it ONCE per mount and pair (no secret bytes) — the admin re-authorizes before deleting the old client', said);
   use([g('channels', S_A)]);   // the key withdrawn
   ok(quietLog(() => rcl(d)) === `${ORG1}|${S_R}`, 'the key withdrawn: the mount keeps its minted client (never a silent fall to another preset)');
   // a re-authorize while org1 is withdrawn: the sign-in fell to another preset (Z) — the record names THAT client
@@ -220,7 +220,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
     GS.keepSignIn(gml, { token: tok('rt-old-g'), client: { clientId: ORG1, clientSecret: S_M } }); const kg = age(gml);
     const keepM = mm._state.mounts; mm._state.mounts = [];
     try { await mm._healthSweep(); } finally { mm._state.mounts = keepM; }
-    ok(!drv.has(kd) && !gml.has(kg) && gml.has(kn) && kn !== kg, 'the hub\'s 60 s mount sweep drops a sign-in\'s client at its day\'s end — the Drive and the Gmail memory alike (no new timer); a fresh one stays'); }
+    ok(!drv.has(kd) && !gml.has(kg) && gateOf(gml.has(kn)) && kn !== kg, 'the hub\'s 60 s mount sweep drops a sign-in\'s client at its day\'s end — the Drive and the Gmail memory alike (no new timer); a fresh one stays'); }
   // a Gmail sign-in takes only the request's client fields: a `minted` in its body never picks the client
   { use([g('org1', S_M)]);
     await mm.gmail.startAuth({ clientPreset: 'org1', minted: { clientId: 'body.apps.googleusercontent.com', clientSecret: 'body-secret' } });
@@ -247,7 +247,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
   { use([swapped]); const bad = { id: 'drv-bad', name: 'bad seal', type: 'drive', clientPreset: 'org1', tokenEnc: mm._enc(tok('rt-bad')), mintedClient: { id: ORG1, key: 'org1', sealed: 'not-a-sealed-value' } };
     const saidB = []; const l1 = console.log; console.log = (...x) => saidB.push(x.join(' ')); MountManager._mintedSaid = null;
     let rb; try { rb = rcl(bad); rcl(bad); } finally { console.log = l1; }
-    ok(rb === `${swapped.clientId}|${S_N}` && saidB.length === 1 && /bad seal: the sealed copy of the client its token was minted under .* cannot be opened — it refreshes with the preset «org1»; re-authorize it/.test(saidB[0]), 'a sealed copy that cannot be opened is NEVER silent: the hub\'s log says it once (the mount refreshes with the preset — re-authorize it)', saidB); }
+    ok(rb === `${swapped.clientId}|${S_N}` && saidB.length === 1 && verdictOf(/bad seal: the sealed copy of the client its token was minted under .* cannot be opened — it refreshes with the preset «org1»; re-authorize it/.test(saidB[0])), 'a sealed copy that cannot be opened is NEVER silent: the hub\'s log says it once (the mount refreshes with the preset — re-authorize it)', saidB); }
   // a record saved before the rule (or from a pasted token): its first ANSWERED backend probe adopts the client ITS env carried —
   // driven through the real _accessErrorFor → _probeBackendAccess (only the rclone run stands in: it answers «listed»)
   use([g('org1', S_M)]);
@@ -269,7 +269,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
     during = null;
     ok(ran[0] === `${ORG1}|${S_M}` && sealed(before) === `${ORG1}|${S_M}`, 'a preset swapped DURING the probe: the record adopts the client the run carried (never the swapped one worked out after it)', sealed(before));
     const anchorP = '      return this._adoptClient(holder, { clientId: env.RCLONE_CONFIG_VS_CLIENT_ID, clientSecret: env.RCLONE_CONFIG_VS_CLIENT_SECRET });';
-    ok(msrc4.includes(anchorP), 'RED control, its plant first: _adoptProbed adopts the client the probe\'s env carried');
+    ok(verdictOf(msrc4.includes(anchorP)), 'RED control, its plant first: _adoptProbed adopts the client the probe\'s env carried');
     const MP = M.load('src/mounts.js', anchored(msrc4, anchorP, '      return this._adoptClient(holder, MountManager.refreshClient(holder, this));', 'adopt-after-run'), 'adopt-after-run');
     delete before.mintedClient; use([g('org1', S_M)]);
     const envP = mm._rcloneFor(before).env; use([swapped]);
@@ -320,7 +320,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
   ok(!('mintedClient' in own) && rcl(own) === 'own.apps.googleusercontent.com|own-secret' && mm._adoptClient({ ...own, type: 'drive' }, { clientId: 'x', clientSecret: 'y' }) === false, 'a record with its OWN client names no minted client and adopts none — its own wins, as before');
   // RED control (a patched COPY of the product, its plant first): rclone's env from the preset alone — the base's road
   const dsrc = fs.readFileSync(path.join(REPO, 'src/mount-providers/drive.js'), 'utf8'), danchor = 'const pc = x.constructor.refreshClient(m, x);';
-  ok(dsrc.includes(danchor), 'RED control, its plant first: drive.js asks refreshClient for rclone\'s client');
+  ok(verdictOf(dsrc.includes(danchor)), 'RED control, its plant first: drive.js asks refreshClient for rclone\'s client');
   const DRIVE0 = M.load('src/mount-providers/drive.js', anchored(dsrc, danchor, 'const pc = x.constructor._driveClient(m);', 'drive-preset-only'), 'drive-preset-only');
   use([swapped]);
   ok(rcl(before, DRIVE0) === `${swapped.clientId}|${S_N}`, 'RED control: rclone\'s env from the preset alone sends the SWAPPED client after the swap — the 2026-10-23 outage');
@@ -336,7 +336,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
   const gc = quietLog(() => mm.gmail._client({ id: 'g1', clientPreset: 'org1', minted: mintedG }));
   ok(gc.clientId === ORG1 && gc.clientSecret === S_M, 'THE OUTAGE for Gmail: another client under the same key — gmail-sync refreshes with the minted one');
   const gsrc = fs.readFileSync(path.join(REPO, 'src/gmail-sync.js'), 'utf8'), ganchor = '    if (minted && minted.clientId && minted.clientSecret && (!pick || String(pick.clientId) !== String(minted.clientId))) {';
-  ok(gsrc.includes(ganchor), 'RED control, its plant first: gmail-sync\'s _client holds the minted branch');
+  ok(verdictOf(gsrc.includes(ganchor)), 'RED control, its plant first: gmail-sync\'s _client holds the minted branch');
   const G0 = M.load('src/gmail-sync.js', anchored(gsrc, ganchor, '    if (false) {', 'gmail-preset-only'), 'gmail-preset-only');
   ok(new G0.GmailSync({ presets: () => MountManager.drivePresets() })._client({ clientPreset: 'org1', minted: mintedG }).clientId === swapped.clientId, 'RED control: gmail-sync without it refreshes with the SWAPPED client (the base\'s road)');
   // the wiring: the sync worker and the labels picker are handed the RECORD's minted client; a refresh that worked adopts / follows
@@ -378,7 +378,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
       ok(!recW.mintedClient, 'a refresh of a token the record no longer holds adopts nothing');
       // RED control (a patched copy of mounts.js, its plant first): the worker handed a COPY of the minted client at start
       const anchorW = '      name: MountManager.lentName(m) || id, minted: MountManager.mintedReader(this, id),';
-      ok(msrc4.includes(anchorW), 'RED control, its plant first: _mountGmail hands the worker a reader of the record');
+      ok(verdictOf(msrc4.includes(anchorW)), 'RED control, its plant first: _mountGmail hands the worker a reader of the record');
       const MW = M.load('src/mounts.js', anchored(msrc4, anchorW, '      name: MountManager.lentName(m) || id, minted: MountManager.mintedOf(m, this),', 'worker-copy'), 'worker-copy');
       mm.gmail.stop('g-work'); sent.length = 0;
       MW.MountManager.prototype._mountGmail.call(mm, 'g-work');
@@ -393,7 +393,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
     const fetch0 = globalThis.fetch, asked = [];
     globalThis.fetch = async (url, o) => { asked.push(String(url).includes('oauth2') ? 'token' : 'labels'); return { ok: true, status: 200, json: async () => (String(url).includes('oauth2') ? { access_token: 'at', expires_in: 3600 } : { labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }] }) }; };
     let labels = null; try { labels = await mm.listGmailLabels({ id: 'g-lab' }); } finally { globalThis.fetch = fetch0; mm._state.mounts = mm._state.mounts.filter((x) => x.id !== 'g-lab'); }
-    ok(asked.join() === 'token,labels' && Array.isArray(labels) && labels.length === 1 && sealed(recL) === `${ORG1}|${S_M}`, 'a LABELS read over a saved record whose refresh worked adopts its client (listGmailLabels hands gmail-sync the record\'s id)', { asked, n: labels && labels.length }); }
+    ok(asked.join() === 'token,labels' && gateOf(Array.isArray(labels)) && labels.length === 1 && sealed(recL) === `${ORG1}|${S_M}`, 'a LABELS read over a saved record whose refresh worked adopts its client (listGmailLabels hands gmail-sync the record\'s id)', { asked, n: labels && labels.length }); }
   mm.gmail._auth = { token: tok('rt-g2'), client: { clientId: swapped.clientId, clientSecret: S_N } };
   GMAIL.update(gm, { token: tok('rt-g2') }, () => {}, mm);
   ok(gm.mintedClient.id === swapped.clientId, 'a Gmail re-authorize (its PATCH with a token) names the client its sign-in used');
@@ -441,14 +441,14 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
       const { at, open, u } = await quietA(() => run(MP, store('swap')));
       const s0 = at.swap[0] || {};
       ok(at.before.length === 0, 'the preset names the client the mounts were minted under: nothing is said');
-      ok(at.swap.length === 1 && s0.n === 3 && /the preset «org1» signs in with another OAuth client now — 3 mount\(s\) still on the old one/.test(s0.text) && /: Alpha, Beta, Delta\./.test(s0.detail) && !/Gamma|Own/.test(s0.detail) && s0.action.type === 'mount-reauth' && s0.action.mountId === 'sw-a',
+      ok(at.swap.length === 1 && s0.n === 3 && gateOf(/the preset «org1» signs in with another OAuth client now — 3 mount\(s\) still on the old one/.test(s0.text)) && gateOf(/: Alpha, Beta, Delta\./.test(s0.detail)) && !/Gamma|Own/.test(s0.detail) && s0.action.type === 'mount-reauth' && s0.action.mountId === 'sw-a',
         'ANOTHER client under the key: ONE For-you item names the mounts still on the old client (Alpha, Beta, Delta — never one that names no client, never one with its own), its door the first by name', at.swap);
-      ok(!!s0.door && s0.door.opens === 'storage' && /Re-authorize/.test(s0.door.verb), 'its door is the registry row\'s (opens the storage Re-authorize — src/lib/user-todos-actions.js ROW_DOORS `storage`)', s0.door);
+      ok(!!s0.door && s0.door.opens === 'storage' && verdictOf(/Re-authorize/.test(s0.door.verb)), 'its door is the registry row\'s (opens the storage Re-authorize — src/lib/user-todos-actions.js ROW_DOORS `storage`)', s0.door);
       ok(!!at.memo && !!at.memo.org1 && at.memo.org1.to === swapped.clientId && at.memo.org1.itemId === s0.id && at.memo.org1.named.join() === 'sw-a,sw-b,sw-d' && at.loaded === s0.id && JSON.stringify(at.restart) === JSON.stringify([s0.id]), 'what was said is kept on disk (the memo: the client in force, the mounts named, the item) — after a RESTART (a new manager\'s own load, a new producer, the boot\'s check) the same ONE item, never a second', { memo: at.memo, loaded: at.loaded, restart: at.restart });
       const r1 = at.reauth[0] || {};
-      ok(at.reauth.length === 1 && r1.id === s0.id && r1.n === 2 && /: Beta, Delta\./.test(r1.detail) && r1.door === 'sw-b', 'one re-authorized under the new client: the SAME item names who is left (Beta, Delta), its door moves to the next', at.reauth);
+      ok(at.reauth.length === 1 && r1.id === s0.id && r1.n === 2 && gateOf(/: Beta, Delta\./.test(r1.detail)) && r1.door === 'sw-b', 'one re-authorized under the new client: the SAME item names who is left (Beta, Delta), its door moves to the next', at.reauth);
       const m1 = at.removed[0] || {};
-      ok(at.afterRemovedHook === 1 && at.removed.length === 1 && m1.id === s0.id && m1.n === 1 && /: Delta\./.test(m1.detail) && m1.door === 'sw-d', 'the mount its door named REMOVED: the item is not closed by the removal — the next check names who is left (Delta), its door moves', at.removed);
+      ok(at.afterRemovedHook === 1 && at.removed.length === 1 && m1.id === s0.id && m1.n === 1 && gateOf(/: Delta\./.test(m1.detail)) && m1.door === 'sw-d', 'the mount its door named REMOVED: the item is not closed by the removal — the next check names who is left (Delta), its door moves', at.removed);
       mm._driveAuth = { token: tok('rt-sw-d2'), client: { clientId: swapped.clientId, clientSecret: S_N } };
       DRIVE.writeToken(mm._state.mounts.find((x) => x.id === 'sw-d'), tok('rt-sw-d2'), mm); mm._driveAuth = null;
       await quietA(() => mm.clientSwapCheck());
@@ -469,10 +469,10 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
       mm._state.mounts = [rec('sw-p', 'Plain', DEF, { clientPreset: null }), rec('sw-q', 'Keyed', DEF, { clientPreset: 'default' })];
       use([{ key: 'default', label: 'Default', clientId: 'replaced-default.apps.googleusercontent.com', clientSecret: S_N }]); await quietA(() => mm.clientSwapCheck());
       const one = open();
-      ok(one.length === 1 && one[0].i18n.text.params.n === 2 && /: Keyed, Plain\./.test(one[0].detail), 'a mount with NO key and one keyed to the same (default) preset are ONE group: one item names both', one.map((i) => [i.text, i.detail]));
+      ok(one.length === 1 && one[0].i18n.text.params.n === 2 && verdictOf(/: Keyed, Plain\./.test(one[0].detail)), 'a mount with NO key and one keyed to the same (default) preset are ONE group: one item names both', one.map((i) => [i.text, i.detail]));
       // RED control (a patched COPY of the producer, its plant first): the removal closes the swap item like the mount's own items
       const fsrc = fs.readFileSync(path.join(REPO, 'src/server/mount-for-you.js'), 'utf8'), fanchor = "filter((x) => x && !isSwap(x) && ((x.facts && x.facts.mountId === m.id)";
-      ok(fsrc.includes(fanchor), 'RED control, its plant first: the removal of a mount leaves a client-swap item to the check');
+      ok(verdictOf(fsrc.includes(fanchor)), 'RED control, its plant first: the removal of a mount leaves a client-swap item to the check');
       const MP0 = M.load('src/server/mount-for-you.js', anchored(fsrc, fanchor, "filter((x) => x && ((x.facts && x.facts.mountId === m.id)", 'removal-closes-swap'), 'removal-closes-swap');   // stale-pins: kept — the RED control's plant is the base's road on purpose
       const red = await quietA(() => run(MP0, store('swap-red')));
       ok(red.at.afterRemovedHook === 0 && red.at.removed.length === 0, 'RED control: a removal that closes the swap item leaves Delta, still on the old client, told by NOTHING (the item closed, the memo named it already)', red.at.removed);
@@ -485,7 +485,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
         const l1 = it && it.i18n && it.i18n.detail && it.i18n.detail[0];
         const shown = l1 && l1.params && typeof l1.params.names === 'string' ? l1.params.names.split(', ') : [];
         const whole = shown.every((n) => need.some((r) => r.name === n)), more = l1 && l1.params ? l1.params.more : null;
-        ok(!!it && /\{names\} and \{more\} more\.$/.test(l1.key) && shown.length > 1 && whole && shown.length + more === need.length && l1.params.names.length <= 600 && it.detail.includes(`and ${more} more.`),
+        ok(!!it && gateOf(/\{names\} and \{more\} more\.$/.test(l1.key)) && shown.length > 1 && gateOf(whole) && shown.length + more === need.length && l1.params.names.length <= 600 && verdictOf(it.detail.includes(`and ${more} more.`)),
           'MANY mounts on the old client: the item names WHOLE names only (never cut mid-name inside the store\'s 600 characters), then the count of the rest — in one sentence of its own', { shown: shown.length, more, len: l1 && l1.params && l1.params.names.length, key: l1 && l1.key, lastShown: shown.slice(-1)[0] }); }
       // A FULL TRAY: the item waits, said ONCE an episode (the log), the episode ends when it is filed or nothing is owed
       { const uf = store('swap-full'), said = [], ff = MP.create({ getUserTodos: () => uf, mountCount: () => 1, log: (l) => said.push(l) });
@@ -508,17 +508,17 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
         const msrc5 = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8');
         const rmBody = msrc5.slice(msrc5.indexOf('  async remove(id) {'), msrc5.indexOf('\n  }\n', msrc5.indexOf('  async remove(id) {')));
         const upBody = msrc5.slice(msrc5.indexOf('  async update(id, patch = {}) {'), msrc5.indexOf('\n  }\n', msrc5.indexOf('  async update(id, patch = {}) {')));
-        ok(at.doors.afterAdopt === 1 && at.doors.afterImport === 2 && rmBody.includes('this.clientSwapCheck().catch(') && upBody.includes('this.clientSwapCheck().catch('),
+        ok(at.doors.afterAdopt === 1 && at.doors.afterImport === 2 && gateOf(rmBody.includes('this.clientSwapCheck().catch(')) && verdictOf(upBody.includes('this.clientSwapCheck().catch(')),
           'the doors that change who is counted ask the check: a client adopted and an import (driven), a removal and an edit (their own lines)', { doors: at.doors, remove: rmBody.includes('this.clientSwapCheck().catch('), update: upBody.includes('this.clientSwapCheck().catch(') }); }
       // THE WIRING (the hub's real lines): the producer handed over, the store's reopen, the presets reload and the boot's check;
       // the door's client chain: ROW_DOORS `storage` → app.openMountReauth → the sidebar's openMountReauth (the shared client-switch
       // Re-authorize under the preset's NOW client — Drive and Gmail alike)
       const wire = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8'), acts = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8');
       const appSrc = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'), side = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-      ok(wire.includes('onClientSwaps: (g, memos) => fy.clientSwaps(g, memos)') && wire.includes('onReopen: () => { mounts.clientSwapCheck().catch(() => { }); }') && wire.includes('sharedPresets().onChange(() => { mounts.clientSwapCheck().catch(() => { }); })') && /\} mounts\.clientSwapCheck\(\)\.catch\(\(\) => \{ \}\); \} \/\/ B-e40d/.test(wire),
+      ok(gateOf(wire.includes('onClientSwaps: (g, memos) => fy.clientSwaps(g, memos)')) && gateOf(wire.includes('onReopen: () => { mounts.clientSwapCheck().catch(() => { }); }')) && gateOf(wire.includes('sharedPresets().onChange(() => { mounts.clientSwapCheck().catch(() => { }); })')) && verdictOf(/\} mounts\.clientSwapCheck\(\)\.catch\(\(\) => \{ \}\); \} \/\/ B-e40d/.test(wire)),
         'the hub wires it: the producer, the store\'s reopen, the presets reload and the boot\'s check (src/server/mounts-plugins-wiring.js)');
-      ok(/const ROW_DOORS = \{[^\n]*\bstorage: \(item\) => app\.openMountReauth\?\.\(/.test(acts) && appSrc.includes('openMountReauth(id) { return this.sidebar?.openMountReauth?.(id); }') && side.includes('async openMountReauth(id) {')
-        && side.includes('this._showClientSwitchReauthDialog(m, m, { type: m.type, start: { clientPreset: m.clientPreset || undefined }, client: { clientPreset: m.clientPreset || \'\' } }, presets);') && side.includes('this._providersSeen = d.providers'),
+      ok(gateOf(/const ROW_DOORS = \{[^\n]*\bstorage: \(item\) => app\.openMountReauth\?\.\(/.test(acts)) && gateOf(appSrc.includes('openMountReauth(id) { return this.sidebar?.openMountReauth?.(id); }')) && gateOf(side.includes('async openMountReauth(id) {'))
+        && gateOf(side.includes('this._showClientSwitchReauthDialog(m, m, { type: m.type, start: { clientPreset: m.clientPreset || undefined }, client: { clientPreset: m.clientPreset || \'\' } }, presets);')) && verdictOf(side.includes('this._providersSeen = d.providers')),
         'the door\'s client chain: ROW_DOORS storage → app.openMountReauth → the sidebar\'s openMountReauth — the client-switch Re-authorize under the preset\'s NOW client (its rows read though the Storage tab never drew)');
     } finally { mm._state.mounts = keepS; mm._state.clientSwaps = keepSw; mm.onClientSwaps = keepOn; if (keepOn === undefined) delete mm.onClientSwaps; mm._driveAuth = null; }
   }
@@ -526,7 +526,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
   CP.setSharedPresets(null);
 }
 
-for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(verdictOf(row.pass), row.name, row.detail);
 CP.setSharedPresets(null);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

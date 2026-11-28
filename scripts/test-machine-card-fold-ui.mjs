@@ -33,7 +33,7 @@ const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 const LIVE_SID = '5c3a0000-0000-4000-8000-00000000pcf1'.replace('pcf1', 'fcf1');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -193,57 +193,57 @@ try {
     { type: 'assistant', uuid: 'mcf-a1', sessionId: H_SID, cwd: H_CWD, timestamp: ts(5), message: { id: 'msg_mcf1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: '好的，我在那台机器上开始渲染。' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } },
   ].map((r) => JSON.stringify(r)).join('\n') + '\n');
   await evalJs(`(async () => { window.__sid = ${JSON.stringify(H_SID)}; window.app.viewSession(${JSON.stringify(H_SID)}, ${JSON.stringify(H_CWD)}, 'machine fold'); return true; })()`);
-  check('the conversation opens', await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 2`, 20000));
+  check('the conversation opens', verdictOf(await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 2`, 20000)));
   await feed(SIX);
   await shot('390-zh-six');
   console.log('① six cards of one machine at 390 px (zh)');
   let c = await evalJs(MCENSUS);
   const mh = c.hs.filter((h) => h.label.startsWith(M));
   check('① ONE head for the six: "WIN-DESK1 · 4 条命令 · 2 个文件 · 最后：退出码 0" + the time span in its own span', mh.length === 1 && mh[0].label === 'WIN-DESK1 · 4 条命令 · 2 个文件 · 最后：退出码 0' && mh[0].time === `· ${SPAN}` && !mh[0].alert, c.hs);
-  check('① …closed: none of the six cards is on screen', c.cards.length === 6 && c.cards.every((x) => !x.shown), c.cards);
-  check('① …the head is ONE line at 390 px (≤ 32 px tall) and its time span is whole on screen', mh[0] && mh[0].h <= 32 && mh[0].timeIn, mh[0]);
+  check('① …closed: none of the six cards is on screen', c.cards.length === 6 && verdictOf(c.cards.every((x) => !x.shown)), c.cards);
+  check('① …the head is ONE line at 390 px (≤ 32 px tall) and its time span is whole on screen', gateOf(mh[0]) && mh[0].h <= 32 && verdictOf(mh[0].timeIn), mh[0]);
   console.log('② open: the six, the decoded script, the line one click away');
   await clickHead();
   c = await evalJs(MCENSUS);
-  check('② open ⇒ the six cards are shown', c.cards.length === 6 && c.cards.every((x) => x.shown) && c.hs.some((h) => h.open), c.cards);
-  check('② …each as ONE compact line (a ~40 px row at 390 px): no "VibeSpace · Machines" header, no machine name, no words / script / output', c.cards.length === 6 && c.cards.every((x) => x.compact && x.lineShown && x.oneLine && !x.headShown && !x.wordsShown && !x.detailShown && !x.seen.includes(M) && x.lineH >= 38 && x.lineH <= 42 && x.h <= 44), c.cards);
+  check('② open ⇒ the six cards are shown', c.cards.length === 6 && gateOf(c.cards.every((x) => x.shown)) && verdictOf(c.hs.some((h) => h.open)), c.cards);
+  check('② …each as ONE compact line (a ~40 px row at 390 px): no "VibeSpace · Machines" header, no machine name, no words / script / output', c.cards.length === 6 && verdictOf(c.cards.every((x) => x.compact && x.lineShown && x.oneLine && !x.headShown && !x.wordsShown && !x.detailShown && !x.seen.includes(M) && x.lineH >= 38 && x.lineH <= 42 && x.h <= 44)), c.cards);
   const headOf = (m) => /`([^`]*)`/.exec(m.content[0].text)[1];
   const framed = (cs) => cs.every((x, i) => i === 0 || Math.abs(x.top - cs[i - 1].bottom) <= 1) && cs.slice(0, -1).every((x) => x.bb === 0) && cs[cs.length - 1].bb >= 1 && cs.every((x) => x.bt >= 1) && cs.slice(1).every((x) => x.btc !== x.brc);
-  check('② …the open group is ONE framed list: the rows touch (no gap), a thin divider between rows, the frame only round the whole', framed(c.cards), c.cards.map((x) => ({ id: x.id, top: x.top, bottom: x.bottom, bt: x.bt, bb: x.bb, btc: x.btc, brc: x.brc })));
-  check('② …the line: the verb + the readable command, then the outcome ("PowerShell: … · 退出码 0 · 1.4 s" — a run\'s outcome in the page\'s words, lane phone-run-box —, "pulled … → … · 1.2 MiB · 0.4 s")', c.cards[0].what === headOf(SIX[0]) && c.cards[0].what.startsWith('PowerShell: $ErrorActionPreference') && c.cards[0].out === '· 退出码 0 · 1.4 s' && c.cards[1].what === 'pulled E:\\house3d\\jobs\\h3d-1\\out.png → /var/tmp/mart/h3d-1/out.png' && c.cards[1].out === '· 1.2 MiB · 0.4 s' && c.cards[2].what === 'hostname', c.cards.slice(0, 3));
-  check('② …the whole text is ON the line (no hover title), each line closed (aria-expanded=false)', c.cards.every((x) => !x.titled && x.expanded === 'false'), c.cards);
+  check('② …the open group is ONE framed list: the rows touch (no gap), a thin divider between rows, the frame only round the whole', verdictOf(framed(c.cards)), c.cards.map((x) => ({ id: x.id, top: x.top, bottom: x.bottom, bt: x.bt, bb: x.bb, btc: x.btc, brc: x.brc })));
+  check('② …the line: the verb + the readable command, then the outcome ("PowerShell: … · 退出码 0 · 1.4 s" — a run\'s outcome in the page\'s words, lane phone-run-box —, "pulled … → … · 1.2 MiB · 0.4 s")', c.cards[0].what === headOf(SIX[0]) && gateOf(c.cards[0].what.startsWith('PowerShell: $ErrorActionPreference')) && c.cards[0].out === '· 退出码 0 · 1.4 s' && c.cards[1].what === 'pulled E:\\house3d\\jobs\\h3d-1\\out.png → /var/tmp/mart/h3d-1/out.png' && c.cards[1].out === '· 1.2 MiB · 0.4 s' && c.cards[2].what === 'hostname', c.cards.slice(0, 3));
+  check('② …the whole text is ON the line (no hover title), each line closed (aria-expanded=false)', verdictOf(c.cards.every((x) => !x.titled && x.expanded === 'false')), c.cards);
   await evalJs(`(() => { const v = ${VIEW}; v._messageList.querySelector(':scope > .chat-run-header').scrollIntoView({ block: 'start' }); return true; })()`);
   await shot('390-zh-compact');
   await clickLine('mcf-1');
   c = await evalJs(MCENSUS);
-  check('② a click on the encoded call\'s line opens ITS detail in place (the output + a closed 技术细节 — lane exit-card-margin: the script under it) — the other five stay one line', c.cards[0].detailShown && c.cards[0].outShown && c.cards[0].techShown && !c.cards[0].scriptShown && !c.cards[0].rawShown && c.cards[0].lineShown && !c.cards[0].headShown && c.cards[0].expanded === 'true' && c.cards.slice(1).every((x) => x.lineShown && !x.detailShown), c.cards);
+  check('② a click on the encoded call\'s line opens ITS detail in place (the output + a closed 技术细节 — lane exit-card-margin: the script under it) — the other five stay one line', gateOf(c.cards[0].detailShown) && gateOf(c.cards[0].outShown) && gateOf(c.cards[0].techShown) && !c.cards[0].scriptShown && !c.cards[0].rawShown && gateOf(c.cards[0].lineShown) && !c.cards[0].headShown && c.cards[0].expanded === 'true' && verdictOf(c.cards.slice(1).every((x) => x.lineShown && !x.detailShown)), c.cards);
   const techOpened = await openTech('mcf-1');
   c = await evalJs(MCENSUS);
-  check('② 技术细节 opened: the decoded script and 显示完整命令 inside it', techOpened && c.cards[0].scriptShown && c.cards[0].rawShown, c.cards[0]);
+  check('② 技术细节 opened: the decoded script and 显示完整命令 inside it', gateOf(techOpened) && gateOf(c.cards[0].scriptShown) && verdictOf(c.cards[0].rawShown), c.cards[0]);
   const encCard = await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === 'mcf-1'); if (!el) return null;
     const raw = el.querySelector('.chat-exit-cmd-raw'); return { head: el.querySelector('.chat-vs-notice-title')?.textContent + ' | ' + (el.querySelector(':scope > .chat-text')?.textContent || el.innerText.slice(0, 200)), what: el.querySelector('.chat-exit-cmd-what')?.textContent || '', script: el.querySelector('.chat-exit-cmd-enc .chat-exit-cmd')?.textContent || '', raw: raw ? raw.querySelector('summary').textContent : null, rawShown: raw ? raw.open : null }; })()`);
-  check('② the encoded card\'s words say actor + verb + object (在 WIN-DESK1 上运行了一条命令 — 退出码 0 · 1.4 s; its compact line keeps "PowerShell: …"), the decoded script (zh label), the line behind 显示完整命令', encCard && encCard.head === 'VibeSpace · Machines · WIN-DESK1 | 在 WIN-DESK1 上运行了一条命令 — 退出码 0 · 1.4 s' && /PowerShell 脚本（由 -EncodedCommand 解码）/.test(encCard.what) && encCard.script.startsWith('$ErrorActionPreference = "Stop"\nGet-ChildItem') && encCard.raw === '显示完整命令' && encCard.rawShown === false, encCard);
+  check('② the encoded card\'s words say actor + verb + object (在 WIN-DESK1 上运行了一条命令 — 退出码 0 · 1.4 s; its compact line keeps "PowerShell: …"), the decoded script (zh label), the line behind 显示完整命令', gateOf(encCard) && encCard.head === 'VibeSpace · Machines · WIN-DESK1 | 在 WIN-DESK1 上运行了一条命令 — 退出码 0 · 1.4 s' && gateOf(/PowerShell 脚本（由 -EncodedCommand 解码）/.test(encCard.what)) && gateOf(encCard.script.startsWith('$ErrorActionPreference = "Stop"\nGet-ChildItem')) && encCard.raw === '显示完整命令' && encCard.rawShown === false, encCard);
   await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === 'mcf-1'); el.scrollIntoView({ block: 'start' }); return true; })()`);
   await shot('390-zh-compact-one-open');
   await clickLine('mcf-1');
   c = await evalJs(MCENSUS);
-  check('② a second click closes it again (one line)', !c.cards[0].detailShown && c.cards[0].lineShown && c.cards[0].expanded === 'false', c.cards[0]);
+  check('② a second click closes it again (one line)', !c.cards[0].detailShown && gateOf(c.cards[0].lineShown) && c.cards[0].expanded === 'false', c.cards[0]);
   await keyLine('mcf-3');
   c = await evalJs(MCENSUS);
   const k3 = c.cards[2];
   await keyLine('mcf-3');
   c = await evalJs(MCENSUS);
-  check('② Enter on a line opens that call too, and Enter again closes it', k3.detailShown && k3.expanded === 'true' && !c.cards[2].detailShown, [k3, c.cards[2]]);
+  check('② Enter on a line opens that call too, and Enter again closes it', gateOf(k3.detailShown) && k3.expanded === 'true' && !c.cards[2].detailShown, [k3, c.cards[2]]);
   await clickHead();
   console.log('③ a FAILED card: on screen, the head in the alert style; the closed group patched in place');
   await evalJs(`(() => { const v = ${VIEW}; window.__mcfEls = [...v._messageList.querySelectorAll(':scope > .chat-msg')].filter((e) => String(e._rawMsg?.peerFrom || '').startsWith('Machines · ')); return true; })()`);
   await feed([FAILED]);
   c = await evalJs(MCENSUS);
   const fh = c.hs.filter((h) => h.label.startsWith(M));
-  check('③ still ONE head, now "… · 5 条命令 · 2 个文件 · 1 个失败 · 最后：退出码 1" in the alert style, closed, its time whole at 390 px', fh.length === 1 && fh[0].label === 'WIN-DESK1 · 5 条命令 · 2 个文件 · 1 个失败 · 最后：退出码 1' && fh[0].time === `· ${spanOf(T0, FAILED.ts)}` && fh[0].timeIn && fh[0].alert && !fh[0].open, c.hs);
+  check('③ still ONE head, now "… · 5 条命令 · 2 个文件 · 1 个失败 · 最后：退出码 1" in the alert style, closed, its time whole at 390 px', fh.length === 1 && fh[0].label === 'WIN-DESK1 · 5 条命令 · 2 个文件 · 1 个失败 · 最后：退出码 1' && fh[0].time === `· ${spanOf(T0, FAILED.ts)}` && gateOf(fh[0].timeIn) && gateOf(fh[0].alert) && !fh[0].open, c.hs);
   check('③ the failed card stays ON SCREEN outside the closed fold; the six stay folded', c.cards.length === 7 && c.cards.filter((x) => x.shown).map((x) => x.id).join() === FAILED.id, c.cards);
   const fc = c.cards.find((x) => x.id === FAILED.id);
-  check('③ …as ONE compact line too, in the alert style, its first error line under it ("Access is denied.")', fc && fc.compact && fc.lineShown && fc.alert && fc.out === '· 退出码 1 · 1.4 s' && fc.errShown && fc.err === 'Access is denied.' && !fc.headShown && !fc.detailShown && !fc.seen.includes(M), fc);
+  check('③ …as ONE compact line too, in the alert style, its first error line under it ("Access is denied.")', gateOf(fc) && gateOf(fc.compact) && gateOf(fc.lineShown) && gateOf(fc.alert) && fc.out === '· 退出码 1 · 1.4 s' && gateOf(fc.errShown) && fc.err === 'Access is denied.' && !fc.headShown && !fc.detailShown && !fc.seen.includes(M), fc);
   const same = await evalJs(`(() => { const v = ${VIEW}; const now = [...v._messageList.querySelectorAll(':scope > .chat-msg')].filter((e) => String(e._rawMsg?.peerFrom || '').startsWith('Machines · ')); return window.__mcfEls.every((e, i) => e.isConnected && now[i] === e); })()`);
   check('③ the group was patched in place: the six members are the SAME nodes (no re-creation)', same === true);
   await evalJs(`(() => { const v = ${VIEW}; v._messageList.querySelector(':scope > .chat-run-header').scrollIntoView({ block: 'center' }); return true; })()`);
@@ -251,18 +251,18 @@ try {
   console.log('④ another machine\'s card is not swallowed; 1280 px');
   await feed([OTHER]);
   c = await evalJs(MCENSUS);
-  check('④ linux-box\'s card is its own (on screen), the WIN-DESK1 head unchanged', c.cards.find((x) => x.id === OTHER.id)?.shown && c.hs.filter((h) => h.label.startsWith(M)).length === 1 && !c.hs.some((h) => h.label.startsWith('linux-box')), c);
+  check('④ linux-box\'s card is its own (on screen), the WIN-DESK1 head unchanged', gateOf(c.cards.find((x) => x.id === OTHER.id)?.shown) && c.hs.filter((h) => h.label.startsWith(M)).length === 1 && !c.hs.some((h) => h.label.startsWith('linux-box')), c);
   const oc = c.cards.find((x) => x.id === OTHER.id);
-  check('④ …a LONE card (another machine) stays the full card: its header, its words, its command + output; no compact line', oc && oc.shown && !oc.compact && !oc.lineShown && oc.headShown && oc.wordsShown && oc.detailShown, oc);
+  check('④ …a LONE card (another machine) stays the full card: its header, its words, its command + output; no compact line', gateOf(oc) && gateOf(oc.shown) && !oc.compact && !oc.lineShown && gateOf(oc.headShown) && gateOf(oc.wordsShown) && verdictOf(oc.detailShown), oc);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await sleep(500);
   c = await evalJs(MCENSUS);
   const wh = c.hs.filter((h) => h.label.startsWith(M));
-  check('④ at 1280 px: one WIN-DESK1 head (alert, one line), the failed and the other machine\'s card shown, the six folded', wh.length === 1 && wh[0].alert && wh[0].h <= 32 && c.cards.filter((x) => x.shown).map((x) => x.id).join() === [FAILED.id, OTHER.id].join(), c);
+  check('④ at 1280 px: one WIN-DESK1 head (alert, one line), the failed and the other machine\'s card shown, the six folded', wh.length === 1 && gateOf(wh[0].alert) && wh[0].h <= 32 && c.cards.filter((x) => x.shown).map((x) => x.id).join() === [FAILED.id, OTHER.id].join(), c);
   await shot('1280-zh-failed');
   await clickHead();
   c = await evalJs(MCENSUS);
-  check('④ 1280 px open: the seven WIN-DESK1 calls are one ~30 px row each in ONE framed list (the failed one in the alert style), linux-box whole', c.cards.filter((x) => x.id !== OTHER.id).every((x) => x.compact && x.lineShown && x.oneLine && !x.headShown && !x.detailShown && x.h >= 28 && x.h <= (x.errShown ? 56 : 34)) && framed(c.cards.filter((x) => x.id !== OTHER.id)) && c.cards.find((x) => x.id === FAILED.id)?.alert && c.cards.find((x) => x.id === OTHER.id)?.headShown && c.hs.find((h) => h.label.startsWith(M))?.timeIn, c.cards.map((x) => [x.id, x.compact, x.lineShown, x.oneLine, x.headShown, x.detailShown, x.h, x.bt, x.bb, Math.round(x.top), Math.round(x.bottom), x.errShown, x.btc === x.brc]));
+  check('④ 1280 px open: the seven WIN-DESK1 calls are one ~30 px row each in ONE framed list (the failed one in the alert style), linux-box whole', gateOf(c.cards.filter((x) => x.id !== OTHER.id).every((x) => x.compact && x.lineShown && x.oneLine && !x.headShown && !x.detailShown && x.h >= 28 && x.h <= (x.errShown ? 56 : 34))) && gateOf(framed(c.cards.filter((x) => x.id !== OTHER.id))) && gateOf(c.cards.find((x) => x.id === FAILED.id)?.alert) && gateOf(c.cards.find((x) => x.id === OTHER.id)?.headShown) && verdictOf(c.hs.find((h) => h.label.startsWith(M))?.timeIn), c.cards.map((x) => [x.id, x.compact, x.lineShown, x.oneLine, x.headShown, x.detailShown, x.h, x.bt, x.bb, Math.round(x.top), Math.round(x.bottom), x.errShown, x.btc === x.brc]));
   // ── ⑤ lane exit-calls-in-history: a HISTORY of vibespace-exit Bash calls (no injected card exists after a rebuild) ──
   console.log('⑤ a rebuilt history: the vibespace-exit Bash calls are machine cards (zh)');
   const XM = 'BOX-STUDIO', X_SID = '5c3a0000-0000-4000-8000-0000000000ec', X_CWD = path.join(fakeHome, 'xc');
@@ -290,7 +290,7 @@ try {
   fs.writeFileSync(path.join(xdir, X_SID + '.jsonl'), xrecs.map((r) => JSON.stringify(r)).join('\n') + '\n');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await evalJs(`(async () => { window.__sid = ${JSON.stringify(X_SID)}; window.app.viewSession(${JSON.stringify(X_SID)}, ${JSON.stringify(X_CWD)}, 'exit history'); return true; })()`);
-  check('⑤ the rebuilt conversation opens', await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 7`, 20000));
+  check('⑤ the rebuilt conversation opens', verdictOf(await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 7`, 20000)));
   await sleep(800);
   const XCENSUS = `(() => { const v = ${VIEW}; const list = v._messageList; const vis = (x) => !!x && x.checkVisibility();
     const calls = [...list.querySelectorAll(':scope > .chat-exit-call')].map((el) => { const line = el.querySelector(':scope > .chat-mline'), w = line && line.querySelector('.chat-mline-what');
@@ -300,19 +300,19 @@ try {
     const hs = [...list.querySelectorAll(':scope > .chat-run-header')].map((h) => ({ label: h.querySelector('.chat-run-label')?.textContent || '', alert: h.classList.contains('chat-run-alert'), open: h.classList.contains('open'), cut: h.scrollWidth > h.clientWidth + 1, h: Math.round(h.getBoundingClientRect().height) }));
     return { calls, bash, hs }; })()`;
   let xc = await evalJs(XCENSUS);
-  check('⑤ the five vibespace-exit calls are five machine cards (keyed to their tool calls); no Bash card says vibespace-exit; the plain ls stays a Bash card', xc.calls.length === 5 && xc.calls.every((x) => /^toolu_xc\d$/.test(x.toolId)) && !xc.bash.some((t) => t.includes('vibespace-exit')) && xc.bash.length === 1 && xc.bash[0].includes('ls -la'), xc);
+  check('⑤ the five vibespace-exit calls are five machine cards (keyed to their tool calls); no Bash card says vibespace-exit; the plain ls stays a Bash card', xc.calls.length === 5 && gateOf(xc.calls.every((x) => /^toolu_xc\d$/.test(x.toolId))) && !xc.bash.some((t) => t.includes('vibespace-exit')) && xc.bash.length === 1 && verdictOf(xc.bash[0].includes('ls -la')), xc);
   const xh = xc.hs.filter((h) => h.label.startsWith(XM));
-  check('⑤ ONE machine head for them: the machine, 3 commands, 1 file, 1 lookup, 2 failed (alert), the last outcome — the failures counted once (no extra "2 ✗")', xh.length === 1 && xh[0].alert && /3 条命令/.test(xh[0].label) && /1 个文件/.test(xh[0].label) && /1 次查询/.test(xh[0].label) && /2 个失败/.test(xh[0].label) && !/✗/.test(xh[0].label), xc.hs);
-  check('⑤ closed: the two failures (exit 127, the timeout) stay on screen, the three others folded', xc.calls.filter((x) => x.shown).length === 2 && xc.calls.filter((x) => x.shown).every((x) => x.alert), xc.calls);
+  check('⑤ ONE machine head for them: the machine, 3 commands, 1 file, 1 lookup, 2 failed (alert), the last outcome — the failures counted once (no extra "2 ✗")', xh.length === 1 && gateOf(xh[0].alert) && gateOf(/3 条命令/.test(xh[0].label)) && gateOf(/1 个文件/.test(xh[0].label)) && gateOf(/1 次查询/.test(xh[0].label)) && gateOf(/2 个失败/.test(xh[0].label)) && !/✗/.test(xh[0].label), xc.hs);
+  check('⑤ closed: the two failures (exit 127, the timeout) stay on screen, the three others folded', xc.calls.filter((x) => x.shown).length === 2 && verdictOf(xc.calls.filter((x) => x.shown).every((x) => x.alert)), xc.calls);
   await shot('history-1280-zh');
   await clickHead();
   xc = await evalJs(XCENSUS);
-  check('⑤ 1280 px open: five one-line rows (command · outcome); list is a row too, in the UI language (int209); failures red', xc.calls.every((x) => x.shown && x.compact && x.lineShown && x.oneLine && x.h <= 60) && xc.calls[0].what === '列出了此会话可用的机器' && xc.calls[1].what === 'hostname' && xc.calls[3].what.startsWith('pulled /home/me/render/frame-12.png') && xc.calls.filter((x) => x.alert).length === 2, xc.calls);
+  check('⑤ 1280 px open: five one-line rows (command · outcome); list is a row too, in the UI language (int209); failures red', gateOf(xc.calls.every((x) => x.shown && x.compact && x.lineShown && x.oneLine && x.h <= 60)) && xc.calls[0].what === '列出了此会话可用的机器' && xc.calls[1].what === 'hostname' && gateOf(xc.calls[3].what.startsWith('pulled /home/me/render/frame-12.png')) && xc.calls.filter((x) => x.alert).length === 2, xc.calls);
   await shot('history-1280-zh-open');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 780, deviceScaleFactor: 2, mobile: true });
   await sleep(600);
   xc = await evalJs(XCENSUS);
-  check('⑤ 390 px open: the same five one-line rows, the head one line', xc.calls.every((x) => x.shown && x.compact && x.oneLine) && xc.hs.filter((h) => h.label.startsWith(XM)).every((h) => h.h <= 64), xc);
+  check('⑤ 390 px open: the same five one-line rows, the head one line', gateOf(xc.calls.every((x) => x.shown && x.compact && x.oneLine)) && verdictOf(xc.hs.filter((h) => h.label.startsWith(XM)).every((h) => h.h <= 64)), xc);
   await shot('history-390-zh-open');
   await clickHead();
   await shot('history-390-zh');
@@ -327,7 +327,7 @@ try {
   const lc1 = await evalJs(liveCount);
   await evalJs(`(async () => { const v = ${VIEW}; v._onEditMessage('xc-live', { status: 'complete', content: [{ type: 'tool_result', toolCallId: 'toolu_live', toolName: 'Bash', input: { command: ${JSON.stringify(LC)} }, output: ${JSON.stringify(' 10:41:02 up 3 days\n' + E.cliLine({ outcome: 'ran', code: 0, ms: 300 }, { machine: XM }))}, status: 'success' }] }); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
   const lc2 = await evalJs(liveCount);
-  check('⑤ live: running = a Bash card; the server\'s upgrade = the SAME message drawn as the machine card; its result = still ONE card, the same words', lc0.calls === 5 && lc0.bash === 1 && lc1.calls === 6 && lc1.bash === 0 && lc1.cards === 0 && lc2.calls === 6 && lc2.bash === 0 && lc2.cards === 0 && lc2.text.includes('uptime') && lc2.text.includes('退出码 0'), { lc0, lc1, lc2 });   // the zh page says 退出码 on the row, the card and the head (lane phone-run-box, 主开发's look 2026-11-18 02:34Z)
+  check('⑤ live: running = a Bash card; the server\'s upgrade = the SAME message drawn as the machine card; its result = still ONE card, the same words', lc0.calls === 5 && lc0.bash === 1 && lc1.calls === 6 && lc1.bash === 0 && lc1.cards === 0 && lc2.calls === 6 && lc2.bash === 0 && lc2.cards === 0 && gateOf(lc2.text.includes('uptime')) && verdictOf(lc2.text.includes('退出码 0')), { lc0, lc1, lc2 });   // the zh page says 退出码 on the row, the card and the head (lane phone-run-box, 主开发's look 2026-11-18 02:34Z)
   // ── ⑥ lane exit-card-margin (the owner 2026-10-18: 「这个卡片的 margin 有点问题」 + the standing 「No raw strings in cards」):
   //    a LONE run card — the owner's Macbook card, in the default compact chat — every row starts on the card's own padding;
   //    the words say actor + verb + object; the command (its length, its paths) only inside ONE closed 技术细节 fold, as text ──
@@ -345,7 +345,7 @@ try {
   const KCARD = mcard(KM, E.cardText({ outcome: 'ran', cmd: KCMD, code: 0, ms: 200 }, { machine: KM }), { exitRun: E.cardOutput({ cmd: KCMD, code: 0, ms: 200, heads: E.outputHeads({ stdout: 'granted denied /Users/me/.vibespace/helpers/vibespace-screen 4b7bcb1e31e9 2.369.305 [2, 3]\n', stderr: '' }) }) });
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await evalJs(`(async () => { window.__sid = ${JSON.stringify(K_SID)}; window.app.viewSession(${JSON.stringify(K_SID)}, ${JSON.stringify(K_CWD)}, 'lone card'); return true; })()`);
-  check('⑥ the conversation opens', await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 2`, 20000));
+  check('⑥ the conversation opens', verdictOf(await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 2`, 20000)));
   await feed([KCARD]);
   // every visible row of the card (its own children, then the run block's) as its left edge AND its first text's left edge,
   // both from the card's content box (border + padding-left) — the owner saw the words line start ON the border
@@ -366,14 +366,14 @@ try {
   let k = await evalJs(KCEN);
   console.log('    rows @1280 closed: ' + JSON.stringify(k && { pad: k.pad, rows: k.rows }));
   await shot('1280-zh-lone');
-  check('⑥ 1280 px, compact chat: the card keeps its own padding (≥ 8 px, both sides) and EVERY row — head, words, output, fold — starts on it (pre-fix the padding was 0: the words sat on the border)', aligned(k), k && { pad: k.pad, padR: k.padR, rows: k.rows });
-  check('⑥ …its left line is its own accent (not the role indicator\'s transparent 3 px) at the role bar\'s width, on the assistant bar\'s x', k && k.bl[0] >= 2 && !/rgba\(0, 0, 0, 0\)|transparent/.test(k.bl[1]) && k.bar && k.bar[0] === k.bar[1] && k.bar[2] === k.bl[0], k && { bl: k.bl, bar: k.bar });
-  check('⑥ the words: actor + verb + object — 「在 Macbook 上运行了一条命令 — 退出码 0 · 0.2 s」 under 「VibeSpace · Machines · Macbook」', k && k.title === 'VibeSpace · Machines · Macbook' && k.words === '在 Macbook 上运行了一条命令 — 退出码 0 · 0.2 s', k && [k.title, k.words]);
-  check('⑥ closed: the command (its length, its paths) is nowhere on screen; ONE 技术细节 fold, closed; no link on the card; the output (the result) shown', k && k.techs === 1 && !k.open && k.summary === '技术细节' && !k.cmdShown && !/vibespace-screen --disclaim|2>\/dev\/null|个字符/.test(k.seen) && k.cmdOutside === 0 && !k.links.length && k.outShown && k.out.startsWith('granted denied'), k && { techs: k.techs, open: k.open, summary: k.summary, seen: k.seen, cmdOutside: k.cmdOutside, links: k.links });
+  check('⑥ 1280 px, compact chat: the card keeps its own padding (≥ 8 px, both sides) and EVERY row — head, words, output, fold — starts on it (pre-fix the padding was 0: the words sat on the border)', verdictOf(aligned(k)), k && { pad: k.pad, padR: k.padR, rows: k.rows });
+  check('⑥ …its left line is its own accent (not the role indicator\'s transparent 3 px) at the role bar\'s width, on the assistant bar\'s x', gateOf(k) && k.bl[0] >= 2 && !/rgba\(0, 0, 0, 0\)|transparent/.test(k.bl[1]) && gateOf(k.bar) && k.bar[0] === k.bar[1] && k.bar[2] === k.bl[0], k && { bl: k.bl, bar: k.bar });
+  check('⑥ the words: actor + verb + object — 「在 Macbook 上运行了一条命令 — 退出码 0 · 0.2 s」 under 「VibeSpace · Machines · Macbook」', gateOf(k) && k.title === 'VibeSpace · Machines · Macbook' && k.words === '在 Macbook 上运行了一条命令 — 退出码 0 · 0.2 s', k && [k.title, k.words]);
+  check('⑥ closed: the command (its length, its paths) is nowhere on screen; ONE 技术细节 fold, closed; no link on the card; the output (the result) shown', gateOf(k) && k.techs === 1 && !k.open && k.summary === '技术细节' && !k.cmdShown && !/vibespace-screen --disclaim|2>\/dev\/null|个字符/.test(k.seen) && k.cmdOutside === 0 && !k.links.length && gateOf(k.outShown) && verdictOf(k.out.startsWith('granted denied')), k && { techs: k.techs, open: k.open, summary: k.summary, seen: k.seen, cmdOutside: k.cmdOutside, links: k.links });
   await kOpen(true);
   k = await evalJs(KCEN);
   await shot('1280-zh-lone-tech');
-  check('⑥ open 技术细节: the WHOLE command, its length (命令 · 252 个字符), as TEXT — no link inside; every row still on the padding', k && k.open && k.cmdShown && k.cmd === KCMD && k.caption === `命令 · ${KCMD.length} 个字符` && !k.links.length && k.cmdOutside === 0 && aligned(k), k && { open: k.open, cmd: k.cmd, caption: k.caption, links: k.links, rows: k.rows });
+  check('⑥ open 技术细节: the WHOLE command, its length (命令 · 252 个字符), as TEXT — no link inside; every row still on the padding', gateOf(k) && gateOf(k.open) && gateOf(k.cmdShown) && k.cmd === KCMD && k.caption === `命令 · ${KCMD.length} 个字符` && !k.links.length && k.cmdOutside === 0 && verdictOf(aligned(k)), k && { open: k.open, cmd: k.cmd, caption: k.caption, links: k.links, rows: k.rows });
   await kOpen(false);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 780, deviceScaleFactor: 2, mobile: true });
   await sleep(500);
@@ -381,10 +381,10 @@ try {
   k = await evalJs(KCEN);
   console.log('    rows @390 closed: ' + JSON.stringify(k && { pad: k.pad, rows: k.rows }));
   await shot('390-zh-lone');
-  check('⑥ 390 px: the same — one left edge on the padding, the same words, the command folded away', aligned(k) && k.words === '在 Macbook 上运行了一条命令 — 退出码 0 · 0.2 s' && !k.open && !/vibespace-screen --disclaim/.test(k.seen), k && { pad: k.pad, rows: k.rows, words: k.words });
+  check('⑥ 390 px: the same — one left edge on the padding, the same words, the command folded away', gateOf(aligned(k)) && k.words === '在 Macbook 上运行了一条命令 — 退出码 0 · 0.2 s' && !k.open && !/vibespace-screen --disclaim/.test(k.seen), k && { pad: k.pad, rows: k.rows, words: k.words });
   await feed([{ id: 'kc-peer', role: 'user', status: 'complete', content: [{ type: 'text', text: 'PONG from desk 7.' }], ts: T0 + 7300000, turnIndex: 300, originKind: 'peer-message', peerFrom: 'desk-7', peerVia: 'peer' }]);
   const pk = await evalJs(`(() => { const el = [...(${VIEW})._messageList.querySelectorAll(':scope > .chat-peer-message')].pop(); if (!el) return null; const cs = getComputedStyle(el); return { pad: [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map(parseFloat), compact: !!el.closest('.chat-compact') }; })()`);
-  check('⑥ the same rule no longer flattens a PEER card in the compact chat either: its own 8px 12px (pre-fix 1px 0)', pk && pk.compact && pk.pad.join() === '8,12,8,12', pk);
+  check('⑥ the same rule no longer flattens a PEER card in the compact chat either: its own 8px 12px (pre-fix 1px 0)', gateOf(pk) && gateOf(pk.compact) && pk.pad.join() === '8,12,8,12', pk);
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++;
@@ -392,4 +392,4 @@ try {
 }
 cleanup();
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

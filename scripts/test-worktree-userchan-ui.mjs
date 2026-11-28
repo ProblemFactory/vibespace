@@ -37,7 +37,7 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── 1. NODE leg: the card HTML itself (no browser needed for the escaping) ──
@@ -50,12 +50,12 @@ const MARKER = '"><img src=x onerror=alert(1)>';
   const rec = userChannelRecord({ toolName: 'SendUserMessage', input: { message: MARKER, status: 'proactive', attachments: [MARKER] }, output: null });
   const html = userMessageCardHtml(rec, { esc: escHtml, t, icons: { mail: '<svg></svg>' } });
   ok('the message card escapes every interpolation (the marker never becomes a tag)',
-    !html.includes('<img src=x') && html.includes('&lt;img') && html.includes('chat-userchan-message'), html.slice(0, 160));
+    !html.includes('<img src=x') && gateOf(html.includes('&lt;img')) && verdictOf(html.includes('chat-userchan-message')), html.slice(0, 160));
   const fileHtml = userFileCardHtml(
     userChannelRecord({ toolName: 'SendUserFile', input: { files: [MARKER], caption: MARKER, status: 'normal' }, output: null }),
     { esc: escHtml, t, icons: { upload: '<svg></svg>' }, link: () => '/p/pg' + 'a'.repeat(10) });
   ok('…and so does the file card, INCLUDING the href it was handed',
-    !fileHtml.includes('<img src=x') && fileHtml.includes('href="/p/pg'), fileHtml.slice(0, 160));
+    !fileHtml.includes('<img src=x') && verdictOf(fileHtml.includes('href="/p/pg')), fileHtml.slice(0, 160));
 }
 
 
@@ -109,13 +109,13 @@ console.log('— _swapMessageEl bookkeeping');
   ok('…and the new element keeps its message id (the key both trims, the minimap and search all read)', next.dataset.msgId === 'm1', JSON.stringify(next.dataset));
   ok('…its time coordinate and file offset ride across', next.dataset.ts === 1757200000000 && next.dataset.line === '4242', JSON.stringify(next.dataset));
   ok('…_elements now points at the ATTACHED node (the detached entry is what froze the card at pending)', w.v._elements.get('m1') === next && next.parent === w.list);
-  ok('…the element-keyed run-fold marks transfer (an open fold must not snap shut on a link arriving)', w.v._runExpanded.has(next) && w.v._runStickyOpen.has(next));
+  ok('…the element-keyed run-fold marks transfer (an open fold must not snap shut on a link arriving)', gateOf(w.v._runExpanded.has(next)) && verdictOf(w.v._runStickyOpen.has(next)));
   ok('…and the per-element affordances are re-installed', next.__wrap === true && next.__editor === true);
 
   const g = mkView({ gap: true });
   g.v._rerenderToolCard('tc1');
   ok('a GAP-loaded card stays gap-loaded across the swap (else it is promoted into the window accounting both trims do)',
-    g.list.children[0].classList.contains('chat-gap-msg'));
+    verdictOf(g.list.children[0].classList.contains('chat-gap-msg')));
 
   // NEGATIVE CONTROL: the pre-fix statement, verbatim (`if (next) el.replaceWith(next);`).
   const n = mkView();
@@ -176,13 +176,13 @@ console.log('— reloaded history: SendUserFile links (round-4 verifier)');
   try { await view._loadPublishedUserFiles(); } finally { globalThis.fetch = realFetch; }
 
   ok('it asks for THIS conversation’s pages (a card must never link a page another conversation published)',
-    askedUrl.includes('/api/pages?conversationId=' + encodeURIComponent(CONV)), askedUrl);
+    verdictOf(askedUrl.includes('/api/pages?conversationId=' + encodeURIComponent(CONV))), askedUrl);
   const rows = view._publishedUserFiles || new Map();
   ok('an ABSOLUTE path in the record gets its link back after a reload — the exact case the round-3 key change silently broke',
-    rows.get('tc-abs')?.[0]?.link === pubAbs.page.path && rerendered.includes('tc-abs'),
+    rows.get('tc-abs')?.[0]?.link === pubAbs.page.path && verdictOf(rerendered.includes('tc-abs')),
     JSON.stringify({ rows: [...rows], rerendered }));
   ok('…and a RELATIVE one still resolves by basename (the client does not know the CLI’s cwd and must not guess)',
-    rows.get('tc-rel')?.[0]?.link === pubRel.page.path && rerendered.includes('tc-rel'), JSON.stringify([...rows]));
+    rows.get('tc-rel')?.[0]?.link === pubRel.page.path && verdictOf(rerendered.includes('tc-rel')), JSON.stringify([...rows]));
 
   // NEGATIVE CONTROL: the pre-fix statement, verbatim, over the SAME real list.
   const preMap = new Map(listed.map((p) => [String(p.srcKey || '').replace(/^local:/, ''), p]));
@@ -244,22 +244,22 @@ console.log('— active-sessions payload → _merge() (whitelist drift)');
   // ci-344-reds: a HANDLED key is a claim that _merge() reads it by NAME — for `purpose` that read is the sign-in filter
   const dayOne = fs.readFileSync(path.join(repo, 'src/day-one.js'), 'utf8');
   ok('`purpose` is HANDLED because _merge() reads it by name: a sign-in row is dropped before the webui-only unshift (isSignInRow(ws) → row.purpose === SIGN_IN)',
-    /for \(const ws of webui\) \{\n\s*if \(isSignInRow\(ws\)\) continue;/.test(sb) && /const isSignInRow = \(row\) => !!row && row\.purpose === SIGN_IN;/.test(dayOne));
-  ok('…the facts this round found dead are on it', ['worktree', 'worktreePath', 'outputStyle', 'remoteState'].every((k) => facts.includes(k)), facts.join(','));
+    gateOf(/for \(const ws of webui\) \{\n\s*if \(isSignInRow\(ws\)\) continue;/.test(sb)) && verdictOf(/const isSignInRow = \(row\) => !!row && row\.purpose === SIGN_IN;/.test(dayOne)));
+  ok('…the facts this round found dead are on it', verdictOf(['worktree', 'worktreePath', 'outputStyle', 'remoteState'].every((k) => facts.includes(k))), facts.join(','));
   ok('…every row states its render-gate choice (the parse saw all of them — a row this regex cannot read would silently drop out of BOTH halves of the guard)',
     facts.length >= 8 && facts.length === (listSrc.match(/digest:/g) || []).length, JSON.stringify(factRows));
   // ROUND 4: reaching `_merge()` is only half the hop — `_mergeAndRender()`
   // re-renders only when its DIGEST changes, and the digest named none of
   // these, so the `worktree-path` broadcast repainted nothing.
   ok('the four facts whose SURFACES have no partial-update path gate the render digest (badge, path tooltip, transport chip, response-style row)',
-    ['worktree', 'worktreePath', 'remoteState', 'outputStyle'].every((k) => gating.includes(k)), gating.join(','));
+    verdictOf(['worktree', 'worktreePath', 'remoteState', 'outputStyle'].every((k) => gating.includes(k))), gating.join(','));
   ok('…and the object-valued ones are carried-only ON PURPOSE (`todo` changes several times per TURN, `auth` is re-pointed by the pool — gating on either is the 2.72.0/2.106.1 re-render churn)',
     !gating.includes('todo') && !gating.includes('auth'), gating.join(','));
   // WIRING PIN (the 2.331.0 lesson: a pure helper nobody calls is dead code
   // with a green unit test) — the digest expression must USE the projection.
   const digestLine = sb.split('\n').find((l) => l.includes('const digest = JSON.stringify('));
   ok('…and the render gate actually CALLS the projection (a fact list the digest does not read is the same drift one level down)',
-    !!digestLine && digestLine.includes('${liveFactsDigestPart(s)}'), String(digestLine).slice(0, 200));
+    !!digestLine && verdictOf(digestLine.includes('${liveFactsDigestPart(s)}')), String(digestLine).slice(0, 200));
   // NEGATIVE CONTROL: the SHIPPED digest expression with that one call removed
   // (a patched copy, asserted to have hit) cannot tell the two rows apart —
   // the failure this round found, reproduced on the real expression.
@@ -291,7 +291,7 @@ console.log('— active-sessions payload → _merge() (whitelist drift)');
   // webui-only unshift): a fix applied to one branch is half a fix.
   ok('both _merge branches carry the list (matched system session AND the webui-only unshift)',
     (sb.match(/\.\.\.liveSessionFacts\(/g) || []).length === 2
-    && /\.\.\.liveSessionFacts\(wm\)/.test(sb) && /\.\.\.liveSessionFacts\(ws\)/.test(sb));
+    && gateOf(/\.\.\.liveSessionFacts\(wm\)/.test(sb)) && verdictOf(/\.\.\.liveSessionFacts\(ws\)/.test(sb)));
 }
 
 // ── 1d. NODE leg: §17 on the CSS this branch ADDED ──
@@ -311,7 +311,7 @@ console.log('— §17: no literal colours in the new CSS');
   }
   // NEGATIVE CONTROL: the scan really does catch the shape that was there.
   ok('NEGATIVE CONTROL: the same scan flags the removed `var(--green, #3fb950)` fallback — it is not a vacuous regex',
-    /#[0-9a-fA-F]{3,8}\b/.test('color: var(--green, #3fb950);'));
+    verdictOf(/#[0-9a-fA-F]{3,8}\b/.test('color: var(--green, #3fb950);')));
 }
 
 // ── 2. BROWSER leg ──
@@ -447,7 +447,7 @@ console.log('— A. New Session: the worktree checkbox at 375×667');
 
   const claude = await openWith('claude');
   ok('claude: the row is RENDERED (not display:none) and has real box',
-    claude.display !== 'none' && claude.visible, JSON.stringify(claude));
+    claude.display !== 'none' && verdictOf(claude.visible), JSON.stringify(claude));
   ok('…it stays inside the dialog body — no horizontal overflow at 375px (the phone failure this measures)',
     claude.row.l >= claude.body.l - 0.5 && claude.row.r <= claude.body.r + 0.5 && claude.body.sw <= claude.body.cw + 1,
     JSON.stringify({ row: claude.row, body: claude.body }));
@@ -457,7 +457,7 @@ console.log('— A. New Session: the worktree checkbox at 375×667');
     claude.cb.w >= 12 && claude.cb.h >= 12 && claude.row.h >= 24, JSON.stringify({ cb: claude.cb, h: claude.row.h }));
   ok('…the hint sits BELOW the box on its own line (the grid row-2 rule), so the label is never squeezed to one character per line',
     claude.hintText > 20 && claude.hintTop > claude.cbTop, JSON.stringify({ hintText: claude.hintText, hintTop: claude.hintTop, cbTop: claude.cbTop }));
-  ok('…and it is labelled', /worktree/i.test(claude.label) || claude.label.length > 4, claude.label);
+  ok('…and it is labelled', verdictOf(/worktree/i.test(claude.label)) || claude.label.length > 4, claude.label);
 
   // Tick it, then switch to a harness WITHOUT the flag: the row must vanish
   // AND the tick must be cleared, or a stale DOM value rides the next create.
@@ -535,10 +535,10 @@ console.log('— B. the SendUserMessage / SendUserFile cards at 375×667');
   ok('…it is visually a channel card, not a tool card: an accent left rule + a tinted background',
     parseFloat(m.accentLeft) >= 2 && m.bg !== 'rgba(0, 0, 0, 0)', JSON.stringify({ accentLeft: m.accentLeft, bg: m.bg }));
   ok('the file card wraps a long unbreakable file name instead of pushing the column sideways (the string that actually breaks 375px)',
-    m.link && m.link.r <= m.listW + 0.5 && m.link.h > 20 && m.linkText.length > 60,
+    gateOf(m.link) && m.link.r <= m.listW + 0.5 && m.link.h > 20 && m.linkText.length > 60,
     JSON.stringify({ link: m.link, listW: m.listW, len: m.linkText.length }));
   ok('…and the full path is still reachable on the row rather than dropped (the title carries what the label cannot)',
-    m.linkTitle.startsWith('/home/u/workspace/proj/') && m.linkTitle.length > m.linkText.length, JSON.stringify(m.linkTitle));
+    gateOf(m.linkTitle.startsWith('/home/u/workspace/proj/')) && m.linkTitle.length > m.linkText.length, JSON.stringify(m.linkTitle));
 
   // NEGATIVE CONTROL: the same measurement, with the card CSS neutralised —
   // it must go RED, or the asserts above are measuring nothing.
@@ -575,14 +575,14 @@ console.log('— B. the SendUserMessage / SendUserFile cards at 375×667');
     };
   })()`);
   ok('a FAILED user-channel card draws its reason row and wraps it inside the 375px column (no new scrollbar, on the list or the page)',
-    f.hasRow && f.row.h > 0 && f.row.r <= f.listW + 0.5 && f.listSW <= f.listW + 1 && f.docSW <= f.docCW + 1,
+    gateOf(f.hasRow) && f.row.h > 0 && f.row.r <= f.listW + 0.5 && f.listSW <= f.listW + 1 && f.docSW <= f.docCW + 1,
     JSON.stringify(f));
   ok('…it reads as a failure, not a delivery: the red rule + red label + the CLI’s own reason, and no "sent from a remote session" note',
-    f.rowColor === f.cardRule && f.rowColor === f.labelColor && /outside the workspace/.test(f.text) && f.note === false,
+    f.rowColor === f.cardRule && f.rowColor === f.labelColor && gateOf(/outside the workspace/.test(f.text)) && f.note === false,
     JSON.stringify({ rowColor: f.rowColor, rule: f.cardRule, label: f.labelColor, note: f.note }));
   const themeRed = await ev(`(() => { const p = document.createElement('span'); p.style.color = 'var(--red)'; document.body.appendChild(p); const c = getComputedStyle(p).color; p.remove(); return c; })()`);
   ok('…and that colour IS the theme variable resolved, not a literal baked into the markup (§17 — the card carries classes, the theme carries colour)',
-    f.rowColor === themeRed && /^rgba?\(/.test(themeRed), JSON.stringify({ row: f.rowColor, themeRed }));
+    f.rowColor === themeRed && verdictOf(/^rgba?\(/.test(themeRed)), JSON.stringify({ row: f.rowColor, themeRed }));
 
   const neg = await ev(`(() => {
     const st = document.createElement('style'); st.id = 'vs-card-probe-neg';
@@ -618,7 +618,7 @@ console.log('— C. a REAL ChatView: the SendUserFile card lifecycle');
     window.__wtProbe = { winId: entry[0], v: entry[1] };
     return { ok: true, winId: entry[0], hasList: !!entry[1]._messageList };
   })()`);
-  ok('a real read-only ChatView exists to drive (shipped constructor + renderers, not a hand-built chain)', setup?.ok === true && setup.hasList, JSON.stringify(setup));
+  ok('a real read-only ChatView exists to drive (shipped constructor + renderers, not a hand-built chain)', setup?.ok === true && verdictOf(setup.hasList), JSON.stringify(setup));
 
   const lifecycle = await ev(`(() => {
     const v = window.__wtProbe.v;
@@ -658,19 +658,19 @@ console.log('— C. a REAL ChatView: the SendUserFile card lifecycle');
   })()`);
 
   ok('the pending card renders and is registered (data-msg-id + _elements + the trims can see it)',
-    lifecycle.before.msgId === 'ucf-probe-1' && lifecycle.before.mappedIsVisible && lifecycle.before.trimSees === 1,
+    lifecycle.before.msgId === 'ucf-probe-1' && gateOf(lifecycle.before.mappedIsVisible) && lifecycle.before.trimSees === 1,
     JSON.stringify(lifecycle.before));
   // absUrl joins the RELATIVE link the server published with the browser's own
   // origin (2.366.1 — the server never guesses an absolute URL), so the href is
   // origin + /p/<id> and it is the SUFFIX that is the product's fact.
   ok('the user-file-published broadcast puts the LINK on the card…',
-    /^https?:\/\/[^/]+\/p\/pgwtprobe1$/.test(lifecycle.published.href || '') && lifecycle.published.cards === 1, JSON.stringify(lifecycle.published));
+    gateOf(/^https?:\/\/[^/]+\/p\/pgwtprobe1$/.test(lifecycle.published.href || '')) && lifecycle.published.cards === 1, JSON.stringify(lifecycle.published));
   ok('…and the swapped-in element is STILL the registered one — attached, msgId intact, visible to both trims (round-2 verifier: it used to be an orphan)',
-    lifecycle.published.msgId === 'ucf-probe-1' && lifecycle.published.mappedIsVisible && lifecycle.published.mappedConnected && lifecycle.published.trimSees === 1,
+    lifecycle.published.msgId === 'ucf-probe-1' && gateOf(lifecycle.published.mappedIsVisible) && gateOf(lifecycle.published.mappedConnected) && lifecycle.published.trimSees === 1,
     JSON.stringify(lifecycle.published));
   ok('the tool_result then reaches the VISIBLE card (the edit used to "replace" a parentless node — a spec no-op — so the card stayed pending forever)',
-    lifecycle.done.msgId === 'ucf-probe-1' && lifecycle.done.mappedIsVisible && /\/p\/pgwtprobe1$/.test(lifecycle.done.href || '')
-    && lifecycle.done.cards === 1 && lifecycle.published.meta === '' && /20 KB/.test(lifecycle.done.meta || ''),
+    lifecycle.done.msgId === 'ucf-probe-1' && gateOf(lifecycle.done.mappedIsVisible) && gateOf(/\/p\/pgwtprobe1$/.test(lifecycle.done.href || ''))
+    && lifecycle.done.cards === 1 && lifecycle.published.meta === '' && verdictOf(/20 KB/.test(lifecycle.done.meta || '')),
     JSON.stringify(lifecycle.done));
 
   // MUTATION CONTROL: the pre-fix swap, on the same real view and the same
@@ -807,7 +807,7 @@ console.log('— E. the active-sessions payload really reaches the surfaces that
     return { keys: Object.keys(m || {}), worktree: m?.worktree, worktreePath: m?.worktreePath, outputStyle: m?.outputStyle, has: !!m };
   })()`);
   ok('the merged row carries the payload’s worktree facts (they used to be dropped by the hand-picked key list)',
-    merged.has && merged.worktree === true && merged.worktreePath === WT, JSON.stringify(merged));
+    gateOf(merged.has) && merged.worktree === true && merged.worktreePath === WT, JSON.stringify(merged));
   ok('…and its TWIN from the same payload (outputStyle, 2.369.58 — the standing-sweep sibling)', merged.outputStyle === 'Concise', JSON.stringify(merged.keys));
 
   const card = await ev(`(() => {
@@ -818,7 +818,7 @@ console.log('— E. the active-sessions payload really reaches the surfaces that
     return { tip: badgeOf(m), preFix: badgeOf(stripped) };
   })()`);
   ok('the session card draws the worktree badge from the merged row, and its tooltip names the CLI-announced path',
-    card.tip.includes(WT), JSON.stringify(card));
+    verdictOf(card.tip.includes(WT)), JSON.stringify(card));
   ok('NEGATIVE CONTROL: strip those two keys back out of the same row and the badge disappears — the pre-fix merge, reproduced on the real renderer',
     card.preFix === '', JSON.stringify(card));
 
@@ -933,4 +933,4 @@ console.log('— E. the active-sessions payload really reaches the surfaces that
 ws.close();
 cleanup();
 console.log(fail ? `\nFAIL (${fail}) — ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

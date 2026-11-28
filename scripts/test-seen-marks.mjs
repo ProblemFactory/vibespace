@@ -35,7 +35,7 @@ const landed = (f) => { try { SW.storeWriter().flushSync([f]); } catch { } retur
 const VERSION = require('../package.json').version;
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -113,7 +113,7 @@ console.log('§1 src/seen-marks.js (PURE)');
   const r = SEEN.restoreMarks(JSON.parse(JSON.stringify(m)), '9.9.1');
   ok(JSON.stringify(r._groupSeenAt) === JSON.stringify(s._groupSeenAt) && r._preambleSeen === s._preambleSeen && r._toolsIntroSeen === true && r._mgrIntroSeen === true && r._jobsEventsSeenTs === 77 && r._marksRestored === true,
     'round trip under the same build: the groups\' instants, the preamble hash, both intros, the jobs cursor — and _marksRestored', r);
-  ok(SEEN.isSigDigest(m.ctxSig['T-a']) && m.ctxSig['T-b'] === '' && !JSON.stringify(m).includes('x.md'), 'the folder signature is persisted as a DIGEST (no file names in the meta); an empty one stays empty', m.ctxSig);
+  ok(gateOf(SEEN.isSigDigest(m.ctxSig['T-a'])) && m.ctxSig['T-b'] === '' && !JSON.stringify(m).includes('x.md'), 'the folder signature is persisted as a DIGEST (no file names in the meta); an empty one stays empty', m.ctxSig);
   ok(SEEN.liveSig(r._ctxSig['T-a'], s._ctxSig['T-a']) === s._ctxSig['T-a'] && SEEN.liveSig(r._ctxSig['T-a'], 'x.md:10:1|y.md:21:3') === r._ctxSig['T-a'],
     'liveSig: a held digest becomes the live signature when the folder is unchanged, stays a digest (≠ any signature) when it changed');
   const r2 = SEEN.restoreMarks(m, '9.9.2');
@@ -136,7 +136,7 @@ console.log('§1 src/seen-marks.js (PURE)');
     { id: 'B-2', text: 'mine claimed', status: 'open', addedBy: 'claude:P', claimedBy: ['claude:A'] },
     { id: 'B-3', text: 'a peer\'s', status: 'open', addedBy: 'claude:P', claimedBy: ['claude:Q'] }] };
   const lite = SEEN.liteSnap(snap, 'claude:A');
-  ok(lite && lite.backlog.map((b) => b.id).join() === 'B-1,B-2' && lite.of === 'claude:A' && lite.objHash === snap.objHash && lite.lastProgressAt === 9, 'liteSnap keeps the session\'s own items (parked or claimed) and the scalar fields', lite);
+  ok(gateOf(lite) && lite.backlog.map((b) => b.id).join() === 'B-1,B-2' && lite.of === 'claude:A' && lite.objHash === snap.objHash && lite.lastProgressAt === 9, 'liteSnap keeps the session\'s own items (parked or claimed) and the scalar fields', lite);
   const many = { ...snap, backlog: Array.from({ length: SEEN.SNAP_MAX_ITEMS + 1 }, (_, i) => ({ id: 'B-' + i, text: 'x', status: 'open', addedBy: 'claude:A', claimedBy: [] })) };
   ok(SEEN.liteSnap(many, 'claude:A') === null && SEEN.liteSnap(snap, null) === null && SEEN.liteSnap(null, 'claude:A') === null && SEEN.liteSnap({ ...snap, backlog: [{ id: 'B-9', text: 'x'.repeat(9000), addedBy: 'claude:A' }] }, 'claude:A') === null,
     `no lite snapshot past ${SEEN.SNAP_MAX_ITEMS} own items or ${SEEN.SNAP_MAX_BYTES} B, without a key or a snapshot (that group is re-sent whole once)`);
@@ -146,8 +146,8 @@ console.log('§1 src/seen-marks.js (PURE)');
     'the lite snapshot rides the marks and comes back as _groupSnap (a restored one re-persists unchanged)');
   ok(!('T-a' in SEEN.restoreMarks({ ...ms, snap: { 'T-a': { ...lite, backlog: 'x' } } }, '9.9.1')._groupSnap), 'a malformed snapshot is not restored');
   // the wiring pins: ONE spelling in sessionFromMeta, called by all three restore paths
-  ok(sfmSrc && /\n    \.\.\.restoreMarks\(meta\.seenMarks, BUILD_VERSION\), /.test(sfmSrc) && (brSrc.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3
-    && /const BUILD_VERSION = \(\(\) => \{ try \{ return require\('\.\.\/\.\.\/package\.json'\)\.version; \}/.test(brSrc),
+  ok(gateOf(sfmSrc) && gateOf(/\n    \.\.\.restoreMarks\(meta\.seenMarks, BUILD_VERSION\), /.test(sfmSrc)) && (brSrc.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3
+    && verdictOf(/const BUILD_VERSION = \(\(\) => \{ try \{ return require\('\.\.\/\.\.\/package\.json'\)\.version; \}/.test(brSrc)),
     'WIRING PIN: boot-restore\'s sessionFromMeta spreads restoreMarks(meta.seenMarks, BUILD_VERSION) — the one meta→session spelling all three restore paths call');
 }
 
@@ -221,8 +221,8 @@ fs.mkdirSync(work, { recursive: true });
   const w0 = meta.writes();
   const c1 = rig.prompt('A');
   const sm = (meta.readSessionMeta('sock-A') || {}).seenMarks;
-  ok(c1.includes('<vibespace-task-context>') && ids.every((g) => c1.includes(g)), 'first prompt: the FULL multi-context of the three groups (as before)', c1.slice(0, 200));
-  ok(meta.writes() === w0 + 1 && sm && ids.every((g) => typeof sm.groupSeenAt[g] === 'number' && SEEN.isSigDigest(sm.ctxSig[g])) && (meta.readSessionMeta('sock-A') || {}).agentToken === A.agentToken,
+  ok(gateOf(c1.includes('<vibespace-task-context>')) && verdictOf(ids.every((g) => c1.includes(g))), 'first prompt: the FULL multi-context of the three groups (as before)', c1.slice(0, 200));
+  ok(meta.writes() === w0 + 1 && gateOf(sm) && gateOf(ids.every((g) => typeof sm.groupSeenAt[g] === 'number' && SEEN.isSigDigest(sm.ctxSig[g]))) && (meta.readSessionMeta('sock-A') || {}).agentToken === A.agentToken,
     'the marks are written to the session meta WITH that answer (one write; the meta\'s other fields kept)', sm);
   const c2 = rig.prompt('A');
   ok(!c2.includes('<vibespace-task-context>') && meta.writes() === w0 + 1, 'a quiet turn: nothing re-sent and NO meta write (the marks did not move)', { writes: meta.writes() - w0 });
@@ -230,9 +230,9 @@ fs.mkdirSync(work, { recursive: true });
   // a restart: the routes' memory is gone, the session comes back through sessionFromMeta
   const rigR = restart(rig, meta, ['A'], { tasks });
   const AR = rigR.activeSessions.get('A');
-  ok(AR._marksRestored === true && ids.every((g) => AR._groupSeenAt[g] === sm.groupSeenAt[g]), 'sessionFromMeta restores the marks (and _marksRestored)');
+  ok(AR._marksRestored === true && verdictOf(ids.every((g) => AR._groupSeenAt[g] === sm.groupSeenAt[g])), 'sessionFromMeta restores the marks (and _marksRestored)');
   const r1 = rigR.prompt('A');
-  ok(!r1.includes('<vibespace-task-context>') && !r1.includes('was UPDATED') && /<vibespace-task-unchanged>VibeSpace restarted; unchanged since you last saw them, so not repeated: /.test(r1) && ids.every((g) => r1.includes(`(${g})`)) && B(r1) < 700,
+  ok(!r1.includes('<vibespace-task-context>') && !r1.includes('was UPDATED') && gateOf(/<vibespace-task-unchanged>VibeSpace restarted; unchanged since you last saw them, so not repeated: /.test(r1)) && gateOf(ids.every((g) => r1.includes(`(${g})`))) && B(r1) < 700,
     `restart, nothing changed: no group re-sent — ONE line names the three (${B(r1)} B vs ${B(c1)} B before)`, r1);
   const r2 = rigR.prompt('A');
   ok(!r2.includes('vibespace-task-unchanged') && !r2.includes('<vibespace-task-context>'), 'the pointer rides the FIRST prompt after the restart only', r2.slice(0, 200));
@@ -241,8 +241,8 @@ fs.mkdirSync(work, { recursive: true });
   const rigX = restart(rig, meta, ['A'], { tasks });
   tasks.addProgress(ids[0], { note: 'landed the seen marks', session: 'claude:B' });
   const x1 = rigX.prompt('A');
-  ok(x1.includes('<vibespace-task-update>') && x1.includes(`(${ids[0]}) changed since your last update`) && x1.includes('landed the seen marks') && !x1.includes('<vibespace-task-context>') && B(x1) < 1500
-    && new RegExp(`so not repeated: "[^"]+" \\(${ids[1]}\\), "[^"]+" \\(${ids[2]}\\)`).test(x1),
+  ok(gateOf(x1.includes('<vibespace-task-update>')) && gateOf(x1.includes(`(${ids[0]}) changed since your last update`)) && gateOf(x1.includes('landed the seen marks')) && !x1.includes('<vibespace-task-context>') && B(x1) < 1500
+    && verdictOf(new RegExp(`so not repeated: "[^"]+" \\(${ids[1]}\\), "[^"]+" \\(${ids[2]}\\)`).test(x1)),
     `restart with ONE group changed: that group arrives as its DIFF (the lite snapshot), the other two named as not repeated (${B(x1)} B)`, x1.slice(0, 300) + ' …… ' + x1.slice(-400));
   const x2 = rigX.prompt('A');
   ok(!x2.includes('<vibespace-task-context>') && !x2.includes('vibespace-task-unchanged'), 'and the next turn is quiet again');
@@ -252,7 +252,7 @@ fs.mkdirSync(work, { recursive: true });
   fs.writeFileSync(path.join(g2dir, 'new-notes-from-a-peer.md'), 'x'.repeat(321));
   tasks._sigCache && tasks._sigCache.clear();
   const f1 = rigF.prompt('A');
-  ok(f1.includes('was UPDATED') && f1.includes(`(${ids[1]})`) && f1.includes(`- ${g2dir}/ — `) && new RegExp(`so not repeated: "[^"]+" \\(${ids[0]}\\), "[^"]+" \\(${ids[2]}\\)`).test(f1),
+  ok(gateOf(f1.includes('was UPDATED')) && gateOf(f1.includes(`(${ids[1]})`)) && gateOf(f1.includes(`- ${g2dir}/ — `)) && verdictOf(new RegExp(`so not repeated: "[^"]+" \\(${ids[0]}\\), "[^"]+" \\(${ids[2]}\\)`).test(f1)),
     'restart with a context-folder file added: the digest no longer matches ⇒ that group re-sent whole (its Context row told again), the others named', f1.slice(0, 300));
   // a session holding more than SNAP_MAX_ITEMS items has no lite snapshot: a moved group is re-sent whole once
   {
@@ -264,7 +264,7 @@ fs.mkdirSync(work, { recursive: true });
     const smH = metaH.readSessionMeta('sock-H').seenMarks;
     t2.addProgress(i2[0], { note: 'a peer moved it', session: 'claude:P1' });
     const h1 = restart(rigH, metaH, ['H'], { tasks: t2 }).prompt('H');
-    ok(!(i2[0] in smH.snap) && h1.includes('was UPDATED') && h1.includes('<vibespace-task-context>'), 'a session holding 51 items: no lite snapshot is kept — its moved group is re-sent whole once (the old no-snapshot path)', Object.keys(smH.snap));
+    ok(!(i2[0] in smH.snap) && gateOf(h1.includes('was UPDATED')) && verdictOf(h1.includes('<vibespace-task-context>')), 'a session holding 51 items: no lite snapshot is kept — its moved group is re-sent whole once (the old no-snapshot path)', Object.keys(smH.snap));
   }
   // ACCEPTED EDGE: an item the session claimed AFTER its last delivery is not in its lite snapshot — the diff names it as parked
   {
@@ -276,19 +276,19 @@ fs.mkdirSync(work, { recursive: true });
     const g = t3.get(i3[0]);
     t3.update(i3[0], { backlog: g.backlog.map((b, i) => (i === 0 ? { ...b, claimedBy: [...b.claimedBy, 'claude:E'] } : b)) });
     const e1 = restart(rigE, metaE, ['E'], { tasks: t3 }).prompt('E');
-    ok(e1.includes('<vibespace-task-update>') && e1.includes(`[${g.backlog[0].id}]`), `an item claimed after the last delivery still surfaces in the diff (as "Backlog PARKED" — the lite snapshot never held it; the report names the edge)`, e1.slice(0, 400));
+    ok(gateOf(e1.includes('<vibespace-task-update>')) && verdictOf(e1.includes(`[${g.backlog[0].id}]`)), `an item claimed after the last delivery still surfaces in the diff (as "Backlog PARKED" — the lite snapshot never held it; the report names the edge)`, e1.slice(0, 400));
   }
   // an OLDER meta (no seenMarks): today's behaviour — everything once
   const metaOld = mkMeta();
   const O = mkSession('O', work); seedMeta(metaOld, O);
   const rigO = restart(null, metaOld, ['O'], { tasks });
   const o1 = rigO.prompt('O');
-  ok(o1.includes('<vibespace-task-context>') && ids.every((g) => o1.includes(g)) && !o1.includes('vibespace-task-unchanged') && rigO.activeSessions.get('O')._marksRestored === undefined,
+  ok(gateOf(o1.includes('<vibespace-task-context>')) && gateOf(ids.every((g) => o1.includes(g))) && !o1.includes('vibespace-task-unchanged') && rigO.activeSessions.get('O')._marksRestored === undefined,
     'a meta with NO marks (written before this lane): the full context once, as today', o1.slice(0, 160));
   // SessionStart after a restart (a CLI resume / compact) carries everything — the next prompt names nothing
   const rigS = restart(rig, meta, ['A'], { tasks });
   const s1 = rigS.start('A'), s2 = rigS.prompt('A');
-  ok(s1.includes('<vibespace-task-context>') && !s2.includes('vibespace-task-unchanged') && rigS.activeSessions.get('A')._marksRestored === false,
+  ok(gateOf(s1.includes('<vibespace-task-context>')) && !s2.includes('vibespace-task-unchanged') && rigS.activeSessions.get('A')._marksRestored === false,
     'a SessionStart after the restart sends the full context (its source is not known — a compact needs it) and clears the pointer');
 }
 {
@@ -306,7 +306,7 @@ fs.mkdirSync(work, { recursive: true });
   rig.activeSessions.set('L', L); seedMeta(meta, L);
   const c1 = rig.prompt('L');
   const sm = meta.readSessionMeta('sock-L').seenMarks;
-  ok(c1.includes('<vibespace-session-tools>') && c1.includes('</vibespace-group-manager>') && c1.includes('standing instructions for the fleet') && sm.toolsIntro === VERSION && sm.mgrIntro === VERSION && typeof sm.preamble === 'string' && sm.jobsTs === 4242,
+  ok(gateOf(c1.includes('<vibespace-session-tools>')) && gateOf(c1.includes('</vibespace-group-manager>')) && gateOf(c1.includes('standing instructions for the fleet')) && sm.toolsIntro === VERSION && sm.mgrIntro === VERSION && typeof sm.preamble === 'string' && sm.jobsTs === 4242,
     'first prompt: tools intro + manager intro + preamble; the marks name the build (intros), the hash (preamble), the jobs cursor', sm);
   const rigR = restart(rig, meta, ['L'], { tasks, settings, userState, jobs });
   const r1 = rigR.prompt('L');
@@ -314,11 +314,11 @@ fs.mkdirSync(work, { recursive: true });
     'restart under the SAME build: no intro, no preamble repeated, the jobs update reads from the persisted cursor (4242, not 0)', { r1: r1.slice(0, 200), since });
   const rigN = restart(rig, meta, ['L'], { tasks, settings, userState, jobs, from: sessionFromMetaAt('0.0.1-next') });
   const n1 = rigN.prompt('L'), n2 = rigN.prompt('L');
-  ok(n1.includes('<vibespace-session-tools>') && n1.includes('</vibespace-group-manager>') && !n1.includes('standing instructions for the fleet') && !n2.includes('<vibespace-session-tools>'),
+  ok(gateOf(n1.includes('<vibespace-session-tools>')) && gateOf(n1.includes('</vibespace-group-manager>')) && !n1.includes('standing instructions for the fleet') && !n2.includes('<vibespace-session-tools>'),
     'a NEW build: the tools intro and the manager intro taught ONCE again; the preamble (the user\'s text, unchanged) is not', n1.slice(0, 200));
   settings['agents.injectPreamble'] = 'new standing instructions';
   const rigP = restart(rig, meta, ['L'], { tasks, settings, userState, jobs });
-  ok(rigP.prompt('L').includes('new standing instructions'), 'a CHANGED preamble after the restart: re-sent (its hash differs)');
+  ok(verdictOf(rigP.prompt('L').includes('new standing instructions')), 'a CHANGED preamble after the restart: re-sent (its hash differs)');
 }
 
 // ════════ §3 RED control: no persist call ⇒ the base (everything again) ════════
@@ -347,7 +347,7 @@ const loadPatched = (rel, cuts) => {
     return rigR.prompt('A');
   };
   const base = run(noPersist), now = run(ROUTES);
-  ok(base.includes('<vibespace-task-context>') && ids.every((g) => base.includes(g)) && B(base) > 5000, `CONTROL: without the persist call a restart re-sends the full context (${B(base)} B — the base behaviour)`);
+  ok(gateOf(base.includes('<vibespace-task-context>')) && gateOf(ids.every((g) => base.includes(g))) && B(base) > 5000, `CONTROL: without the persist call a restart re-sends the full context (${B(base)} B — the base behaviour)`);
   ok(!now.includes('<vibespace-task-context>') && B(now) < 700, `…and with it, ${B(now)} B`);
   const src = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
   ok((src.match(/\n    const delivery = carry\.close\(ctx, \(\) => persistSeenMarks\(s, key\)\);[^\n]*\n    res\.json\(\{ success: true, context: ctx, \.\.\.\(delivery \? \{ delivery \} : \{\}\) \}\);/g) || []).length === 2,
@@ -372,20 +372,20 @@ console.log('§4 the Context table budget (the old folder index)');
   const D = Date.now, T = D(); Date.now = () => T;
   let ctxOff, ctxOn; try { set(0); ctxOff = tasks.renderContext(id, {}); set(undefined); ctxOn = tasks.renderContext(id, {}); } finally { Date.now = D; }
   const head = (c) => c.slice(0, c.indexOf('## Context'));
-  ok(head(ctxOff) === head(ctxOn) && ctxOn.includes('### Reporting back') && ctxOn.includes('### Using the shared context folder') && ctxOn.includes('## Activity log'),
+  ok(head(ctxOff) === head(ctxOn) && gateOf(ctxOn.includes('### Reporting back')) && gateOf(ctxOn.includes('### Using the shared context folder')) && verdictOf(ctxOn.includes('## Activity log')),
     'the rules / tools part is byte-identical whatever the table\'s budget; the folder teaching and the activity log follow the table', { off: B(ctxOff), on: B(ctxOn) });
-  ok(new RegExp(`- ${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/ — \\(no note yet\\) \\(agents keep the group's shared notes here\\) \\[over the injection budget: file names need [\\d.]+ KB, [\\d.]+ KB was left — told as the path and note only instead; \`vibespace-task show --full\` lists every file\\]`).test(ctxOn),
+  ok(verdictOf(new RegExp(`- ${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/ — \\(no note yet\\) \\(agents keep the group's shared notes here\\) \\[over the injection budget: file names need [\\d.]+ KB, [\\d.]+ KB was left — told as the path and note only instead; \`vibespace-task show --full\` lists every file\\]`).test(ctxOn)),
     'its 158 file names do not fit: the folder row steps down to the path and note, SAYS so, and points at show --full', ctxOn.slice(ctxOn.indexOf('## Context'), ctxOn.indexOf('## Context') + 700));
   set(1024);
   const r1k = tasks.renderContext(id, { multi: true });
-  ok(r1k.includes('within 1 KB)') && r1k.includes(`\`vibespace-task --group ${id} show --full\``), 'the setting moves it (1024 B) and a multi-group spelling names --group <id>', r1k.slice(r1k.indexOf('## Context'), r1k.indexOf('## Context') + 500));
+  ok(gateOf(r1k.includes('within 1 KB)')) && verdictOf(r1k.includes(`\`vibespace-task --group ${id} show --full\``)), 'the setting moves it (1024 B) and a multi-group spelling names --group <id>', r1k.slice(r1k.indexOf('## Context'), r1k.indexOf('## Context') + 500));
   set(undefined);
   // the SessionStart answer: cut inside the index before B-86d3, whole now — under the cap, the activity log there
   const meta = mkMeta();
   const S = mkSession('S', work);
   const one = (v) => { set(v); const rig = mkRig({ tasks, meta }); rig.activeSessions.set('S', { ...S }); return rig.start('S'); };
   const ssOn = one(undefined);
-  ok(!/context trimmed to stay inline/.test(ssOn) && B(ssOn) <= 9600 && ssOn.includes('## Activity log') && ssOn.includes('## Context'),
+  ok(!/context trimmed to stay inline/.test(ssOn) && B(ssOn) <= 9600 && gateOf(ssOn.includes('## Activity log')) && verdictOf(ssOn.includes('## Context')),
     `the school group's SessionStart: whole under the 9600 B cap, its Context table and its activity log in it (${B(ssOn)} B)`);
   // show --full lists every file, through the belt
   const rig = mkRig({ tasks, meta });
@@ -395,10 +395,10 @@ console.log('§4 the Context table budget (the old folder index)');
   tasks._sigCache && tasks._sigCache.clear(); tasks._walkCache && tasks._walkCache.clear();
   const full = rig.call('/api/agent/task', 'S', { full: '1' }), plain = rig.call('/api/agent/task', 'S', {});
   const fl = (full.contextIndex && full.contextIndex.files) || [];
-  ok(fl.length === 159 && full.contextIndex.dir === dir && !('contextIndex' in plain) && fl.every((f) => typeof f.size === 'number' && f.path.startsWith(dir + '/')) && Array.isArray(full.contextIndex.rows) && full.contextIndex.rows.some((r) => r.path === dir && r.files.length === 159),
+  ok(fl.length === 159 && full.contextIndex.dir === dir && !('contextIndex' in plain) && gateOf(fl.every((f) => typeof f.size === 'number' && f.path.startsWith(dir + '/'))) && gateOf(Array.isArray(full.contextIndex.rows)) && verdictOf(full.contextIndex.rows.some((r) => r.path === dir && r.files.length === 159)),
     'GET /api/agent/task?full=1 answers the WHOLE listing (the folder\'s 159 files, every row) — a plain show does not walk', { n: fl.length });
   const ev = fl.find((f) => f.path.includes('note '));
-  ok(ev && !ev.path.includes('<system-reminder>'), 'a file NAME is a member\'s word: it leaves through the belt (no live tag)', ev && ev.path);
+  ok(gateOf(ev) && !ev.path.includes('<system-reminder>'), 'a file NAME is a member\'s word: it leaves through the belt (no live tag)', ev && ev.path);
   fs.rmSync(evil);
 }
 {
@@ -415,7 +415,7 @@ console.log('§4 the Context table budget (the old folder index)');
   const urlFull = seenUrl;
   const outPlain = await run(['show']);
   srv.close();
-  ok(urlFull.includes('full=1') && outFull.includes('Shared context folder: /ctx (2 files)') && outFull.includes('  - /ctx/b/c.md (4 KB)') && !outPlain.includes('Shared context folder:') && !seenUrl.includes('full=1'),
+  ok(gateOf(urlFull.includes('full=1')) && gateOf(outFull.includes('Shared context folder: /ctx (2 files)')) && gateOf(outFull.includes('  - /ctx/b/c.md (4 KB)')) && !outPlain.includes('Shared context folder:') && !seenUrl.includes('full=1'),
     '`vibespace-task show --full` asks ?full=1 and prints every file (an older hub\'s answer: the shared folder only); a plain `show` neither asks nor prints', outFull.slice(-160));
   // lane task-group-context: a hub with the Context table answers every row's files — the CLI prints them row by row
   answer.contextIndex.rows = [{ path: '/ctx', note: 'notes', files: answer.contextIndex.files }, { path: '/w/handbook.md', note: 'rules', files: [{ path: '/w/handbook.md', size: 900 }] }];
@@ -424,7 +424,7 @@ console.log('§4 the Context table budget (the old folder index)');
   env.VIBESPACE_API = `http://127.0.0.1:${srv2.address().port}`;
   const outRows = await run(['show', '--full']);
   srv2.close();
-  ok(outRows.includes("Context table — every row's files:") && outRows.includes('  /ctx — notes (2 files)') && outRows.includes('    - /ctx/b/c.md (4 KB)') && outRows.includes('  /w/handbook.md — rules (1 file)') && !outRows.includes('Shared context folder:'),
+  ok(gateOf(outRows.includes("Context table — every row's files:")) && gateOf(outRows.includes('  /ctx — notes (2 files)')) && gateOf(outRows.includes('    - /ctx/b/c.md (4 KB)')) && gateOf(outRows.includes('  /w/handbook.md — rules (1 file)')) && !outRows.includes('Shared context folder:'),
     '…a hub with the Context table: every row\'s files, row by row', outRows.slice(-260));
   void execFileSync;
 }
@@ -467,7 +467,7 @@ console.log('§5 measurement — 13 sessions × 3 groups, the real shape');
   // B-52fa: the budget is measured with the scratch dir written as ONE fixed-length stand-in (a default TMPDIR's 24 chars) —
   // its path rides every Context row, and a verifier's 87-char TMPDIR made this leg red (test-prompt-budget ③b pins the shape)
   const multi = tasks.renderMultiContext(ids, {}), multiFixed = multi.split(tmp).join('/vs-seenmarks-fixture-00');
-  ok(B(multiFixed) <= 9600 && ids.every((id) => multi.includes(`### "${tasks.get(id).title}"\n`)), `the three groups' layered context, every Context table in it, under the cap (${kb(B(multiFixed))}, its scratch dir as a 24-char stand-in; ${kb(B(multi))} on the real ${tmp.length}-char path)`);
+  ok(B(multiFixed) <= 9600 && verdictOf(ids.every((id) => multi.includes(`### "${tasks.get(id).title}"\n`))), `the three groups' layered context, every Context table in it, under the cap (${kb(B(multiFixed))}, its scratch dir as a 24-char stand-in; ${kb(B(multi))} on the real ${tmp.length}-char path)`);
 }
 
 // ════════ §6 THE OWNER'S CONSTRAINT (lane task-group-fanout, 2026-10-24): what the model is told must not change ════════
@@ -553,7 +553,7 @@ console.log('§6 the Context read off the main thread (lane task-group-fanout): 
   const marks0 = JSON.stringify([sA._groupSeenAt, sA._ctxSig]);
   road = slow; fresh();
   const nN = (await callN('/api/agent/prompt-context', 'A')).context || '';
-  ok(cN.includes('<vibespace-task-update') && !nN.includes('<vibespace-task-update') && !nN.includes('the stale-path line') && JSON.stringify([sA._groupSeenAt, sA._ctxSig]) === marks0 && sA._sigStale && g1 in sA._sigStale,
+  ok(gateOf(cN.includes('<vibespace-task-update')) && !nN.includes('<vibespace-task-update') && !nN.includes('the stale-path line') && JSON.stringify([sA._groupSeenAt, sA._ctxSig]) === marks0 && gateOf(sA._sigStale) && g1 in sA._sigStale,
     'turn N, the read missed its bound: NOTHING new told (the control told the update), no seen mark moved, the session holds the group sigStale', { control: cN.slice(0, 160), road: nN.slice(0, 300), stale: sA._sigStale });
   await release();
   const nN1 = (await callN('/api/agent/prompt-context', 'A')).context || '';
@@ -568,7 +568,7 @@ console.log('§6 the Context read off the main thread (lane task-group-fanout): 
   road = slow; fresh(); const nS = (await callN('/api/agent/task-context', 'B')).context || '';
   await release();
   road = counted; fresh(); const nP = (await callN('/api/agent/prompt-context', 'B')).context || '';
-  ok(cS.includes(g1) && cS.includes(g2) && !nS.includes(g1) && !nS.includes(g2) && nP.includes(g1) && nP.includes(g2) && !rigN.activeSessions.get('B')._sigStale && !cP.includes(g1),
+  ok(gateOf(cS.includes(g1)) && gateOf(cS.includes(g2)) && !nS.includes(g1) && !nS.includes(g2) && gateOf(nP.includes(g1)) && gateOf(nP.includes(g2)) && !rigN.activeSessions.get('B')._sigStale && !cP.includes(g1),
     'SessionStart on a read that missed its bound tells no group (nothing marked seen) — the first prompt tells both whole', { start: nS.slice(0, 160), first: nP.slice(0, 160) });
   fs.readdirSync = realReaddir;
   pool.close();
@@ -633,19 +633,19 @@ console.log('§7 confirm, then mark (lane report-mark-on-ack): the census, the d
   ok((ar.match(/withPreamble\(s, [^\n]*?, carry\.stage\)/g) || []).length === 2 && (ar.match(/UnderCap\([^\n]*?, console\.log, carry\)/g) || []).length === 4, 'both hook routes hand their stage to the preamble and their CARRY to the four drains (stage + claim; a helper with no carry marks at once — only a direct caller)');
   ok(c.loose.length === 0, `THE CENSUS: every state write in the two hook routes and their drain / preamble helpers is STAGED through a rider kind (${c.kinds.length} kinds staged) or on the not-told list with its reason (${NOT_TOLD.length} rows)`, c.loose);
   const rows = Object.keys(TC.RIDERS);
-  ok(rows.every((k) => c.kinds.includes(k)) && c.kinds.every((k) => rows.includes(k)) && rows.every((k) => TC.RIDERS[k].mark && TC.RIDERS[k].lost),
+  ok(gateOf(rows.every((k) => c.kinds.includes(k))) && gateOf(c.kinds.every((k) => rows.includes(k))) && verdictOf(rows.every((k) => TC.RIDERS[k].mark && TC.RIDERS[k].lost)),
     `…every census row (${rows.length}: ${rows.join(', ')}) is staged somewhere and every staged kind has a row — what it marks and what a dropped injection lost`, { rows, staged: c.kinds });
   // CONTROLS: a new rider written the old way, and a staged kind with no row, are both caught
   const planted = { ...regions, 'prompt-context': regions['prompt-context'].replace('const parts = [];', 'const parts = []; s._newRiderSeen = true;') };
   const cp = census(planted);
-  ok(cp.loose.length === 1 && /_newRiderSeen/.test(cp.loose[0]), 'CONTROL a rider that marks as it composes (s._newRiderSeen = true): the census names it', cp.loose);
+  ok(cp.loose.length === 1 && verdictOf(/_newRiderSeen/.test(cp.loose[0])), 'CONTROL a rider that marks as it composes (s._newRiderSeen = true): the census names it', cp.loose);
   const said7 = []; let applied = 0;
   const c7 = TC.open({}, { owner: 'k', route: 'UserPromptSubmit', confirm: true, log: (l) => said7.push(l) }); c7.stage('new-rider', () => { applied++; });
   const id7 = c7.close('some text', null);
-  ok(said7.some((l) => /no census row for the rider "new-rider"/.test(l) && /composed and marked at send/.test(l)) && id7 === null && applied === 1, 'CONTROL a rider kind with no census row breaks the carry BY NAME — the answer falls back to the legacy answer (marked at send, no delivery id), never fails', said7);
-  ok(rows.every((k) => /^(append-only|by identity): .{12,}/.test(TC.RIDERS[k].store || '')) && /^by identity/.test(TC.RIDERS.notices.store) && /^by identity/.test(TC.RIDERS['msg-stash'].store) && /^by identity/.test(TC.RIDERS['jobs-stash'].store),
+  ok(gateOf(said7.some((l) => /no census row for the rider "new-rider"/.test(l) && /composed and marked at send/.test(l))) && id7 === null && applied === 1, 'CONTROL a rider kind with no census row breaks the carry BY NAME — the answer falls back to the legacy answer (marked at send, no delivery id), never fails', said7);
+  ok(gateOf(rows.every((k) => /^(append-only|by identity): .{12,}/.test(TC.RIDERS[k].store || ''))) && gateOf(/^by identity/.test(TC.RIDERS.notices.store)) && gateOf(/^by identity/.test(TC.RIDERS['msg-stash'].store)) && verdictOf(/^by identity/.test(TC.RIDERS['jobs-stash'].store)),
     'acceptance r1 law A: every census row says whether its store is append-only (and why) or consumed BY IDENTITY — the notices and both stashes by identity', Object.fromEntries(rows.map((k) => [k, (TC.RIDERS[k].store || '').slice(0, 40)])));
-  ok(TC.LEGACY && /without X-VibeSpace-Confirm/.test(TC.LEGACY.who), 'the LEGACY row: a caller without the header keeps mark-on-send, named (an older hook on a remote host until its helper refresh)');
+  ok(gateOf(TC.LEGACY) && verdictOf(/without X-VibeSpace-Confirm/.test(TC.LEGACY.who)), 'the LEGACY row: a caller without the header keeps mark-on-send, named (an older hook on a remote host until its helper refresh)');
 
   // ── the REAL routes: staged until the confirm; a turn that never confirmed is composed again under the repeat line ──
   const { tasks, ids } = mkStore('r7', { cwd: work, sessionKeys: PEERS });
@@ -660,39 +660,39 @@ console.log('§7 confirm, then mark (lane report-mark-on-ack): the census, the d
   const w0 = meta.writes();
   routeLog.length = 0;
   const a1 = ask('/api/agent/prompt-context', 'S');
-  ok(a1.context.includes('<vibespace-task-context>') && /^dl_[\w-]{24}$/.test(a1.delivery || '') && none(S) && meta.writes() === w0 && JSON.stringify(TC.pendingOf(S).kinds) === '["task-full"]',
+  ok(gateOf(a1.context.includes('<vibespace-task-context>')) && gateOf(/^dl_[\w-]{24}$/.test(a1.delivery || '')) && gateOf(none(S)) && meta.writes() === w0 && JSON.stringify(TC.pendingOf(S).kinds) === '["task-full"]',
     'a confirming caller: the full context rides with a delivery id — and NOTHING moved yet (no seen mark, no meta write; one delivery staged: task-full)', { delivery: a1.delivery, pending: TC.pendingOf(S) });
   const a2 = ask('/api/agent/prompt-context', 'S');
-  ok(a2.context.startsWith(TC.AGAIN_LINE + '\n\n') && a2.context.includes('<vibespace-task-context>') && ids.every((g) => a2.context.includes(g)) && a2.delivery && a2.delivery !== a1.delivery,
+  ok(gateOf(a2.context.startsWith(TC.AGAIN_LINE + '\n\n')) && gateOf(a2.context.includes('<vibespace-task-context>')) && gateOf(ids.every((g) => a2.context.includes(g))) && gateOf(a2.delivery) && a2.delivery !== a1.delivery,
     'the next call before any confirm: the SAME content composed again, under ONE «sent again — the previous turn did not confirm it» line (addition a), with a fresh id', a2.context.slice(0, 260));
-  ok(routeLog.some((l) => /^\[inject\] not carried: claude:S — the person turn's UserPromptSubmit answer \(\d+ B: task-full\) was not confirmed before the next call/.test(l)) && !routeLog.some((l) => /CTX|vibespace-task-context>/.test(l)),
+  ok(gateOf(routeLog.some((l) => /^\[inject\] not carried: claude:S — the person turn's UserPromptSubmit answer \(\d+ B: task-full\) was not confirmed before the next call/.test(l))) && !routeLog.some((l) => /CTX|vibespace-task-context>/.test(l)),
     'the drop is COUNTED in the hub journal — «[inject] not carried» with the turn kind, the reason, the riders and the bytes; never the content (ruling 4)', routeLog.filter((l) => /not carried/.test(l)));
   // THE DOOR (addition b)
-  ok(carried('S', a1.delivery).status === 409 && carried('S', a1.delivery).code === 'replaced' && /composed again/.test(carried('S', a1.delivery).error), 'the door: the replaced id is refused by name (409 replaced) — it moves nothing', carried('S', a1.delivery));
-  ok(carried('O', a2.delivery).status === 403 && carried('O', a2.delivery).code === 'not-yours' && none(S) && none(O), "the door: ANOTHER conversation's bearer with this id is refused by name (403 not-yours) — no mark moves on either", carried('O', a2.delivery));
+  ok(carried('S', a1.delivery).status === 409 && carried('S', a1.delivery).code === 'replaced' && verdictOf(/composed again/.test(carried('S', a1.delivery).error)), 'the door: the replaced id is refused by name (409 replaced) — it moves nothing', carried('S', a1.delivery));
+  ok(carried('O', a2.delivery).status === 403 && carried('O', a2.delivery).code === 'not-yours' && gateOf(none(S)) && verdictOf(none(O)), "the door: ANOTHER conversation's bearer with this id is refused by name (403 not-yours) — no mark moves on either", carried('O', a2.delivery));
   ok(carried('S', 'dl_' + 'x'.repeat(24)).status === 404 && carried('S', 'nope').status === 400 && carried('S', undefined).status === 400, 'the door: an unknown id 404, a malformed or missing one 400');
   const ok1 = carried('S', a2.delivery);
-  ok(ok1.status === 200 && ok1.success === true && JSON.stringify(ok1.carried) === '["task-full"]' && ids.every((g) => typeof S._groupSeenAt[g] === 'number') && meta.writes() === w0 + 1 && (meta.readSessionMeta('sock-S').seenMarks || {}).groupSeenAt,
+  ok(ok1.status === 200 && ok1.success === true && JSON.stringify(ok1.carried) === '["task-full"]' && gateOf(ids.every((g) => typeof S._groupSeenAt[g] === 'number')) && meta.writes() === w0 + 1 && verdictOf((meta.readSessionMeta('sock-S').seenMarks || {}).groupSeenAt),
     'the confirm moves exactly the staged marks of THAT delivery (task-full) and persists them (one meta write)', ok1);
-  ok(carried('S', a2.delivery).code === 'already' && /single-use/.test(carried('S', a2.delivery).error), 'the door: a delivery id is single-use (409 already)');
+  ok(carried('S', a2.delivery).code === 'already' && verdictOf(/single-use/.test(carried('S', a2.delivery).error)), 'the door: a delivery id is single-use (409 already)');
   const a3 = ask('/api/agent/prompt-context', 'S');
   ok(!a3.context.includes('<vibespace-task-context>') && !a3.context.includes('sent again') && !a3.delivery, 'after the confirm: a quiet turn — nothing repeated, no line, nothing staged (no id)', a3);
   // a caller that does not confirm (LEGACY): marks at once, as before
   const L = mkSession('L', work); rig.activeSessions.set('L', L); seedMeta(meta, L);
   const l1 = ask('/api/agent/prompt-context', 'L', { confirm: false });
-  ok(l1.context.includes('<vibespace-task-context>') && !('delivery' in l1) && ids.every((g) => typeof L._groupSeenAt[g] === 'number') && !TC.pendingOf(L), 'a caller without the header (LEGACY): no delivery id, the marks move as the answer is composed — as before');
+  ok(gateOf(l1.context.includes('<vibespace-task-context>')) && !('delivery' in l1) && gateOf(ids.every((g) => typeof L._groupSeenAt[g] === 'number')) && !TC.pendingOf(L), 'a caller without the header (LEGACY): no delivery id, the marks move as the answer is composed — as before');
   // SessionStart rides the same helper (ruling 1)
   const N = mkSession('N', work); rig.activeSessions.set('N', N); seedMeta(meta, N);
   const t1 = ask('/api/agent/task-context', 'N');
-  ok(t1.context.includes('<vibespace-task-context>') && t1.delivery && none(N) && JSON.stringify(TC.pendingOf(N, 'SessionStart').kinds) === '["task-full"]', 'SessionStart (ruling 1): its full context staged under a delivery id, nothing marked yet', TC.pendingOf(N, 'SessionStart'));
+  ok(gateOf(t1.context.includes('<vibespace-task-context>')) && gateOf(t1.delivery) && gateOf(none(N)) && JSON.stringify(TC.pendingOf(N, 'SessionStart').kinds) === '["task-full"]', 'SessionStart (ruling 1): its full context staged under a delivery id, nothing marked yet', TC.pendingOf(N, 'SessionStart'));
   const t2 = ask('/api/agent/prompt-context', 'N');
-  ok(t2.context.includes('<vibespace-task-context>') && t2.context.startsWith(TC.AGAIN_LINE) && TC.pendingOf(N, 'SessionStart'), "…a SessionStart answer still unconfirmed: the first prompt tells the groups whole again under the repeat line — and the SessionStart delivery stays confirmable (one route never cancels the other's)", t2.context.slice(0, 200));
+  ok(gateOf(t2.context.includes('<vibespace-task-context>')) && gateOf(t2.context.startsWith(TC.AGAIN_LINE)) && verdictOf(TC.pendingOf(N, 'SessionStart')), "…a SessionStart answer still unconfirmed: the first prompt tells the groups whole again under the repeat line — and the SessionStart delivery stays confirmable (one route never cancels the other's)", t2.context.slice(0, 200));
   // RED CONTROL: the base's law (every caller marks as it composes) — the confirming caller's marks move at compose
   const Base = loadPatched('src/agent-routes.js', [["confirm: TC.confirmable(req)", "confirm: false"]]);
   const rigB = mkRig({ tasks, meta: mkMeta(), routesMod: Base });
   const SB = mkSession('S', work); rigB.activeSessions.set('S', SB);
   let bo = null; hush(() => rigB.routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer ' + SB.agentToken, 'x-vibespace-confirm': '1' }, query: {}, body: {} }, { json: (o) => { bo = o; }, status: () => ({ json: () => {} }) }));
-  ok(bo && bo.context.includes('<vibespace-task-context>') && !bo.delivery && ids.every((g) => typeof SB._groupSeenAt[g] === 'number'), 'RED CONTROL mark-on-send (the confirm switch off): the marks move as the answer is composed — a turn that never carries it loses it (the incident)');
+  ok(gateOf(bo) && gateOf(bo.context.includes('<vibespace-task-context>')) && !bo.delivery && verdictOf(ids.every((g) => typeof SB._groupSeenAt[g] === 'number')), 'RED CONTROL mark-on-send (the confirm switch off): the marks move as the answer is composed — a turn that never carries it loses it (the incident)');
 }
 
 // ════════ §7b the acceptance's four laws (lane report-mark-on-ack r2, 主开发's verdict 2026-11-10) ════════
@@ -722,7 +722,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   ssm.pushNotice(keyA, { kind: 'browser-dialog', dialog: { type: 'confirm', message: 'DIALOG-6' } }, { replaceKind: true });   // replaces #5 before the confirm
   confirmOn(rig, 'NA', a1.delivery);
   const a2 = askOn(rig, P, 'NA');
-  ok((a1.context || '').includes('DIALOG-5') && !(a1.context || '').includes('DIALOG-6') && ssm.pendingNotices(keyA).length === 1 && (a2.context || '').includes('DIALOG-6'),
+  ok(gateOf((a1.context || '').includes('DIALOG-5')) && !(a1.context || '').includes('DIALOG-6') && ssm.pendingNotices(keyA).length === 1 && verdictOf((a2.context || '').includes('DIALOG-6')),
     'LAW A (replace): dialog #5 told, #6 REPLACES it before the confirm — the confirm removes only what it rendered (#5, gone already), #6 stays queued and the next turn tells it', { told: /DIALOG-\d/.exec(a1.context || '')?.[0], next: /DIALOG-\d/.exec(a2.context || '')?.[0] });
   confirmOn(rig, 'NA', a2.delivery);
   ssm.pushNotice(keyA, { kind: 'browser-proposal', text: 'PROPOSAL-A told' });
@@ -730,7 +730,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   ssm.dropNotices(keyA, (x) => x.kind === 'browser-proposal'); ssm.pushNotice(keyA, { kind: 'browser-proposal', text: 'PROPOSAL-B never told' });   // a withdraw, then a push
   confirmOn(rig, 'NA', b1.delivery);
   const b2 = askOn(rig, P, 'NA');
-  ok((b1.context || '').includes('PROPOSAL-A told') && (b2.context || '').includes('PROPOSAL-B never told'),
+  ok(gateOf((b1.context || '').includes('PROPOSAL-A told')) && verdictOf((b2.context || '').includes('PROPOSAL-B never told')),
     'LAW A (withdraw + push): A told, A withdrawn and B pushed before the confirm — the confirm consumes nothing it did not render, B rides the next turn', { pending: ssm.pendingNotices(keyA).map((n) => n.text || n.kind) });
   confirmOn(rig, 'NA', b2.delivery);
   {
@@ -746,7 +746,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   const Q = add(rig, 'NQ');
   const q1 = askOn(rig, P, 'NQ');                 // the prompt's delivery, unconfirmed (a slow inject, a hook in flight)
   const q2 = askOn(rig, T, 'NQ');                 // SessionStart composed meanwhile (a /clear, a compact)
-  ok(q1.delivery && q2.delivery && TC.pendingOf(Q, 'UserPromptSubmit') && TC.pendingOf(Q, 'UserPromptSubmit').id === q1.delivery && (q2.context || '').startsWith(TC.AGAIN_LINE),
+  ok(gateOf(q1.delivery) && gateOf(q2.delivery) && gateOf(TC.pendingOf(Q, 'UserPromptSubmit')) && TC.pendingOf(Q, 'UserPromptSubmit').id === q1.delivery && verdictOf((q2.context || '').startsWith(TC.AGAIN_LINE)),
     'LAW B: SessionStart composed while the prompt\'s delivery is unconfirmed — the prompt\'s delivery STAYS confirmable, and the SessionStart answer (the same groups again) says «sent again»', { q2: (q2.context || '').slice(0, 120) });
   const c1 = confirmOn(rig, 'NQ', q1.delivery), c2 = confirmOn(rig, 'NQ', q2.delivery);
   const q3 = askOn(rig, P, 'NQ');
@@ -762,7 +762,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   const o1 = askOn(oldHub, P, 'NS');                         // told, handed out — and the hub dies before its confirm
   confirmOn(oldHub, 'NC', askOn(oldHub, P, 'NC').delivery);  // confirmed before the restart: nothing outstanding
   askOn(oldHub, P, 'NL');                                    // outstanding — the new hub's caller of it is a LEGACY one
-  ok((o1.context || '').includes('OLD-NS') && o1.delivery && fs.existsSync(landed(path.join(carryDir, 'turn-carry-outstanding.json'))), 'the old hub: a notice told, its delivery outstanding, written by conversation (data/turn-carry-outstanding.json)');
+  ok(gateOf((o1.context || '').includes('OLD-NS')) && gateOf(o1.delivery) && verdictOf(fs.existsSync(landed(path.join(carryDir, 'turn-carry-outstanding.json')))), 'the old hub: a notice told, its delivery outstanding, written by conversation (data/turn-carry-outstanding.json)');
   await new Promise((r) => setTimeout(r, TC.LIMITS.clearAfterMs + 50));   // NC's row retired once its stores are durable (r4 item 4)
   TC._newProcess();                                          // the hub dies: nothing of the old process stays in memory
   const newHub = mk2({ carryDir });                          // a NEW process on the same data dir
@@ -770,16 +770,16 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   routeLog.length = 0;
   const ss = askOn(newHub, T, 'NS');                         // its first call: a SessionStart with nothing to stage (a compaction, a /clear)
   const r1 = askOn(newHub, P, 'NS');
-  ok(!ss.context && !ss.delivery && (r1.context || '').startsWith(TC.RESTART_LINE + '\n\n') && (r1.context || '').includes('OLD-NS') && routeLog.some((l) => /^\[inject\] claude:NS: the first UserPromptSubmit answer from this hub process that carries anything \(notices\) — said «the hub restarted»/.test(l)),
+  ok(!ss.context && !ss.delivery && gateOf((r1.context || '').startsWith(TC.RESTART_LINE + '\n\n')) && gateOf((r1.context || '').includes('OLD-NS')) && verdictOf(routeLog.some((l) => /^\[inject\] claude:NS: the first UserPromptSubmit answer from this hub process that carries anything \(notices\) — said «the hub restarted»/.test(l))),
     'r3 item 1 + 2: a RESUMED record of a conversation the dead process left outstanding — its empty SessionStart does not spend the line; the first answer that CARRIES something (the notice, again) says «the hub restarted …» and the journal says so', { ss: ss.context, r1: (r1.context || '').slice(0, 140) });
   confirmOn(newHub, 'NS', r1.delivery);
   ssm.pushNotice('claude:NS', { kind: 'browser-proposal', text: 'NEW-NS' });
   const r2b = askOn(newHub, P, 'NS');
-  ok((r2b.context || '').includes('NEW-NS') && !(r2b.context || '').includes('hub restarted') && !(r2b.context || '').includes('sent again'), '…said once: the next answer carries new content with no line');
+  ok(gateOf((r2b.context || '').includes('NEW-NS')) && !(r2b.context || '').includes('hub restarted') && !(r2b.context || '').includes('sent again'), '…said once: the next answer carries new content with no line');
   add(newHub, 'NC', quiet); add(newHub, 'NW', quiet); add(newHub, 'NL', quiet);
   ssm.pushNotice('claude:NC', { kind: 'browser-proposal', text: 'NEW-NC' }); ssm.pushNotice('claude:NW', { kind: 'browser-proposal', text: 'NEW-NW' });
   const c1n = askOn(newHub, P, 'NC'), w1 = askOn(newHub, P, 'NW'), l1 = askOn(newHub, P, 'NL', false);
-  ok(!(c1n.context || '').includes('hub restarted') && !(w1.context || '').includes('hub restarted') && (l1.context || '').includes('OLD-NL') && !(l1.context || '').includes('hub restarted'),
+  ok(!(c1n.context || '').includes('hub restarted') && !(w1.context || '').includes('hub restarted') && gateOf((l1.context || '').includes('OLD-NL')) && !(l1.context || '').includes('hub restarted'),
     'r3 item 2, the other side: a conversation whose delivery was confirmed before the restart, one made in this process, and a LEGACY caller (no confirm header — nothing can repeat for it) get no line', { NC: (c1n.context || '').slice(0, 60), NW: (w1.context || '').slice(0, 60), NL: (l1.context || '').slice(0, 60) });
   // ── r3 item 3a: an unconfirmed SessionStart never poisons later prompts — «sent again» only when its content IS composed again ──
   const X = mk2({});
@@ -791,7 +791,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   const px2 = askOn(X, P, 'NX'); confirmOn(X, 'NX', px2.delivery);
   ssm.pushNotice('claude:NX', { kind: 'browser-proposal', text: 'FRESH-2' });
   const px3 = askOn(X, P, 'NX');
-  ok(sx.delivery && (px1.context || '').startsWith(TC.AGAIN_LINE) && (px2.context || '').includes('FRESH-1') && !(px2.context || '').includes('sent again') && !(px3.context || '').includes('sent again'),
+  ok(gateOf(sx.delivery) && gateOf((px1.context || '').startsWith(TC.AGAIN_LINE)) && gateOf((px2.context || '').includes('FRESH-1')) && !(px2.context || '').includes('sent again') && !(px3.context || '').includes('sent again'),
     'r3 item 3a: an unconfirmed SessionStart delivery — the prompt that composes its content again says «sent again» ONCE (the debt retired); later prompts carrying NEW content say nothing', { px1: (px1.context || '').slice(0, 80), px2: (px2.context || '').slice(0, 80) });
   // ── r3 item 3b: a late SessionStart confirm never rolls the preamble back ──
   const settingsY = { 'agents.injectPreamble': 'PRE-ONE' };
@@ -802,14 +802,14 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   const py1 = askOn(Y, P, 'NY'); confirmOn(Y, 'NY', py1.delivery);   // PRE-TWO told and confirmed
   const late = confirmOn(Y, 'NY', sy.delivery);              // the old SessionStart confirm lands late
   const py2 = askOn(Y, P, 'NY');
-  ok((sy.context || '').includes('PRE-ONE') && (py1.context || '').includes('PRE-TWO') && late.status === 200 && !(py2.context || '').includes('PRE-TWO'), 'r3 item 3b: a late SessionStart confirm lands (200) and never rolls the preamble\'s seen hash back — the standing instructions are not told again', { late: late.status, py2: (py2.context || '').slice(0, 80) });
+  ok(gateOf((sy.context || '').includes('PRE-ONE')) && gateOf((py1.context || '').includes('PRE-TWO')) && late.status === 200 && !(py2.context || '').includes('PRE-TWO'), 'r3 item 3b: a late SessionStart confirm lands (200) and never rolls the preamble\'s seen hash back — the standing instructions are not told again', { late: late.status, py2: (py2.context || '').slice(0, 80) });
   {
     const NoGuard = loadPatched('src/agent-routes.js', [["if (!((preambleToldOf.get(sessionObj) || 0) > toldAt)) { sessionObj._preambleSeen = hash; preambleToldOf.set(sessionObj, toldAt); }", 'sessionObj._preambleSeen = hash;']]);
     const settingsZ = { 'agents.injectPreamble': 'PRE-ONE' };
     const Z = mk2({ settings: settingsZ, routesMod: NoGuard }); add(Z, 'NZ', quiet);
     const sz = askOn(Z, T, 'NZ'); settingsZ['agents.injectPreamble'] = 'PRE-TWO';
     const pz1 = askOn(Z, P, 'NZ'); confirmOn(Z, 'NZ', pz1.delivery); confirmOn(Z, 'NZ', sz.delivery);
-    ok((askOn(Z, P, 'NZ').context || '').includes('PRE-TWO'), 'RED CONTROL the preamble apply without its forward guard: the late confirm rolls the hash back and the instructions are told again with no line');
+    ok(verdictOf((askOn(Z, P, 'NZ').context || '').includes('PRE-TWO')), 'RED CONTROL the preamble apply without its forward guard: the late confirm rolls the hash back and the instructions are told again with no line');
   }
   // ── r3 item 3c: the owner is the conversation under either key — a key that changes before the confirm ──
   const K = mk2({ statusKey: (s, id) => (s.claudeSessionId ? `claude:${s.claudeSessionId}` : `webui:${id}`) });
@@ -818,7 +818,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   const k1 = askOn(K, P, 'NK');
   KS.claudeSessionId = 'cccccccc-0000-4000-8000-00000000000c';   // the conversation id arrives between the stage and the confirm
   const kc = confirmOn(K, 'NK', k1.delivery);
-  ok((k1.context || '').includes('BEFORE-THE-ID') && kc.status === 200 && kc.success === true, 'r3 item 3c: the conversation\'s own confirm lands (200) though its status key changed between the stage and the confirm — the owner is the session, never its key', kc);
+  ok(gateOf((k1.context || '').includes('BEFORE-THE-ID')) && kc.status === 200 && kc.success === true, 'r3 item 3c: the conversation\'s own confirm lands (200) though its status key changed between the stage and the confirm — the owner is the session, never its key', kc);
   // ── the TOLD snapshot (the verifier's M2a / M2c): an edit between the stage and the confirm is told next ──
   const told = (r, id) => {
     add(r, id);
@@ -830,8 +830,8 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     return { full: (e1.context || '').includes('<vibespace-task-context>'), editTold: (e2.context || '').includes(`EDITED-AFTER-TOLD-${id}`), d1: (e3.context || '').includes(`DELTA-ONE-${id}`), d2Told: (e4.context || '').includes(`DELTA-TWO-${id}`) };
   };
   const st = told(rig, 'NT');
-  ok(st.full && st.editTold, 'THE TOLD SNAPSHOT (a first full context): a group edited between the stage and the confirm — the confirm marks what was TOLD, so the next turn tells the edit', st);
-  ok(st.d1 && st.d2Told, 'THE TOLD SNAPSHOT (a delta): a second edit between a delta\'s stage and its confirm is told next turn', st);
+  ok(gateOf(st.full) && verdictOf(st.editTold), 'THE TOLD SNAPSHOT (a first full context): a group edited between the stage and the confirm — the confirm marks what was TOLD, so the next turn tells the edit', st);
+  ok(gateOf(st.d1) && verdictOf(st.d2Told), 'THE TOLD SNAPSHOT (a delta): a second edit between a delta\'s stage and its confirm is told next turn', st);
   {
     const M2c = loadPatched('src/agent-routes.js', [['              s._groupSeenAt[g.id] = g.at;\n              s._ctxSig[g.id] = g.sig;   // lane task-group-fanout: as read this turn\n              s._groupSnap[g.id] = g.snap;', '              s._groupSeenAt[g.id] = Date.now() + 1e9; s._ctxSig[g.id] = g.sig; s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);']]);
     const M2a = loadPatched('src/agent-routes.js', [['() => { if (Number(s._groupSeenAt[g.id]) > contentAt) return; s._groupSeenAt[g.id] = contentAt; s._ctxSig[g.id] = sig; s._groupSnap[g.id] = snap; }', '() => { s._groupSeenAt[g.id] = Date.now() + 1e9; s._ctxSig[g.id] = sig; s._groupSnap[g.id] = tasks.snapshotForDiff(g.id); }']]);
@@ -849,7 +849,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     TC._fault.at = door;
     let f1; try { f1 = askOn(F, P, 'NF' + door); } finally { TC._fault.at = null; }
     const failLines = routeLog.filter((l) => /carry failed/.test(l));
-    ok((f1.context || '').includes(`FAULT-${door}`) && !f1.delivery && ssm.pendingNotices('claude:NF' + door).length === 0 && failLines.length === 1 && failLines[0].includes(`planted at ${door}`),
+    ok(gateOf((f1.context || '').includes(`FAULT-${door}`)) && !f1.delivery && ssm.pendingNotices('claude:NF' + door).length === 0 && failLines.length === 1 && verdictOf(failLines[0].includes(`planted at ${door}`)),
       `r4 item 2b: a throw planted at the carry's «${door}» — the answer is WHOLE (the notice rides), composed and marked at send as for a caller that does not confirm (no delivery id, the notice consumed), and ONE journal line names the cause`, { ctx: (f1.context || '').slice(0, 80), lines: failLines });
   }
   {
@@ -862,7 +862,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     let w1, w2; try { w1 = askOn(F, P, 'NFW'); confirmOn(F, 'NFW', w1.delivery); ssm.pushNotice('claude:NFW', { kind: 'browser-proposal', text: 'FAULT-write-2' }); w2 = askOn(F, P, 'NFW'); } finally { TC._fault.at = null; }
     hush(() => landed(path.join(wDir, 'turn-carry-outstanding.json')));   // U2: the table's write is the writer's — landed (and failed, once) here, its said line heard as the answers' were
     const said = routeLog.filter((l) => /could not be written/.test(l));
-    ok((w1.context || '').includes('FAULT-write') && w1.delivery && (w2.context || '').includes('FAULT-write-2') && said.length === 1,
+    ok(gateOf((w1.context || '').includes('FAULT-write')) && gateOf(w1.delivery) && gateOf((w2.context || '').includes('FAULT-write-2')) && said.length === 1,
       'r4 items 2b + 3: a throw planted at the FILE\'s write — the answer is whole AND keeps its confirm law (a delivery id): the file only serves the restart line, whose loss is said ONCE (not per answer)', said);
   }
   // B-f276 (lane bl-scratch, slice hub-own-ledgers): a file that holds no table is TORN under the store-read law — HELD while its bytes
@@ -879,7 +879,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     const lines = routeLog.filter((l) => /outstanding-deliveries file/.test(l));
     const held = lines.filter((l) => l.includes(`turn-carry-outstanding.json did not parse (${why}) — held while its bytes are copied aside; then it starts empty`));
     const copy = await copyFact(bDir, `the copy of the file holding ${label}`);
-    ok(held.length === 1 && !!copy && fs.readFileSync(path.join(bDir, copy), 'utf8') === bytes && (b1.context || '').includes('BAD-FILE') && b1.delivery,
+    ok(held.length === 1 && !!copy && fs.readFileSync(path.join(bDir, copy), 'utf8') === bytes && gateOf((b1.context || '').includes('BAD-FILE')) && verdictOf(b1.delivery),
       `r4 item 2a under the store-read law (B-f276): the file holding ${label} is HELD while its bytes are kept aside (byte for byte), said once — then the table starts empty; the answer is whole with its delivery id`, lines);
     confirmOn(F, 'NB', b1.delivery);
   }
@@ -890,15 +890,15 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     fs.writeFileSync(path.join(nDir, 'turn-carry-outstanding.json'), JSON.stringify(rows));
     const trimSaid = [];
     const st = TC.createOutstanding(nDir, { log: (l) => trimSaid.push(l) });
-    ok(st.size() === TC.OUTSTANDING_MAX_ROWS && !st.fromBefore('claude:R5') && st.fromBefore('claude:R200') && st.fromBefore('claude:R1199'),
+    ok(st.size() === TC.OUTSTANDING_MAX_ROWS && !st.fromBefore('claude:R5') && gateOf(st.fromBefore('claude:R200')) && verdictOf(st.fromBefore('claude:R1199')),
       `r4 item 3: the table is BOUNDED — rows older than ${TC.OUTSTANDING_MAX_AGE_MS / 3600000} h leave, then the newest ${TC.OUTSTANDING_MAX_ROWS} stay (1200 written, 200 of them old)`, { size: st.size() });
-    ok(trimSaid.length === 1 && /held 1200 row\(s\) — 200 past its bound/.test(trimSaid[0]), 'the tidy after r4 (item 3): rows the load\'s bound drops are SAID, once (a cut is never silent)', trimSaid);
+    ok(trimSaid.length === 1 && verdictOf(/held 1200 row\(s\) — 200 past its bound/.test(trimSaid[0])), 'the tidy after r4 (item 3): rows the load\'s bound drops are SAID, once (a cut is never silent)', trimSaid);
     // the size FIRST: a file beyond its byte bound is refused by name and never parsed (a planted 56 MB file held setup 1.2 s)
     const zDir = fs.mkdtempSync(path.join(tmp, 'carry-z-'));
     fs.writeFileSync(path.join(zDir, 'turn-carry-outstanding.json'), JSON.stringify({ 'claude:NBIG': { at: Date.now(), route: 'UserPromptSubmit', kinds: ['notices'] } }) + ' '.repeat(TC.OUTSTANDING_MAX_BYTES));
     const bigSaid = [];
     const big = TC.createOutstanding(zDir, { log: (l) => bigSaid.push(l) });
-    ok(!big.fromBefore('claude:NBIG') && big.size() === 0 && bigSaid.length === 1 && new RegExp(`is \\d+ B, beyond its ${TC.OUTSTANDING_MAX_BYTES} B bound .* — not read, and nothing is written over it in this run`).test(bigSaid[0]) && big.held()?.code === 'past its bound',
+    ok(!big.fromBefore('claude:NBIG') && big.size() === 0 && bigSaid.length === 1 && gateOf(new RegExp(`is \\d+ B, beyond its ${TC.OUTSTANDING_MAX_BYTES} B bound .* — not read, and nothing is written over it in this run`).test(bigSaid[0])) && big.held()?.code === 'past its bound',
       `the tidy after r4 (item 3), under the store-read law (B-f276): a file past its ${TC.OUTSTANDING_MAX_BYTES} B bound is REFUSED BY NAME before it is read — never parsed (its valid row is not taken), never written over in the run, said once`, bigSaid);
   }
   {
@@ -925,7 +925,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     await new Promise((r) => setTimeout(r, 120));
     TC.LIMITS.claimBoundMs = bound0;
     const failed = said.filter((l) => /claude:NCL2: the UserPromptSubmit carry failed \(claim: planted after the stamp\)/.test(l));
-    ok(heldAt0 && !('ho' in r1) && said.filter((l) => /claude:NCL1: an unconfirmed answer's claim on stashed records ended at its \d+-minute bound/.test(l)).length === 1,
+    ok(gateOf(heldAt0) && !('ho' in r1) && said.filter((l) => /claude:NCL1: an unconfirmed answer's claim on stashed records ended at its \d+-minute bound/.test(l)).length === 1,
       'the tidy after r4 (item 1): a claim\'s BOUND RUNS FROM ITS STAMP — an answer that claimed and never closed (its route threw on the way) releases at the bound, said once', said);
     ok(d2 === null && took === 1 && !('ho' in r2) && failed.length === 1,
       'the tidy after r4 (item 1): a claim call that THROWS after its stamp is SAID (one line) and breaks the carry — the legacy answer takes at send, the record is unstamped by its own tag (its release never came back)', { d2, took, ho: r2.ho, failed });
@@ -940,7 +940,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     const rightAfter = 'claude:ND' in read();
     await new Promise((r) => setTimeout(r, TC.LIMITS.clearAfterMs + 40));
     const later = 'claude:ND' in read();
-    ok(rightAfter && !later, `r4 item 4: the confirm retires the row only once what it guards is durable — still there at the confirm, gone ${TC.LIMITS.clearAfterMs} ms later (production: 2 s, above the notice store's 500 ms write)`, { rightAfter, later });
+    ok(gateOf(rightAfter) && !later, `r4 item 4: the confirm retires the row only once what it guards is durable — still there at the confirm, gone ${TC.LIMITS.clearAfterMs} ms later (production: 2 s, above the notice store's 500 ms write)`, { rightAfter, later });
   }
   {
     // the unverified drift (verdict r3): a row written under the page key follows the conversation once its id arrives
@@ -981,7 +981,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     };
     const u = leg(TC, 'm');
     const [d1, d2, d3] = u.rec.dirties;
-    ok(!u.atMark && u.rec.dirties.length === 3 && u.rec.dirties.every((d) => d.name === 'turn-carry-outstanding.write') && d1.rank === 0 && d2.rank === 0 && d3.rank === undefined && u.rec.durables.length === 2,
+    ok(!u.atMark && u.rec.dirties.length === 3 && gateOf(u.rec.dirties.every((d) => d.name === 'turn-carry-outstanding.write')) && d1.rank === 0 && d2.rank === 0 && d3.rank === undefined && u.rec.durables.length === 2,
       'U2 (B-0248): a MARK is an act handed to the store writer (turn-carry-outstanding.write, rank 0, durable() asked), a clear is PACED — nothing is written on the main thread at the change', { atMark: u.atMark, dirties: u.rec.dirties, durables: u.rec.durables.length });
     u.rec.flushSync([u.f]);
     const onDisk = JSON.parse(fs.readFileSync(u.f, 'utf8'));
@@ -990,14 +990,14 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     st2.mark('claude:NW', { at: Date.now(), route: 'UserPromptSubmit', kinds: ['notices'] });
     const before = u.rec.flushes;
     const st3 = TC.createOutstanding(u.uDir, { writer: u.rec, log: () => { } });
-    ok(u.rec.flushes === before + 1 && st3.fromBefore('claude:NW') && st3.fromBefore('claude:NV'), 'U2: a table made AGAIN in the same process while its write is owed lands it first, then reads it (both rows from before)', { flushes: u.rec.flushes - before });
+    ok(u.rec.flushes === before + 1 && gateOf(st3.fromBefore('claude:NW')) && verdictOf(st3.fromBefore('claude:NV')), 'U2: a table made AGAIN in the same process while its write is owed lands it first, then reads it (both rows from before)', { flushes: u.rec.flushes - before });
     const tcSrc = fs.readFileSync(path.join(REPO, 'src/turn-carry.js'), 'utf8');
     const aW = "  const W = () => writer || require('./store-writer.js').storeWriter();\n";
     ok(tcSrc.split(aW).length === 2, 'ANCHOR: the table\'s one writer line');
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const Sync = mutantCopies('seen-marks-u2', REPO).load('src/turn-carry.js', editAnchor(tcSrc, aW, "  const W = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) });\n", "src/turn-carry.js"), 'sync-save');
     const r = leg(Sync, 's');
-    ok(r.atMark && r.rec.dirties.length === 0, 'CONTROL (U2): the old synchronous save ⇒ the file is on disk at the mark — the leg\'s first check would be red');
+    ok(gateOf(r.atMark) && r.rec.dirties.length === 0, 'CONTROL (U2): the old synchronous save ⇒ the file is on disk at the mark — the leg\'s first check would be red');
   }
   TC.LIMITS.clearAfterMs = clearAfter0;
 
@@ -1006,4 +1006,4 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
 try { SW.storeWriter().flushSync(); } catch { }   // lane lg-store-writes U2: the writer's owed writes land before the scratch dir goes (no race, no folder left)
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

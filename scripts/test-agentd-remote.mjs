@@ -27,7 +27,7 @@ const dataDir = path.join(tmp, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -94,9 +94,9 @@ check('daemon is setsid-detached on the "remote"', daemonPid > 0, String(daemonP
 console.log('— spawn-env-census: the ssh bridge gets a service\'s env, never the hub\'s (planted fakes) —');
 {
   const envs = sshEnvs();
-  check('the planted names are in the hub\'s own env (the leg is not vacuous)', Object.entries(PLANT).every(([k, v]) => process.env[k] === v), Object.keys(PLANT).join(' '));
-  check('the bridge\'s ssh got none of the planted names or values (and no VIBESPACE_* / CLAUDE_* / AWS_* at all)', envs.length >= 1 && envs.every((e) => leakedIn(e).length === 0 && !Object.keys(e).some((k) => /^(VIBESPACE_|CLAUDE_|AWS_)/.test(k))), JSON.stringify(envs.map((e) => Object.keys(e).sort())));
-  check('…and it KEPT SSH_AUTH_SOCK (ssh needs it for an agent-held key)', envs.length >= 1 && envs.every((e) => e.SSH_AUTH_SOCK === AUTH_SOCK), JSON.stringify(envs.map((e) => e.SSH_AUTH_SOCK || null)));
+  check('the planted names are in the hub\'s own env (the leg is not vacuous)', verdictOf(Object.entries(PLANT).every(([k, v]) => process.env[k] === v)), Object.keys(PLANT).join(' '));
+  check('the bridge\'s ssh got none of the planted names or values (and no VIBESPACE_* / CLAUDE_* / AWS_* at all)', envs.length >= 1 && verdictOf(envs.every((e) => leakedIn(e).length === 0 && !Object.keys(e).some((k) => /^(VIBESPACE_|CLAUDE_|AWS_)/.test(k)))), JSON.stringify(envs.map((e) => Object.keys(e).sort())));
+  check('…and it KEPT SSH_AUTH_SOCK (ssh needs it for an agent-held key)', envs.length >= 1 && verdictOf(envs.every((e) => e.SSH_AUTH_SOCK === AUTH_SOCK)), JSON.stringify(envs.map((e) => e.SSH_AUTH_SOCK || null)));
   // CONTROL: the pre-fix client.js (the bridge spawned with no env) hands the fake ssh every planted name
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const src = fs.readFileSync(path.join(repo, 'src/agentd/client.js'), 'utf8');
@@ -123,7 +123,7 @@ check('pipe session spawned (daemon-owned)', r1.pid > 0 && !r1.existing, JSON.st
 await sleep(400);
 h.write('one\n');
 await sleep(700);
-check('stdout flows: bridge → mux → buffer tail', out.toString().includes('echo:one'), JSON.stringify(out.toString()));
+check('stdout flows: bridge → mux → buffer tail', verdictOf(out.toString().includes('echo:one')), JSON.stringify(out.toString()));
 
 console.log('— M2: the bridge dies (ssh drop) — session survives, offset reattach —');
 const consumed = out.length; // wrapper-style byte accounting
@@ -131,7 +131,7 @@ dm.stop(); // kills the fake-ssh bridge = the ssh drop
 await sleep(500);
 const meta1 = JSON.parse(fs.readFileSync(path.join(stateDir, 'sessions', 'm2sess-1.json'), 'utf8'));
 let stubAlive = true; try { process.kill(meta1.childPid, 0); } catch { stubAlive = false; }
-check('child SURVIVES the bridge death (daemon-owned, detached)', stubAlive, '');
+check('child SURVIVES the bridge death (daemon-owned, detached)', verdictOf(stubAlive), '');
 const dm2 = new DeviceManager({ dataDir, bundlePath: bundle, version, transport, log: () => {} });
 let out2 = Buffer.alloc(0);
 const h2 = await dm2.openPipeSession({ sid: 'm2sess-1', offset: consumed }); // attach-only
@@ -142,12 +142,12 @@ await sleep(400);
 check('no replay at the exact offset', out2.length === 0, JSON.stringify(out2.toString().slice(0, 80)));
 h2.write('two\n');
 await sleep(700);
-check('post-reattach input still flows', out2.toString().includes('echo:two'), JSON.stringify(out2.toString()));
+check('post-reattach input still flows', verdictOf(out2.toString().includes('echo:two')), JSON.stringify(out2.toString()));
 
 console.log('— M2: exit sentinel through the byte stream —');
 h2.write('quit\n');
 await sleep(900);
-check('sentinel _remote_exit code 7 in the stream', out2.toString().includes('"_remote_exit"') && out2.toString().includes('"code":7'), JSON.stringify(out2.toString().slice(-120)));
+check('sentinel _remote_exit code 7 in the stream', gateOf(out2.toString().includes('"_remote_exit"')) && verdictOf(out2.toString().includes('"code":7')), JSON.stringify(out2.toString().slice(-120)));
 const meta2 = JSON.parse(fs.readFileSync(path.join(stateDir, 'sessions', 'm2sess-1.json'), 'utf8'));
 check('meta records exited', meta2.exited === 7, JSON.stringify(meta2));
 
@@ -160,14 +160,14 @@ await h3.ready;
 await sleep(500);
 const meta3 = JSON.parse(fs.readFileSync(path.join(stateDir, 'sessions', 'm2sess-1.json'), 'utf8'));
 check('exited session NOT respawned (same pid recorded, exited kept)', meta3.childPid === meta1.childPid && meta3.exited === 7, JSON.stringify(meta3));
-check('drain includes the sentinel', out3.toString().includes('"_remote_exit"'), '');
+check('drain includes the sentinel', verdictOf(out3.toString().includes('"_remote_exit"')), '');
 
 dm2.stop(); dm3.stop();
 // r5404 (lane bl-machines-b — the 2.369.422 hosted proof's red, placed): a daemon must be GONE before its root goes — its SIGTERM
 // handler's last log line re-creates agentd/state/agentd.log under a racing rmSync (ENOTEMPTY, the 2.369.217 runner red's class)
 const end = endDaemonsAndWait(AGENTD_ROOT);
-check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && end.gone && !end.killed, JSON.stringify(end));
+check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && gateOf(end.gone) && !end.killed, JSON.stringify(end));
 fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M2 remote tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

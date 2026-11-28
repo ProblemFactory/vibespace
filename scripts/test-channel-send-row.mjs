@@ -24,7 +24,7 @@ import { engineSource } from './channels-engine-src.mjs';   // .219 dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const C = require(path.join(REPO, 'src/channel-caps.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -41,19 +41,19 @@ const ESRC = engineSource(REPO);
 console.log('\n① PURE: the closed why set, the row, the foot');
 {
   const W = C.CONV_CAPS_FAIL_WHYS;
-  ok(Object.isFrozen(W) && W.join() === 'rate-limited,backoff,not-connected,vendor-error,auth-expired,vault-locked', 'the closed set of why a send row was not resolved', W.join());
+  ok(gateOf(Object.isFrozen(W)) && W.join() === 'rate-limited,backoff,not-connected,vendor-error,auth-expired,vault-locked', 'the closed set of why a send row was not resolved', W.join());
   // CENSUS: every why the engine's failure writer can put into a convCaps row, and every why Gmail's convCaps
   // answers, has its own words — sendWhyText's `default: return String(why)` is unreachable for them
   const body = ESRC.slice(ESRC.indexOf('async function convCapsFailed('), ESRC.indexOf('async function retryConvCaps('));
   const whyExpr = (body.match(/const why = ([\s\S]*?);\n/) || [])[1] || '';
   const engineWhys = [...new Set([...whyExpr.matchAll(/\? '([a-z-]+)'/g)].map((m) => m[1]).concat([...whyExpr.matchAll(/: '([a-z-]+)'/g)].map((m) => m[1])))];
-  ok(engineWhys.length === W.length && engineWhys.every((w) => W.includes(w)), `the engine's failure writer produces exactly the closed set (${engineWhys.join()})`);
+  ok(engineWhys.length === W.length && verdictOf(engineWhys.every((w) => W.includes(w))), `the engine's failure writer produces exactly the closed set (${engineWhys.join()})`);
   const gsrc = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
   const gcc = gsrc.slice(gsrc.indexOf('    async convCaps(convId'), gsrc.indexOf('    async replyEnvelope('));
   const gWhys = [...new Set([...gcc.matchAll(/why: '([a-z-]+)'/g)].map((m) => m[1]).concat(['send-scope-not-granted']))];
   const all = [...new Set([...W, ...engineWhys, ...gWhys, 'unknown', 'stale', 'checking'])];
   const bare = all.filter((w) => C.sendWhyText(w) === w);
-  ok(gWhys.includes('not-a-member') && !bare.length, `sendWhyText words every engine-written / Gmail why — none falls to the default (${all.length} checked)`, bare.join());
+  ok(gateOf(gWhys.includes('not-a-member')) && !bare.length, `sendWhyText words every engine-written / Gmail why — none falls to the default (${all.length} checked)`, bare.join());
   const t0 = Date.parse('2026-10-05T18:00:00Z');
   const row = { read: 'unknown', sendAs: [], why: 'rate-limited', detail: 'rate-limited', at: t0, retryAt: t0 + 7 * 60e3 };
   const st = C.convCapsState(row, t0 + 1000);
@@ -62,11 +62,11 @@ console.log('\n① PURE: the closed why set, the row, the foot');
   ok(!('retryAt' in good) && C.offers({ sendAs: ['user'] }, row, 'send-as-user', t0 + 1000).why === 'rate-limited', 'a resolved row carries no retryAt; a refused row is not offered, by its own why');
   const t = (s, v) => String(s).replace(/\{(\w+)\}/g, (_, k) => (v && v[k] !== undefined ? v[k] : `{${k}}`));
   const f1 = C.sendFoot(st, 'rate-limited', { t, vendor: 'Gmail' });
-  ok(f1 && f1.state === 'failed' && f1.retry && !f1.reauth && /^Gmail is rate-limiting this account — the reply box returns when it answers \(retrying at \d\d:\d\d\)$/.test(f1.text), 'the foot: "Gmail is rate-limiting this account … (retrying at HH:MM)" + Retry', f1 && f1.text);
+  ok(gateOf(f1) && f1.state === 'failed' && gateOf(f1.retry) && !f1.reauth && verdictOf(/^Gmail is rate-limiting this account — the reply box returns when it answers \(retrying at \d\d:\d\d\)$/.test(f1.text)), 'the foot: "Gmail is rate-limiting this account … (retrying at HH:MM)" + Retry', f1 && f1.text);
   const f2 = C.sendFoot({ ...st, why: 'backoff' }, 'backoff', { t, vendor: 'Gmail' });
-  ok(f2 && /paused after repeated vendor errors/.test(f2.text) && f2.retry, 'backoff: paused after repeated vendor errors + Retry', f2 && f2.text);
+  ok(gateOf(f2) && gateOf(/paused after repeated vendor errors/.test(f2.text)) && verdictOf(f2.retry), 'backoff: paused after repeated vendor errors + Retry', f2 && f2.text);
   const f3 = C.sendFoot({ read: 'unknown', why: 'not-connected', retryAt: null }, 'not-connected', { t, vendor: 'Gmail' });
-  ok(f3 && f3.reauth && f3.retry && /not connected — Re-authorize/.test(f3.text) && !/retrying/.test(f3.text), 'not-connected: Re-authorize (no timer — the owner\'s step)', f3 && f3.text);
+  ok(gateOf(f3) && gateOf(f3.reauth) && gateOf(f3.retry) && gateOf(/not connected — Re-authorize/.test(f3.text)) && !/retrying/.test(f3.text), 'not-connected: Re-authorize (no timer — the owner\'s step)', f3 && f3.text);
   const f4 = C.sendFoot(null, 'unknown', { t, checking: false });
   const f5 = C.sendFoot(st, 'rate-limited', { t, checking: true });
   ok(f4.state === 'checking' && f5.state === 'checking' && f4.text === 'Checking whether you can reply…' && !f4.retry, 'an unresolved / in-flight row reads "Checking whether you can reply…", never the raw word');
@@ -75,7 +75,7 @@ console.log('\n① PURE: the closed why set, the row, the foot');
   for (const lang of ['zh', 'ja']) {
     const src = fs.readFileSync(path.join(REPO, `src/lib/i18n-${lang}.js`), 'utf-8');
     const keys = ['Checking whether you can reply…', '{vendor} is rate-limiting this account — the reply box returns when it answers', '{sentence} (retrying at {time})', 'the vendor is rate-limiting this account — it is asked again by itself'];
-    ok(keys.every((k) => src.includes(JSON.stringify(k) + ':')), `${lang}: the foot's sentences are translated`);
+    ok(verdictOf(keys.every((k) => src.includes(JSON.stringify(k) + ':'))), `${lang}: the foot's sentences are translated`);
   }
 }
 
@@ -179,28 +179,28 @@ async function run(EM, tag) {
 {
   const r = await run(ENG, 'real');
   const j = JSON.stringify(r);
-  ok(r.open.ok && r.open.asked === 1 && r.open.why === 'rate-limited' && r.open.retryIn > 0 && r.open.retryIn <= 1100 && r.open.viewWhy === 'rate-limited' && r.open.viewRetry, 'the open\'s refused lookup is WRITTEN into the row: why rate-limited, retryAt = the vendor\'s Retry-After; the view names it', j);
+  ok(gateOf(r.open.ok) && r.open.asked === 1 && r.open.why === 'rate-limited' && r.open.retryIn > 0 && r.open.retryIn <= 1100 && r.open.viewWhy === 'rate-limited' && verdictOf(r.open.viewRetry), 'the open\'s refused lookup is WRITTEN into the row: why rate-limited, retryAt = the vendor\'s Retry-After; the view names it', j);
   ok(r.said === 1, 'ONE journal line: "[channels] <key>: send row not resolved (rate-limited, retry HH:MMZ)"', j);
-  ok(r.auto.read === 'yes' && r.auto.sendAs === 'user' && r.auto.asked === 2 && r.auto.offered, 'at retryAt the engine asks again BY ITSELF for the open window — the reply box returns', j);
+  ok(r.auto.read === 'yes' && r.auto.sendAs === 'user' && r.auto.asked === 2 && verdictOf(r.auto.offered), 'at retryAt the engine asks again BY ITSELF for the open window — the reply box returns', j);
   ok(r.saidAfter3 === 1, 'three refusals of the same (conversation, why) inside 5 min: still one journal line', j);
-  ok(r.backoff.why === 'backoff' && r.backoff.asked === 0 && r.backoff.retryAt && r.backoff.view === 'backoff', 'inside the account\'s vendor back-off a polite non-owner lookup (the open, the own re-ask, propose) is refused by NAME (backoff, retryAt = the back-off\'s end) — the vendor is not asked', j);
-  ok(r.retry.ok && r.retry.read === 'yes' && r.retry.asked === 1, 'the owner\'s Retry during the back-off goes through (exempt, as their refresh press is)', j);
-  ok(r.storm.asked === 1 && r.storm.all && r.storm.checkingWhileInFlight === true, '20 concurrent Retry presses = ONE lookup; while it is in flight the view says checking', j);
+  ok(r.backoff.why === 'backoff' && r.backoff.asked === 0 && gateOf(r.backoff.retryAt) && r.backoff.view === 'backoff', 'inside the account\'s vendor back-off a polite non-owner lookup (the open, the own re-ask, propose) is refused by NAME (backoff, retryAt = the back-off\'s end) — the vendor is not asked', j);
+  ok(gateOf(r.retry.ok) && r.retry.read === 'yes' && r.retry.asked === 1, 'the owner\'s Retry during the back-off goes through (exempt, as their refresh press is)', j);
+  ok(r.storm.asked === 1 && gateOf(r.storm.all) && r.storm.checkingWhileInFlight === true, '20 concurrent Retry presses = ONE lookup; while it is in flight the view says checking', j);
   ok(r.recover.before === 'backoff' && r.recover.after === 'yes' && r.recover.asked === 1, 'the account answered again (a pass went through): the open window\'s refused row is re-asked at once', j);
-  ok(r.propose.ok === false && r.propose.code === 'send-not-available' && r.propose.why === 'rate-limited' && r.propose.retryAt && r.propose.words, 'an agent\'s reply on a refused row: refused with the same why + when it is asked again', j);
+  ok(r.propose.ok === false && r.propose.code === 'send-not-available' && r.propose.why === 'rate-limited' && gateOf(r.propose.retryAt) && verdictOf(r.propose.words), 'an agent\'s reply on a refused row: refused with the same why + when it is asked again', j);
 
   console.log('\n③ patched-copy CONTROLS');
   const SW = '      try { cc = await e.adapter.convCaps(convId, { listed }); } catch (err) { return convCapsFailed(rec, e, adapterId, convId, err); }';
   const AU = '        if (stopped || !isWatched(k)) return;   // the window closed: its next open asks';
   const EX = '      if (polite && !owner && inBackoff(e) && !(listed && heldByListing(rec)))';
-  ok([SW, AU, EX].every((x) => ESRC.split(x).length === 2), 'CONTROL anchors: each patched line is in the engine once');
+  ok(verdictOf([SW, AU, EX].every((x) => ESRC.split(x).length === 2)), 'CONTROL anchors: each patched line is in the engine once');
   const swallow = await run(MUTE.load('src/server/channels-engine.js', ESRC.replace(SW, '      cc = await e.adapter.convCaps(convId, { listed });'), 'swallow'), 'swallow');
   ok(swallow.open.why !== 'rate-limited' && swallow.open.viewWhy === 'unknown' && swallow.said === 0, `CONTROL: the swallow restored ⇒ the raw word ('${swallow.open.viewWhy}'), no journal line — ① would be red`, JSON.stringify(swallow.open));
   const noAuto = await run(MUTE.load('src/server/channels-engine.js', ESRC.replace(AU, '        return;'), 'no-auto'), 'noauto');
   ok(noAuto.auto.read === 'unknown' && noAuto.auto.asked === 1, 'CONTROL: no auto re-ask ⇒ the row is still refused after retryAt — ② would be red', JSON.stringify(noAuto.auto));
   const notExempt = await run(MUTE.load('src/server/channels-engine.js', ESRC.replace(EX, '      if (polite && inBackoff(e) && !(listed && heldByListing(rec)))'), 'not-exempt'), 'noexempt');
   ok(notExempt.retry.read !== 'yes' && notExempt.retry.asked === 0, 'CONTROL: Retry not exempt ⇒ the owner\'s press is refused by the back-off — ② would be red', JSON.stringify(notExempt.retry));
-  for (const x of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 3, label: '③ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  for (const x of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 3, label: '③ ' })) ok(verdictOf(x.pass), x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

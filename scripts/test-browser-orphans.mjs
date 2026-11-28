@@ -37,7 +37,7 @@ const S = require('../src/browser-serve.js');
 const F = require('../src/browser-facts.js');
 const { DeviceManager } = require('../src/agentd/client.js');
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -100,11 +100,11 @@ function mutant(from, to, name) {
   return table(require(f));
 }
 const m1 = mutant("  if (num(leases) > 0) return { act: 'keep', why: 'a lease holds it' };\n", '', 'lease');
-ok(m1 && m1.some((x) => /leased/.test(x)), 'CONTROL: a patched copy that ends a daemon under a live lease is RED', m1);
+ok(gateOf(m1) && verdictOf(m1.some((x) => /leased/.test(x))), 'CONTROL: a patched copy that ends a daemon under a live lease is RED', m1);
 const m2 = mutant("if (!d.owned) return { act: 'report'", "if (false) return { act: 'report'", 'unmarked');
-ok(m2 && m2.some((x) => /unmarked/.test(x)), 'CONTROL: a patched copy that ends an unmarked daemon is RED', m2);
+ok(gateOf(m2) && verdictOf(m2.some((x) => /unmarked/.test(x))), 'CONTROL: a patched copy that ends an unmarked daemon is RED', m2);
 const m3 = mutant('  if (d.stoppedIdleAt != null && d.starttime != null && !d.cdp) {\n', '  if (false) {\n', 'outlives');
-ok(m3 && m3.some((x) => /^(gone|running|null) leased 600000: keep/.test(x)) && m3.some((x) => /endpoint silent/.test(x)), 'CONTROL: the pre-fix verdict (no other half) keeps a leased daemon whose browser ended 10 min ago, and one whose browser has not answered for 2 h — RED', m3 && m3.slice(0, 3));
+ok(gateOf(m3) && gateOf(m3.some((x) => /^(gone|running|null) leased 600000: keep/.test(x))) && verdictOf(m3.some((x) => /endpoint silent/.test(x))), 'CONTROL: the pre-fix verdict (no other half) keeps a leased daemon whose browser ended 10 min ago, and one whose browser has not answered for 2 h — RED', m3 && m3.slice(0, 3));
 
 // ═══ ② THE PROCESS TABLE ═══
 console.log('— ② the process table');
@@ -149,15 +149,15 @@ console.log('— ③ the keeper');
     endIdentity: async (pid, st) => { ended.push(`${pid}:${st}`); rows = rows.filter((r) => !(r.pid === pid && r.starttime === st)); return 'ended'; } });
   await keeper.boot();
   ok(reads === 1, 'the boot sweep read the process table once', reads);
-  ok(ended.includes('9002:222') && ended.includes('9004:444') && ended.includes('9005:555'), 'ENDED by pid + starttime: the stopped-idle record\'s daemon (no lease, no verb for 2 h) and the archived conversation\'s daemon WITH its Xvfb', ended);
+  ok(gateOf(ended.includes('9002:222')) && gateOf(ended.includes('9004:444')) && verdictOf(ended.includes('9005:555')), 'ENDED by pid + starttime: the stopped-idle record\'s daemon (no lease, no verb for 2 h) and the archived conversation\'s daemon WITH its Xvfb', ended);
   // lane browser-daemon-survives-update (the other half): no live record keeps them and their browser ended 3 h ago ⇒ ended
   // too, the leased one, the recently-used one and the running conversation's (each one's next command starts a fresh one)
-  ok(['9001:111', '9003:333', '9007:777'].every((x) => ended.includes(x)), 'ENDED (the other half): the LEASED one, the recently-used one, the running conversation\'s — no live record keeps them and their browser ended 3 h ago', ended);
+  ok(verdictOf(['9001:111', '9003:333', '9007:777'].every((x) => ended.includes(x))), 'ENDED (the other half): the LEASED one, the recently-used one, the running conversation\'s — no live record keeps them and their browser ended 3 h ago', ended);
   ok(!ended.some((x) => /^900[68]:/.test(x)), 'KEPT: the one with a Chrome — and the unmarked one is never ended', ended);
   ok(lines.filter((l) => /pid 9006 .*reported, left running/.test(l)).length === 1, 'the unmarked daemon is REPORTED, once', lines.filter((l) => /9006/.test(l)));
-  ok(lines.some((l) => /ended the browser daemon pid 9004 \(its browser ended 3 h ago and no live record keeps it; no browser for 3 h; conversation bk-0000000d\): ended; its Xvfb pid 9005 ended/.test(l)), 'ONE journal line per ending names the why, the conversation and its Xvfb', lines.filter((l) => /9004/.test(l)));
+  ok(verdictOf(lines.some((l) => /ended the browser daemon pid 9004 \(its browser ended 3 h ago and no live record keeps it; no browser for 3 h; conversation bk-0000000d\): ended; its Xvfb pid 9005 ended/.test(l))), 'ONE journal line per ending names the why, the conversation and its Xvfb', lines.filter((l) => /9004/.test(l)));
   const rb = JSON.parse((landedU5b(), fs).readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).browsers['bp-0000000b'];
-  ok(rb && rb.note === 'stopped — its browser daemon was ended at 08:00 UTC: its browser ended 3 h ago and no live record keeps it (the next command starts a fresh one)', 'the profile row says why it was ended and that the next command starts a fresh one', rb && rb.note);
+  ok(gateOf(rb) && rb.note === 'stopped — its browser daemon was ended at 08:00 UTC: its browser ended 3 h ago and no live record keeps it (the next command starts a fresh one)', 'the profile row says why it was ended and that the next command starts a fresh one', rb && rb.note);
   ok(require('../src/browser-verbs.js').browserCell(keeper.browserOf('bp-0000000a')) === keeper.browserOf('bp-0000000a').note, '`status` says it too (its browser cell is the row\'s words — never a silent exit)', require('../src/browser-verbs.js').browserCell(keeper.browserOf('bp-0000000a')));
   await keeper.tick();
   ok(reads === 1, 'a tick inside the scan interval does not re-walk (the boot sweep ran once)', reads);
@@ -208,15 +208,15 @@ async function otherHalf(Kmod, tag) {
 {
   const oh = await otherHalf(K, 'fixed');
   ok(oh.at1.length === 0, '⑤ inside the bound: the wedged one (first seen silent) and the one whose browser went 30 s ago are KEPT', oh.at1);
-  ok(oh.ended.includes('9101:1101') && oh.ended.includes('9102:1102') && oh.ended.includes('9103:1103'), '⑤ 61 s later: the daemon whose Chrome has not answered CDP for 61 s is ENDED WITH that Chrome, and the one whose browser ended 91 s ago is ended — each LEASED, a command 10 s before', oh.ended);
-  ok(oh.lines.some((l) => /pid 9101 \(its browser has not answered CDP for 1 min and no live record keeps it; its browser not answering\): ended; its browser pid 9102 ended/.test(l)) && oh.lines.some((l) => /pid 9103 \(its browser ended \d+ min ago and no live record keeps it; no browser for \d+ min\): ended/.test(l)), '⑤ the journal says each ending and why (never a silent exit)', oh.lines);
-  ok(/^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser has not answered CDP for 1 min/.test(oh.notes.h || '') && /^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser ended \d+ min ago/.test(oh.notes.i || '') && oh.cell === oh.notes.h, '⑤ …and so do the rows and `status` (the record that named it; the mark\'s profile row for the one no record named)', oh.notes);
+  ok(gateOf(oh.ended.includes('9101:1101')) && gateOf(oh.ended.includes('9102:1102')) && verdictOf(oh.ended.includes('9103:1103')), '⑤ 61 s later: the daemon whose Chrome has not answered CDP for 61 s is ENDED WITH that Chrome, and the one whose browser ended 91 s ago is ended — each LEASED, a command 10 s before', oh.ended);
+  ok(gateOf(oh.lines.some((l) => /pid 9101 \(its browser has not answered CDP for 1 min and no live record keeps it; its browser not answering\): ended; its browser pid 9102 ended/.test(l))) && verdictOf(oh.lines.some((l) => /pid 9103 \(its browser ended \d+ min ago and no live record keeps it; no browser for \d+ min\): ended/.test(l))), '⑤ the journal says each ending and why (never a silent exit)', oh.lines);
+  ok(gateOf(/^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser has not answered CDP for 1 min/.test(oh.notes.h || '')) && gateOf(/^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser ended \d+ min ago/.test(oh.notes.i || '')) && oh.cell === oh.notes.h, '⑤ …and so do the rows and `status` (the record that named it; the mark\'s profile row for the one no record named)', oh.notes);
   const pre = path.join(ROOT, 'orphans-pre-fix.js');
   const osrc = fs.readFileSync(path.join(SRCDIR, 'browser-orphans.js'), 'utf8');
   fs.writeFileSync(pre, editAnchor(osrc, '  if (d.stoppedIdleAt != null && d.starttime != null && !d.cdp) {\n', '  if (false) {\n', "src/browser-orphans.js"));
   const Kpre = keeperCopy('pre-other-half', [], pre);
   const ctl = Kpre ? await otherHalf(Kpre, 'pre') : null;
-  ok(ctl && !ctl.ended.some((x) => /^910[123]:/.test(x)), '⑤ CONTROL: the pre-fix verdict (no other half) keeps both — the wedged Chrome under a lease and the daemon whose browser is gone — the legs above can go red', ctl && ctl.ended);
+  ok(gateOf(ctl) && !ctl.ended.some((x) => /^910[123]:/.test(x)), '⑤ CONTROL: the pre-fix verdict (no other half) keeps both — the wedged Chrome under a lease and the daemon whose browser is gone — the legs above can go red', ctl && ctl.ended);
 }
 
 // ═══ ⑥ lane browser-daemon-survives-update: A SERVER RESTART RE-OWNS OR ENDS (never leaves) ═══
@@ -260,14 +260,14 @@ async function bootLeg(Kmod, tag) {
 {
   const b = await bootLeg(K, 'fixed');
   ok(b.j.state === 'ready' && b.j.pid === 9201 && b.cdpJ === `ws://127.0.0.1:${PJ}/devtools/browser/aaaaaaaa-1111-jjjj`, '⑥ a STOPPED record\'s daemon still running, its page answering: RE-OWNED — the record ready again on that daemon, its endpoint read from its Chrome\'s DevToolsActivePort', { j: b.j, cdpJ: b.cdpJ });
-  ok(b.k.state === 'stopped' && b.ended.includes('9301:3301') && b.ended.includes('9302:3302') && /^stopped — its browser daemon was ended at 08:00 UTC: none of its 1 page\(s\) answered within the bound/.test(b.k.note || ''), '⑥ a stopped record\'s daemon whose page answers NOTHING: ENDED with its Chrome, by identity; its row says why and that the next command starts a fresh one', { k: b.k, ended: b.ended });
-  ok(b.l.state === 'stopped' && !b.l.alive && /its browser does not answer CDP \(the page list: timeout\) — its daemon was ended at the restart \(ended\)/.test(b.l.lastError || ''), '⑥ a LIVE record whose daemon answers `session info` while its browser answers nothing: ENDED at the adoption (it was adopted ready before)', b.l);
-  ok(b.m.state === 'ready' && b.m.alive, '⑥ a live record whose page answers: adopted (re-owned), left running', b.m);
+  ok(b.k.state === 'stopped' && gateOf(b.ended.includes('9301:3301')) && gateOf(b.ended.includes('9302:3302')) && verdictOf(/^stopped — its browser daemon was ended at 08:00 UTC: none of its 1 page\(s\) answered within the bound/.test(b.k.note || '')), '⑥ a stopped record\'s daemon whose page answers NOTHING: ENDED with its Chrome, by identity; its row says why and that the next command starts a fresh one', { k: b.k, ended: b.ended });
+  ok(b.l.state === 'stopped' && !b.l.alive && verdictOf(/its browser does not answer CDP \(the page list: timeout\) — its daemon was ended at the restart \(ended\)/.test(b.l.lastError || '')), '⑥ a LIVE record whose daemon answers `session info` while its browser answers nothing: ENDED at the adoption (it was adopted ready before)', b.l);
+  ok(b.m.state === 'ready' && verdictOf(b.m.alive), '⑥ a live record whose page answers: adopted (re-owned), left running', b.m);
   ok(b.lines.length === 4 && b.lines.filter((l) => /RE-OWNED/.test(l)).length === 2 && b.lines.filter((l) => /ENDED/.test(l)).length === 2, '⑥ ONE journal line per daemon the boot judged (2 re-owned, 2 ended), each with why', b.lines);
   const P1 = ['        if (cliAsked(i)) {\n', '        if (false) {\n'], P2 = ["        if (seenBy === 'boot' && unkept && browserAlive && p) {\n", '        if (false) {\n'];
   const Kpre = keeperCopy('pre-boot', [P1, P2]);
   const c = Kpre ? await bootLeg(Kpre, 'pre') : null;
-  ok(c && c.l.state === 'ready' && c.l.alive && c.j.state === 'stopped' && !c.ended.some((x) => /^9301:|^9302:/.test(x)), '⑥ CONTROL: the pre-fix boot ADOPTS the live record whose browser answers nothing (ready on `session info` alone — the incident), leaves the answering daemon under its stopped record unowned and keeps the silent one\'s daemon + Chrome — the legs above can go red', c && { j: c.j, l: c.l, ended: c.ended });
+  ok(gateOf(c) && c.l.state === 'ready' && gateOf(c.l.alive) && c.j.state === 'stopped' && !c.ended.some((x) => /^9301:|^9302:/.test(x)), '⑥ CONTROL: the pre-fix boot ADOPTS the live record whose browser answers nothing (ready on `session info` alone — the incident), leaves the answering daemon under its stopped record unowned and keeps the silent one\'s daemon + Chrome — the legs above can go red', c && { j: c.j, l: c.l, ended: c.ended });
 }
 silent.close();
 
@@ -322,19 +322,19 @@ async function endLeg(Kmod, tag, waitMs = 6000) {
 {
   const e = await endLeg(K, 'fixed');
   ok(e.a.state === 'stopped' && !e.daemon && !e.chrome && !e.a.mark, '⑧ a MARKED live record is ENDED at the boot, never adopted: its daemon (pid + starttime) and the Chrome it launched (proven by its directory) are gone, the mark dropped', e);
-  ok(e.a.lastError === `${WHY8} — ended at the update (ended)` && new RegExp(`^stopped — its browser daemon was ended at \\d\\d:\\d\\d UTC: ${WHY8}`).test(e.a.note || ''), '⑧ its row says why, in the migration\'s words (the keeper names no reason of its own)', e.a);
+  ok(e.a.lastError === `${WHY8} — ended at the update (ended)` && verdictOf(new RegExp(`^stopped — its browser daemon was ended at \\d\\d:\\d\\d UTC: ${WHY8}`).test(e.a.note || '')), '⑧ its row says why, in the migration\'s words (the keeper names no reason of its own)', e.a);
   ok(!e.port, '⑧ its proxy is NOT re-bound (nothing listens on the port its record named)', e.port);
-  ok(e.b.state === 'stopped' && e.recycled && e.b.lastError === `${WHY8} — ended at the update (unproven)`, '⑧ a marked record whose pid is ANOTHER process now (another starttime): closed, the process NEVER signalled', e.b);
+  ok(e.b.state === 'stopped' && gateOf(e.recycled) && e.b.lastError === `${WHY8} — ended at the update (unproven)`, '⑧ a marked record whose pid is ANOTHER process now (another starttime): closed, the process NEVER signalled', e.b);
   ok(e.c.state === 'stopped' && !e.c.mark, '⑧ a mark on a stopped record is dropped (nothing to end)', e.c);
-  ok(e.lines.length === 2 && e.lines.some((l) => /"Marked" ended at the update: .* \(daemon pid \d+: ended; marked by 2026-11-cloak-to-plugin\)/.test(l)) && e.lines.some((l) => /"Recycled" ended at the update: .*unproven/.test(l)), '⑧ ONE journal line per marked browser: why, the result, who marked it', e.lines);
+  ok(e.lines.length === 2 && gateOf(e.lines.some((l) => /"Marked" ended at the update: .* \(daemon pid \d+: ended; marked by 2026-11-cloak-to-plugin\)/.test(l))) && verdictOf(e.lines.some((l) => /"Recycled" ended at the update: .*unproven/.test(l))), '⑧ ONE journal line per marked browser: why, the result, who marked it', e.lines);
   const MARK_LINE = "      if (rec.endAtBoot) { if (isLocalRec(rec)) { await endMarked(rec, p); continue; }";
   const REBIND = "      if (v.state === 'ready' && rec.egress) { const eg = await egressAdopt(rec);";
   const pre = keeperCopy('pre-end-at-boot', [[MARK_LINE, '      if (false) { if (isLocalRec(rec)) { await endMarked(rec, p); continue; }']]);
   const c1 = pre ? await endLeg(pre, 'pre', 300) : null;
-  ok(c1 && c1.a.state === 'ready' && c1.daemon && c1.port, '⑧ CONTROL: the pre-L3 keeper ADOPTS the marked record — ready on the old daemon, its proxy listening again — the legs above can go red', c1 && { a: c1.a, daemon: c1.daemon, port: c1.port });
+  ok(gateOf(c1) && c1.a.state === 'ready' && gateOf(c1.daemon) && verdictOf(c1.port), '⑧ CONTROL: the pre-L3 keeper ADOPTS the marked record — ready on the old daemon, its proxy listening again — the legs above can go red', c1 && { a: c1.a, daemon: c1.daemon, port: c1.port });
   const late = keeperCopy('late-end-at-boot', [[MARK_LINE, '      if (false) { if (isLocalRec(rec)) { await endMarked(rec, p); continue; }'], [REBIND, "      if (v.state === 'ready' && rec.egress) { await egressAdopt(rec); } if (rec.endAtBoot) { await endMarked(rec, p); continue; }\n" + REBIND]]);
   const c2 = late ? await endLeg(late, 'late', 300) : null;
-  ok(c2 && c2.a.state === 'stopped' && c2.port, '⑧ CONTROL: a keeper that ends it only AFTER the re-bind leaves its proxy holding the port — the "not re-bound" leg can go red', c2 && { a: c2.a, port: c2.port });
+  ok(gateOf(c2) && c2.a.state === 'stopped' && verdictOf(c2.port), '⑧ CONTROL: a keeper that ends it only AFTER the re-bind leaves its proxy holding the port — the "not re-bound" leg can go red', c2 && { a: c2.a, port: c2.port });
 }
 // round 2 (主开发's law C): a record THIS version cannot read — what a FAILED migration leaves on a running CloakBrowser (its profile on
 // provider 'cloak', its egress the old {port, cloak: true}, NO mark) — is ended by identity like a marked one, said, its proxy never
@@ -376,15 +376,15 @@ async function unreadLeg(Kmod, tag, waitMs = 6000) {
 }
 {
   const u = await unreadLeg(K, 'fixed');
-  ok(u.a.state === 'stopped' && !u.daemon && !u.chrome && /its profile names a browser backend this version does not have \(«cloak»\) — ended at the update \(ended\)$/.test(u.a.lastError || '') && !u.adopted.length,
+  ok(u.a.state === 'stopped' && !u.daemon && !u.chrome && gateOf(/its profile names a browser backend this version does not have \(«cloak»\) — ended at the update \(ended\)$/.test(u.a.lastError || '')) && !u.adopted.length,
     '⑧b a live record a FAILED migration left (provider cloak, the old proxy shape, no mark) is ENDED by identity — its daemon and its Chrome gone — never adopted', u);
-  ok(u.b.state === 'stopped' && !u.daemonB && /its site-list proxy is a shape this version does not read/.test(u.b.lastError || ''), '⑧b …a record whose egress is the old {port, cloak: true} on a profile this version reads is ended the same way (no engine names its proxy)', u.b);
+  ok(u.b.state === 'stopped' && !u.daemonB && verdictOf(/its site-list proxy is a shape this version does not read/.test(u.b.lastError || '')), '⑧b …a record whose egress is the old {port, cloak: true} on a profile this version reads is ended the same way (no engine names its proxy)', u.b);
   ok(!u.port && !u.portB, '⑧b neither proxy is re-bound (nothing listens on the ports the records named — never an engine row that refuses every site)', { port: u.port, portB: u.portB });
-  ok(u.lines.length === 2 && u.lines.some((l) => /"Cloaked" ended at the update: its profile names a browser backend this version does not have .*marked by this version\)/.test(l)), '⑧b ONE journal line per record: why, the result, by whom', u.lines);
+  ok(u.lines.length === 2 && verdictOf(u.lines.some((l) => /"Cloaked" ended at the update: its profile names a browser backend this version does not have .*marked by this version\)/.test(l))), '⑧b ONE journal line per record: why, the result, by whom', u.lines);
   const UNREAD = '      const unread = unreadableRecordWhy(rec, p);';
   const blind = keeperCopy('unread-adopted', [[UNREAD, '      const unread = null;']]);
   const c9 = blind ? await unreadLeg(blind, 'blind', 300) : null;
-  ok(c9 && c9.a.state === 'ready' && c9.daemon && c9.port, '⑧b CONTROL: a keeper that does not judge what it can read ADOPTS the CloakBrowser record — ready on its daemon, its proxy listening again with nothing admitted — the legs above can go red', c9 && { a: c9.a, port: c9.port, daemon: c9.daemon });
+  ok(gateOf(c9) && c9.a.state === 'ready' && gateOf(c9.daemon) && verdictOf(c9.port), '⑧b CONTROL: a keeper that does not judge what it can read ADOPTS the CloakBrowser record — ready on its daemon, its proxy listening again with nothing admitted — the legs above can go red', c9 && { a: c9.a, port: c9.port, daemon: c9.daemon });
 }
 {
   // the install slot: a marker of a kind this version no longer installs (its installer removed — a CloakBrowser install at the update)
@@ -404,22 +404,22 @@ async function unreadLeg(Kmod, tag, waitMs = 6000) {
     return out;
   }
   const p8 = await retiredLeg(BI, 'proven', true);
-  ok(!p8.alive && !p8.marker && !p8.busy && p8.retired && p8.retired.kind === 'retired-kind' && p8.retired.result === 'ended' && p8.retired.step === 'package',
+  ok(!p8.alive && !p8.marker && !p8.busy && gateOf(p8.retired) && p8.retired.kind === 'retired-kind' && p8.retired.result === 'ended' && p8.retired.step === 'package',
     '⑧ an install marker of a kind this version no longer installs: its running step is ENDED by identity (pid + starttime, its group), the marker gone, the slot free — and what the restart found is kept for the migration that tells the user', p8);
-  ok(p8.lines.some((l) => /an install of a kind this version no longer runs \(retired-kind, pid \d+\) was found at the restart — its step was stopped by identity; what it left under .* stays where it is/.test(l)), '⑧ …said in the journal (what it left on disk stays)', p8.lines);
+  ok(verdictOf(p8.lines.some((l) => /an install of a kind this version no longer runs \(retired-kind, pid \d+\) was found at the restart — its step was stopped by identity; what it left under .* stays where it is/.test(l))), '⑧ …said in the journal (what it left on disk stays)', p8.lines);
   const u8 = await retiredLeg(BI, 'unproven', false);
-  ok(u8.alive && !u8.marker && u8.retired && u8.retired.result === 'let-go' && u8.lines.some((l) => /could not be proven .*: let go, never signalled/.test(l)), '⑧ …one whose pid cannot be proven the marker\'s (no starttime) is LET GO — never signalled, said', u8);
+  ok(gateOf(u8.alive) && !u8.marker && gateOf(u8.retired) && u8.retired.result === 'let-go' && verdictOf(u8.lines.some((l) => /could not be proven .*: let go, never signalled/.test(l))), '⑧ …one whose pid cannot be proven the marker\'s (no starttime) is LET GO — never signalled, said', u8);
   const biSrc = fs.readFileSync(path.join(SRCDIR, 'server/browser-installs.js'), 'utf8');
   const RULE = "    if (m && typeof m === 'object' && !row) {\n";
   const preBI = biSrc.includes(RULE) ? (() => { const f = path.join(ROOT, 'installs-pre-retired.js'); fs.writeFileSync(f, absReq(editAnchor(biSrc, RULE, '    if (false) {\n', "src/server/browser-installs.js"), path.join(SRCDIR, 'server'))); return require(f); })() : null;
   const c8 = preBI ? await retiredLeg(preBI, 'pre', true, 300) : null;
-  ok(c8 && c8.alive && !c8.marker, '⑧ CONTROL: the pre-L3 slot DROPS the marker and leaves its step running unowned (no wall clock) — the legs above can go red', c8 && { alive: c8.alive, marker: c8.marker });
+  ok(gateOf(c8) && gateOf(c8.alive) && !c8.marker, '⑧ CONTROL: the pre-L3 slot DROPS the marker and leaves its step running unowned (no wall clock) — the legs above can go red', c8 && { alive: c8.alive, marker: c8.marker });
   // the keeper hands the finding on (the migration reads it: `retiredInstall`)
   const kd = path.join(ROOT, 'retired-keeper', 'data'); fs.mkdirSync(path.join(kd, 'browser-tools'), { recursive: true });
   fs.writeFileSync(path.join(kd, 'browser-tools', 'install-running.json'), JSON.stringify({ kind: 'retired-kind', spec: 'gone@1.0.0', step: 'binary', pid: 2147483000, starttime: 1, startedAt: NOW }));
   const kr = K.create({ dataDir: kd, homeDir: ROOT, env: () => ({ PATH: path.join(ROOT, 'nobin'), HOME: ROOT }), liveKeys: () => new Set(), install: false, log: { log() { }, warn() { }, error() { } }, now: () => NOW, tickMs: 3600e3 });
   const ri = typeof kr.retiredInstall === 'function' ? kr.retiredInstall() : null;
-  ok(ri && ri.kind === 'retired-kind' && ri.result === 'gone' && ri.step === 'binary' && !fs.existsSync(path.join(kd, 'browser-tools', 'install-running.json')), '⑧ the keeper hands what its install slot found on to the boot migration (`retiredInstall`) — a step already gone is `gone`', ri);
+  ok(gateOf(ri) && ri.kind === 'retired-kind' && ri.result === 'gone' && ri.step === 'binary' && !fs.existsSync(path.join(kd, 'browser-tools', 'install-running.json')), '⑧ the keeper hands what its install slot found on to the boot migration (`retiredInstall`) — a step already gone is `gone`', ri);
   kr.shutdown();
 }
 
@@ -432,22 +432,22 @@ console.log('— ④ browser-serve end-daemon + the capability gate');
   const st = F.procStart(kid.pid);
   const bs = { homeDir: ROOT, runtime: { info: async () => ({ active: true, pid: kid.pid }) } };
   const s1 = await S.runBrowserServeOp(bs, 'status', { profileId: 'bp-0000000a' });
-  ok(s1.ok && s1.daemon && s1.daemon.pid === kid.pid && s1.daemon.starttime === st && s1.daemon.chrome === false, 'status answers the daemon facts (pid, starttime, chrome)', s1.daemon);
+  ok(gateOf(s1.ok) && gateOf(s1.daemon) && s1.daemon.pid === kid.pid && s1.daemon.starttime === st && s1.daemon.chrome === false, 'status answers the daemon facts (pid, starttime, chrome)', s1.daemon);
   const w = await S.runBrowserServeOp(bs, 'end-daemon', { profileId: 'bp-0000000a', pid: kid.pid, starttime: st + 1 });
-  ok(w.ok === false && w.code === 'not_that_daemon' && F.pidAlive(kid.pid), 'another starttime: refused, left running', w);
+  ok(w.ok === false && w.code === 'not_that_daemon' && verdictOf(F.pidAlive(kid.pid)), 'another starttime: refused, left running', w);
   const bo = { homeDir: ROOT, runtime: { info: async () => ({ active: true, pid: other.pid }) } };
   const n = await S.runBrowserServeOp(bo, 'end-daemon', { profileId: 'bp-0000000a', pid: other.pid, starttime: F.procStart(other.pid) });
-  ok(n.ok === false && n.code === 'not_a_daemon' && F.pidAlive(other.pid), 'a process that is not a browser daemon: refused, left running', n);
+  ok(n.ok === false && n.code === 'not_a_daemon' && verdictOf(F.pidAlive(other.pid)), 'a process that is not a browser daemon: refused, left running', n);
   const e = await S.runBrowserServeOp(bs, 'end-daemon', { profileId: 'bp-0000000a', pid: kid.pid, starttime: st });
   await new Promise((r) => setTimeout(r, 100));
-  ok(e.ok && e.result === 'ended' && !F.pidAlive(kid.pid), 'its daemon by pid + starttime: ended', e);
+  ok(gateOf(e.ok) && e.result === 'ended' && !F.pidAlive(kid.pid), 'its daemon by pid + starttime: ended', e);
   try { other.kill('SIGKILL'); } catch { /* gone */ }
   const ask = async (caps, action) => { const self = { connect: async () => ({ info: { capabilities: caps } }), _request: async () => ({ result: { ok: true, asked: action } }) }; try { return await DeviceManager.prototype.browserServe.call(self, action, { profileId: 'bp-0000000a' }); } catch (x) { return { thrown: x.code, message: x.message }; } };
   const old = await ask(['browser-serve', 'browser-builds', 'browser-remove'], 'end-daemon');
-  ok(old.thrown === 'end_daemon_unsupported' && /upgrade the agent/.test(old.message), 'an agent without `browser-end-daemon` is never asked: end_daemon_unsupported by name', old);
+  ok(old.thrown === 'end_daemon_unsupported' && verdictOf(/upgrade the agent/.test(old.message)), 'an agent without `browser-end-daemon` is never asked: end_daemon_unsupported by name', old);
   ok((await ask(['browser-serve', 'browser-end-daemon'], 'end-daemon')).asked === 'end-daemon', 'with the capability it is asked');
   const daemonSrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  ok(/capabilities: \[[^\]]*'browser-end-daemon'[^\]]*\]/.test(daemonSrc) && S.BROWSER_SERVE_OPS.includes('end-daemon'), 'the daemon announces `browser-end-daemon`; `end-daemon` is in the shared op table');
+  ok(gateOf(/capabilities: \[[^\]]*'browser-end-daemon'[^\]]*\]/.test(daemonSrc)) && verdictOf(S.BROWSER_SERVE_OPS.includes('end-daemon')), 'the daemon announces `browser-end-daemon`; `end-daemon` is in the shared op table');
 }
 
 console.log('— ⑦ the census reads the table once (lane ledger-dedup-law r12)');
@@ -507,4 +507,4 @@ console.log('— ⑦ the census reads the table once (lane ledger-dedup-law r12)
 }
 
 console.log(`\n${fail ? '✗' : '✓'} test-browser-orphans: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

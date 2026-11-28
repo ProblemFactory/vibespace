@@ -85,7 +85,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -144,7 +144,7 @@ else await (async () => {
   const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
   const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
-  if (!ok(await until(() => journal.includes('Ready.'), 40000), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000)), 'the worktree server booted', journal.slice(-800))) return;
 
   const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling',
     '--proxy-server=http://127.0.0.1:9', `--user-data-dir=${PROFILE}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -244,13 +244,13 @@ else await (async () => {
     // titleFloorPx (主开发's ruling 2026-11-13 09:33Z, the recovery of phone-six): at 320 px the For-you chip's ONE number keeps its
     // READABLE 14 px digit — «a count a person cannot read is worth less than two pixels of title on the narrowest phone» — and the
     // title gets what the bar measures with it (94.1 px, under the 96 px readable minimum); every wider bar keeps the release's rule
-    if (titleFloorPx != null) ok(b.title.whole || b.title.w + 0.05 >= titleFloorPx, `${tag}: the title's box (${b.title.w} px) is what the bar leaves beside the readable one-number chip — ≥ ${titleFloorPx} px (the readable minimum «${b.title.min}» is ${b.title.minW} px; 主开发 09:33Z: the digit stays 14 px)`, say(b));
-    else ok(b.title.readable || b.title.whole, `${tag}: the title's box (${b.title.w} px) holds its readable minimum «${b.title.min}» (${b.title.minW} px) — exactly, no slack`, say(b));
-    ok(['menu', 'todos', 'close', 'new'].every((k) => b.ctl.some((c) => c.id === k)), `${tag}: ☰ · For you · ✕ · + stand (${ids(b)})`, ids(b));
-    ok(b.ctl.every((c) => c.w >= 44 && c.h >= 43.5), `${tag}: every control is a ≥ 44 px target (${b.ctl.map((c) => c.id + ' ' + c.w + '×' + c.h).join(', ')})`, b.ctl);
+    if (titleFloorPx != null) ok(verdictOf(b.title.whole) || b.title.w + 0.05 >= titleFloorPx, `${tag}: the title's box (${b.title.w} px) is what the bar leaves beside the readable one-number chip — ≥ ${titleFloorPx} px (the readable minimum «${b.title.min}» is ${b.title.minW} px; 主开发 09:33Z: the digit stays 14 px)`, say(b));
+    else ok(verdictOf(b.title.readable) || verdictOf(b.title.whole), `${tag}: the title's box (${b.title.w} px) holds its readable minimum «${b.title.min}» (${b.title.minW} px) — exactly, no slack`, say(b));
+    ok(verdictOf(['menu', 'todos', 'close', 'new'].every((k) => b.ctl.some((c) => c.id === k))), `${tag}: ☰ · For you · ✕ · + stand (${ids(b)})`, ids(b));
+    ok(verdictOf(b.ctl.every((c) => c.w >= 44 && c.h >= 43.5)), `${tag}: every control is a ≥ 44 px target (${b.ctl.map((c) => c.id + ' ' + c.w + '×' + c.h).join(', ')})`, b.ctl);
     ok(!b.ctl.some((c) => c.id === 'files'), `${tag}: the bar shows no folder icon (LAW 3)`, ids(b));
-    if (wantOne) ok(b.badges.length === 1 && b.badges[0].c.includes('mnav-one'), `${tag}: the For-you chip shows ONE badge (${b.badges.map((x) => x.n).join('/')})`, b.badges);
-    if (wantFolded) ok(wantFolded.every((k) => b.folded.includes(k)) && b.ctl.some((c) => c.id === 'overflow'), `${tag}: ${wantFolded.join(' · ')} live in ONE «⋯» (folded: ${b.folded.join(', ')})`, b);
+    if (wantOne) ok(b.badges.length === 1 && verdictOf(b.badges[0].c.includes('mnav-one')), `${tag}: the For-you chip shows ONE badge (${b.badges.map((x) => x.n).join('/')})`, b.badges);
+    if (wantFolded) ok(gateOf(wantFolded.every((k) => b.folded.includes(k))) && verdictOf(b.ctl.some((c) => c.id === 'overflow')), `${tag}: ${wantFolded.join(' · ')} live in ONE «⋯» (folded: ${b.folded.join(', ')})`, b);
   };
   const MORE_ROWS = `[...document.querySelectorAll('.context-menu.mnav-more-menu .context-menu-item')].map((el) => { const r = el.getBoundingClientRect(); return { key: el.dataset.key, label: el.querySelector('.mnav-more-label')?.textContent, value: el.querySelector('.mnav-more-value')?.textContent || '', h: Math.round(r.height), fs: parseFloat(getComputedStyle(el).fontSize) }; })`;
 
@@ -317,31 +317,31 @@ else await (async () => {
     await reset(); await sleep(400); await settle();
     const scene = await evalJs(`(() => ({ vc: document.documentElement.dataset.vc, badges: document.querySelectorAll('#mobile-nav-todos .ut-count, #mobile-nav-todos .mnav-one').length, page: !!app.phoneHome?.show?.(),
       filesIcon: !!document.getElementById('mobile-nav-files')?.getClientRects().length, windows: [...app.wm.windows.values()].map((w) => w.type).join(',') }))()`);
-    ok(opened && scene.vc === 'compact' && scene.badges === 0 && !scene.page, `⑪ the scene: 360 px compact, a web view open (${scene.windows}), the attention list EMPTY — no badge, no For-you page to show (so no 文件 card)`, scene);
+    ok(gateOf(opened) && scene.vc === 'compact' && scene.badges === 0 && !scene.page, `⑪ the scene: 360 px compact, a web view open (${scene.windows}), the attention list EMPTY — no badge, no For-you page to show (so no 文件 card)`, scene);
     const now = await roads('after-en-360-empty');
     const plus = now.find((r) => r.door === 'new');
-    ok(!scene.filesIcon && !!plus && plus.reached && plus.taps === 2 && !plus.dialog,
+    ok(!scene.filesIcon && !!plus && gateOf(plus.reached) && plus.taps === 2 && !plus.dialog,
       `⑪ L1 Files is TWO taps away with nothing waiting — a TAP on «+» (no long press) opens the «+» sheet, its Files row the explorer; no folder icon on the bar (LAW 3) — every drawn door: ${roadSay(now)}`, now);
     await tap('#mobile-nav-new'); await sleep(250); await settle();
     const sh = await evalJs(`(() => { const m = document.querySelector('.context-menu.mobile-sheet'); if (!m) return null; const rows = [...m.querySelectorAll(':scope > .context-menu-item')], first = rows[0], btn = document.getElementById('mobile-nav-new');
       return { rows: rows.map((r) => r.textContent.trim()), lead: !!first && first.classList.contains('mnav-sheet-lead'), color: first ? getComputedStyle(first).color : '', weight: first ? getComputedStyle(first).fontWeight : '',
         accent: getComputedStyle(btn).color, plain: rows[1] ? getComputedStyle(rows[1]).color : '', popup: btn.getAttribute('aria-haspopup') }; })()`);
-    ok(!!sh && sh.rows[0] === 'Agent session' && sh.rows.includes('Files') && sh.lead && sh.color === sh.accent && sh.plain !== sh.accent && Number(sh.weight) >= 600 && sh.popup === 'menu',
+    ok(!!sh && sh.rows[0] === 'Agent session' && gateOf(sh.rows.includes('Files')) && gateOf(sh.lead) && sh.color === sh.accent && sh.plain !== sh.accent && Number(sh.weight) >= 600 && sh.popup === 'menu',
       `⑪ L1 the sheet a tap opens: New session FIRST, accented («${sh?.rows[0]}» in «+»'s ${sh?.accent}, weight ${sh?.weight}; the other rows ${sh?.plain}), Files in it (${sh?.rows.join(' · ')}); «+» names its menu for a screen reader (aria-haspopup «${sh?.popup}»)`, sh);
     const lead = await tap(`(document.querySelector('.context-menu.mobile-sheet > .context-menu-item.mnav-sheet-lead'))`);
     const ns = await waitFor(NEW_SESSION, 5000);
     await shot('after-en-360-empty-new-session-2taps.png');
-    ok(ns, `⑪ L1 New session is ${lead ? 'TWO taps away: «+», then its first row' : 'ONE tap away: «+» itself'} — the New Session dialog${lead ? ' (the tap\'s old act, one row in)' : ''}`);
+    ok(verdictOf(ns), `⑪ L1 New session is ${lead ? 'TWO taps away: «+», then its first row' : 'ONE tap away: «+» itself'} — the New Session dialog${lead ? ' (the tap\'s old act, one row in)' : ''}`);
     await reset(); await sleep(250); await settle();
     await tap('#mobile-nav-new'); await sleep(150); const t1 = await evalJs(`!!document.querySelector('.context-menu.mobile-sheet')`);
     await tap('#mobile-nav-new'); await sleep(150); const t2 = await evalJs(`!!document.querySelector('.context-menu.mobile-sheet')`);
     await longPress('#mobile-nav-new'); await sleep(150); const t3 = await evalJs(`document.querySelectorAll('.context-menu.mobile-sheet').length === 1 && !${NEW_SESSION}`);
-    ok(t1 && !t2 && t3, `⑪ L1 a second tap on «+» closes its sheet (open: ${t1} → ${t2}); a long press opens the same sheet, once, no dialog (${t3})`, { t1, t2, t3 });
+    ok(gateOf(t1) && !t2 && verdictOf(t3), `⑪ L1 a second tap on «+» closes its sheet (open: ${t1} → ${t2}); a long press opens the same sheet, once, no dialog (${t3})`, { t1, t2, t3 });
     await reset(); await sleep(250);
     await evalJs(`(() => { const b = document.getElementById('mobile-nav-new'); window.__pttTap = b.onclick; b.onclick = () => app.showNewSessionDialog(); return true; })()`);
     const r5 = await roads('before-en-360-empty');
     await evalJs(`(() => { document.getElementById('mobile-nav-new').onclick = window.__pttTap; return true; })()`);
-    ok(r5.length >= 3 && r5.every((r) => !r.reached) && !!r5.find((r) => r.door === 'new')?.dialog,
+    ok(r5.length >= 3 && gateOf(r5.every((r) => !r.reached)) && !!r5.find((r) => r.door === 'new')?.dialog,
       `⑪ L1 CONTROL — r5's road (a tap on «+» = the New Session dialog; its sheet on a 500 ms press only) put back on the page: Files two taps from NO drawn door — ${roadSay(r5)} — RED by name`, r5);
 
     // ── ⑫ THE REGULAR CLASS UNDER ITS OWN RULES (r6 L2 — the r5 acceptance: only the `viewportClass() === 'compact'` term in
@@ -382,10 +382,10 @@ else await (async () => {
       `⑫ L2 a rotation from the compact class (locked: the variable ${locked}) to a Duo's landscape (951×585 — the regular class, its bar a column to ${rot.bottom} of ${rot.vh}): the variable leaves <html> (now «${rot.v}»)`, { locked, rot });
     await vaultR6(false); await sleep(400); await settle();
     const land = await regRun(8, 'after-en-951-regular-settings');
-    ok(regOk(land) && (await evalJs(VAR)) === '', `⑫ L2 the Duo's landscape (the regular class): ${regSay(land)}`, land);
+    ok(gateOf(regOk(land)) && (await evalJs(VAR)) === '', `⑫ L2 the Duo's landscape (the regular class): ${regSay(land)}`, land);
     await device(669, 867); await sleep(800); await settle();
     const port = await regRun(52, null);
-    ok(regOk(port) && (await evalJs(VAR)) === '' && (await evalJs(`document.documentElement.dataset.vc`)) === 'regular', `⑫ L2 the Duo's portrait (669×867, the regular class): ${regSay(port)}`, port);
+    ok(gateOf(regOk(port)) && (await evalJs(VAR)) === '' && (await evalJs(`document.documentElement.dataset.vc`)) === 'regular', `⑫ L2 the Duo's portrait (669×867, the regular class): ${regSay(port)}`, port);
     await device(951, 585); await sleep(800); await settle();
     const dropped = await evalJs(`(() => { const nav = app._mobileNav; nav._publishUnder = function () {
         if (this._held) { this._heldMissed = true; return; }
@@ -398,7 +398,7 @@ else await (async () => {
     const ctl = await regRun(8, 'before-en-951-regular-settings-term-dropped');
     await evalJs(`(() => { const nav = app._mobileNav; delete nav._publishUnder; if (nav._publishUnder) nav._publishUnder(); else document.documentElement.style.removeProperty('--phone-sheet-top'); return true; })()`);
     const off = ctl.filter(([, g]) => !!g && g.top >= g.vh);
-    ok(['the Settings popover', 'the Usage popup', 'the mini inbox'].every((k) => off.some(([n]) => n.startsWith(k))),
+    ok(verdictOf(['the Settings popover', 'the Usage popup', 'the mini inbox'].every((k) => off.some(([n]) => n.startsWith(k)))),
       `⑫ L2 CONTROL — _publishUnder with the compact term dropped (the regular class's column writes ${dropped} = the screen + 4): ${off.map(([n, g]) => `${n.split(' (')[0]} at ${g.top} ≥ the screen's ${g.vh}`).join('; ') || 'none off the screen'} — off the screen, RED by name`, ctl);
     await device(360, 740); await sleep(600); await settle(); await reset();
     // ── ⑪b «+» NAMES ITS MENU in every language (r7 W1 — the r6 acceptance: «+» was still titled «New session» while a tap opens the
@@ -408,7 +408,7 @@ else await (async () => {
     const PLUS_WORDS = { zh: '新建或打开…', ja: '作成または開く…', en: 'Create or open…' };
     const said = {};
     for (const lang of Object.keys(PLUS_WORDS)) { await load(lang); said[lang] = await evalJs(`(() => { const b = document.getElementById('mobile-nav-new'); return { title: b.title, aria: b.getAttribute('aria-label'), popup: b.getAttribute('aria-haspopup'), shown: b.getClientRects().length > 0 }; })()`); }
-    ok(Object.entries(PLUS_WORDS).every(([l, w]) => said[l]?.title === w && said[l]?.aria === w && said[l]?.popup === 'menu' && said[l]?.shown),
+    ok(verdictOf(Object.entries(PLUS_WORDS).every(([l, w]) => said[l]?.title === w && said[l]?.aria === w && said[l]?.popup === 'menu' && said[l]?.shown)),
       `⑪b W1 «+» names its MENU in every language — title / aria-label: ${Object.entries(said).map(([l, x]) => `${l} «${x?.title}» / «${x?.aria}»`).join(' · ')}; aria-haspopup «${said.en?.popup}» (r6: «New session», the one act a tap no longer does)`, said);
   };
   if (process.env.PTT_ONLY === 'r6') {
@@ -442,9 +442,9 @@ else await (async () => {
       // r3 F3: the row says what the chip says — the place OF the total and the name; CONTROL: r2's value (the chip's bare badge) is RED
       const placeOfTotal = (v) => /^2\/3 · \S/.test(v || '');
       const dRow = rows.find((r) => r.key === 'desktops');
-      ok(placeOfTotal(dRow?.value) && !placeOfTotal(desk), `${lang} ${vw} px: ② F3 — the Desktops row reads «${dRow?.label} ${dRow?.value}»: the place of the total and the name, never a bare number — CONTROL: r2's «${desk}» judged the same is RED`, dRow);
+      ok(gateOf(placeOfTotal(dRow?.value)) && !placeOfTotal(desk), `${lang} ${vw} px: ② F3 — the Desktops row reads «${dRow?.label} ${dRow?.value}»: the place of the total and the name, never a bare number — CONTROL: r2's «${desk}» judged the same is RED`, dRow);
       ok(JSON.stringify(rows.map((r) => [r.key, r.label, r.value])) === JSON.stringify(want), `${lang} ${vw} px: ② the ⋯ lists the folded chips in order with their live values (${rows.map((r) => r.label + (r.value ? ' ' + r.value : '')).join(' · ')})`, rows);
-      ok(rows.length && rows.every((r) => r.h >= 44 && r.fs >= 16), `${lang} ${vw} px: ② every ⋯ row is ≥ 44 px tall in ≥ 16 px words (${rows.map((r) => r.h + '/' + r.fs).join(', ')})`, rows);
+      ok(gateOf(rows.length) && verdictOf(rows.every((r) => r.h >= 44 && r.fs >= 16)), `${lang} ${vw} px: ② every ⋯ row is ≥ 44 px tall in ≥ 16 px words (${rows.map((r) => r.h + '/' + r.fs).join(', ')})`, rows);
       await shot(`after-${lang}-${vw}-more.png`);
       if (vw === 360 && lang === 'zh') {
         await setRing(52); await sleep(200);
@@ -456,7 +456,7 @@ else await (async () => {
         const g37 = await glyph();
         ok(g37.n === '37' && g37.arc === '133deg' && (await evalJs(MORE_ROWS)).find((r) => r.key === 'usage')?.value === '37 %', `② …back to 37: the glyph and the value together (${g37.n}, ${g37.arc})`, g37);
         await tap(`(document.querySelector('.mnav-more-menu .context-menu-item[data-key="desktops"]'))`);
-        ok(await waitFor(`!!document.querySelector('.mdesk-menu')`, 3000), '② the Desktops row opens the desktops sheet (the chip\'s own door)');
+        ok(verdictOf(await waitFor(`!!document.querySelector('.mdesk-menu')`, 3000)), '② the Desktops row opens the desktops sheet (the chip\'s own door)');
         await evalJs(`document.querySelector('.mdesk-menu')?.remove(); true`);
         await sleep(200);
       } else { await evalJs(`document.querySelector('.mnav-more-menu')?.remove(); true`); await sleep(150); }
@@ -470,11 +470,11 @@ else await (async () => {
       await post(urgentId, 'done');
       const gone = await waitFor(`document.querySelector('#mobile-nav-todos .mnav-one')?.textContent === '30'`, 8000); await settle();
       const b1 = await bar();
-      ok(gone && b1.badges.length === 1 && b1.badges[0].n === '30' && b1.badges[0].seg === 'high' && b1.title.readable, `② the urgent ask resolved (a broadcast): still ONE badge, now 30 in the high colour, the title readable (${say(b1)})`, b1.badges);
+      ok(gateOf(gone) && b1.badges.length === 1 && b1.badges[0].n === '30' && b1.badges[0].seg === 'high' && verdictOf(b1.title.readable), `② the urgent ask resolved (a broadcast): still ONE badge, now 30 in the high colour, the title readable (${say(b1)})`, b1.badges);
       await post(urgentId, 'open');
       const back = await waitFor(`document.querySelector('#mobile-nav-todos .mnav-one')?.textContent === '31'`, 8000); await settle();
       const b2 = await bar();
-      ok(back && b2.badges.length === 1 && b2.badges[0].seg === 'urgent', `② …reopened (an arrival): ONE badge, 31, urgent again (${b2.badges.map((x) => x.n + ' ' + x.seg).join('/')})`, b2.badges);
+      ok(gateOf(back) && b2.badges.length === 1 && b2.badges[0].seg === 'urgent', `② …reopened (an arrival): ONE badge, 31, urgent again (${b2.badges.map((x) => x.n + ' ' + x.seg).join('/')})`, b2.badges);
     }
   }
 
@@ -490,7 +490,7 @@ else await (async () => {
     const how = mouse ? 'a mouse' : 'a finger';
     await device(360, 780, { mouse }); await sleep(600); await settle(); await clear();
     const b = await bar();
-    if (!ok(b.vc === 'compact' && b.folded.includes('gear') && b.ctl.some((c) => c.id === 'overflow'), `${how}: the compact bar at 360 px with ⚙ in the ⋯ (${b.vc}; folded ${b.folded})`, say(b))) continue;
+    if (!ok(b.vc === 'compact' && gateOf(b.folded.includes('gear')) && verdictOf(b.ctl.some((c) => c.id === 'overflow')), `${how}: the compact bar at 360 px with ⚙ in the ⋯ (${b.vc}; folded ${b.folded})`, say(b))) continue;
     const seq = [];
     for (let i = 0; i < 3; i++) { await press('#mobile-nav-overflow', mouse); seq.push((await evalJs(MENUS)).more); }
     ok(JSON.stringify(seq) === '[true,false,true]', `${how}: ⋯ opens, a second press CLOSES it, a third opens it (${seq.map((x) => (x ? 'open' : 'closed')).join(' / ')})`, seq);
@@ -501,9 +501,9 @@ else await (async () => {
     const s2 = await evalJs(MENUS);
     await press('.mnav-more-menu .context-menu-item[data-key="gear"]', mouse);
     const s3 = await evalJs(MENUS);
-    ok(s1.settings === 1 && s1.settingsTop && s1.keyedTo === 'mobile-nav-gear' && !s1.more, `${how}: ⋯ → Settings opens Settings on top, keyed to ⚙ — never to the ⋯ (${JSON.stringify(s1)})`, s1);
-    ok(s2.settings === 0 && s2.more && s2.moreTop, `${how}: …⋯ again closes Settings and opens the ⋯ on top — nothing stacked (${JSON.stringify(s2)})`, s2);
-    ok(s3.settings === 1 && s3.settingsTop && !s3.more, `${how}: …Settings again: Settings open, on top, ONCE (${JSON.stringify(s3)})`, s3);
+    ok(s1.settings === 1 && gateOf(s1.settingsTop) && s1.keyedTo === 'mobile-nav-gear' && !s1.more, `${how}: ⋯ → Settings opens Settings on top, keyed to ⚙ — never to the ⋯ (${JSON.stringify(s1)})`, s1);
+    ok(s2.settings === 0 && gateOf(s2.more) && verdictOf(s2.moreTop), `${how}: …⋯ again closes Settings and opens the ⋯ on top — nothing stacked (${JSON.stringify(s2)})`, s2);
+    ok(s3.settings === 1 && gateOf(s3.settingsTop) && !s3.more, `${how}: …Settings again: Settings open, on top, ONCE (${JSON.stringify(s3)})`, s3);
     if (!mouse) await shot('after-en-360-more-settings.png');
     await clear();
   }
@@ -518,7 +518,7 @@ else await (async () => {
     // arithmetic). The slack's law is judged where its edge now lies: the widest bar under 360 that folds the desktops door and
     // the ring and keeps ⚙
     const b360 = await bar();
-    ok(!b360.folded.length && b360.title.whole && b360.badges.length === 1, `the owner's bar with a short title at 360: NOTHING folds, the title whole — one number (主开发 09:33Z; it was «desktops + ring in the ⋯» with five) (${say(b360)})`, say(b360));
+    ok(!b360.folded.length && gateOf(b360.title.whole) && b360.badges.length === 1, `the owner's bar with a short title at 360: NOTHING folds, the title whole — one number (主开发 09:33Z; it was «desktops + ring in the ⋯» with five) (${say(b360)})`, say(b360));
     let edge = null;
     for (let vw = 359; vw >= 300 && !edge; vw--) { await device(vw, 780); await sleep(120); await settle(); const bb = await bar(); if (bb.folded.join() === 'desktops,usage') edge = vw; }
     const b0 = await bar();
@@ -548,7 +548,7 @@ else await (async () => {
       await waitFor(`document.getElementById('mobile-nav-title').textContent === ${JSON.stringify(s)}`, 3000); await sleep(150); await settle();
       const b = await bar();
       const gearFolds = b.folded.includes('gear');
-      ok(b.title.whole && gearFolds === d > -1 / 64, `«${s}» (${d >= 0 ? '+' : ''}${d.toFixed(4)} px against the room ⚙ leaves): ⚙ ${gearFolds ? 'folds' : 'stands'}, the title WHOLE (${b.title.fullW} in ${b.title.w}, over by ${b.title.over.toFixed(4)})`, say(b));
+      ok(gateOf(b.title.whole) && gearFolds === d > -1 / 64, `«${s}» (${d >= 0 ? '+' : ''}${d.toFixed(4)} px against the room ⚙ leaves): ⚙ ${gearFolds ? 'folds' : 'stands'}, the title WHOLE (${b.title.fullW} in ${b.title.w}, over by ${b.title.over.toFixed(4)})`, say(b));
       if (d > 0 && d <= 0.5 && k < 2) await shot(`after-en-edge-slack-${++k}.png`);
     }
   }
@@ -563,12 +563,12 @@ else await (async () => {
     ${relayBroadcastJs(`msg`, "app.ws.globalHandlers")} return !!document.getElementById('mobile-nav-vault') === ${on ? 'true' : 'false'}; })`);
   await device(600, 900); await sleep(500); await settle();
   await dress({ title: '游戏' });
-  ok(await vault(true) && await evalJs(`!!document.querySelector('#mobile-nav-gear.vault-locked > .vault-gear-mark')`), '⑧ the lock\'s broadcast (the road another client\'s lock takes) draws the real lock chip beside For you and ⚙\'s red mark');
+  ok(gateOf(await vault(true)) && verdictOf(await evalJs(`!!document.querySelector('#mobile-nav-gear.vault-locked > .vault-gear-mark')`)), '⑧ the lock\'s broadcast (the road another client\'s lock takes) draws the real lock chip beside For you and ⚙\'s red mark');
   await sleep(200); await settle();
   {
     const b = await bar();
     const four = ['desktops', 'usage', 'vault', 'gear'].every((k) => b.ctl.some((c) => c.id === k));
-    ok(b.vc === 'compact' && four && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow') && b.title.whole, `600 px, a 2-character title, the vault locked: the count would put the desktops door ALONE in a ⋯ — it stands: four foldable chips inline, no ⋯ (${say(b)})`, say(b));
+    ok(b.vc === 'compact' && gateOf(four) && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow') && verdictOf(b.title.whole), `600 px, a 2-character title, the vault locked: the count would put the desktops door ALONE in a ⋯ — it stands: four foldable chips inline, no ⋯ (${say(b)})`, say(b));
     await shot('after-en-600-vault-giveback.png');
   }
   await dress({ title: OWNER }); await vault(true); await sleep(200); await settle();
@@ -576,7 +576,7 @@ else await (async () => {
     const b = await bar();
     // 主开发's ruling (09:33Z): ONE number — the width no longer folds the ring, and the count's one fold would leave the
     // desktops door alone in a ⋯, which ⑧'s give-back refuses: NOTHING folds at 600 (the pin encoded the five-number chip)
-    ok(!b.folded.length && b.title.whole, `…the owner's title: NOTHING folds at 600, the title whole — one number (主开发 09:33Z; it was «TWO in the ⋯» with five) (${say(b)})`, say(b));
+    ok(!b.folded.length && verdictOf(b.title.whole), `…the owner's title: NOTHING folds at 600, the title whole — one number (主开发 09:33Z; it was «TWO in the ⋯» with five) (${say(b)})`, say(b));
   }
   await device(360, 780); await sleep(500); await settle();
   {
@@ -609,21 +609,21 @@ else await (async () => {
   await device(360, 780); await sleep(300); await settle(); await clear();
   {
     const red = await evalJs(RED), b = await bar(), l0 = await evalJs(LOUD);
-    ok(b.folded.includes('gear') && l0.gear.locked && l0.more.shown && l0.more.cls && l0.more.color === red && l0.more.mark?.svg && l0.more.mark.w > 0 && l0.more.mark.color === red && l0.more.title === 'More — Vault locked',
+    ok(gateOf(b.folded.includes('gear')) && gateOf(l0.gear.locked) && gateOf(l0.more.shown) && gateOf(l0.more.cls) && l0.more.color === red && gateOf(l0.more.mark?.svg) && l0.more.mark.w > 0 && l0.more.mark.color === red && l0.more.title === 'More — Vault locked',
       `⑨ locked, 360 px, the owner's title, ⚙ folded: the ⋯ wears ⚙'s lock — the red (${l0.more.color}), the mark (${JSON.stringify(l0.more.mark)}), «${l0.more.title}»`, { l0, folded: b.folded });
     await shot('after-en-360-locked.png');
     await tap('#mobile-nav-overflow'); await sleep(300);
     const l1 = await evalJs(LOUD);
-    ok(!!l1.row && l1.row.marked && l1.row.mark?.w > 0 && l1.row.color === red && l1.vaultRow, `⑨ …its Settings row «${l1.row?.label}» wears the mark and the red (${l1.row?.color}); the «Vault locked» row stays`, l1);
+    ok(!!l1.row && gateOf(l1.row.marked) && l1.row.mark?.w > 0 && l1.row.color === red && verdictOf(l1.vaultRow), `⑨ …its Settings row «${l1.row?.label}» wears the mark and the red (${l1.row?.color}); the «Vault locked» row stays`, l1);
     ok(l1.r2Row === false, '⑨ CONTROL: r2\'s ⚙ row (the chip\'s FIRST svg — the plain cog) judged by the same predicate carries no mark — RED', l1.r2Row);
     await shot('after-en-360-locked-more.png');
     // G2 (r4): ⚙'s lock mark drawn ONE way — the row's svg the bar's size (the r3 acceptance: 16×16 in the 16 px row, over the cog), on
     // its glyph's corner on the ⋯ as on ⚙ (r3: the ⋯'s floated at its 44 px box's corner over the strip's border), the labels in ONE column
     const g2a = await evalJs(MARKGEO);
     const sz = (m) => (m && m.svg ? m.svg.join('×') : '—'), near = (a, b) => Math.abs(a - b) <= 0.6;
-    ok(!!g2a.more && !!g2a.row && sz(g2a.row) === sz(g2a.more) && near(g2a.more.svg[0], 11) && near(g2a.more.svg[1], 13.33), `⑨ G2 the 设置 row's lock is drawn at the bar's size — row ${sz(g2a.row)}, the ⋯'s ${sz(g2a.more)} (11 × 13.3: the mark's own em)`, g2a);
-    ok(!!g2a.more && near(g2a.more.dx, 18) && near(g2a.more.dy, 18) && g2a.more.top >= g2a.navTop - 0.5 && !!g2a.row && near(g2a.row.dx, 18) && near(g2a.row.dy, 18), `⑨ G2 the mark sits on its GLYPH's corner — the ⋯'s ${g2a.more?.dx}/${g2a.more?.dy} px from its dots' middle, inside the bar (top ${g2a.more?.top} ≥ ${g2a.navTop}); the row's ${g2a.row?.dx}/${g2a.row?.dy} from the cog's`, g2a);
-    ok(g2a.labels.length === 4 && Math.max(...g2a.labels) - Math.min(...g2a.labels) <= 0.5 && g2a.glyphs.every((w) => w <= g2a.col + 0.5), `⑨ G2 the ⋯ rows' labels start at ONE x (${[...new Set(g2a.labels)].join(' / ')}) — every glyph inside the ${g2a.col} px column (${g2a.glyphs.join(', ')})`, g2a);
+    ok(!!g2a.more && !!g2a.row && sz(g2a.row) === sz(g2a.more) && gateOf(near(g2a.more.svg[0], 11)) && verdictOf(near(g2a.more.svg[1], 13.33)), `⑨ G2 the 设置 row's lock is drawn at the bar's size — row ${sz(g2a.row)}, the ⋯'s ${sz(g2a.more)} (11 × 13.3: the mark's own em)`, g2a);
+    ok(!!g2a.more && gateOf(near(g2a.more.dx, 18)) && gateOf(near(g2a.more.dy, 18)) && g2a.more.top >= g2a.navTop - 0.5 && !!g2a.row && gateOf(near(g2a.row.dx, 18)) && verdictOf(near(g2a.row.dy, 18)), `⑨ G2 the mark sits on its GLYPH's corner — the ⋯'s ${g2a.more?.dx}/${g2a.more?.dy} px from its dots' middle, inside the bar (top ${g2a.more?.top} ≥ ${g2a.navTop}); the row's ${g2a.row?.dx}/${g2a.row?.dy} from the cog's`, g2a);
+    ok(g2a.labels.length === 4 && Math.max(...g2a.labels) - Math.min(...g2a.labels) <= 0.5 && verdictOf(g2a.glyphs.every((w) => w <= g2a.col + 0.5)), `⑨ G2 the ⋯ rows' labels start at ONE x (${[...new Set(g2a.labels)].join(' / ')}) — every glyph inside the ${g2a.col} px column (${g2a.glyphs.join(', ')})`, g2a);
     // CONTROL — r3's rules on the page (the mark in its host's em with the sheet's no-shrink, at its box's corner; no glyph column)
     await evalJs(`(() => { const st = document.createElement('style'); st.id = 'ptt-r3-mark'; st.textContent = '.vault-gear-mark{font-size:inherit} .mobile-sheet .context-menu-item .vault-gear-mark svg{flex-shrink:0} html[data-vc="compact"] #mobile-nav > :is(#mobile-nav-gear, #mobile-nav-overflow).vault-locked > .vault-gear-mark, .mnav-more-menu .context-menu-item.vault-locked .mnav-more-icon > .vault-gear-mark{top:0;right:0} .mnav-more-menu .mnav-more-icon{width:auto}'; document.head.appendChild(st); return true; })()`);
     await settle();
@@ -637,7 +637,7 @@ else await (async () => {
       const h = document.elementFromPoint(more.left + more.width / 2, more.top + more.height / 2), st = document.getElementById('vault-lock-strip');
       return { navTop: Math.round(nav.top), navBottom: Math.round(nav.bottom), menuTop: m ? Math.round(m.getBoundingClientRect().top) : null, moreOnTop: !!h && !!h.closest('#mobile-nav-overflow'), strip: !!st && st.getClientRects().length > 0 }; })()`;
     const g1 = await evalJs(GEO);
-    ok(g1.strip && g1.navTop > 48 && g1.menuTop >= g1.navBottom && g1.moreOnTop && 48 < g1.navBottom, `⑨ the lock's strip moves the bar down (its top ${g1.navTop}): the ⋯ menu opens UNDER it (menu top ${g1.menuTop} ≥ bar bottom ${g1.navBottom}), the ⋯ on top — CONTROL: r2's sheet at the stylesheet's 48 px covered the bar (48 < ${g1.navBottom})`, g1);
+    ok(gateOf(g1.strip) && g1.navTop > 48 && g1.menuTop >= g1.navBottom && gateOf(g1.moreOnTop) && 48 < g1.navBottom, `⑨ the lock's strip moves the bar down (its top ${g1.navTop}): the ⋯ menu opens UNDER it (menu top ${g1.menuTop} ≥ bar bottom ${g1.navBottom}), the ⋯ on top — CONTROL: r2's sheet at the stylesheet's 48 px covered the bar (48 < ${g1.navBottom})`, g1);
     await tap('#mobile-nav-overflow'); await sleep(200);
     ok(!(await evalJs(`!!document.querySelector('.mnav-more-menu')`)), '⑨ …so the ⋯\'s second press reaches it and closes the menu (under the strip too)');
     await tap('#mobile-nav-overflow'); await sleep(300);
@@ -645,15 +645,15 @@ else await (async () => {
     await vault(false); await sleep(250); await settle();
     const l2 = await evalJs(LOUD), same = await evalJs(`document.querySelector('.mnav-more-menu') === window.__ptMenu`), g2 = await evalJs(GEO);
     ok(!g2.strip && g2.menuTop >= g2.navBottom && g2.menuTop <= g2.navBottom + 8, `⑨ …the strip gone, the open menu follows the bar back up (menu top ${g2.menuTop}, bar bottom ${g2.navBottom})`, g2);
-    ok(menu0 && same && !l2.more.cls && !l2.more.mark && l2.more.title === 'More' && !!l2.row && !l2.row.marked && l2.row.color !== red && !l2.vaultRow,
+    ok(gateOf(menu0) && gateOf(same) && !l2.more.cls && !l2.more.mark && l2.more.title === 'More' && !!l2.row && !l2.row.marked && l2.row.color !== red && !l2.vaultRow,
       `⑨ an unlock (another client's broadcast) with the menu open: the mark leaves the ⋯ and the Settings row, the «Vault locked» row leaves — the same menu, patched (${JSON.stringify({ more: l2.more.cls, row: l2.row?.color, vaultRow: l2.vaultRow, same })})`, l2);
     await clear();
     // ⚙ standing (a short title), the vault locked: the ⋯ plain — ⚙ wears the lock itself
     await dress({ title: 'Notes' }); await vault(true); await sleep(200); await settle();
     const b3 = await bar(), l3 = await evalJs(LOUD);
-    ok(!b3.folded.includes('gear') && l3.gear.locked && l3.gear.mark?.svg && !l3.more.cls && !l3.more.mark, `⑨ ⚙ standing (a short title), locked: ⚙ wears the lock (${JSON.stringify(l3.gear.mark)}), the ⋯ plain (folded ${b3.folded.join(',') || '—'})`, { b3: say(b3), l3 });
+    ok(!b3.folded.includes('gear') && gateOf(l3.gear.locked) && gateOf(l3.gear.mark?.svg) && !l3.more.cls && !l3.more.mark, `⑨ ⚙ standing (a short title), locked: ⚙ wears the lock (${JSON.stringify(l3.gear.mark)}), the ⋯ plain (folded ${b3.folded.join(',') || '—'})`, { b3: say(b3), l3 });
     const g2g = await evalJs(MARKGEO);
-    ok(!!g2g.gear && near(g2g.gear.dx, 18) && near(g2g.gear.dy, 18) && sz(g2g.gear) === '11×13.33' && g2g.gear.top >= g2g.navTop - 0.5, `⑨ G2 …⚙'s mark sits where the ⋯'s does — ${g2g.gear?.dx}/${g2g.gear?.dy} px from its cog's middle, ${sz(g2g.gear)}, inside the bar`, g2g);
+    ok(!!g2g.gear && gateOf(near(g2g.gear.dx, 18)) && gateOf(near(g2g.gear.dy, 18)) && sz(g2g.gear) === '11×13.33' && g2g.gear.top >= g2g.navTop - 0.5, `⑨ G2 …⚙'s mark sits where the ⋯'s does — ${g2g.gear?.dx}/${g2g.gear?.dy} px from its cog's middle, ${sz(g2g.gear)}, inside the bar`, g2g);
     await shot('after-en-360-locked-gear.png');
     await longPress('#mobile-nav-new');
     const plus = await evalJs(`(() => { const m = document.querySelector('.context-menu.mobile-sheet'), nav = document.getElementById('mobile-nav').getBoundingClientRect(); return m ? { top: Math.round(m.getBoundingClientRect().top), navBottom: Math.round(nav.bottom) } : null; })()`);
@@ -690,7 +690,7 @@ else await (async () => {
     const g2 = await evalJs(SURF(sel));
     await vault(true); await sleep(300); await settle();
     const g3 = await evalJs(SURF(sel));
-    ok(under(g1) && g1.navBottom > 48 && under(g2) && g2.navBottom < g1.navBottom && under(g3) && g3.navBottom === g1.navBottom,
+    ok(gateOf(under(g1)) && g1.navBottom > 48 && gateOf(under(g2)) && g2.navBottom < g1.navBottom && gateOf(under(g3)) && g3.navBottom === g1.navBottom,
       `⑨b ${name}: opened LOCKED under the moved bar (top ${g1?.top} / bar ${g1?.navBottom}); an unlock while open — it follows up (${g2?.top} / ${g2?.navBottom}); a re-lock — down again (${g3?.top} / ${g3?.navBottom})`, { g1, g2, g3 });
     if (name.startsWith('the Desktops') || name.startsWith('the Usage') || name.startsWith('the Settings')) await shot(`after-en-360-locked-${name.split(' ')[1].toLowerCase()}.png`);
   }
@@ -699,7 +699,7 @@ else await (async () => {
   {
     const red = [];
     for (const [name, sel, open] of SURFACES.filter(([n]) => /Desktops|Usage/.test(n))) { await shut(); await open(); const g = await evalJs(SURF(sel)); red.push([name, g]); }
-    ok(red.length === 2 && red.every(([, g]) => !!g && g.top < g.navBottom), `⑨b CONTROL — r3's rules on the page: ${red.map(([n, g]) => `${n} at ${g?.top} over the bar (bottom ${g?.navBottom})`).join('; ')} — RED`, red);
+    ok(red.length === 2 && verdictOf(red.every(([, g]) => !!g && g.top < g.navBottom)), `⑨b CONTROL — r3's rules on the page: ${red.map(([n, g]) => `${n} at ${g?.top} over the bar (bottom ${g?.navBottom})`).join('; ')} — RED`, red);
   }
   await evalJs(`(document.getElementById('ptt-r3-top')?.remove(), true)`);
   await shut(); await vault(false); await sleep(250); await settle();
@@ -739,7 +739,7 @@ else await (async () => {
       const c = await evalJs(ROOMGEO(sel));
       const flush = sel === '.mobile-win-switcher', L = lockedFirst ? [a, c] : [b], U = lockedFirst ? [b] : [a, c];
       if (lockedFirst && a) lockedAt[lang] = a.navBottom;
-      ok([a, b, c].every((g) => roomOk(g, flush)) && L.every((g) => g.navBottom > 48) && U.every((g) => g.navBottom < 48),
+      ok(gateOf([a, b, c].every((g) => roomOk(g, flush))) && gateOf(L.every((g) => g.navBottom > 48)) && verdictOf(U.every((g) => g.navBottom < 48)),
         `⑨c ${lang} ${name}, opened ${lockedFirst ? 'LOCKED' : 'unlocked'}, 40 rows: ${lockedFirst ? 'locked → unlocked → re-locked' : 'unlocked → locked → unlocked'} — ${flush ? 'flush under' : 'under'} the bar (${[a, b, c].map((g) => g ? `${g.top}/${g.navBottom}` : '—').join(' · ')}), its bottom ${[a, b, c].map((g) => g?.bottom).join(' / ')} ≤ ${a?.vh} − 12, its last row reached by its own scroll`, { a, b, c });
     }
     await shutAll(); await vault(false); await sleep(250); await settle();
@@ -767,7 +767,7 @@ else await (async () => {
     // won — so it fit any screen taller than ~600 px; the Usage popup keeps r5's inline room from the bar: its control is
     // test-phone-titlebar's run of r4's anchorFixedPopup)
     const want = ['the «+» sheet', 'the ⋯ menu', 'the Desktops sheet (⋯ → Desktops)', 'the Settings popover'];
-    ok(back.length >= 4 && want.every((k) => over.some(([n]) => n === k)), `⑨c CONTROL — r4's rooms put back on the page (${back.join(' · ')}): ${over.map(([n, g]) => `${n.split(' (')[0]} ends at ${g.bottom} > ${g.vh - 12}`).join('; ')} — RED by name`, over);
+    ok(back.length >= 4 && verdictOf(want.every((k) => over.some(([n]) => n === k))), `⑨c CONTROL — r4's rooms put back on the page (${back.join(' · ')}): ${over.map(([n, g]) => `${n.split(' (')[0]} ends at ${g.bottom} > ${g.vh - 12}`).join('; ')} — RED by name`, over);
     // CONTROL — r4's switcher: no rule (placed once, at open, from the bar's bottom then)
     await shutAll(); await vault(true); await sleep(250); await settle();
     await evalJs(`(() => { const saved = window.__pttSw = []; const walk = (rules) => { for (const r of rules) { if (r instanceof CSSStyleRule && /mobile-win-switcher/.test(r.selectorText)) { saved.push([r, r.style.cssText]); r.style.cssText = ''; } if (r.cssRules) walk(r.cssRules); } }; for (const sh of document.styleSheets) { try { walk(sh.cssRules); } catch { } } return saved.length; })()`);
@@ -854,7 +854,7 @@ else await (async () => {
   const c0 = await count(), cs = [];
   for (let i = 0; i < 6; i++) { await vault(i % 2 === 0); await sleep(200); await settle(); cs.push(await count()); }
   const after = await evalJs(`(() => { const m = document.querySelector('.mnav-more-menu'); return { same: m === window.__m0, keys: m ? [...m.children].map((e) => e.dataset.key).join(',') : '', rows: !!m && Object.entries(window.__r0).every(([k, e]) => m.querySelector(':scope > [data-key="' + k + '"]') === e) }; })()`);
-  ok(after.same && after.rows && after.keys === keys0 && [1, 3, 5].every((i) => cs[i].menu === c0.menu) && cs[0].menu === cs[2].menu && cs[2].menu === cs[4].menu && c0.menu > 0 && c0.page > 0 && cs[5].page === c0.page,
+  ok(gateOf(after.same) && gateOf(after.rows) && after.keys === keys0 && gateOf([1, 3, 5].every((i) => cs[i].menu === c0.menu)) && cs[0].menu === cs[2].menu && cs[2].menu === cs[4].menu && c0.menu > 0 && c0.page > 0 && cs[5].page === c0.page,
     `⑩ six fold changes (lock / unlock ×3) with the ⋯ open: the SAME menu node, the staying rows the same nodes (${after.keys}), its listeners flat (menu ${c0.menu} → ${cs.map((c) => c.menu).join(' / ')}; page ${c0.page} → ${cs[5].page})`, { after, c0, cs });
   await closeAll(); await sleep(200); await settle();
   // a fold change that leaves the bar where it stands (the ring coming back — no strip): it inserts «Usage» above «Settings» mid-press,
@@ -877,7 +877,7 @@ else await (async () => {
     nav._fitBar = function () { const h = this._held; this._held = false; try { return P._fitBar.call(this); } finally { this._held = h; } }; return true; })()`); // r4: the hold lives at the fit — r2 held nothing there
   {
     const rC = await ringBack();
-    ok(rC.k === 'desktops,gear' && rC.ran.includes('usage') && !rC.ran.includes('settings'), `⑩ CONTROL: r2's road (the menu re-opened under the finger) ⇒ the same lift ran ${rC.ran.join(',') || 'nothing'} — the «Usage» row that moved under it (RED, as the acceptance drove it with a lock)`, rC);
+    ok(rC.k === 'desktops,gear' && gateOf(rC.ran.includes('usage')) && !rC.ran.includes('settings'), `⑩ CONTROL: r2's road (the menu re-opened under the finger) ⇒ the same lift ran ${rC.ran.join(',') || 'nothing'} — the «Usage» row that moved under it (RED, as the acceptance drove it with a lock)`, rC);
   }
   await evalJs(`(() => { delete app._mobileNav._syncMore; delete app._mobileNav._fitBar; return true; })()`);
   await closeAll(); await vault(false); await sleep(200); await settle();
@@ -910,7 +910,7 @@ else await (async () => {
     await evalJs(`(() => { window.__r3lift = (e) => { if (!e.target?.closest?.('.mnav-more-menu')) e.stopImmediatePropagation(); }; window.addEventListener('pointerup', window.__r3lift, true); return true; })()`);
     const r = await dragOff();
     await evalJs(`(() => { window.removeEventListener('pointerup', window.__r3lift, true); window.dispatchEvent(new Event('blur')); return true; })()`); // the stuck hold's own end: the page's blur
-    ok(r.lifted.held && r.after.keys === 'desktops,usage,gear' && !(r.after.top >= r.after.navBottom), `⑩ G3 CONTROL — r3's menu-only lift: the hold outlives the press (held ${r.lifted.held}), the rows stale after the lock (${r.after.keys}), the menu over the moved bar (top ${r.after.top} / bar ${r.after.navBottom}) — RED`, r);
+    ok(gateOf(r.lifted.held) && r.after.keys === 'desktops,usage,gear' && !(r.after.top >= r.after.navBottom), `⑩ G3 CONTROL — r3's menu-only lift: the hold outlives the press (held ${r.lifted.held}), the rows stale after the lock (${r.after.keys}), the menu over the moved bar (top ${r.after.top} / bar ${r.after.navBottom}) — RED`, r);
     await closeAll(); await vault(false); await sleep(250); await settle();
   }
   {
@@ -923,7 +923,7 @@ else await (async () => {
     const mid = await evalJs(MENU_AT);
     await cdp('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }); await sleep(300); await settle();
     const after = await evalJs(MENU_AT), ran = await evalJs('window.__ran.slice()');
-    ok(k === 'desktops,usage,gear' && mid.held && mid.keys === k && !after.held && after.keys === 'desktops,usage,vault,gear' && after.top >= after.navBottom && after.navBottom > 48 && !ran.length,
+    ok(k === 'desktops,usage,gear' && gateOf(mid.held) && mid.keys === k && !after.held && after.keys === 'desktops,usage,vault,gear' && after.top >= after.navBottom && after.navBottom > 48 && !ran.length,
       `⑩ G3 a finger's press cancelled (touchcancel) after a lock landed: held until then (${mid.keys}), then the rows catch up (${after.keys}) and the menu follows (top ${after.top} / bar ${after.navBottom}); nothing ran`, { k, mid, after, ran });
     await closeAll(); await vault(false); await sleep(250); await settle();
   }
@@ -943,13 +943,13 @@ else await (async () => {
       return { before: b.folded.join(','), under, ran: await evalJs('window.__ran.slice()'), opened: await evalJs('window.__opened'), after: after.folded.join(',') || '—', menu: await evalJs(`!!document.querySelector('.mnav-more-menu')`), whole: after.title.whole };
     };
     const m = await onMore();
-    ok(m.before.length > 0 && m.under === 'mobile-nav-overflow' && m.opened === 1 && !m.ran.includes('settings') && !m.ran.includes('gear') && m.after === '—' && !m.menu && m.whole,
+    ok(m.before.length > 0 && m.under === 'mobile-nav-overflow' && m.opened === 1 && !m.ran.includes('settings') && !m.ran.includes('gear') && m.after === '—' && !m.menu && verdictOf(m.whole),
       `⑩ G3 a finger on the ⋯ while another client's rename empties the fold (folded ${m.before} → ${m.after}): the ⋯ stays under it until the lift (${m.under}), the lift is the ⋯'s press (its menu opened ${m.opened}×, then closed by the catch-up: nothing left to list) — never ⚙ (ran ${m.ran.join(',') || 'nothing'})`, m);
     // CONTROL — r3's bar (no hold at the fit): the rename refits mid-press, ⚙ slides under the finger, the lift runs Settings
     await evalJs(`(() => { const nav = app._mobileNav, P = Object.getPrototypeOf(nav); nav._fitBar = function () { const h = this._held; this._held = false; try { return P._fitBar.call(this); } finally { this._held = h; } }; return true; })()`);
     const r = await onMore();
     await evalJs(`(() => { delete app._mobileNav._fitBar; return true; })()`);
-    ok(r.ran.includes('settings') && r.under !== 'mobile-nav-overflow', `⑩ G3 CONTROL — r3's bar (the fit not held): ${r.under} slid under the finger and the lift ran ${r.ran.join(',') || 'nothing'} — RED`, r);
+    ok(gateOf(r.ran.includes('settings')) && r.under !== 'mobile-nav-overflow', `⑩ G3 CONTROL — r3's bar (the fit not held): ${r.under} slid under the finger and the lift ran ${r.ran.join(',') || 'nothing'} — RED`, r);
     await closeAll();
   }
   await evalJs(`(() => { app._pressGlobalSettings = app.__pgs; window.__ranOn = false; return true; })()`);
@@ -963,27 +963,27 @@ else await (async () => {
     const b = await bar(); console.log(`    430 px, a 2-character title: ${say(b)}`);
     // 主开发's ruling (2026-11-13, the phone-six recovery — userW's «非常多的数字围绕在周围»): the compact class's For-you button carries
     // exactly ONE number ALWAYS (the honest count in the worst urgency's colour), whatever room the bar has — no longer five here
-    ok(!b.folded.length && b.badges.length === 1 && b.badges[0].c.includes('mnav-one') && b.badges[0].n === '31' && !b.ctl.some((c) => c.id === 'overflow'), `a 2-character title at 430 px: everything fits, nothing folds — and the For-you button carries ONE number (${ids(b)}; badges ${b.badges.map((x) => x.n).join('/')})`, say(b));
-    ok(b.title.whole, `…the whole title shows (${b.title.w} ≥ ${b.title.fullW}, exactly)`, say(b));
+    ok(!b.folded.length && b.badges.length === 1 && gateOf(b.badges[0].c.includes('mnav-one')) && b.badges[0].n === '31' && !b.ctl.some((c) => c.id === 'overflow'), `a 2-character title at 430 px: everything fits, nothing folds — and the For-you button carries ONE number (${ids(b)}; badges ${b.badges.map((x) => x.n).join('/')})`, say(b));
+    ok(verdictOf(b.title.whole), `…the whole title shows (${b.title.w} ≥ ${b.title.fullW}, exactly)`, say(b));
     await shot('after-en-430-two-chars.png');
   }
   await device(360, 780); await sleep(400); await settle();
   {
     const b = await bar();
     judgeBar(b, '360 px, a 2-character title', { wantOne: false });
-    ok(b.title.whole, `…the whole 2-character title shows (${b.title.w} ≥ ${b.title.fullW}, exactly)`, say(b));
+    ok(verdictOf(b.title.whole), `…the whole 2-character title shows (${b.title.w} ≥ ${b.title.fullW}, exactly)`, say(b));
   }
   await dress({ title: LATIN40 });
   { const b = await bar(); judgeBar(b, '360 px, a 42-character Latin title', { wantFolded: ['desktops', 'usage', 'gear'] }); await shot('after-en-360-latin.png'); }
   await dress({ title: 'Notes' });
-  { const b = await bar(); judgeBar(b, '360 px, a one-word title', { wantOne: false }); ok(b.title.whole, `…the whole word shows (${b.title.w} ≥ ${b.title.fullW}, exactly)`, say(b)); }
+  { const b = await bar(); judgeBar(b, '360 px, a one-word title', { wantOne: false }); ok(verdictOf(b.title.whole), `…the whole word shows (${b.title.w} ≥ ${b.title.fullW}, exactly)`, say(b)); }
   // ── ⑤ THE TIERS ──
   console.log('⑤ the tiers');
   await dress({ title: OWNER });
   await device(780, 360); await sleep(600); await settle();
   {
     const b = await bar(); console.log(`    landscape: ${say(b)}`);
-    ok(b.vc === 'regular' && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow') && b.badges.length === 5 && b.badges.every((x) => !x.c.includes('mnav-one')), `a rotation to landscape (the regular class): no fold, no ⋯, the five badges (${b.vc}; ${ids(b)}; ${b.badges.map((x) => x.n).join('/')})`, say(b));
+    ok(b.vc === 'regular' && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow') && b.badges.length === 5 && verdictOf(b.badges.every((x) => !x.c.includes('mnav-one'))), `a rotation to landscape (the regular class): no fold, no ⋯, the five badges (${b.vc}; ${ids(b)}; ${b.badges.map((x) => x.n).join('/')})`, say(b));
     await shot('after-en-landscape.png');
   }
   await device(360, 780); await sleep(600); await settle();
@@ -1004,13 +1004,13 @@ else await (async () => {
     };
     const standIn = await holdsRow();
     const b = await bar(), y = await evalJs(YIELD); console.log(`    tablet portrait, the owner's name: ${say(b)} · yield ${y || '—'}`);
-    ok(standIn && b.vc === 'regular' && b.title.readable && y === 'badges' && b.badges.length === 1 && b.badges[0].c.includes('mnav-one') && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow'),
+    ok(gateOf(standIn) && b.vc === 'regular' && gateOf(b.title.readable) && y === 'badges' && b.badges.length === 1 && gateOf(b.badges[0].c.includes('mnav-one')) && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow'),
       `a tablet in portrait (the regular class), the owner's 12-glyph name in its 348 px column: the five numbers become ONE only because the name would fall under its readable minimum (the ladder's «${y || 'no'}» step) — the name readable (${b.title.w} px ≥ ${b.title.minW}), no fold, no ⋯ (${b.dir}; ${ids(b)})`, say(b));
     await shot('after-en-tablet.png');
     await dress({ title: '游戏' }); await sleep(400); await settle();
     const standIn5 = await holdsRow();
     const s5 = await bar(), y5 = await evalJs(YIELD); console.log(`    tablet portrait, a short name: ${say(s5)} · yield ${y5 || '—'}`);
-    ok(standIn5 && s5.vc === 'regular' && s5.title.whole && y5 !== 'badges' && s5.badges.length >= 2 && s5.badges.every((x) => !x.c.includes('mnav-one')) && !s5.folded.length && !s5.ctl.some((c) => c.id === 'overflow'),
+    ok(gateOf(standIn5) && s5.vc === 'regular' && gateOf(s5.title.whole) && y5 !== 'badges' && s5.badges.length >= 2 && gateOf(s5.badges.every((x) => !x.c.includes('mnav-one'))) && !s5.folded.length && !s5.ctl.some((c) => c.id === 'overflow'),
       `…its opposite: the same tablet with a short name («游戏») keeps its FIVE numbers (${s5.badges.map((x) => x.n).join('/')}) — the name whole, no one-badge form, no fold, no ⋯`, say(s5));
     await shot('after-en-tablet-short.png');
     await dress({ title: OWNER }); await sleep(400); await settle();
@@ -1019,25 +1019,25 @@ else await (async () => {
   console.log('④ the + road (LAW 3)');
   await device(360, 780); await sleep(600); await settle();
   await evalJs(`(() => { for (const id of [...app.wm.windows.keys()]) app.wm.requestClose(id); return true; })()`); await sleep(500);
-  ok(await evalJs(`!document.getElementById('mobile-nav-files') || document.getElementById('mobile-nav-files').getClientRects().length === 0`), 'the compact bar draws no #mobile-nav-files');
+  ok(verdictOf(await evalJs(`!document.getElementById('mobile-nav-files') || document.getElementById('mobile-nav-files').getClientRects().length === 0`)), 'the compact bar draws no #mobile-nav-files');
   // the sheet's 文件 row by its word (r3: with an explorer open a hint line rides under it)
   const FILES_ROW = `([...document.querySelectorAll('.context-menu.mobile-sheet .context-menu-item')].find((el) => [...el.querySelectorAll('span')].some((s) => !s.children.length && s.textContent.trim() === 'Files')))`;
   const filesHint = () => evalJs(`(() => { const r = ${FILES_ROW}; return r ? (r.querySelector('.mnav-sheet-hint')?.textContent || '') : null; })()`);
   await longPress('#mobile-nav-new');
   const sheet = await evalJs(`[...document.querySelectorAll('.context-menu.mobile-sheet .context-menu-item')].map((el) => el.textContent.trim())`);
-  ok(sheet.includes('Files'), `a real long-press on «+» opens the sheet listing Files (${sheet.join(' · ')})`, sheet);
+  ok(verdictOf(sheet.includes('Files')), `a real long-press on «+» opens the sheet listing Files (${sheet.join(' · ')})`, sheet);
   const hint0 = await filesHint();
   ok(hint0 === '', `F4 — no explorer open: the 文件 row is the word alone — its one act opens one at home (hint «${hint0}»)`, hint0);
   await shot('after-en-360-plus-menu.png');
   await tap(FILES_ROW);
-  ok(await waitFor(`app.wm.windows.get(app.wm.activeWindowId)?.type === 'files'`, 8000), 'its Files row opens the explorer');
+  ok(verdictOf(await waitFor(`app.wm.windows.get(app.wm.activeWindowId)?.type === 'files'`, 8000)), 'its Files row opens the explorer');
   await waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'files' && w.element.querySelectorAll('.file-item').length > 0)`, 8000); await sleep(400);
   await evalJs(`app.phoneHome?.show?.(); true`); await sleep(300);
   await longPress('#mobile-nav-new');
   const hint1 = await filesHint();
   ok(hint1 === 'Back to ~', `G1 — with the home's explorer open the 文件 row SAYS its one act by the FOLDER's name: «${hint1}» (the explorer's own breadcrumb for the home, never its path — a second explorer is that explorer's «Open in new window»)`, hint1);
   await tap(FILES_ROW);
-  ok(await waitFor(`app.wm.windows.get(app.wm.activeWindowId)?.type === 'files'`, 8000) && await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'files').length === 1`),
+  ok(gateOf(await waitFor(`app.wm.windows.get(app.wm.activeWindowId)?.type === 'files'`, 8000)) && verdictOf(await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'files').length === 1`)),
     'a second time reveals the same explorer — the files door\'s press (never a second explorer)', await evalJs(`[...app.wm.windows.values()].map((w) => w.type).join(',')`));
 
   // ── ④ G1 (r4 — the r3 acceptance: the hint was the window's title, a path front-cut to 40 whose END the line then cut — «Back to
@@ -1076,14 +1076,14 @@ else await (async () => {
       await device(vw, 780); await sleep(300); await settle(); await clear();
       await longPress('#mobile-nav-new');
       const g = await evalJs(HINTGEO);
-      ok(!!g && g.text === WORDS[lang]('vibespace') && g.node === 'vibespace' && tailIn(g, 9) && headIn(g) && !g.cut && g.said.every((x) => x.whole),
+      ok(!!g && g.text === WORDS[lang]('vibespace') && g.node === 'vibespace' && gateOf(tailIn(g, 9)) && gateOf(headIn(g)) && !g.cut && verdictOf(g.said.every((x) => x.whole)),
         `G1 ${lang} ${vw} px, a ${deep.length}-character path: the hint reads «${g?.text}» — the folder WHOLE where it renders (${g ? g.chars.length : 0} characters inside its ${g ? Math.round(g.clipW) : 0} px box), the sentence's words whole`, g);
       if (vw === 360 && lang !== 'zh') await shot(`after-${lang}-360-plus-files-hint.png`);
       if (lang === 'en' && vw === 360) {
         // CONTROL — r3's hint on this very row: the window's title (a front-cut path) under r3's end-ellipsis rule
         const r3 = await evalJs(`(() => { const h = document.querySelector('.context-menu.mobile-sheet .mnav-sheet-hint'); const w = [...app.wm.windows.values()].find((x) => x.type === 'files'); h.textContent = 'Back to ' + w.title; h.style.cssText = 'display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0'; return w.title; })()`);
         const g3 = await evalJs(HINTGEO);
-        ok(!!g3 && !tailIn(g3, 9) && g3.cut, `G1 CONTROL — r3's hint on the same row, «Back to ${r3}»: the folder's name is CUT where it renders (its last 9 characters outside the ${g3 ? Math.round(g3.clipW) : 0} px box) — RED`, g3);
+        ok(!!g3 && !tailIn(g3, 9) && verdictOf(g3.cut), `G1 CONTROL — r3's hint on the same row, «Back to ${r3}»: the folder's name is CUT where it renders (its last 9 characters outside the ${g3 ? Math.round(g3.clipW) : 0} px box) — RED`, g3);
       }
       await clear();
     }
@@ -1093,7 +1093,7 @@ else await (async () => {
       await evalJs(`app.phoneHome?.show?.(); true`); await sleep(300); await clear();
       await longPress('#mobile-nav-new');
       const g = await evalJs(HINTGEO), leaf = path.basename(longLeaf);
-      ok(!!g && g.node === leaf && g.cut && tailIn(g, 12) && !headIn(g) && g.said.every((x) => x.whole), `G1 ${lang} 360 px, a ${leaf.length}-character folder name: cut at its START — its last characters inside the box, its first outside — the sentence's words whole (${g?.said.map((x) => '«' + x.text.trim() + '»').join(' ')})`, g);
+      ok(!!g && g.node === leaf && gateOf(g.cut) && gateOf(tailIn(g, 12)) && !headIn(g) && verdictOf(g.said.every((x) => x.whole)), `G1 ${lang} 360 px, a ${leaf.length}-character folder name: cut at its START — its last characters inside the box, its first outside — the sentence's words whole (${g?.said.map((x) => '«' + x.text.trim() + '»').join(' ')})`, g);
       await shot(`after-${lang}-360-plus-files-long.png`);
       await clear();
     }
@@ -1114,13 +1114,13 @@ else await (async () => {
       await device(vw, 780); await sleep(300); await settle(); await clear();
       await longPress('#mobile-nav-new');
       const g = await evalJs(HINTGEO), leaf = path.basename(dir);
-      ok(!!g && g.node === leaf && g.cut && tailIn(g, 12) && !firstIn(g) && g.said.every((x) => x.whole), `K3 ${lang} ${vw} px, a ${leaf.length}-character ${what} folder: cut where it BEGINS in reading order — its first character outside the box, its last 12 inside (${inside(g)}/${leaf.length} inside), the sentence's words whole`, g && { ...g, chars: g.chars.length });
+      ok(!!g && g.node === leaf && gateOf(g.cut) && gateOf(tailIn(g, 12)) && !firstIn(g) && verdictOf(g.said.every((x) => x.whole)), `K3 ${lang} ${vw} px, a ${leaf.length}-character ${what} folder: cut where it BEGINS in reading order — its first character outside the box, its last 12 inside (${inside(g)}/${leaf.length} inside), the sentence's words whole`, g && { ...g, chars: g.chars.length });
       if (what === 'Arabic' && lang === 'ja') {
         await shot('after-ja-320-plus-files-rtl.png');
         // CONTROL — r4's box on the same row: the name's direction taken off its box (r4's one rtl box over every name)
         await evalJs(`(document.querySelector('.context-menu.mobile-sheet .mnav-sheet-name')?.removeAttribute('data-dir'), true)`); await settle();
         const g4 = await evalJs(HINTGEO);
-        ok(!!g4 && firstIn(g4) && !tailIn(g4, 12), `K3 CONTROL — r4's box on the same row: the Arabic name's FIRST character inside, its last outside (${inside(g4)}/${leaf.length} inside — its END cut) — RED`, g4 && { ...g4, chars: g4.chars.length });
+        ok(!!g4 && gateOf(firstIn(g4)) && !tailIn(g4, 12), `K3 CONTROL — r4's box on the same row: the Arabic name's FIRST character inside, its last outside (${inside(g4)}/${leaf.length} inside — its END cut) — RED`, g4 && { ...g4, chars: g4.chars.length });
         await shot('before-ja-320-plus-files-rtl-r4.png');
       }
       await clear(); await device(360, 780); await sleep(200);
@@ -1138,7 +1138,7 @@ else await (async () => {
     const h2 = await hintNow();
     await pressRow();
     const shownA = await evalJs(`app.wm.activeWindowId === ${JSON.stringify(a)}`);
-    ok(!!a && !!b && h1 === 'Back to notes' && h2 === 'Back to vibespace' && shownA, `G1 two explorers: the hint names the one shown LAST («${h1}», then after showing the other «${h2}») and the row brings THAT one`, { h1, h2, shownA });
+    ok(!!a && !!b && h1 === 'Back to notes' && h2 === 'Back to vibespace' && verdictOf(shownA), `G1 two explorers: the hint names the one shown LAST («${h1}», then after showing the other «${h2}») and the row brings THAT one`, { h1, h2, shownA });
   }
   {
     // the explorer on the desktop on show, then a FRESH desktop to stand on (a desktop with a record replays its own windows when
@@ -1150,7 +1150,7 @@ else await (async () => {
     const h = await hintNow();
     await pressRow();
     const back = await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(home)} && app.wm.activeWindowId === ${JSON.stringify(a)}`, 5000);
-    ok(away && h === 'Back to vibespace' && back, `G1 the ONLY explorer is on another desktop: still named («${h}»), and the press switches to its desktop and shows it (r3: none named — the row opened a second explorer at home)`, { away, h, back });
+    ok(gateOf(away) && h === 'Back to vibespace' && verdictOf(back), `G1 the ONLY explorer is on another desktop: still named («${h}»), and the press switches to its desktop and shows it (r3: none named — the row opened a second explorer at home)`, { away, h, back });
   }
   {
     const a = await explorerAt(deep);
@@ -1159,7 +1159,7 @@ else await (async () => {
     const h = await hintNow();
     await pressRow();
     const back = await waitFor(`!app.wm.windows.get(${JSON.stringify(a)})?.isMinimized && app.wm.activeWindowId === ${JSON.stringify(a)}`, 5000);
-    ok(min && h === 'Back to vibespace' && back, `G1 the only explorer MINIMIZED: still named («${h}»), and the press restores it`, { min, h, back });
+    ok(gateOf(min) && h === 'Back to vibespace' && verdictOf(back), `G1 the only explorer MINIMIZED: still named («${h}»), and the press restores it`, { min, h, back });
   }
   {
     const a = await explorerAt(deep);
@@ -1170,7 +1170,7 @@ else await (async () => {
     const h = await hintNow();
     await pressRow();
     const back = await waitFor(`(() => { const ex = app.wm.windows.get(${JSON.stringify(a)}); return !!ex && !!ex._tabChain && ex._tabChain.tabs[ex._tabChain.active] === ex.id && !ex.content.classList.contains('tab-hidden'); })()`, 5000);
-    ok(grouped && h === 'Back to vibespace' && back, `G1 the only explorer a tab group's hidden GUEST: still named («${h}»), and the press shows its tab`, { grouped, h, back });
+    ok(gateOf(grouped) && h === 'Back to vibespace' && verdictOf(back), `G1 the only explorer a tab group's hidden GUEST: still named («${h}»), and the press shows its tab`, { grouped, h, back });
   }
   await clear();
 
@@ -1201,4 +1201,4 @@ else await (async () => {
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed, ${skipped} skipped)`);
 cleanup();
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

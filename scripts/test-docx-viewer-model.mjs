@@ -38,7 +38,7 @@ const MODEL = path.join(REPO, MODEL_REL);
 const M = await import(pathToFileURL(MODEL).href);
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 const near = (a, b, eps = 1e-3) => Math.abs(a - b) <= eps;
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -216,16 +216,16 @@ const runTable = (m, name) => { try { return TABLES[name](m).every(([got, want])
 
 for (const [i, name] of Object.keys(TABLES).entries()) {
   console.log(`${'①②③④⑤⑥⑦⑧⑧⑧⑨⑩'[i]}${name === 'styleTabsResolver' ? 'b' : name === 'symbolBullet' ? 'c' : ''} ${name}`);
-  for (const [got, want, label] of TABLES[name](M)) ok(typeof want === 'number' ? near(got, want) : eq(got, want), label, { got, want });
+  for (const [got, want, label] of TABLES[name](M)) ok(typeof want === 'number' ? verdictOf(near(got, want)) : verdictOf(eq(got, want)), label, { got, want });
 }
 console.log('⑥b refusalText — every refusal is a sentence through t()');
 {
   const tt = (s) => '⟦' + s + '⟧';
   for (const code of ['binary-word', 'ole', 'empty', 'other']) {
     const s = M.refusalText(code, tt);
-    ok(/^⟦.{10,}⟧$/.test(s), `${code}: "${s.slice(0, 70)}…"`);
+    ok(verdictOf(/^⟦.{10,}⟧$/.test(s)), `${code}: "${s.slice(0, 70)}…"`);
   }
-  ok(/\.docx/.test(M.refusalText('binary-word')) && /Word or LibreOffice/.test(M.refusalText('binary-word')), 'the .doc refusal says what to do (open in Word / LibreOffice, save as .docx)');
+  ok(gateOf(/\.docx/.test(M.refusalText('binary-word'))) && verdictOf(/Word or LibreOffice/.test(M.refusalText('binary-word'))), 'the .doc refusal says what to do (open in Word / LibreOffice, save as .docx)');
 }
 
 // ⑪ i18n census over both files
@@ -249,44 +249,44 @@ const FV = fs.readFileSync(path.join(REPO, 'src/lib/file-viewer.js'), 'utf8');
 const DV = fs.readFileSync(path.join(REPO, 'src/lib/docx-viewer.js'), 'utf8');
 {
   const branch = FV.slice(FV.indexOf("viewerType === 'docx'"), FV.indexOf("viewerType === 'pptx'"));
-  ok(/import \{[^}]*\bviewerVerdict\b[^}]*\} from '\.\/docx-viewer-model\.js'/.test(FV), 'file-viewer.js imports viewerVerdict from the model');
-  ok(/import \{[^}]*\brenderDocxViewer\b[^}]*\} from '\.\/docx-viewer\.js'/.test(FV), 'file-viewer.js imports renderDocxViewer');
+  ok(verdictOf(/import \{[^}]*\bviewerVerdict\b[^}]*\} from '\.\/docx-viewer-model\.js'/.test(FV)), 'file-viewer.js imports viewerVerdict from the model');
+  ok(verdictOf(/import \{[^}]*\brenderDocxViewer\b[^}]*\} from '\.\/docx-viewer\.js'/.test(FV)), 'file-viewer.js imports renderDocxViewer');
   const iv = branch.indexOf('viewerVerdict(ext)'), ir = branch.indexOf('renderDocxViewer(');
   ok(iv > 0 && ir > iv && !/fetch\(/.test(branch.slice(0, ir)), "the docx branch asks viewerVerdict(ext) FIRST and fetches nothing before it (a .doc is refused before any fetch)");
-  ok(/refusalText\(verdict\.code, t\)/.test(branch), 'the refusal sentence comes from refusalText through t');
+  ok(verdictOf(/refusalText\(verdict\.code, t\)/.test(branch)), 'the refusal sentence comes from refusalText through t');
   ok(!/from 'docx-preview'/.test(FV) && !/renderAsync/.test(FV), 'file-viewer.js no longer calls docx-preview directly (the old renderAsync path is gone)');
-  ok(/if \(ctl\.signal\.aborted\) return true;/.test(FV), 'a superseded render never paints its error over the render that replaced it');
+  ok(verdictOf(/if \(ctl\.signal\.aborted\) return true;/.test(FV)), 'a superseded render never paints its error over the render that replaced it');
   const libUsers = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js') && /from 'docx-preview'/.test(fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8')));
-  ok(eq(libUsers, ['docx-viewer.js']), 'docx-viewer.js is the ONE importer of docx-preview', libUsers);
+  ok(verdictOf(eq(libUsers, ['docx-viewer.js'])), 'docx-viewer.js is the ONE importer of docx-preview', libUsers);
   const body = DV.replace(/^import[\s\S]*?from '\.\/docx-viewer-model\.js';/m, '');
   for (const fn of ['fitWidthScale', 'zoomStep', 'wheelScale', 'pageIndexAt', 'sniffVerdict', 'refusalText', 'linkVerdict', 'inheritHeaderFooterRefs', 'styleTabsResolver', 'symbolBullet', 'parseZoomPref', 'serializeZoomPref', 'toolbarModel']) {
-    ok(new RegExp('\\b' + fn + '\\(').test(body), `docx-viewer.js calls ${fn}()`);
+    ok(verdictOf(new RegExp('\\b' + fn + '\\(').test(body)), `docx-viewer.js calls ${fn}()`);
   }
   const opts = DV.slice(DV.indexOf('DOCX_RENDER_OPTIONS = Object.freeze('), DV.indexOf('});', DV.indexOf('DOCX_RENDER_OPTIONS = Object.freeze(')));
   for (const [k, v] of [['experimental', 'true'], ['ignoreFonts', 'true'], ['breakPages', 'true'], ['ignoreLastRenderedPageBreak', 'true'], ['renderHeaders', 'true'], ['renderFooters', 'true'], ['renderFootnotes', 'true'], ['ignoreWidth', 'false'], ['inWrapper', 'true']]) {
-    ok(new RegExp('\\b' + k + ': ' + v + '\\b').test(opts), `DOCX_RENDER_OPTIONS.${k} = ${v}`);
+    ok(verdictOf(new RegExp('\\b' + k + ': ' + v + '\\b').test(opts)), `DOCX_RENDER_OPTIONS.${k} = ${v}`);
   }
-  ok(/parseAsync\(buf, DOCX_RENDER_OPTIONS\)/.test(DV) && /renderDocument\(doc, bodyBox, styleBox, DOCX_RENDER_OPTIONS\)/.test(DV), 'parse and render both take DOCX_RENDER_OPTIONS');
-  ok(/attachShadow\(\{ mode: 'open' \}\)/.test(DV), 'the document renders into a shadow root');
-  ok(/doc\.loadAltChunk = /.test(DV) && /setAttribute\('sandbox', 'allow-scripts'\)/.test(DV) && /writeFrame\(f, ALTCHUNK_CSP \+ html, hostAddress\('docx'\)\)/.test(DV) && !/\.srcdoc\s*=/.test(DV), 'altChunk HTML is intercepted and re-hosted in a sandboxed iframe at the frame host\'s docx address (lane frame-host-preview: nothing of it runs — never srcdoc)');
-  ok(/document\.fonts\.add\(face\)/.test(DV) && /document\.fonts\.delete\(face\)/.test(DV), 'embedded fonts are registered on document.fonts and removed on close');
-  ok(/applyHeaderInheritance\(doc\);\s*applyStyleTabs\(doc\);\s*applySymbolBullets\(doc\);/.test(DV) && DV.indexOf('applySymbolBullets(doc);') < DV.indexOf('await renderDocument('), 'header inheritance, style tab stops and Symbol bullets are applied BEFORE render');
-  ok(/localStorage\.(get|set)Item\(ZOOM_PREF_KEY/.test(DV), 'the zoom is remembered under ZOOM_PREF_KEY');
-  ok(/scale\(\$\{1 \/ z\}\)/.test(DV) && /hasTabs \? sleep\(500\)/.test(DV), 'the tab-stop pass runs at NET scale 1 (1 / uiScale) and the stack is shown after it');
+  ok(gateOf(/parseAsync\(buf, DOCX_RENDER_OPTIONS\)/.test(DV)) && verdictOf(/renderDocument\(doc, bodyBox, styleBox, DOCX_RENDER_OPTIONS\)/.test(DV)), 'parse and render both take DOCX_RENDER_OPTIONS');
+  ok(verdictOf(/attachShadow\(\{ mode: 'open' \}\)/.test(DV)), 'the document renders into a shadow root');
+  ok(gateOf(/doc\.loadAltChunk = /.test(DV)) && gateOf(/setAttribute\('sandbox', 'allow-scripts'\)/.test(DV)) && gateOf(/writeFrame\(f, ALTCHUNK_CSP \+ html, hostAddress\('docx'\)\)/.test(DV)) && !/\.srcdoc\s*=/.test(DV), 'altChunk HTML is intercepted and re-hosted in a sandboxed iframe at the frame host\'s docx address (lane frame-host-preview: nothing of it runs — never srcdoc)');
+  ok(gateOf(/document\.fonts\.add\(face\)/.test(DV)) && verdictOf(/document\.fonts\.delete\(face\)/.test(DV)), 'embedded fonts are registered on document.fonts and removed on close');
+  ok(gateOf(/applyHeaderInheritance\(doc\);\s*applyStyleTabs\(doc\);\s*applySymbolBullets\(doc\);/.test(DV)) && DV.indexOf('applySymbolBullets(doc);') < DV.indexOf('await renderDocument('), 'header inheritance, style tab stops and Symbol bullets are applied BEFORE render');
+  ok(verdictOf(/localStorage\.(get|set)Item\(ZOOM_PREF_KEY/.test(DV)), 'the zoom is remembered under ZOOM_PREF_KEY');
+  ok(gateOf(/scale\(\$\{1 \/ z\}\)/.test(DV)) && verdictOf(/hasTabs \? sleep\(500\)/.test(DV)), 'the tab-stop pass runs at NET scale 1 (1 / uiScale) and the stack is shown after it');
   const vcss = fs.readFileSync(path.join(REPO, 'public/viewers.css'), 'utf8');
   const scss = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
   ok(!/\.docx-preview\b/.test(vcss), 'the old .docx-preview rules (theme text colour on a white page, the padded scroller) are gone');
   const block = vcss.slice(vcss.indexOf('/* ── Word document viewer'), vcss.indexOf('/* ── CodeMirror Editor'));
   ok(block.length > 200 && !/#[0-9a-f]{3,8}\b|rgba?\(|\b(white|black|gray|grey)\b(?!-)/i.test(block.replace(/\/\*[\s\S]*?\*\//g, '')), 'the viewer CSS uses theme vars only (no literal colour)');
-  ok(/--paper: #ffffff;/.test(scss.slice(0, scss.indexOf('[data-theme="light"]'))), '--paper is defined once for every theme (a page is paper)');
+  ok(verdictOf(/--paper: #ffffff;/.test(scss.slice(0, scss.indexOf('[data-theme="light"]')))), '--paper is defined once for every theme (a page is paper)');
   const paperCss = DV.slice(DV.indexOf('const PAPER_CSS = `'), DV.indexOf('`;', DV.indexOf('const PAPER_CSS = `')));
-  ok(/background: var\(--paper\)/.test(paperCss) && /box-shadow: var\(--shadow-window\)/.test(paperCss) && !/#[0-9a-f]{3,8}\b|rgba?\(|\b(white|black|gray|grey)\b(?!-)/i.test(paperCss.replace(/--paper/g, '')), 'the page = var(--paper) + var(--shadow-window), no literal colour in the shadow CSS');
+  ok(gateOf(/background: var\(--paper\)/.test(paperCss)) && gateOf(/box-shadow: var\(--shadow-window\)/.test(paperCss)) && !/#[0-9a-f]{3,8}\b|rgba?\(|\b(white|black|gray|grey)\b(?!-)/i.test(paperCss.replace(/--paper/g, '')), 'the page = var(--paper) + var(--shadow-window), no literal colour in the shadow CSS');
   ok(!/color:\s*var\(--text\)/.test(paperCss + block), 'no rule paints the theme text colour onto the page');
   const icons = fs.readFileSync(path.join(REPO, 'src/lib/icons.js'), 'utf8');
-  ok(/\bzoomOut:\s*_s\(/.test(icons) && /\bzoomIn:\s*_s\(/.test(icons), 'UI_ICONS carries zoomOut / zoomIn (SVG)');
-  ok(/node\.setAttribute\('aria-label', it\.aria \|\| it\.title\)/.test(DV) && /node\.title = it\.title/.test(DV), 'every toolbar button gets title + aria-label (icon-only buttons are named; "Open in LibreOffice" by its own name)');
-  ok(/node\.disabled = !!it\.disabled \|\| \(state\.rendering && !it\.live\);/.test(DV) && /toolbarModel\(state, t, \{ office: office \? office\.file : null \}\)/.test(DV), '§7.9 the office button is drawn from the model and stays enabled while rendering (`live`)');
-  ok(/office: FileViewer\._officeOpener\(app, filePath, host\)/.test(branch), '§7.9 the docx branch hands the viewer its "Open in LibreOffice" (file-viewer.js decides what a click does — test-office-open pins the door)');
+  ok(gateOf(/\bzoomOut:\s*_s\(/.test(icons)) && verdictOf(/\bzoomIn:\s*_s\(/.test(icons)), 'UI_ICONS carries zoomOut / zoomIn (SVG)');
+  ok(gateOf(/node\.setAttribute\('aria-label', it\.aria \|\| it\.title\)/.test(DV)) && verdictOf(/node\.title = it\.title/.test(DV)), 'every toolbar button gets title + aria-label (icon-only buttons are named; "Open in LibreOffice" by its own name)');
+  ok(gateOf(/node\.disabled = !!it\.disabled \|\| \(state\.rendering && !it\.live\);/.test(DV)) && verdictOf(/toolbarModel\(state, t, \{ office: office \? office\.file : null \}\)/.test(DV)), '§7.9 the office button is drawn from the model and stays enabled while rendering (`live`)');
+  ok(verdictOf(/office: FileViewer\._officeOpener\(app, filePath, host\)/.test(branch)), '§7.9 the docx branch hands the viewer its "Open in LibreOffice" (file-viewer.js decides what a click does — test-office-open pins the door)');
 }
 
 console.log('⑬ the model is PURE');
@@ -318,10 +318,10 @@ console.log('⑭ controls — a patched copy of each rule turns its table red');
     if (!src.includes(a)) { ok(false, `${rule} CONTROL: the patch anchor is still in the module`, a); continue; }
     const f = C.write(MODEL_REL, src.replace(a, b), rule);
     const mm = await import(pathToFileURL(f).href);
-    ok(runTable(M, rule) && !runTable(mm, rule), `${rule} CONTROL (${what}): the real module passes its table, the patched copy FAILS it`);
+    ok(gateOf(runTable(M, rule)) && !runTable(mm, rule), `${rule} CONTROL (${what}): the real module passes its table, the patched copy FAILS it`);
   }
-  for (const r of copiesCensus(C.files, C.dir, REPO, { minCopies: MUTANTS.length, label: '⑭ ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(C.files, C.dir, REPO, { minCopies: MUTANTS.length, label: '⑭ ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'} · ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

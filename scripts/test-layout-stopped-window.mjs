@@ -81,7 +81,7 @@ const LIB = path.join(REPO, 'src/lib');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const J = JSON.stringify;
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
 const section = async (title, fn) => { console.log('— ' + title); try { await fn(); } catch (e) { ok(false, title + ' — threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e)); } };
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 // B-7e49 (lane card-door-in-chat, s1126, 主开发 r4912): A REAL WAIT RUN BY HAND. Every timer this suite arms from here on is
@@ -253,9 +253,9 @@ await section('§1 A WINDOW NEVER LOSES ITS NAME — the 09:18:22 write on the R
   const nameless = p.filter((w) => !isNamed(w));
   ok(p.length === 11 && !nameless.length, `§1 个人's eleven new windows are stored NAMED — none nameless (2.369.363: ${7} of 11 nameless; here ${nameless.length})`, nameless.map((w) => w.title));
   const seven = p.filter((w) => !w.openSpec);
-  ok(seven.length === 7 && seven.every((w) => { const i = NAMES.indexOf(w.title); return i >= 4 && w.backendSessionId === CID(i) && w.backend === BACK(i) && w.cwd === CWD(i); }), '§1 each of the seven took the conversation of the window it replaced (its id, its harness, its cwd) — matched by the title\'s name, not the openSpec\'s first message', seven.map((w) => [w.title, w.backendSessionId, w.backend]));
-  ok(seven.every((w) => !w.serverSessionId && !w.openSpec), '§1 …never the old window\'s server session nor its openSpec (the attach was the old window\'s)', seven.map((w) => [w.serverSessionId, !!w.openSpec]));
-  ok(H.logs.some((l) => /7 window\(s\) took the name of the window they replaced/.test(l)), '§1 the journal says it: «7 window(s) took the name of the window they replaced»', H.logs.filter((l) => /layout-sync/.test(l)));
+  ok(seven.length === 7 && verdictOf(seven.every((w) => { const i = NAMES.indexOf(w.title); return i >= 4 && w.backendSessionId === CID(i) && w.backend === BACK(i) && w.cwd === CWD(i); })), '§1 each of the seven took the conversation of the window it replaced (its id, its harness, its cwd) — matched by the title\'s name, not the openSpec\'s first message', seven.map((w) => [w.title, w.backendSessionId, w.backend]));
+  ok(verdictOf(seven.every((w) => !w.serverSessionId && !w.openSpec)), '§1 …never the old window\'s server session nor its openSpec (the attach was the old window\'s)', seven.map((w) => [w.serverSessionId, !!w.openSpec]));
+  ok(verdictOf(H.logs.some((l) => /7 window\(s\) took the name of the window they replaced/.test(l))), '§1 the journal says it: «7 window(s) took the name of the window they replaced»', H.logs.filter((l) => /layout-sync/.test(l)));
   // two windows of ONE name: the name never guesses — neither is paired, both are left out; the evidence's `by` pairs the one it
   // names, and the other is then the only one left (one-to-one)
   const twins = () => DOC([named(0, { title: 'Twin — ' + CWD(0) }), named(1, { title: 'Twin — ' + CWD(1) }), named(2)]);
@@ -263,7 +263,7 @@ await section('§1 A WINDOW NEVER LOSES ITS NAME — the 09:18:22 write on the R
   const H2 = hub(loadHandler(), twins()); const S2 = H2.connect();
   await S2.send(twinWrite([{ id: 'win-old-0', why: 'replaced' }, { id: 'win-old-1', why: 'replaced' }], 2));
   const p2 = H2.layouts().desktops['desk-p'].autoSave.windows;
-  ok(J(p2.map((w) => w.winId)) === J(['win-old-2']) && H2.logs.some((l) => /2 with no name left out of this write \(Twin · Twin\)/.test(l)), '§1 two windows of ONE name and nothing else to tell them apart: neither is guessed — both left out of THIS write and named in the journal (never stored nameless)', { ids: p2.map((w) => w.winId), log: H2.logs.filter((l) => /layout-sync/.test(l)) });
+  ok(J(p2.map((w) => w.winId)) === J(['win-old-2']) && verdictOf(H2.logs.some((l) => /2 with no name left out of this write \(Twin · Twin\)/.test(l))), '§1 two windows of ONE name and nothing else to tell them apart: neither is guessed — both left out of THIS write and named in the journal (never stored nameless)', { ids: p2.map((w) => w.winId), log: H2.logs.filter((l) => /layout-sync/.test(l)) });
   const H2b = hub(loadHandler(), twins()); const S2b = H2b.connect();
   await S2b.send(twinWrite([{ id: 'win-old-0', why: 'replaced', by: 'win-new-0' }, { id: 'win-old-1', why: 'replaced' }], 3));
   const p2b = H2b.layouts().desktops['desk-p'].autoSave.windows;
@@ -282,8 +282,8 @@ await section('§1 PURE keepNames / carryName (src/lib/desktop-record.js)', asyn
   const DR = require(MODEL);
   ok(typeof DR.keepNames === 'function' && typeof DR.isNameless === 'function' && typeof DR.carryName === 'function', '§1 desktop-record.js exports keepNames / isNameless / carryName');
   const r = DR.keepNames({ prev: P_BEFORE(), next: P_SENT(), evidence: [] });
-  ok(r.carried.length === 7 && r.carried.every((c) => c.how === 'name') && !r.withheld.length && r.windows.every(isNamed), '§1 keepNames on the 09:18:22 shape: seven carried by NAME, none withheld, all named', r.carried);
-  ok(DR.isNameless(bare(4)) && !DR.isNameless(named(4)) && !DR.isNameless({ ...bare(4), serverSessionId: 'sess-9' }) && !DR.isNameless(files('x', 1)), '§1 isNameless: a session entry with no conversation AND no server session; never a window that is no session');
+  ok(r.carried.length === 7 && gateOf(r.carried.every((c) => c.how === 'name')) && !r.withheld.length && verdictOf(r.windows.every(isNamed)), '§1 keepNames on the 09:18:22 shape: seven carried by NAME, none withheld, all named', r.carried);
+  ok(gateOf(DR.isNameless(bare(4))) && !DR.isNameless(named(4)) && !DR.isNameless({ ...bare(4), serverSessionId: 'sess-9' }) && !DR.isNameless(files('x', 1)), '§1 isNameless: a session entry with no conversation AND no server session; never a window that is no session');
   const c = DR.carryName(named(6), bare(6));
   ok(c.backendSessionId === CID(6) && c.claudeSessionId === CID(6) && c.cwd === CWD(6) && c.backend === 'claude' && !c.serverSessionId && !c.openSpec && c.winId === 'win-new-6' && c.title === NAMES[6], '§1 carryName copies the conversation (backend, the id, claudeSessionId, cwd) — never the server session, the openSpec, the id or the title', c);
   const prevM = [named(0)], nextM = [bare(0)];
@@ -342,23 +342,23 @@ await section('§1b THE DOOR — the real resumeSession → createSession over t
   W.app.sidebar.getSessionConfig = () => ({}); W.app.sidebar._getSessionTasks = () => [];
   W.app.resumeSession(CID(6), CWD(6), NAMES[6], { backend: 'claude', backendSessionId: CID(6), winBounds: { gridBounds: GB(6), desktopId: 'desk-p', winId: 'win-old-6' } });
   const E = [...W.wins.values()].find((w) => w.type === 'chat');
-  ok(!!E && requests.some((m) => m.type === 'create' && m.resumeId === CID(6)) && E._desktopId === 'desk-p', '§1b the resume sent its create (never answered) and its window landed on 个人 (resume placement)', { E: E && E.id, desk: E && E._desktopId, req: requests.map((m) => m.type) });
+  ok(!!E && gateOf(requests.some((m) => m.type === 'create' && m.resumeId === CID(6))) && E._desktopId === 'desk-p', '§1b the resume sent its create (never answered) and its window landed on 个人 (resume placement)', { E: E && E.id, desk: E && E._desktopId, req: requests.map((m) => m.type) });
   const cap = W.lm.captureWin(E, E.id);
-  ok(cap && cap.backendSessionId === CID(6) && cap.backend === 'claude' && cap.cwd === CWD(6) && !cap.openSpec, '§1b THE WINDOW KNOWS ITS CONVERSATION FROM BIRTH: captured before its create answers it names the conversation (2.369.363: no identity — the title alone)', cap);
+  ok(gateOf(cap) && cap.backendSessionId === CID(6) && cap.backend === 'claude' && cap.cwd === CWD(6) && !cap.openSpec, '§1b THE WINDOW KNOWS ITS CONVERSATION FROM BIRTH: captured before its create answers it names the conversation (2.369.363: no identity — the title alone)', cap);
   const held = W.dm._savedStates.get('desk-p').windows;
   // lane phone-resume-keeps-layout (LAW 1 — A RESUME RE-OPENS ITS ROW): the resumed window IS win-old-6 — the row's own id, box and name
   ok(held.length === 2 && E.id === 'win-old-6' && held.find((w) => w.winId === 'win-old-6')?.backendSessionId === CID(6) && J(held.find((w) => w.winId === 'win-old-6')?.gridBounds) === J(GB(6)), '§1b 个人\'s held record: the resume re-opens win-old-6 AS ITSELF — its id, its box, NAMED (2.369.381: a new window in its place)', held.map((w) => [w.winId, w.backendSessionId || null]));
   await W.lm._doAutoSave();
   const out = W.syncs('desk-p').at(-1);
-  ok(out && out.state.windows.every(isNamed) && out.state.windows.some((w) => w.winId === E.id && w.backendSessionId === CID(6)), '§1b the next autosave sends 个人 with every window named (the resumed one by its conversation)', out && out.state.windows.map((w) => [w.winId, w.backendSessionId || null]));
-  ok(out && !out.evidence.some((e) => e.id === 'win-old-6' && ['replaced', 'closed', 'dup'].includes(e.why)), '§1b …and nothing in its evidence retires the row (no \'replaced\' / \'closed\' — the row stands)', out && out.evidence);
+  ok(gateOf(out) && gateOf(out.state.windows.every(isNamed)) && verdictOf(out.state.windows.some((w) => w.winId === E.id && w.backendSessionId === CID(6))), '§1b the next autosave sends 个人 with every window named (the resumed one by its conversation)', out && out.state.windows.map((w) => [w.winId, w.backendSessionId || null]));
+  ok(gateOf(out) && !out.evidence.some((e) => e.id === 'win-old-6' && ['replaced', 'closed', 'dup'].includes(e.why)), '§1b …and nothing in its evidence retires the row (no \'replaced\' / \'closed\' — the row stands)', out && out.evidence);
   // AT THE WRITER, NOT PER CALLER: a bare window (no birth identity — another door, an older bundle's shape) moved in place of a named entry
   const W2 = world({ records: { 'desk-w': [], 'desk-p': [named(7)], 'desk-r': [] }, active: 'desk-w' });
   const B = W2.mkWin('win-new-7', 'desk-w', { type: 'chat', title: NAMES[7] });
   W2.dm.moveWindowToDesktop(B.id, 'desk-p', { replaces: 'win-old-7' });
   await W2.lm._doAutoSave();
   const o2 = W2.syncs('desk-p').at(-1);
-  ok(o2 && o2.state.windows.length === 1 && o2.state.windows[0].winId === 'win-new-7' && o2.state.windows[0].backendSessionId === CID(7), '§1b a BARE window moved in place of a named entry takes its name at the writer (mergeDesktopRecord `replaced`) — 2.369.363 sent it nameless', o2 && o2.state.windows);
+  ok(gateOf(o2) && o2.state.windows.length === 1 && o2.state.windows[0].winId === 'win-new-7' && o2.state.windows[0].backendSessionId === CID(7), '§1b a BARE window moved in place of a named entry takes its name at the writer (mergeDesktopRecord `replaced`) — 2.369.363 sent it nameless', o2 && o2.state.windows);
   // a nameless newcomer on the desktop on show (the active desktop's resume — its read-only window closed, the new one bare)
   const W3 = world({ records: { 'desk-w': [named(8)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w' });
   W3.mkWin('win-old-8', 'desk-w', { type: 'chat', title: named(8).title, _openSpec: named(8).openSpec });
@@ -366,12 +366,12 @@ await section('§1b THE DOOR — the real resumeSession → createSession over t
   W3.mkWin('win-new-8', 'desk-w', { type: 'chat', title: NAMES[8] });
   await W3.lm._doAutoSave();
   const o3 = W3.syncs('desk-w').at(-1);
-  ok(o3 && !o3.state.windows.some((w) => w.winId === 'win-new-8') && o3.evidence.some((e) => e.id === 'win-new-8' && e.why === 'nameless'), '§1b a nameless newcomer on the desktop on show is LEFT OUT of the write and said (evidence \'nameless\') — never saved nameless', o3 && { windows: o3.state.windows.map((w) => w.winId), evidence: o3.evidence });
+  ok(gateOf(o3) && !o3.state.windows.some((w) => w.winId === 'win-new-8') && verdictOf(o3.evidence.some((e) => e.id === 'win-new-8' && e.why === 'nameless')), '§1b a nameless newcomer on the desktop on show is LEFT OUT of the write and said (evidence \'nameless\') — never saved nameless', o3 && { windows: o3.state.windows.map((w) => w.winId), evidence: o3.evidence });
   W3.wins.get('win-new-8')._conversation = { backend: 'claude', backendSessionId: CID(8), cwd: CWD(8) }; // its name arrives
   W3.lm._userDirty = true; W3.lm._lastUserInputAt = Date.now(); W3.lm._lastSentJson = null;
   await W3.lm._doAutoSave();
   const o4 = W3.syncs('desk-w').at(-1);
-  ok(o4 && o4.state.windows.some((w) => w.winId === 'win-new-8' && w.backendSessionId === CID(8)), '§1b …the first write after its name arrives carries it', o4 && o4.state.windows.map((w) => w.winId));
+  ok(gateOf(o4) && verdictOf(o4.state.windows.some((w) => w.winId === 'win-new-8' && w.backendSessionId === CID(8))), '§1b …the first write after its name arrives carries it', o4 && o4.state.windows.map((w) => w.winId));
 });
 
 await section('§2 UNBUILT IS NOT DROPPED — the 09:19:35 write on the REAL ws-handler; PURE shrinkVerdict', async () => {
@@ -380,26 +380,26 @@ await section('§2 UNBUILT IS NOT DROPPED — the 09:19:35 write on the REAL ws-
   await S.send({ type: 'layout-sync', desktopId: 'desk-p', state: { windows: before.slice(0, 4), grid: null }, evidence: before.slice(4).map((w) => ({ id: w.winId, why: 'unbuilt' })), base: 1000, sentAt: 5, viewport: 'desktop' });
   const kept = H.layouts().desktops['desk-p'].autoSave.windows;
   const refused = S.frames.find((f) => f.type === 'layout-sync-refused');
-  ok(kept.length === 11 && refused && refused.reason === 'shrink-without-close' && (refused.unexplained || []).length === 7, `§2 个人 11 → 4 with seven 'unbuilt' is REFUSED — the server keeps 11 (2.369.363 wrote 4; here ${kept.length})`, { refused, n: kept.length });
+  ok(kept.length === 11 && gateOf(refused) && refused.reason === 'shrink-without-close' && (refused.unexplained || []).length === 7, `§2 个人 11 → 4 with seven 'unbuilt' is REFUSED — the server keeps 11 (2.369.363 wrote 4; here ${kept.length})`, { refused, n: kept.length });
   const warn = H.logs.find((l) => /REFUSED a record of desktop "个人"/.test(l)) || '';
-  ok(NAMES.slice(4).every((n) => warn.includes(n)) && /7 stopped \/ unknown session window\(s\) dropped as 'unbuilt'/.test(warn), '§2 the refusal NAMES the seven by title — never a count', warn);
+  ok(gateOf(NAMES.slice(4).every((n) => warn.includes(n))) && verdictOf(/7 stopped \/ unknown session window\(s\) dropped as 'unbuilt'/.test(warn)), '§2 the refusal NAMES the seven by title — never a count', warn);
   const { shrinkVerdict } = require(MODEL);
   const ev = (ws, why) => ws.map((w) => ({ id: w.winId, why }));
   const one = shrinkVerdict({ prev: [named(9), named(10)], next: [named(10)], evidence: ev([named(9)], 'unbuilt'), alive: () => false });
   ok(!one.ok && J(one.unbuilt) === J(['win-old-9']), '§2 ONE stopped session window dropped as \'unbuilt\' is refused (any count)', one);
   const dup = shrinkVerdict({ prev: [named(9), named(10)], next: [{ ...named(9), winId: 'w-dup' }, named(10)], evidence: ev([named(9)], 'unbuilt'), alive: () => false });
-  ok(dup.ok, '§2 …a DUPLICATE (another entry still shows its session) still leaves', dup);
-  ok(shrinkVerdict({ prev: [files('a', 1), files('b', 2), files('c', 3)], next: [], evidence: ev([files('a', 1), files('b', 2), files('c', 3)], 'unbuilt') }).ok, '§2 …a window that is no session stays explained by \'unbuilt\'');
+  ok(verdictOf(dup.ok), '§2 …a DUPLICATE (another entry still shows its session) still leaves', dup);
+  ok(verdictOf(shrinkVerdict({ prev: [files('a', 1), files('b', 2), files('c', 3)], next: [], evidence: ev([files('a', 1), files('b', 2), files('c', 3)], 'unbuilt') }).ok), '§2 …a window that is no session stays explained by \'unbuilt\'');
   const live = shrinkVerdict({ prev: [named(9)], next: [], evidence: ev([named(9)], 'unbuilt'), alive: (s) => s === named(9).serverSessionId });
   ok(!live.ok && J(live.live) === J(['win-old-9']) && !(live.unbuilt || []).length, '§2 …a LIVE one is refused as before (the 10-22 rule: `live`)', live);
-  ok(shrinkVerdict({ prev: [named(9), named(10)], next: [], evidence: ev([named(9), named(10)], 'closed'), alive: () => false }).ok, '§2 …the person\'s CLOSE of stopped session windows passes');
+  ok(verdictOf(shrinkVerdict({ prev: [named(9), named(10)], next: [], evidence: ev([named(9), named(10)], 'closed'), alive: () => false }).ok), '§2 …the person\'s CLOSE of stopped session windows passes');
   // userW inc-mw1ogdno-5jny — the placeholder road vs A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN: a stopped conversation's copy on
   // ANOTHER desktop leaves only with the window that still shows it there (`by`, a placeholder's entry of the same session); a 'dup'
   // naming nothing of it is refused as a duplicate claim (`dup`), never taken as 'unbuilt' — the placeholder road keeps the window
   const other = [{ ...named(9), winId: 'w-elsewhere' }];
   const away = shrinkVerdict({ prev: [named(9), named(10)], next: [named(10)], evidence: [{ id: 'win-old-9', why: 'dup', by: 'w-elsewhere' }], alive: () => false, elsewhere: [other] });
   const wrongBy = shrinkVerdict({ prev: [named(9), named(10)], next: [named(10)], evidence: [{ id: 'win-old-9', why: 'dup', by: 'w-nowhere' }], alive: () => false, elsewhere: [other] });
-  ok(away.ok && !wrongBy.ok && J(wrongBy.dup) === J(['win-old-9']) && !(wrongBy.unbuilt || []).length, '§2 inc-mw1ogdno-5jny: a STOPPED session\'s copy leaves as a duplicate only when `by` (another desktop\'s placeholder entry of it) shows it; a `by` naming nothing ⇒ refused, named in `dup`', { away, wrongBy });
+  ok(gateOf(away.ok) && !wrongBy.ok && J(wrongBy.dup) === J(['win-old-9']) && !(wrongBy.unbuilt || []).length, '§2 inc-mw1ogdno-5jny: a STOPPED session\'s copy leaves as a duplicate only when `by` (another desktop\'s placeholder entry of it) shows it; a `by` naming nothing ⇒ refused, named in `dup`', { away, wrongBy });
 });
 
 await section('§2 the boot restore of that record on a hub whose sessions are stopped — placeholders, kept past the grace', async () => {
@@ -416,11 +416,11 @@ await section('§2 the boot restore of that record on a hub whose sessions are s
   const r = W.dm.recordFor('desk-p');
   ok(r.windows.length === 11 && !W.dm.evidence().some((e) => e.why === 'unbuilt'), '§2 past the grace the record keeps all ELEVEN — no \'unbuilt\' evidence (2.369.363 dropped the seven)', { n: r.windows.length, ev: W.dm.evidence() });
   const strip = (w) => { const o = { ...w }; for (const k of ['gridBounds', 'zIndex', 'isMinimized', 'isMaximized']) delete o[k]; return J(o); };
-  ok(rec.every((w) => strip(r.windows.find((x) => x.winId === w.winId)) === strip(w)), '§2 each placeholder\'s capture IS its entry — identity, openSpec, title as the record holds them (the arrangement is the page\'s)', r.windows.filter((x) => strip(x) !== strip(rec.find((w) => w.winId === x.winId))).slice(0, 1).map((x) => [strip(x), strip(rec.find((w) => w.winId === x.winId))]));
+  ok(verdictOf(rec.every((w) => strip(r.windows.find((x) => x.winId === w.winId)) === strip(w))), '§2 each placeholder\'s capture IS its entry — identity, openSpec, title as the record holds them (the arrangement is the page\'s)', r.windows.filter((x) => strip(x) !== strip(rec.find((w) => w.winId === x.winId))).slice(0, 1).map((x) => [strip(x), strip(rec.find((w) => w.winId === x.winId))]));
   // the press: the conversation resumes IN PLACE
   tileOf(stopped[1]).onclick();
   const call = W.resumed.at(-1);
-  ok(call && call[0] === CID(1) && call[1] === CWD(1) && call[2] === NAMES[1] && call[3].backendSessionId === CID(1) && call[3].fromWin === 'win-new-1' && !W.closed.includes('win-new-1'), '§2 the stopped tile\'s press resumes its conversation in its place (its id, cwd, name): the tile is the row — resumeSession re-opens it as itself (`fromWin`; lane phone-resume-keeps-layout r2 N4: the press closed it first and a new id was minted), the press closes nothing itself', call);
+  ok(gateOf(call) && call[0] === CID(1) && call[1] === CWD(1) && call[2] === NAMES[1] && call[3].backendSessionId === CID(1) && call[3].fromWin === 'win-new-1' && !W.closed.includes('win-new-1'), '§2 the stopped tile\'s press resumes its conversation in its place (its id, cwd, name): the tile is the row — resumeSession re-opens it as itself (`fromWin`; lane phone-resume-keeps-layout r2 N4: the press closed it first and a new id was minted), the press closes nothing itself', call);
   ok(tileOf(gone[1]).onclick == null, '§2 the unavailable tile itself is no press (nothing names a conversation) — its doors are (§7)');
 });
 
@@ -429,30 +429,30 @@ await section('§2 the live record\'s door — a placeholder broadcast live, reb
   const e6 = bare(6), e7 = { ...named(7), openSpec: undefined, winId: 'win-x-7' };
   W.lm._applyRemoteState({ windows: [e6, e7] }, { writer: 'desktop' });
   const held1 = W.lm._restoring === true;
-  ok(W.wins.get('win-new-6')?._placeholderOf && W.wins.get('win-x-7')?._placeholderOf && tileOf(W.wins.get('win-x-7'))?.dataset?.placeholder === 'stopped', '§2 another client\'s record with two spec-less session entries ⇒ two placeholders here (2.369.363: nothing — «no spec = can\'t recreate»)', [...W.wins.keys()]);
+  ok(gateOf(W.wins.get('win-new-6')?._placeholderOf) && gateOf(W.wins.get('win-x-7')?._placeholderOf) && tileOf(W.wins.get('win-x-7'))?.dataset?.placeholder === 'stopped', '§2 another client\'s record with two spec-less session entries ⇒ two placeholders here (2.369.363: nothing — «no spec = can\'t recreate»)', [...W.wins.keys()]);
   const c1 = await heldWait(1100, () => W.lm._restoring); // the apply's cooldown: the old real 1.1 s wait, run by hand (B-7e49)
   W.lm._applyRemoteState({ windows: [e6, { ...e7, openSpec: { ...named(7).openSpec, serverId: 'sess-77' } }] }, { writer: 'desktop' });
   const w7 = W.wins.get('win-x-7');
   const held2 = W.lm._restoring === true;
-  ok(w7 && !w7._placeholderOf && w7._openSpec?.serverId === 'sess-77' && W.replayed.some(([id]) => id === 'win-x-7'), '§2 a newer record whose entry has an openSpec (the resume answered on its page) REBUILDS it in place under the same id', { w7: w7 && { ph: !!w7._placeholderOf, spec: w7._openSpec }, replayed: W.replayed });
+  ok(gateOf(w7) && !w7._placeholderOf && w7._openSpec?.serverId === 'sess-77' && verdictOf(W.replayed.some(([id]) => id === 'win-x-7')), '§2 a newer record whose entry has an openSpec (the resume answered on its page) REBUILDS it in place under the same id', { w7: w7 && { ph: !!w7._placeholderOf, spec: w7._openSpec }, replayed: W.replayed });
   const c2 = await heldWait(1100, () => W.lm._restoring);
   W.lm._applyRemoteState({ windows: [{ ...e7, openSpec: { ...named(7).openSpec, serverId: 'sess-77' } }] }, { writer: 'desktop' });
   ok(!W.wins.has('win-new-6'), '§2 a record without the placeholder\'s entry (the owner closed it elsewhere) closes it here', [...W.wins.keys()]);
   const opened = (c) => c.flips.length === 1 && c.flips[0].ms === 1000 && c.flips[0].from === true && c.flips[0].to === false;
-  ok(held1 && held2 && opened(c1) && opened(c2), `§2 THE APPLY's COOLDOWN, run by hand where the two real 1.1 s waits stood (B-7e49): the gate HELD right after each apply and OPENED when its own 1000 ms timer fired — every timer the old waits let fire, fired in due order (${c1.fired.join(' / ')} ms; then ${c2.fired.join(' / ')} ms)`, { held1, held2, c1, c2 });
+  ok(gateOf(held1) && gateOf(held2) && gateOf(opened(c1)) && verdictOf(opened(c2)), `§2 THE APPLY's COOLDOWN, run by hand where the two real 1.1 s waits stood (B-7e49): the gate HELD right after each apply and OPENED when its own 1000 ms timer fired — every timer the old waits let fire, fired in due order (${c1.fired.join(' / ')} ms; then ${c2.fired.join(' / ')} ms)`, { held1, held2, c1, c2 });
   // the SAME recipe again (it is a placeholder BECAUSE its attach is dead and no transcript is here): it stays one — only a new
   // recipe (an openSpec it lacked, another server session) is built in place (the chrome leg ② caught the first cut rebuilding it)
   const D = world({ records: { 'desk-w': [], 'desk-p': [named(3)], 'desk-r': [] }, active: 'desk-p' });
   await D.lm.restoreState({ windows: [named(3)] });
   const before3 = D.wins.get('win-old-3');
   D.lm._applyRemoteState({ windows: [named(3)] }, { writer: 'desktop' });
-  ok(before3?._placeholderOf && D.wins.get('win-old-3') === before3 && D.wins.get('win-old-3')._placeholderOf && !D.replayed.length, '§2 a placeholder whose newer entry carries the SAME (dead) recipe stays the same placeholder — nothing replayed', { replayed: D.replayed });
+  ok(gateOf(before3?._placeholderOf) && D.wins.get('win-old-3') === before3 && gateOf(D.wins.get('win-old-3')._placeholderOf) && !D.replayed.length, '§2 a placeholder whose newer entry carries the SAME (dead) recipe stays the same placeholder — nothing replayed', { replayed: D.replayed });
   // a spec-less entry whose conversation RUNS (another page's resume, recorded before its create answered): attached, never «stopped»
   const L = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
   L.app.sidebar._allSessions = [{ webuiId: 'sess-live-9', backendSessionId: CID(9), backend: 'claude', cwd: CWD(9) }];
   L.lm._applyRemoteState({ windows: [{ ...named(9), winId: 'win-r-9', openSpec: undefined, serverSessionId: undefined }] }, { writer: 'desktop' });
   const r9 = L.wins.get('win-r-9');
-  ok(r9 && !r9._placeholderOf && r9._openSpec?.action === 'attachSession' && r9._openSpec.serverId === 'sess-live-9' && r9._openSpec.backendSessionId === CID(9), '§2 a spec-less entry whose conversation RUNS now (the sidebar\'s live row) is ATTACHED under its id — never a «stopped» tile for a live session', r9 && { ph: !!r9._placeholderOf, spec: r9._openSpec });
+  ok(gateOf(r9) && !r9._placeholderOf && r9._openSpec?.action === 'attachSession' && r9._openSpec.serverId === 'sess-live-9' && r9._openSpec.backendSessionId === CID(9), '§2 a spec-less entry whose conversation RUNS now (the sidebar\'s live row) is ATTACHED under its id — never a «stopped» tile for a live session', r9 && { ph: !!r9._placeholderOf, spec: r9._openSpec });
 });
 
 await section('§3 A DEAD LOCAL SESSION IS A STOPPED SESSION — the real boot-restore over a scratch data dir', async () => {
@@ -494,19 +494,19 @@ await section('§3 A DEAD LOCAL SESSION IS A STOPPED SESSION — the real boot-r
       await api.stoppedSettled?.(); // the kept metas' transcript answers (off the loop)
     } finally { console.log = REAL.log; console.warn = REAL.warn; CL.store.locate = locate0; }
     ok(syncLocates === 0 && mainLocates === 0, `§3 ③ the boot walks NO transcript store on its loop — 0 harness locates on the main thread (77dc65619: ${2} — one sync projects scan / rollout walk per dead socket; here ${mainLocates})`);
-    ok(deleted.includes(withT) && deleted.includes(noT) && !fs.readdirSync(META).some((f) => f.endsWith('.tmp')), '§3 ④ a kept meta\'s live .json goes through the ONE delete road (deleteSessionMeta — its tombstone stops a straggler writer resurrecting it), the stopped copy written by the store writer (no .tmp left)', { deleted, files: fs.readdirSync(META) });
+    ok(gateOf(deleted.includes(withT)) && gateOf(deleted.includes(noT)) && !fs.readdirSync(META).some((f) => f.endsWith('.tmp')), '§3 ④ a kept meta\'s live .json goes through the ONE delete road (deleteSessionMeta — its tombstone stops a straggler writer resurrecting it), the stopped copy written by the store writer (no .tmp left)', { deleted, files: fs.readdirSync(META) });
     ok(early === true, '§3 ③ a conversation\'s meta is kept FIRST — the «no transcript» answer, not the boot\'s loop, deletes it', { early });
     const kept = path.join(META, withT + '.json.stopped');
     const k = fs.existsSync(kept) ? JSON.parse(fs.readFileSync(kept, 'utf8')) : null;
-    ok(lines.filter((l) => /✗ Dead socket: cw-/.test(l)).length === 3 && [withT, noT, shell].every((s) => !fs.existsSync(path.join(SOCK, s))), '§3 the three dead sockets are retired (the Dead line, the socket gone)', lines.filter((l) => /Dead|meta/.test(l)));
-    ok(k && k.name === 'Ledger' && k.claudeSessionId === CID(0) && k.accountId === 'acct-x' && J(k.taskIds) === J(['T-1']) && typeof k.stoppedAt === 'number' && !fs.existsSync(path.join(META, withT + '.json')), '§3 a claude session whose transcript exists KEEPS its meta as STOPPED (<sock>.json.stopped, stoppedAt; its name, account, groups kept) — out of every live reader\'s *.json scan (2.369.363 deleted it)', { k, json: fs.existsSync(path.join(META, withT + '.json')) });
+    ok(lines.filter((l) => /✗ Dead socket: cw-/.test(l)).length === 3 && verdictOf([withT, noT, shell].every((s) => !fs.existsSync(path.join(SOCK, s)))), '§3 the three dead sockets are retired (the Dead line, the socket gone)', lines.filter((l) => /Dead|meta/.test(l)));
+    ok(gateOf(k) && k.name === 'Ledger' && k.claudeSessionId === CID(0) && k.accountId === 'acct-x' && J(k.taskIds) === J(['T-1']) && typeof k.stoppedAt === 'number' && !fs.existsSync(path.join(META, withT + '.json')), '§3 a claude session whose transcript exists KEEPS its meta as STOPPED (<sock>.json.stopped, stoppedAt; its name, account, groups kept) — out of every live reader\'s *.json scan (2.369.363 deleted it)', { k, json: fs.existsSync(path.join(META, withT + '.json')) });
     ok(!fs.existsSync(path.join(META, noT + '.json')) && !fs.existsSync(path.join(META, noT + '.json.stopped')) && !fs.existsSync(path.join(META, shell + '.json')) && !fs.existsSync(path.join(META, shell + '.json.stopped')), '§3 one with NO transcript (once its harness answered, off the loop), and a shell (at once), are deleted as before', fs.readdirSync(META));
-    ok(lines.some((l) => /local session meta kept as stopped \(claude c0ffee00…: its transcript is looked for off the loop\)/.test(l)) && lines.some((l) => new RegExp(noT + ': no transcript — its stopped meta deleted').test(l)), '§3 the journal says which meta was kept, and which one its answer deleted', lines.filter((l) => /↳/.test(l)));
+    ok(gateOf(lines.some((l) => /local session meta kept as stopped \(claude c0ffee00…: its transcript is looked for off the loop\)/.test(l))) && verdictOf(lines.some((l) => new RegExp(noT + ': no transcript — its stopped meta deleted').test(l))), '§3 the journal says which meta was kept, and which one its answer deleted', lines.filter((l) => /↳/.test(l)));
     // what the SIDEBAR shows: the claude store's discovery lists the conversation from its TRANSCRIPT — the meta is not read
     const H = require(path.join(REPO, 'src/harnesses')).get('claude');
     const rows = await H.store.discover({ activeSessions: new Map(), webuiPids: new Map() });
     const row = (rows || []).find((s) => (s.backendSessionId || s.sessionId) === CID(0));
-    ok(row && row.status !== 'live', `§3 the sidebar's row for it is the transcript's — a STOPPED row (status ${row && row.status}), the same with the meta kept or deleted; the resume-all offer lists it from the layout + this row`, row && { status: row.status, cwd: row.cwd });
+    ok(gateOf(row) && row.status !== 'live', `§3 the sidebar's row for it is the transcript's — a STOPPED row (status ${row && row.status}), the same with the meta kept or deleted; the resume-all offer lists it from the layout + this row`, row && { status: row.status, cwd: row.cwd });
     console.log('    §3 sidebar row: ' + J(row && { status: row.status, name: row.name || row.summary || null, cwd: row.cwd }));
   } finally { process.env.PATH = env0.PATH; process.env.HOME = env0.HOME; fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); }
 });
@@ -534,24 +534,24 @@ await section('§4 THE DOOR TO RECOVER — one desktop restored alone (the real 
     await route.route.stack[0].handle({ params: { id }, body: { desktop: '个人' } }, { json: (j) => { answer = j; }, status: () => ({ json: (j) => { answer = j; } }) });
     await tick(5);
     const back = R.readLayouts();
-    ok(answer && answer.success && back.desktops['desk-p'].autoSave.windows.length === 12 && J(back.desktops['desk-p'].autoSave.windows.map((w) => w.winId)) === J([...P_BEFORE(), editor].map((w) => w.winId)), '§4 the row\'s 个人 restores ALONE: the point\'s twelve windows', { answer, p: back.desktops['desk-p'].autoSave.windows.length });
+    ok(gateOf(answer) && gateOf(answer.success) && back.desktops['desk-p'].autoSave.windows.length === 12 && J(back.desktops['desk-p'].autoSave.windows.map((w) => w.winId)) === J([...P_BEFORE(), editor].map((w) => w.winId)), '§4 the row\'s 个人 restores ALONE: the point\'s twelve windows', { answer, p: back.desktops['desk-p'].autoSave.windows.length });
     ok(back.desktops['desk-w'].autoSave.windows.length === 5 && back.desktops['desk-r'].autoSave.windows.length === 6 && !back.desktops['desk-w'].autoSave.windows.some((w) => w.winId === 'w-5'), '§4 …工作 and 研究 stay as they are NOW (5 / 6 — the point held 工作 six; 2.369.363 restored every desktop)', { w: back.desktops['desk-w'].autoSave.windows.length, r: back.desktops['desk-r'].autoSave.windows.length });
     const pts = R.listLayoutHistory();
-    ok(heard.some((m) => m.type === 'layout-restored') && pts.some((x) => x.writer && x.writer.via === 'restore' && x.writer.desktop === 'desk-p'), '§4 every client is told (layout-restored) and the forced rollback point names the restore and the desktop — undoable', pts.map((x) => x.writer));
+    ok(gateOf(heard.some((m) => m.type === 'layout-restored')) && verdictOf(pts.some((x) => x.writer && x.writer.via === 'restore' && x.writer.desktop === 'desk-p')), '§4 every client is told (layout-restored) and the forced rollback point names the restore and the desktop — undoable', pts.map((x) => x.writer));
     let miss = null;
     await route.route.stack[0].handle({ params: { id }, body: { desktop: 'Nowhere' } }, { json: (j) => { miss = j; }, status: (c) => ({ json: (j) => { miss = { ...j, code: c }; } }) });
-    ok(miss && miss.code === 404, '§4 a desktop the point does not hold is a 404, nothing written', miss);
+    ok(gateOf(miss) && miss.code === 404, '§4 a desktop the point does not hold is a 404, nothing written', miss);
     // the 06:50Z 个人 restored, on a hub whose sessions are all stopped: twelve windows, not 0
     const W = world({ records: { 'desk-w': [], 'desk-p': back.desktops['desk-p'].autoSave.windows, 'desk-r': [] }, active: 'desk-p' });
     await W.lm.restoreState({ windows: back.desktops['desk-p'].autoSave.windows });
     const shown = back.desktops['desk-p'].autoSave.windows.filter((w) => W.wins.has(w.winId)).map((w) => W.wins.get(w.winId));
-    ok(shown.length === 12 && shown.filter((w) => w._placeholderOf).length === 11 && shown.some((w) => w.type === 'editor'), `§4 restoring the 06:50Z 个人 on a hub whose sessions are stopped builds TWELVE windows — eleven placeholders + the editor (2.369.363: the editor alone; here ${shown.length})`, shown.map((w) => [w.id, w.type, !!w._placeholderOf]));
+    ok(shown.length === 12 && shown.filter((w) => w._placeholderOf).length === 11 && verdictOf(shown.some((w) => w.type === 'editor')), `§4 restoring the 06:50Z 个人 on a hub whose sessions are stopped builds TWELVE windows — eleven placeholders + the editor (2.369.363: the editor alone; here ${shown.length})`, shown.map((w) => [w.id, w.type, !!w._placeholderOf]));
   } finally { fs.rmSync(dd, { recursive: true, force: true }); }
   const SF = read('src/lib/setup-flows.js');
-  ok(/class="lh-desk" data-id="\$\{escHtml\(e\.id\)\}" data-desk="\$\{escHtml\(n\)\}"/.test(SF) && /body: JSON\.stringify\(\{ desktop: desk, rid: end\.rid \}\)/.test(SF) && /registerMenuItem\(\{ menu: M, parent: 'system', order: 40,[^\n]*Restore a previous layout…/.test(read('src/lib/gear-menu.js')), '§4 the door: ⚙ → System → «Restore a previous layout…» (恢复之前的布局…) lists each point with its desktops — each desktop a button posting { desktop } to its restore (and the rid of the press — lane phone-dock-restore r2)');
+  ok(gateOf(/class="lh-desk" data-id="\$\{escHtml\(e\.id\)\}" data-desk="\$\{escHtml\(n\)\}"/.test(SF)) && gateOf(/body: JSON\.stringify\(\{ desktop: desk, rid: end\.rid \}\)/.test(SF)) && verdictOf(/registerMenuItem\(\{ menu: M, parent: 'system', order: 40,[^\n]*Restore a previous layout…/.test(read('src/lib/gear-menu.js'))), '§4 the door: ⚙ → System → «Restore a previous layout…» (恢复之前的布局…) lists each point with its desktops — each desktop a button posting { desktop } to its restore (and the rid of the press — lane phone-dock-restore r2)');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['Session stopped — click to resume', 'Session unavailable', 'Press a desktop to restore it alone — your other desktops stay as they are now.', 'Restore only “{desktop}”', 'Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.', '“{desktop}” restored — reloading…'];
-  ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')) && zh.includes('"Session stopped — click to resume": "会话已停止 — 点击恢复"') && zh.includes('"Session unavailable": "会话不可用"'), '§4 every new word has a zh AND a ja entry (会话已停止 — 点击恢复 / 会话不可用)', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
+  ok(gateOf(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':'))) && gateOf(zh.includes('"Session stopped — click to resume": "会话已停止 — 点击恢复"')) && verdictOf(zh.includes('"Session unavailable": "会话不可用"')), '§4 every new word has a zh AND a ja entry (会话已停止 — 点击恢复 / 会话不可用)', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
 });
 
 await section('§6 r2 ① A REPLAY IS IDEMPOTENT — two replays 50 ms apart build each window once, nothing outside wm.windows', async () => {
@@ -570,7 +570,7 @@ await section('§6 r2 ① A REPLAY IS IDEMPOTENT — two replays 50 ms apart bui
     const r2 = W.dm._replayMissing('desk-p', W.dm._savedStates.get('desk-p'));
     await tick(400);
     const j = judge(W, made);
-    ok(j.made === 3 && j.inMap === 3 && !j.orphans.length && j.ids.every((a) => a === 'viewSession') && r1 === 3 && r2 === 0, `§6 ① two replays 50 ms apart ⇒ THREE windows, zero orphans; the second leaves the three to the first (77dc65619: six built, three orphaned outside wm.windows)`, { r1, r2, ...j });
+    ok(j.made === 3 && j.inMap === 3 && !j.orphans.length && gateOf(j.ids.every((a) => a === 'viewSession')) && r1 === 3 && r2 === 0, `§6 ① two replays 50 ms apart ⇒ THREE windows, zero orphans; the second leaves the three to the first (77dc65619: six built, three orphaned outside wm.windows)`, { r1, r2, ...j });
     // the restore's own belt: two overlapping restores of the same entries (the door's guard not asked) — an entry built
     // meanwhile by another door is never built again
     const V = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
@@ -580,7 +580,7 @@ await section('§6 r2 ① A REPLAY IS IDEMPOTENT — two replays 50 ms apart bui
     const b = V.lm.restoreState({ windows: ent() });
     await Promise.all([a, b]); await tick(20);
     const j2 = judge(V, made2);
-    ok(j2.made === 3 && !j2.orphans.length && j2.ids.every((x) => x === 'viewSession'), '§6 ① restoreState\'s belt: two overlapping restores of the same three entries build three windows — the later one skips what the earlier built (77dc65619: six, three orphaned)', j2);
+    ok(j2.made === 3 && !j2.orphans.length && verdictOf(j2.ids.every((x) => x === 'viewSession')), '§6 ① restoreState\'s belt: two overlapping restores of the same three entries build three windows — the later one skips what the earlier built (77dc65619: six, three orphaned)', j2);
   } finally { delays['/api/sessions'] = 0; answers['/api/sessions'] = { sessions: [] }; }
 });
 
@@ -592,7 +592,7 @@ await section('§6 r2 ② THE HOST RIDES WITH THE NAME — {backend, backendSess
   const W = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
   const born = W.mkWin('win-born', 'desk-p', { type: 'chat', title: NAMES[8], _conversation: { backend: 'claude', backendSessionId: CID(8), cwd: CWD(8), hostId: 'host-a' } });
   const cap = W.lm.captureWin(born);
-  ok(cap && cap.backendSessionId === CID(8) && cap.hostId === 'host-a' && DR.hostOf(cap) === 'host-a', '§6 ② born: a remote resume\'s window, captured before its create answers, names its conversation WITH its host (77dc65619: no host)', cap && { bsid: cap.backendSessionId, hostId: cap.hostId ?? null });
+  ok(gateOf(cap) && cap.backendSessionId === CID(8) && cap.hostId === 'host-a' && DR.hostOf(cap) === 'host-a', '§6 ② born: a remote resume\'s window, captured before its create answers, names its conversation WITH its host (77dc65619: no host)', cap && { bsid: cap.backendSessionId, hostId: cap.hostId ?? null });
   // carried: PURE carryName / keepIdentity, and the REAL server write (the 09:18:22 shape, one of the eleven remote)
   const carried = DR.carryName(old, bare(8));
   ok(carried.backendSessionId === CID(8) && carried.hostId === 'host-a' && !carried.openSpec && !carried.serverSessionId && DR.hostOf(carried) === 'host-a', '§6 ② carried: carryName takes the old entry\'s host with its conversation (its recipe\'s hostId as the entry\'s own) — never its openSpec or server session (77dc65619: no host)', carried);
@@ -602,28 +602,28 @@ await section('§6 r2 ② THE HOST RIDES WITH THE NAME — {backend, backendSess
   const H = hub(loadHandler(), DOC(seed)); const S = H.connect();
   await S.send({ ...W0(), state: { windows: P_SENT(), grid: null } });
   const st = H.layouts().desktops['desk-p'].autoSave.windows.find((w) => w.backendSessionId === CID(8) && !w.openSpec);
-  ok(st && st.hostId === 'host-a' && DR.hostOf(st) === 'host-a', '§6 ② the server\'s write stores the carried entry WITH its host (the record keeps hostId through the write)', st && { winId: st.winId, hostId: st.hostId ?? null });
+  ok(gateOf(st) && st.hostId === 'host-a' && DR.hostOf(st) === 'host-a', '§6 ② the server\'s write stores the carried entry WITH its host (the record keeps hostId through the write)', st && { winId: st.winId, hostId: st.hostId ?? null });
   // restored: no local transcript (a remote conversation never stoppedMatches LOCAL discovery) ⇒ viewed ON its host, as the old entry is
   let viewed = null;
   W.app.viewSession = (sid, cwd, name, o) => { viewed = o; return W.mkWin('view-r', 'desk-p', { type: 'chat' }); };
   await W.lm.restoreState({ windows: [carried] });
-  ok(viewed && viewed.hostId === 'host-a' && !W.wins.get('win-new-8')?._placeholderOf, '§6 ② restored: the carried entry is viewed read-only ON its host, the old entry\'s road (77dc65619: a LOCAL «stopped» tile)', viewed);
+  ok(gateOf(viewed) && viewed.hostId === 'host-a' && !W.wins.get('win-new-8')?._placeholderOf, '§6 ② restored: the carried entry is viewed read-only ON its host, the old entry\'s road (77dc65619: a LOCAL «stopped» tile)', viewed);
   // a placeholder (a remote apply, no live row): names its host; the press resumes on that host; its capture keeps the host
   const V = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p', extra: { _hostLabel: (h) => (h === 'host-a' ? 'gpu-box' : h) } });
   V.lm._applyRemoteState({ windows: [carried] }, { writer: 'desktop' });
   const ph = V.wins.get('win-new-8');
   const words = wordsOf(ph);
-  ok(ph?._placeholderOf && tileOf(ph)?.dataset?.host === 'host-a' && words[0] === NAMES[8] && words[1] === 'on gpu-box' && words.at(-1) === 'Session stopped — click to resume', '§6 ② a remote conversation\'s placeholder names its machine — the title, «on <host>» (its own line since r3), «Session stopped — click to resume» (77dc65619: no host)', { words, host: tileOf(ph)?.dataset?.host ?? null });
+  ok(gateOf(ph?._placeholderOf) && tileOf(ph)?.dataset?.host === 'host-a' && words[0] === NAMES[8] && words[1] === 'on gpu-box' && words.at(-1) === 'Session stopped — click to resume', '§6 ② a remote conversation\'s placeholder names its machine — the title, «on <host>» (its own line since r3), «Session stopped — click to resume» (77dc65619: no host)', { words, host: tileOf(ph)?.dataset?.host ?? null });
   const pc = ph && V.lm.captureWin(ph);
-  ok(pc && pc.hostId === 'host-a' && pc.backendSessionId === CID(8), '§6 ② the placeholder\'s capture keeps the host (the record keeps it through every write)', pc && { hostId: pc.hostId ?? null });
+  ok(gateOf(pc) && pc.hostId === 'host-a' && pc.backendSessionId === CID(8), '§6 ② the placeholder\'s capture keeps the host (the record keeps it through every write)', pc && { hostId: pc.hostId ?? null });
   tileOf(ph)?.onclick?.();
   const call = V.resumed.at(-1);
-  ok(call && call[0] === CID(8) && call[3] && call[3].hostId === 'host-a', '§6 ② the press resumes the conversation ON that host — resumeSession(…, {hostId}) (77dc65619: hostId undefined ⇒ this hub)', call && { cid: call[0], hostId: call[3] && call[3].hostId });
+  ok(gateOf(call) && call[0] === CID(8) && gateOf(call[3]) && call[3].hostId === 'host-a', '§6 ② the press resumes the conversation ON that host — resumeSession(…, {hostId}) (77dc65619: hostId undefined ⇒ this hub)', call && { cid: call[0], hostId: call[3] && call[3].hostId });
   // a live row's recipe (the conversation runs again on its host): the row's host, never its display cwd «host: /path»
   V.app.sidebar._allSessions = [{ webuiId: 'sess-r8', backend: 'claude', backendSessionId: CID(8), sessionId: CID(8), host: 'host-a', hostName: 'gpu-box', cwd: 'gpu-box: ' + CWD(8), status: 'live' }];
   const spec = V.lm._liveSpecOf(carried), specNoCwd = V.lm._liveSpecOf({ ...carried, cwd: '' });
   const elsewhere = V.lm._liveSpecOf({ ...carried, hostId: 'host-b' });
-  ok(spec && spec.serverId === 'sess-r8' && spec.hostId === 'host-a' && spec.cwd === CWD(8) && specNoCwd && specNoCwd.cwd === '' && elsewhere === null, '§6 ② a live row\'s attach recipe keeps the row\'s host and never its display cwd; a row on ANOTHER host is not this entry\'s', { spec, specNoCwd: specNoCwd && specNoCwd.cwd, elsewhere });
+  ok(gateOf(spec) && spec.serverId === 'sess-r8' && spec.hostId === 'host-a' && spec.cwd === CWD(8) && gateOf(specNoCwd) && specNoCwd.cwd === '' && elsewhere === null, '§6 ② a live row\'s attach recipe keeps the row\'s host and never its display cwd; a row on ANOTHER host is not this entry\'s', { spec, specNoCwd: specNoCwd && specNoCwd.cwd, elsewhere });
 });
 
 await section('§7 r3 THE TILE WITH NO PRESS HAS A WAY FORWARD — why, in one line, and three doors', async () => {
@@ -641,10 +641,10 @@ await section('§7 r3 THE TILE WITH NO PRESS HAS A WAY FORWARD — why, in one l
   const t4 = W.wins.get('win-new-4');
   const d = doorsOf(t4);
   ok(tileOf(t4)?.dataset?.placeholder === 'unavailable' && lineOf(t4, 'session-placeholder-why') === 'This window was saved without its conversation or its folder, so it cannot be reopened from here.', '§7 a nameless entry\'s tile SAYS WHY in one line — saved without its conversation (and its folder: the record holds none) (5e0cb138e: «Session unavailable» alone)', wordsOf(t4));
-  ok(d.length === 3 && d.every((b) => b.tagName === 'BUTTON' && typeof b.onclick === 'function') && J(d.map((b) => b.dataset.door)) === J(['rollback', 'sessions', 'remove']) && J(d.map((b) => b.textContent)) === J(['Restore a previous layout…', 'Open the session list', 'Remove']), '§7 …and offers THREE doors, each a button: «Restore a previous layout…» · «Open the session list» · «Remove» (5e0cb138e: none — its only control was the window\'s ✕)', d.map((b) => [b.tagName, b.dataset.door, b.textContent]));
+  ok(d.length === 3 && gateOf(d.every((b) => b.tagName === 'BUTTON' && typeof b.onclick === 'function')) && J(d.map((b) => b.dataset.door)) === J(['rollback', 'sessions', 'remove']) && J(d.map((b) => b.textContent)) === J(['Restore a previous layout…', 'Open the session list', 'Remove']), '§7 …and offers THREE doors, each a button: «Restore a previous layout…» · «Open the session list» · «Remove» (5e0cb138e: none — its only control was the window\'s ✕)', d.map((b) => [b.tagName, b.dataset.door, b.textContent]));
   d[0].onclick({ stopPropagation() {} });
   const slot = histCalls.at(-1);
-  ok(slot && slot.desktopId === 'desk-p' && slot.entry?.winId === 'win-new-4' && slot.name === NAMES[4], '§7 the rollback door opens the dialog FOR THIS SLOT (its desktop, its entry, its name)', slot && { desktopId: slot.desktopId, win: slot.entry?.winId, name: slot.name });
+  ok(gateOf(slot) && slot.desktopId === 'desk-p' && slot.entry?.winId === 'win-new-4' && slot.name === NAMES[4], '§7 the rollback door opens the dialog FOR THIS SLOT (its desktop, its entry, its name)', slot && { desktopId: slot.desktopId, win: slot.entry?.winId, name: slot.name });
   d[1].onclick({ stopPropagation() {} });
   ok(J(listCalls) === J([NAMES[4]]), '§7 the session-list door opens the list searched by the window\'s name', listCalls);
   // the reasons, as the record shows them (PURE placeholderWhy) and as the tile says them
@@ -658,26 +658,26 @@ await section('§7 r3 THE TILE WITH NO PRESS HAS A WAY FORWARD — why, in one l
   ok(lineOf(V.wins.get('win-new-7'), 'session-placeholder-where') === CWD(7) && lineOf(V.wins.get('win-new-6'), 'session-placeholder-host') === 'on far-box' && lineOf(W.wins.get('win-new-0'), 'session-placeholder-where') === CWD(0), '§7 the folder the record holds is shown on BOTH kinds (r3 ③), the machine on its own line');
   // ✕ ⇒ the confirm; cancel keeps the entry
   const ask = (id) => W.app.wm.requestClose(id);
-  ok(ask('win-new-4') === false && W.wins.has('win-new-4') && J(confirms) === J([NAMES[4]]), '§7 the ✕ of a nameless tile ASKS first — the window stays while the confirm is up (5e0cb138e: closed at once, the entry gone from the record)', { confirms, has: W.wins.has('win-new-4') });
+  ok(ask('win-new-4') === false && gateOf(W.wins.has('win-new-4')) && J(confirms) === J([NAMES[4]]), '§7 the ✕ of a nameless tile ASKS first — the window stays while the confirm is up (5e0cb138e: closed at once, the entry gone from the record)', { confirms, has: W.wins.has('win-new-4') });
   await tick(5);
-  ok(W.wins.has('win-new-4') && W.dm.recordFor('desk-p').windows.some((w) => w.winId === 'win-new-4') && !W.dm.evidence().some((e) => e.id === 'win-new-4' && e.why === 'closed'), '§7 …cancel KEEPS it: the tile, the entry in the record, no \'closed\' evidence', W.dm.evidence().filter((e) => e.id === 'win-new-4'));
+  ok(gateOf(W.wins.has('win-new-4')) && gateOf(W.dm.recordFor('desk-p').windows.some((w) => w.winId === 'win-new-4')) && !W.dm.evidence().some((e) => e.id === 'win-new-4' && e.why === 'closed'), '§7 …cancel KEEPS it: the tile, the entry in the record, no \'closed\' evidence', W.dm.evidence().filter((e) => e.id === 'win-new-4'));
   answer = true; d[2].onclick({ stopPropagation() {} }); await tick(5);
-  ok(!W.wins.has('win-new-4') && J(confirms) === J([NAMES[4], NAMES[4]]) && W.dm.evidence().some((e) => e.id === 'win-new-4' && e.why === 'closed') && !W.dm.recordFor('desk-p').windows.some((w) => w.winId === 'win-new-4'), '§7 «Remove» asks the same confirm; yes = the person\'s close (the record drops it as \'closed\', every client closes it)', { confirms, ev: W.dm.evidence().filter((e) => e.id === 'win-new-4') });
+  ok(!W.wins.has('win-new-4') && J(confirms) === J([NAMES[4], NAMES[4]]) && gateOf(W.dm.evidence().some((e) => e.id === 'win-new-4' && e.why === 'closed')) && !W.dm.recordFor('desk-p').windows.some((w) => w.winId === 'win-new-4'), '§7 «Remove» asks the same confirm; yes = the person\'s close (the record drops it as \'closed\', every client closes it)', { confirms, ev: W.dm.evidence().filter((e) => e.id === 'win-new-4') });
   answer = true; ask('win-new-5'); await tick(5);
   ok(!W.wins.has('win-new-5') && confirms.length === 3, '§7 …and the ✕ with a yes closes it');
   const n0 = confirms.length;
   ok(ask('win-new-0') === true && !W.wins.has('win-new-0') && confirms.length === n0, '§7 a STOPPED tile\'s ✕ closes without asking (its conversation stays in the session list)', { left: W.wins.has('win-new-0'), confirms });
   // the confirm's words: deleted for good, and where it still lives
   const L = read('src/lib/layout.js');
-  ok(/confirmRemovePlaceholder\(\{ name \}\) \{\n\s*return showConfirmDialog\(\{ title: t\('Remove this window\?'\), message: t\('“\{name\}” is deleted from this desktop’s layout for good\. Only an older rollback point \(Restore a previous layout…\) still holds it\.', \{ name \}\), confirmText: t\('Remove'\), danger: true \}\);/.test(L), '§7 the confirm says the entry is deleted FOR GOOD (and that only an older rollback point still holds it) — the house dialog, danger');
+  ok(verdictOf(/confirmRemovePlaceholder\(\{ name \}\) \{\n\s*return showConfirmDialog\(\{ title: t\('Remove this window\?'\), message: t\('“\{name\}” is deleted from this desktop’s layout for good\. Only an older rollback point \(Restore a previous layout…\) still holds it\.', \{ name \}\), confirmText: t\('Remove'\), danger: true \}\);/.test(L)), '§7 the confirm says the entry is deleted FOR GOOD (and that only an older rollback point still holds it) — the house dialog, danger');
   // a 60-char title + a host: the host is NOT inside the one-line (ellipsized) name
   const long = 'Investigate why the nightly integration build fails on main.'; // 60 chars
   const R = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p', extra: { _hostLabel: (h) => (h === 'host-a' ? 'gpu-box' : h) } });
   R.lm._applyRemoteState({ windows: [{ ...named(8), winId: 'win-long', title: long + ' — ' + CWD(8), openSpec: undefined, serverSessionId: undefined, hostId: 'host-a' }, { ...bare(9), winId: 'win-long-u', title: long, hostId: 'host-a' }] }, { writer: 'desktop' });
   const lp = R.wins.get('win-long'), lu = R.wins.get('win-long-u');
-  ok(long.length === 60 && [lp, lu].every((w) => lineOf(w, 'session-placeholder-name') === long && lineOf(w, 'session-placeholder-host') === 'on gpu-box') && tileOf(lp).dataset.placeholder === 'stopped' && tileOf(lu).dataset.placeholder === 'unavailable', '§7 a 60-char title + a host ⇒ the host is its OWN line under the title, never inside the ellipsized name — stopped and unavailable alike (5e0cb138e: «<title> · gpu-box» cut by the ellipsis)', [wordsOf(lp), wordsOf(lu)]);
+  ok(long.length === 60 && gateOf([lp, lu].every((w) => lineOf(w, 'session-placeholder-name') === long && lineOf(w, 'session-placeholder-host') === 'on gpu-box')) && tileOf(lp).dataset.placeholder === 'stopped' && tileOf(lu).dataset.placeholder === 'unavailable', '§7 a 60-char title + a host ⇒ the host is its OWN line under the title, never inside the ellipsized name — stopped and unavailable alike (5e0cb138e: «<title> · gpu-box» cut by the ellipsis)', [wordsOf(lp), wordsOf(lu)]);
   const css = read('public/style.css');
-  ok(/\.session-placeholder-name \{[^}]*text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; \}/.test(css) && /\.session-placeholder > :first-child \{ margin-top: auto; \}\n\.session-placeholder > :last-child \{ margin-bottom: auto; \}/.test(css) && /\.session-placeholder \{[^}]*justify-content: flex-start;[^}]*overflow: auto;/.test(css) && /\.session-placeholder-host \{[^}]*flex-shrink: 0;/.test(css) && /\.agent-btn\.session-placeholder-door \{ min-height: 44px;/.test(css) && /@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{\n  \.session-placeholder-name \{ font-size: 18px; \}\n  \.session-placeholder-host, \.session-placeholder-where, \.session-placeholder-say, \.session-placeholder-why, \.agent-btn\.session-placeholder-door \{ font-size: 16px; \}/.test(css) && !/var\(--bg-secondary/.test(css.slice(css.indexOf('.session-placeholder {'), css.indexOf('.session-placeholder {') + 600)), '§7 the CSS: the name ellipsized and never shrunk away, the tile centred by auto margins (a tall one scrolls from its top), the host its own unshrunk line, doors ≥ 44 px, every word ≥ 16 px on the phone; no --bg-secondary (not a token here)');
+  ok(gateOf(/\.session-placeholder-name \{[^}]*text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; \}/.test(css)) && gateOf(/\.session-placeholder > :first-child \{ margin-top: auto; \}\n\.session-placeholder > :last-child \{ margin-bottom: auto; \}/.test(css)) && gateOf(/\.session-placeholder \{[^}]*justify-content: flex-start;[^}]*overflow: auto;/.test(css)) && gateOf(/\.session-placeholder-host \{[^}]*flex-shrink: 0;/.test(css)) && gateOf(/\.agent-btn\.session-placeholder-door \{ min-height: 44px;/.test(css)) && gateOf(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{\n  \.session-placeholder-name \{ font-size: 18px; \}\n  \.session-placeholder-host, \.session-placeholder-where, \.session-placeholder-say, \.session-placeholder-why, \.agent-btn\.session-placeholder-door \{ font-size: 16px; \}/.test(css)) && !/var\(--bg-secondary/.test(css.slice(css.indexOf('.session-placeholder {'), css.indexOf('.session-placeholder {') + 600)), '§7 the CSS: the name ellipsized and never shrunk away, the tile centred by auto margins (a tall one scrolls from its top), the host its own unshrunk line, doors ≥ 44 px, every word ≥ 16 px on the phone; no --bg-secondary (not a token here)');
 });
 
 await section('§7 r3 the rollback door opens the dialog ON the newest point that names this slot (the REAL router)', async () => {
@@ -714,27 +714,27 @@ await section('§7 r3 the rollback door opens the dialog ON the newest point tha
     };
     const D1 = await dialog({ desktopId: 'desk-p', entry: bare(4), name: NAMES[4] });
     const q1 = D1.urls[0] ? Object.fromEntries(new URL(D1.urls[0], 'http://x').searchParams) : null;
-    ok(q1 && q1.desktop === 'desk-p' && q1.win === 'win-new-4' && q1.type === 'chat' && q1.title === NAMES[4], '§7 the dialog asks the history for THIS SLOT (?desktop=&win=&type=&title=&cwd=&name= — the tile\'s entry)', D1.urls);
+    ok(gateOf(q1) && q1.desktop === 'desk-p' && q1.win === 'win-new-4' && q1.type === 'chat' && q1.title === NAMES[4], '§7 the dialog asks the history for THIS SLOT (?desktop=&win=&type=&title=&cwd=&name= — the tile\'s entry)', D1.urls);
     const a = await call(q1 || {});
-    ok(a && a.entries.length === 3 && a.pick && a.pick.id === MID && a.pick.desk === '个人', '§7 the router answers the NEWEST point whose 个人 still names a conversation for it (09:18:22\'s own point holds it nameless — skipped)', a && { pick: a.pick, ids: a.entries.map((e) => e.id) });
+    ok(gateOf(a) && a.entries.length === 3 && gateOf(a.pick) && a.pick.id === MID && a.pick.desk === '个人', '§7 the router answers the NEWEST point whose 个人 still names a conversation for it (09:18:22\'s own point holds it nameless — skipped)', a && { pick: a.pick, ids: a.entries.map((e) => e.id) });
     const p1 = D1.picked;
-    ok(p1.length === 1 && p1[0].dataset.id === MID && p1[0].dataset.desk === '个人' && p1[0].attrs['aria-current'] === 'true' && p1[0].focused && p1[0].row === 'is-picked' && D1.html.includes('Selected: the newest point that still names the conversation of “Trip planner” — press it to restore that desktop as it was then.'), '§7 …and the dialog opens WITH THAT POINT\'S 个人 SELECTED (is-picked, aria-current, focused) and says so (5e0cb138e: no slot — the newest row first, the one that holds the seven nameless)', { picked: p1.map((b) => b.dataset), note: (D1.html.match(/lh-slot">([^<]*)/) || [])[1] });
+    ok(p1.length === 1 && p1[0].dataset.id === MID && p1[0].dataset.desk === '个人' && p1[0].attrs['aria-current'] === 'true' && gateOf(p1[0].focused) && p1[0].row === 'is-picked' && verdictOf(D1.html.includes('Selected: the newest point that still names the conversation of “Trip planner” — press it to restore that desktop as it was then.')), '§7 …and the dialog opens WITH THAT POINT\'S 个人 SELECTED (is-picked, aria-current, focused) and says so (5e0cb138e: no slot — the newest row first, the one that holds the seven nameless)', { picked: p1.map((b) => b.dataset), note: (D1.html.match(/lh-slot">([^<]*)/) || [])[1] });
     const b = await call({ desktop: 'desk-p', win: 'win-new-9', type: 'chat', title: NAMES[9] });
-    ok(b && b.pick && b.pick.id === OLD && b.pick.desk === '个人', '§7 …a window the middle point does not hold is found further back (06:50)', b && b.pick);
+    ok(gateOf(b) && gateOf(b.pick) && b.pick.id === OLD && b.pick.desk === '个人', '§7 …a window the middle point does not hold is found further back (06:50)', b && b.pick);
     const c = await call({ desktop: 'desk-p', win: 'win-new-x', type: 'chat', title: 'Nobody' }), e = await call({ desktop: 'desk-q', win: 'win-new-4', type: 'chat', title: NAMES[4] });
     const bare0 = await call({});
     const D2 = await dialog({ desktopId: 'desk-p', entry: { ...bare(4), winId: 'win-new-x', title: 'Nobody' }, name: 'Nobody' });
     const D3 = await dialog(null);
-    ok(c && c.pick === null && e && e.pick === null && bare0 && !('pick' in bare0) && bare0.entries.length === 3 && !D2.picked.length && D2.html.includes('No rollback point names the conversation of “Nobody”.') && D3.urls[0] === '/api/layout-history' && !D3.html.includes('lh-slot'), '§7 …no point names it ⇒ pick null and the dialog SAYS so; another desktop ⇒ null; the bare list (⚙ → System) is as before — no slot, no pick', { c: c && c.pick, e: e && e.pick, bare: bare0 && Object.keys(bare0), d3: D3.urls });
+    ok(gateOf(c) && c.pick === null && gateOf(e) && e.pick === null && gateOf(bare0) && !('pick' in bare0) && bare0.entries.length === 3 && !D2.picked.length && gateOf(D2.html.includes('No rollback point names the conversation of “Nobody”.')) && D3.urls[0] === '/api/layout-history' && !D3.html.includes('lh-slot'), '§7 …no point names it ⇒ pick null and the dialog SAYS so; another desktop ⇒ null; the bare list (⚙ → System) is as before — no slot, no pick', { c: c && c.pick, e: e && e.pick, bare: bare0 && Object.keys(bare0), d3: D3.urls });
     const SF = read('src/lib/setup-flows.js');
-    ok(/const picked = pick \? \[\.\.\.body\.querySelectorAll\('\.lh-desk'\)\]\.find\(\(b\) => b\.dataset\.id === pick\.id && b\.dataset\.desk === pick\.desk\) : null;\n\s*if \(picked\) \{ picked\.classList\.add\('is-picked'\); picked\.setAttribute\('aria-current', 'true'\);/.test(SF), '§7 the dialog SELECTS that point\'s desktop button (is-picked, aria-current, focus) — the chrome heavy sees it');
+    ok(verdictOf(/const picked = pick \? \[\.\.\.body\.querySelectorAll\('\.lh-desk'\)\]\.find\(\(b\) => b\.dataset\.id === pick\.id && b\.dataset\.desk === pick\.desk\) : null;\n\s*if \(picked\) \{ picked\.classList\.add\('is-picked'\); picked\.setAttribute\('aria-current', 'true'\);/.test(SF)), '§7 the dialog SELECTS that point\'s desktop button (is-picked, aria-current, focus) — the chrome heavy sees it');
   } finally { fs.rmSync(dd, { recursive: true, force: true }); }
 });
 
 await section('§7 r3 the words have zh + ja', async () => {
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['Its machine “{host}” is not paired with this hub.', 'The record of its conversation is gone from this hub.', 'This window was saved without its conversation, so it cannot be reopened from here.', 'This window was saved without its conversation or its folder, so it cannot be reopened from here.', 'Open the session list', 'Remove this window?', '“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', 'Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.', 'No rollback point names the conversation of “{name}”.', 'on {host}', 'Remove', 'Restore a previous layout…'];
-  ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')) && zh.includes('"Open the session list": "打开会话列表"') && zh.includes('"Remove": "移除"') && zh.includes('"Restore a previous layout…": "恢复之前的布局…"'), '§7 every word of the tile and the dialog has a zh AND a ja entry (恢复之前的布局… / 打开会话列表 / 移除)', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
+  ok(gateOf(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':'))) && gateOf(zh.includes('"Open the session list": "打开会话列表"')) && gateOf(zh.includes('"Remove": "移除"')) && verdictOf(zh.includes('"Restore a previous layout…": "恢复之前的布局…"')), '§7 every word of the tile and the dialog has a zh AND a ja entry (恢复之前的布局… / 打开会话列表 / 移除)', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
 });
 
 await section('§8 r4 «Open the session list» opens ALL with the search — the tile\'s REAL door → the REAL Sidebar', async () => {
@@ -766,7 +766,7 @@ await section('§8 r4 «Open the session list» opens ALL with the search — th
     const A = W.app.sidebar = mkSb([LIVE, OTHER]); input.value = '';
     press('win-new-5', 'sessions');
     ok(J(A.handed) === J(['cw-13']) && input.value === VAN && A._activeTab === 'folders' && A._activeView === null && A.opened === true, '§8 a RUNNING conversation of the tile\'s name is SHOWN: the door opens the sessions tab on ALL, the search box holding «Van build», the list opened — the live row handed to the list (23eaffef5: the Stopped view — the live row filtered away, «No running sessions»)', { handed: A.handed, view: A._activeView, q: input.value, tab: A._activeTab });
-    ok(A._doorFound === 'cw-13' && A.cards.length === 1 && A.cards[0].cls.includes('door-found') && A.cards[0].scrolled, '§8 …exactly one row ⇒ it is MARKED (door-found) and scrolled to', { found: A._doorFound, cards: A.cards });
+    ok(A._doorFound === 'cw-13' && A.cards.length === 1 && gateOf(A.cards[0].cls.includes('door-found')) && verdictOf(A.cards[0].scrolled), '§8 …exactly one row ⇒ it is MARKED (door-found) and scrolled to', { found: A._doorFound, cards: A.cards });
     const B = W.app.sidebar = mkSb([TMUXVAN, OTHER]); input.value = '';
     press('win-new-5', 'sessions');
     ok(J(B.handed) === J(['tm-1']) && B._doorFound === 'tm-1', '§8 …the STATUS is not the key — a tmux row of the name is shown and marked the same', { handed: B.handed });
@@ -775,7 +775,7 @@ await section('§8 r4 «Open the session list» opens ALL with the search — th
     ok(J([...C._statusFilter]) === J(['live']) && C._activeView === null && J(C.handed) === J(['cw-13']), '§8 …the person\'s status filter is THEIRS: a Live-only filter stays Live-only (its stopped namesake is not shown — their filter), a quick view (LIVE) goes back to ALL (23eaffef5: Stopped added to the filter for the page, the button\'s words stale)', { filter: [...C._statusFilter], view: C._activeView, handed: C.handed });
     const D = W.app.sidebar = mkSb([LIVE, OLDVAN, OTHER]); input.value = '';
     press('win-new-5', 'sessions');
-    ok(J([...D.handed].sort()) === J(['cw-13', 'old-2']) && D._doorFound === null && D.cards.every((c) => !c.cls.includes('door-found')), '§8 …two rows of the name: both shown, NEITHER marked — the person picks', { handed: D.handed, found: D._doorFound });
+    ok(J([...D.handed].sort()) === J(['cw-13', 'old-2']) && D._doorFound === null && verdictOf(D.cards.every((c) => !c.cls.includes('door-found'))), '§8 …two rows of the name: both shown, NEITHER marked — the person picks', { handed: D.handed, found: D._doorFound });
     // B-b842 (lane lg-recovery): the «stopped by a limit or overload» pill is a quick narrowing like the quick view — the door turns it
     // off too. PLANT FIRST: with the pill on, the list searched by the name hides both namesakes (no wall stopped either)
     const E = W.app.sidebar = mkSb([LIVE, OLDVAN, OTHER]); E._stoppedOnly = true; E._activeTab = 'folders'; input.value = VAN; E._render();
@@ -784,8 +784,8 @@ await section('§8 r4 «Open the session list» opens ALL with the search — th
     ok(J(planted) === J([]) && E._stoppedOnly === false && J([...E.handed].sort()) === J(['cw-13', 'old-2']), '§8 …the stopped pill is a quick narrowing too: on, it hid both namesakes (the plant); the door turns it off and both are shown', { planted, handed: E.handed, pill: E._stoppedOnly });
   } finally { document.getElementById = gid; }
   const SB = read('src/lib/sidebar.js'), SR = read('src/lib/sidebar-render.js'), LY = read('src/lib/layout.js');
-  ok(/if \(this\._doorFound && s\.sessionId === this\._doorFound\) card\.classList\.add\('door-found'\);/.test(SR) && /oninput = \(\) => \{\n\s*this\._doorFound = null;/.test(SB) && /\n    if \(!enabled \|\| filters\.length <= 1\) return;/.test(SB) && /\.session-item-card\.door-found \{/.test(read('public/style.css')), '§8 …the mark is kept across the list\'s re-renders (the ONE card builder) until the search changes; the quick tabs are as the person set them (r3\'s forced row gone)');
-  ok(/door\('sessions', t\('Open the session list'\), \(\) => this\.app\.sidebar\?\.showSessionsNamed\?\.\(name\)\)/.test(LY) && !/showStopped/.test(SB + LY), '§8 …the door calls showSessionsNamed; no «showStopped» is left in the tree');
+  ok(gateOf(/if \(this\._doorFound && s\.sessionId === this\._doorFound\) card\.classList\.add\('door-found'\);/.test(SR)) && gateOf(/oninput = \(\) => \{\n\s*this\._doorFound = null;/.test(SB)) && gateOf(/\n    if \(!enabled \|\| filters\.length <= 1\) return;/.test(SB)) && verdictOf(/\.session-item-card\.door-found \{/.test(read('public/style.css'))), '§8 …the mark is kept across the list\'s re-renders (the ONE card builder) until the search changes; the quick tabs are as the person set them (r3\'s forced row gone)');
+  ok(gateOf(/door\('sessions', t\('Open the session list'\), \(\) => this\.app\.sidebar\?\.showSessionsNamed\?\.\(name\)\)/.test(LY)) && !/showStopped/.test(SB + LY), '§8 …the door calls showSessionsNamed; no «showStopped» is left in the tree');
 });
 
 await section('§8 r4 a second tile\'s «Restore a previous layout…» draws ITS point — the dialog keyed by the slot', async () => {
@@ -821,13 +821,13 @@ await section('§8 r4 a second tile\'s «Restore a previous layout…» draws IT
     const a = shown();
     await door(9);
     const b = shown();
-    ok(J(a.picked) === J([MID + '/个人']) && urls.length === 2 && new URL(urls[1], 'http://x').searchParams.get('win') === 'win-new-9' && J(b.picked) === J([OLD + '/个人']) && /“Cluster admin”/.test(b.note || ''), '§8 tile A\'s door (Trip planner → the 09:18 point), then tile B\'s door while it is open ⇒ the dialog is B\'S: B asked for, B\'s point (06:50) picked, B\'s name said (23eaffef5: the open dialog raised with A\'s selection, B never fetched)', { a, b, urls });
+    ok(J(a.picked) === J([MID + '/个人']) && urls.length === 2 && new URL(urls[1], 'http://x').searchParams.get('win') === 'win-new-9' && J(b.picked) === J([OLD + '/个人']) && verdictOf(/“Cluster admin”/.test(b.note || '')), '§8 tile A\'s door (Trip planner → the 09:18 point), then tile B\'s door while it is open ⇒ the dialog is B\'S: B asked for, B\'s point (06:50) picked, B\'s name said (23eaffef5: the open dialog raised with A\'s selection, B never fetched)', { a, b, urls });
     const n = urls.length; await door(9);
     ok(urls.length === n && J(shown().picked) === J([OLD + '/个人']), '§8 …the SAME slot\'s door again raises its dialog as it was (no second fetch)');
     await F.prototype._showLayoutHistory.call(new F(), null);
     const bareOne = shown(); await door(4);
-    ok(bareOne.note === null && !bareOne.picked.length && J(shown().picked) === J([MID + '/个人']) && /“Trip planner”/.test(shown().note || ''), '§8 …a dialog first opened from ⚙ → System (the bare list) is redrawn for the slot when a tile\'s door is pressed', { bareOne, now: shown() });
-    ok(/const key = e0 \? `slot:\$\{slot\.desktopId\}:\$\{e0\.winId \|\| e0\.id \|\| ''\}` : null;/.test(read('src/lib/setup-flows.js')) && /if \(!\(await ready\)\) return null;/.test(read('src/lib/setup-flows.js')) && /if \(!live\(\)\) return null;/.test(read('src/lib/setup-flows.js')), '§8 …the key is the slot (desktop + window); a queued dialog waits for its `ready`; a dialog replaced while it fetched draws nothing (`live()`)');
+    ok(bareOne.note === null && !bareOne.picked.length && J(shown().picked) === J([MID + '/个人']) && verdictOf(/“Trip planner”/.test(shown().note || '')), '§8 …a dialog first opened from ⚙ → System (the bare list) is redrawn for the slot when a tile\'s door is pressed', { bareOne, now: shown() });
+    ok(gateOf(/const key = e0 \? `slot:\$\{slot\.desktopId\}:\$\{e0\.winId \|\| e0\.id \|\| ''\}` : null;/.test(read('src/lib/setup-flows.js'))) && gateOf(/if \(!\(await ready\)\) return null;/.test(read('src/lib/setup-flows.js'))) && verdictOf(/if \(!live\(\)\) return null;/.test(read('src/lib/setup-flows.js'))), '§8 …the key is the slot (desktop + window); a queued dialog waits for its `ready`; a dialog replaced while it fetched draws nothing (`live()`)');
   } finally { fs.rmSync(dd, { recursive: true, force: true }); }
 });
 
@@ -848,7 +848,7 @@ await section('§8 r4 a point that holds the slot ITSELF never matches by name (
     put(NOW, 1793356920000, [...P_SENT(), reopened]); // the person reopened «Trip planner» from the list: the newest point holds both
     const route = p.router.stack.find((l) => l.route && l.route.path === '/api/layout-history' && l.route.methods.get);
     let out = null; await route.route.stack[0].handle({ query: { desktop: 'desk-p', win: tile.winId, type: 'chat', title: NAMES[4] } }, { json: (j) => { out = j; } });
-    ok(out && out.pick && out.pick.id === OLD && out.pick.desk === '个人', '§8 …the REAL router: the newest point holds the tile beside the reopened window ⇒ skipped; the pick is the 06:50 point that names its conversation (23eaffef5: the newest — restoring it brings the same tile back)', out && out.pick);
+    ok(gateOf(out) && gateOf(out.pick) && out.pick.id === OLD && out.pick.desk === '个人', '§8 …the REAL router: the newest point holds the tile beside the reopened window ⇒ skipped; the pick is the 06:50 point that names its conversation (23eaffef5: the newest — restoring it brings the same tile back)', out && out.pick);
   } finally { fs.rmSync(dd, { recursive: true, force: true }); }
 });
 
@@ -863,7 +863,7 @@ await section('§8 r4 the phone switcher\'s row of a window that asked first goe
   const item = MobileNav.prototype._buildWindowItem.call({ app: W.app }, win, W.app.wm, () => {}, () => { redraws++; });
   const x = item.children.at(-1);
   x.onclick({ stopPropagation() {} });
-  ok(W.wins.has('win-new-4') && !item.removed && typeof yes === 'function', '§8 the row\'s ✕ on a nameless tile: the confirm is up, the window and its row stay');
+  ok(gateOf(W.wins.has('win-new-4')) && !item.removed && typeof yes === 'function', '§8 the row\'s ✕ on a nameless tile: the confirm is up, the window and its row stay');
   yes(true); await tick(20);
   ok(!W.wins.has('win-new-4') && redraws === 1, '§8 …«Remove» ⇒ the window closes and the open list REDRAWS without its row (23eaffef5: the row stayed; a tap revealed a window that was gone)', { has: W.wins.has('win-new-4'), redraws });
   const win0 = W.wins.get('win-new-0'), item0 = MobileNav.prototype._buildWindowItem.call({ app: W.app }, win0, W.app.wm, () => {}, () => { redraws++; });
@@ -886,7 +886,7 @@ await section('§8 r4 a group close asks ONE question naming the tile it deletes
   const group = (ids) => { const chain = { tabs: ids, active: 0 }; for (const id of ids) W.wins.get(id)._tabChain = chain; return chain; };
   group(['win-new-0', 'win-new-4']);
   const no = await G.requestCloseGroup('win-new-0');
-  ok(no === false && asked.length === 1 && J(asked[0].gone) === J([NAMES[4]]) && asked[0].names.length === 2 && W.wins.has('win-new-0') && W.wins.has('win-new-4') && !tileAsks.length, '§8 the frame\'s ✕ on [a stopped tile «Ledger», a nameless tile «Trip planner»]: ONE question, naming «Trip planner» as deleted for good; Cancel keeps BOTH (23eaffef5: the question did not say it)', { asked, has: [W.wins.has('win-new-0'), W.wins.has('win-new-4')], tileAsks });
+  ok(no === false && asked.length === 1 && J(asked[0].gone) === J([NAMES[4]]) && asked[0].names.length === 2 && gateOf(W.wins.has('win-new-0')) && gateOf(W.wins.has('win-new-4')) && !tileAsks.length, '§8 the frame\'s ✕ on [a stopped tile «Ledger», a nameless tile «Trip planner»]: ONE question, naming «Trip planner» as deleted for good; Cancel keeps BOTH (23eaffef5: the question did not say it)', { asked, has: [W.wins.has('win-new-0'), W.wins.has('win-new-4')], tileAsks });
   answer = true;
   const go = await G.requestCloseGroup('win-new-0'); await tick(10);
   ok(go === true && asked.length === 2 && !W.wins.has('win-new-0') && !W.wins.has('win-new-4') && !tileAsks.length, '§8 …the confirm closes BOTH, the tile not asked again — all or nothing (23eaffef5: a second «Remove this window?», and a Cancel there left the tile of a group already answered)', { go, has: [W.wins.has('win-new-0'), W.wins.has('win-new-4')], tileAsks });
@@ -895,10 +895,10 @@ await section('§8 r4 a group close asks ONE question naming the tile it deletes
   ok(asked.length === 1 && !('gone' in asked[0]) && asked[0].names.length === 2 && !W.wins.has('win-new-1') && !W.wins.has('win-new-2'), '§8 …a group with no such tile asks exactly as before (the same question, nothing named as deleted) — a control', asked);
   ok(W.wins.get('win-new-5').onCloseRequest() === false && tileAsks.length === 1 && W.wins.get('win-new-5').onCloseRequest({ asked: true }) === true, '§8 …a lone nameless tile\'s ✕ still asks its own question; a close the person already answered (`asked`) does not ask again', tileAsks);
   const TGS = read('src/lib/tab-group.js');
-  ok(/for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid, \{ asked: true \}\);/.test(TGS) && /t\('“\{name\}” cannot be reopened: closing deletes it from this desktop’s layout for good\. Only an older rollback point \(Restore a previous layout…\) still holds it\.', \{ name: gone\[0\] \}\)/.test(TGS) && /showConfirmDialog\(\{ title: t\('Close \{n\} tabs\?', \{ n \}\), message, items: names,/.test(TGS), '§8 …the group question\'s words: «“Trip planner” cannot be reopened: closing deletes it from this desktop’s layout for good…» above the tab list (the house dialog, danger)');
+  ok(gateOf(/for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid, \{ asked: true \}\);/.test(TGS)) && gateOf(/t\('“\{name\}” cannot be reopened: closing deletes it from this desktop’s layout for good\. Only an older rollback point \(Restore a previous layout…\) still holds it\.', \{ name: gone\[0\] \}\)/.test(TGS)) && verdictOf(/showConfirmDialog\(\{ title: t\('Close \{n\} tabs\?', \{ n \}\), message, items: names,/.test(TGS)), '§8 …the group question\'s words: «“Trip planner” cannot be reopened: closing deletes it from this desktop’s layout for good…» above the tab list (the house dialog, danger)');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', '{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.'];
-  ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')), '§8 …both words have a zh AND a ja entry');
+  ok(verdictOf(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':'))), '§8 …both words have a zh AND a ja entry');
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1009,7 +1009,7 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
     } finally { if (had) Object.defineProperty(globalThis, 'sessionStorage', had); else delete globalThis.sessionStorage; }
   }
   const LY = read('src/lib/layout.js'), at = LY.indexOf('      // Remap window ID to saved ID for cross-client sync\n'), blk = at < 0 ? '' : LY.slice(at, LY.indexOf('\n      }\n', at));
-  ok(/\n        wm\.followIdChange\?\.\(oldId, winState\.winId\);/.test(blk) && blk.indexOf('wm.windows.set(winState.winId, winInfo);') < blk.indexOf('wm.followIdChange'), '§10 layout.js\'s restore remap — the other road that changes a window\'s id in place — calls the same rule (followIdChange), AFTER the change', blk.slice(0, 240));
+  ok(gateOf(/\n        wm\.followIdChange\?\.\(oldId, winState\.winId\);/.test(blk)) && blk.indexOf('wm.windows.set(winState.winId, winInfo);') < blk.indexOf('wm.followIdChange'), '§10 layout.js\'s restore remap — the other road that changes a window\'s id in place — calls the same rule (followIdChange), AFTER the change', blk.slice(0, 240));
   { // r1958 (1): A SPLIT PANE's ✕ AFTER ITS WINDOW's ID CHANGED — the REAL installPhoneSplit painting [A, B]; A re-keyed; A's ✕ pressed
     const SPLIT_X = '          x.addEventListener(\'click\', (e) => { e.stopPropagation(); close(w.id); });\n';
     const paneX = async (S0) => {
@@ -1047,9 +1047,9 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
       }
     };
     const P = await paneX(installPhoneSplit);
-    ok(P.mode === 'split' && P.panes === 'win-new-1,win-new-2' && P.took === true && P.pressed && P.focused === 'win-new-2' && P.after === null, `§10 r1958 a split pane's ✕ pressed AFTER its window was re-keyed ends the split and shows the OTHER pane (the ✕ reads its pane's id live) — focused «${P.focused}»`, P);
+    ok(P.mode === 'split' && P.panes === 'win-new-1,win-new-2' && P.took === true && gateOf(P.pressed) && P.focused === 'win-new-2' && P.after === null, `§10 r1958 a split pane's ✕ pressed AFTER its window was re-keyed ends the split and shows the OTHER pane (the ✕ reads its pane's id live) — focused «${P.focused}»`, P);
     const RP2 = await paneX((await mutantEsm('src/lib/phone-split-view.js', SPLIT_X, SPLIT_X.replace('close(w.id)', 'close(id)'))).installPhoneSplit);
-    ok(RP2.pressed && RP2.focused === '', `§10 RED: the release's ✕ (closing by the id it was drawn with) ends the split but shows nothing new — the closed pane stays on show (focused «${RP2.focused}»)`, RP2);
+    ok(gateOf(RP2.pressed) && RP2.focused === '', `§10 RED: the release's ✕ (closing by the id it was drawn with) ends the split but shows nothing new — the closed pane stays on show (focused «${RP2.focused}»)`, RP2);
   }
   { // r1958 (2): WARMTH SWITCHED OFF keeps the phone row's stamp (the row builder's, never warmth's to take away)
     const STRIP = "  for (const el of document.querySelectorAll('.mobile-win-row[data-win-id]')) el.removeAttribute('data-win-id');\n";   // stale-pins: kept — the release's strip, the RED's own text
@@ -1088,10 +1088,10 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
     const miss = (src) => taps.filter(([, re]) => !re.test(src)).map(([n]) => n);
     ok(miss(TB).length === 0, '§10 r1958 / r2250 the desk lists\' rows act on their window\'s id read live, off the instance (an id changed in place while the list stood open)', miss(TB));
     const rel = anchored(anchored(TB, 'app.wm.revealWindow(win.id); // the row names THIS tab', 'app.wm.revealWindow(tid); // the row names THIS tab', 'the chooser tap, as released'), 'activateWindow(app, win.id);', 'activateWindow(app, tl.id);', 'the «+N» tap, as released');   // stale-pins: kept — the release's captured ids, the RED's own text
-    ok(rel !== TB && miss(rel).includes('the grouped chooser row\'s tap') && miss(rel).includes('the «+N» row\'s tap'), '§10 RED: the release\'s rows (a captured id) fail the check by name', miss(rel));
+    ok(rel !== TB && gateOf(miss(rel).includes('the grouped chooser row\'s tap')) && verdictOf(miss(rel).includes('the «+N» row\'s tap')), '§10 RED: the release\'s rows (a captured id) fail the check by name', miss(rel));
     const rel2 = anchored(anchored(anchored(anchored(TB, 'showWindowContextMenu(app, win.id, e.clientX, e.clientY, { onAction:', 'showWindowContextMenu(app, id, e.clientX, e.clientY, { onAction:', 'the ⧉ right-click, as released'), 'goOtherDesk(app, { id: idOf(r),', 'goOtherDesk(app, { id: r.id,', 'the every-desktop tap, as released'), 'goOtherDesk(app, w ? { ...r, id: w.id } : r);', 'goOtherDesk(app, r);', 'the other-desktops tap, as released'), 'const live = app.wm.windows.get(state.hostId)?._tabChain', 'const live = app.wm.windows.get(hostId)?._tabChain', 'the re-list, as released');   // stale-pins: kept — the release's captured ids, the RED's own text
     const R2 = ['the ⧉ list row\'s right-click', 'the every-desktop row\'s stamp and tap', 'the other-desktops row\'s tap', 'the chooser\'s re-list'];
-    ok(rel2 !== TB && R2.every((n) => miss(rel2).includes(n)), '§10 RED (r2250): the release\'s ⧉ right-click, every-desktop and other-desktops taps and the chooser\'s re-list (a captured id) fail the check by name', miss(rel2));
+    ok(rel2 !== TB && verdictOf(R2.every((n) => miss(rel2).includes(n))), '§10 RED (r2250): the release\'s ⧉ right-click, every-desktop and other-desktops taps and the chooser\'s re-list (a captured id) fail the check by name', miss(rel2));
   }
 });
 // §11 (主开发 r2355 / r2396): a window id captured EARLIER, read by a LATER act — the three a person is likeliest to press (the page
@@ -1119,9 +1119,9 @@ await section('§11 r2355 the window menu left open across a change of id, the p
     return out;
   };
   const M = menu((app) => TB.windowMenuRows(app, 'win-m1'));
-  ok(Object.values(M).every((x) => x.row && x.on === true && x.acted === 'win-m1-taken'), '§11 r2355 a window menu left open across a change of id: Move, Minimize and Close each act on the window (taskbar.js windowMenuCtx: the id read off the window held)', M);
+  ok(verdictOf(Object.values(M).every((x) => x.row && x.on === true && x.acted === 'win-m1-taken')), '§11 r2355 a window menu left open across a change of id: Move, Minimize and Close each act on the window (taskbar.js windowMenuCtx: the id read off the window held)', M);
   const RM = menu((app, win) => menuItems('window', { app, id: 'win-m1', win, s: null, switchSubmenu: false, closeLabel: '✕ Close', group: false }));   // the release's ctx: { app, id, win, … }, its id a value taken at the open
-  ok(Object.values(RM).every((x) => x.row && x.acted === 'win-m1' && x.on === false), '§11 RED: the release\'s ctx (its id a value taken at the open) — Move, Minimize and Close act on an id no window holds: nothing, nothing said', RM);
+  ok(verdictOf(Object.values(RM).every((x) => x.row && x.acted === 'win-m1' && x.on === false)), '§11 RED: the release\'s ctx (its id a value taken at the open) — Move, Minimize and Close act on an id no window holds: nothing, nothing said', RM);
   // (2) A PHONE'S DESKTOP SWITCH THAT RE-KEYS THE WINDOW IT SHOWED THERE (the switch takes its kept row back): it shows THAT window
   const phoneSwitch = async (MN) => {
     const mk = (id) => ({ id, _desktopId: 'desk-p', _hiddenByDesktop: false, _hiddenByStage: false, element: mkEl() });
@@ -1155,7 +1155,7 @@ await section('§11 r2355 the window menu left open across a change of id, the p
     return { asked, focused: focused.join(), held: wm.windows.get('win-r1-taken') === win };
   };
   const R = await reveal(WindowManager);
-  ok(R.asked === true && R.held && R.focused === 'win-r1-taken', '§11 r2355 a reveal across a desktop switch that re-keys the window reveals it (window.js revealWindow: the window held, its id read when the switch lands)', R);
+  ok(R.asked === true && gateOf(R.held) && R.focused === 'win-r1-taken', '§11 r2355 a reveal across a desktop switch that re-keys the window reveals it (window.js revealWindow: the window held, its id read when the switch lands)', R);
   const NEWTHEN = "      Promise.resolve(go.to === STAGE_ID ? stage.enter() : dm.switchTo(go.to)).then(() => this.revealWindow(win.id, { raise, _switched: true }), () => this.revealWindow(win.id, { raise, _switched: true }));\n";
   const RR = await reveal((await mutantEsm('src/lib/window.js', NEWTHEN, NEWTHEN.replace(/this\.revealWindow\(win\.id,/g, 'this.revealWindow(id,'))).WindowManager);   // stale-pins: kept — the release's: the id taken before the switch
   ok(RR.asked === true && RR.focused === '', `§11 RED: the release's revealWindow (the id taken before the switch) — the switch lands and the window is not revealed (focused: «${RR.focused}»)`, RR);
@@ -1215,39 +1215,39 @@ await section('§9 B-b05e THE RING IS SPREAD OVER TIME — the REAL router resta
   const r = await ringBurst(P, { dialog: true });
   const has = (f) => r.left.includes(f);
   const days3to13 = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((d) => r.noons[d]);
-  ok(days3to13.every(has) && !!r.yesterday && has(r.yesterday), '§9 after the burst every recent DAY keeps its point — yesterday\'s first, and each noon 3…13 days back (b06f36e90: all evicted, the ring held the first ten ever written + 30 of the burst)', { missing: days3to13.filter((f) => !has(f)), yesterday: r.yesterday, left: r.left.length });
+  ok(gateOf(days3to13.every(has)) && !!r.yesterday && verdictOf(has(r.yesterday)), '§9 after the burst every recent DAY keeps its point — yesterday\'s first, and each noon 3…13 days back (b06f36e90: all evicted, the ring held the first ten ever written + 30 of the burst)', { missing: days3to13.filter((f) => !has(f)), yesterday: r.yesterday, left: r.left.length });
   const hours = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23].map((h) => r.hourly[h]);
-  ok(hours.every(has) && has(r.thisHour), '§9 …and every one of the newest 24 HOURS that hold a point keeps its oldest one (this hour\'s from before the burst, the 23 before it)', hours.filter((f) => !has(f)));
-  ok([15, 16, 17, 18, 19, 20].every((d) => !has(r.noons[d])) && r.first.filter(has).length <= 1 && [24, 25, 26, 27, 28, 29, 30].some((h) => !has(r.hourly[h])), '§9 …the older ones leave: days past the newest fourteen, the hours past the newest 24 (unless the first of their day), at most the first of the forty-day-old ten', { first: r.first.filter(has).length, noons: [15, 16, 17, 18, 19, 20].filter((d) => has(r.noons[d])) });
+  ok(gateOf(hours.every(has)) && verdictOf(has(r.thisHour)), '§9 …and every one of the newest 24 HOURS that hold a point keeps its oldest one (this hour\'s from before the burst, the 23 before it)', hours.filter((f) => !has(f)));
+  ok(gateOf([15, 16, 17, 18, 19, 20].every((d) => !has(r.noons[d]))) && r.first.filter(has).length <= 1 && verdictOf([24, 25, 26, 27, 28, 29, 30].some((h) => !has(r.hourly[h]))), '§9 …the older ones leave: days past the newest fourteen, the hours past the newest 24 (unless the first of their day), at most the first of the forty-day-old ten', { first: r.first.filter(has).length, noons: [15, 16, 17, 18, 19, 20].filter((d) => has(r.noons[d])) });
   ok((r.burst.length === 11 || (r.burst.length === 12 && Math.floor(r.end / HOUR) !== Math.floor(r.now / HOUR))) && r.left.length <= 10 + 24 + 14 + 1, `§9 …the burst keeps its newest ten (+ the pinned point); the ring holds at most 10 + 24 + 14 + 1 points (here ${r.left.length}, the burst ${r.burst.length})`, r.burst);
-  ok(!!r.boot && J(r.bootIds) === J(P_BEFORE().map((w) => w.winId)) && has(r.boot.id), '§9 THE POINT FROM BEFORE THE RESTART is PINNED: the first point after the boot holds the layout the restart found (个人\'s eleven) and stays through the burst — named `restart` in the list', { boot: r.boot && r.boot.id, ids: r.bootIds });
-  ok(r.boot && /\.restart\.json$/.test(r.boot.id) && r.metaReads === 0 && r.syncRing === 0, '§9 …the point carries the mark in its NAME (…restart.json); the burst\'s 100 prunes read NO meta file and make no synchronous readdir / unlink (the verdict\'s cure: the prune off the main loop — data/ may be a network mount)', { id: r.boot && r.boot.id, metaReads: r.metaReads, syncRing: r.syncRing });
-  ok(r.list.filter((e) => e.restart).length === 1 && /<div class="lh-sub lh-restart">As it was before the server restarted<\/div>/.test(r.html || '') && (r.html.match(/lh-restart/g) || []).length === 1, '§9 …the dialog (⚙ → System → Restore a previous layout…) says it on that row alone: «As it was before the server restarted»', (r.html || '').slice(0, 300));
+  ok(!!r.boot && J(r.bootIds) === J(P_BEFORE().map((w) => w.winId)) && verdictOf(has(r.boot.id)), '§9 THE POINT FROM BEFORE THE RESTART is PINNED: the first point after the boot holds the layout the restart found (个人\'s eleven) and stays through the burst — named `restart` in the list', { boot: r.boot && r.boot.id, ids: r.bootIds });
+  ok(gateOf(r.boot) && gateOf(/\.restart\.json$/.test(r.boot.id)) && r.metaReads === 0 && r.syncRing === 0, '§9 …the point carries the mark in its NAME (…restart.json); the burst\'s 100 prunes read NO meta file and make no synchronous readdir / unlink (the verdict\'s cure: the prune off the main loop — data/ may be a network mount)', { id: r.boot && r.boot.id, metaReads: r.metaReads, syncRing: r.syncRing });
+  ok(r.list.filter((e) => e.restart).length === 1 && gateOf(/<div class="lh-sub lh-restart">As it was before the server restarted<\/div>/.test(r.html || '')) && (r.html.match(/lh-restart/g) || []).length === 1, '§9 …the dialog (⚙ → System → Restore a previous layout…) says it on that row alone: «As it was before the server restarted»', (r.html || '').slice(0, 300));
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  ok(zh.includes('"As it was before the server restarted": "') && ja.includes('"As it was before the server restarted": "'), '§9 …with a zh AND a ja entry');
+  ok(gateOf(zh.includes('"As it was before the server restarted": "')) && verdictOf(ja.includes('"As it was before the server restarted": "')), '§9 …with a zh AND a ja entry');
   const RK = P.ringKeep;
   const names = []; let s = 0; const T0 = Date.UTC(2026, 9, 1, 0, 0, 0, 0);
   for (let d = 0; d < 30; d++) names.push(ringName(T0 + d * DAY + 9 * HOUR, s++));
   for (let i = 0; i < 500; i++) names.push(ringName(T0 + 30 * DAY + 10 * HOUR + i * 200, s++));
   const k = RK(names, { pinned: names[31] });
-  ok(k.size === 35 && names.slice(7, 32).every((f) => k.has(f)) && names.slice(-10).every((f) => k.has(f)) && !k.has(names[6]) && !k.has(names[32]), `§9 PURE ringKeep: thirty days of one point each, then a 500-write burst inside one hour ⇒ the newest ten + the oldest point of each of the newest 24 hours (the burst's first + 23 days) + the pin = 35 (${k.size}); the burst's middle leaves`);
+  ok(k.size === 35 && gateOf(names.slice(7, 32).every((f) => k.has(f))) && gateOf(names.slice(-10).every((f) => k.has(f))) && !k.has(names[6]) && !k.has(names[32]), `§9 PURE ringKeep: thirty days of one point each, then a 500-write burst inside one hour ⇒ the newest ten + the oldest point of each of the newest 24 hours (the burst's first + 23 days) + the pin = 35 (${k.size}); the burst's middle leaves`);
   const kd = RK(names, { hours: 0 });
-  ok(kd.size === 10 + 14 && names.slice(17, 31).every((f) => kd.has(f)) && !kd.has(names[16]), `§9 PURE ringKeep, the days alone: the oldest point of each of the fourteen newest days (13 days + the burst's day), the fifteenth gone (${kd.size})`);
+  ok(kd.size === 10 + 14 && gateOf(names.slice(17, 31).every((f) => kd.has(f))) && !kd.has(names[16]), `§9 PURE ringKeep, the days alone: the oldest point of each of the fourteen newest days (13 days + the burst's day), the fifteenth gone (${kd.size})`);
   ok(J([...RK(names.slice().reverse())].sort()) === J([...RK(names)].sort()) && RK([]).size === 0, '§9 PURE ringKeep: any input order, an empty ring');
   const ms = Date.UTC(2026, 10, 17, 9, 0, 0, 0), same = Array.from({ length: 12 }, (_, i) => ringName(ms, 30 + i)); // one millisecond: seq u, v … z, 10, 11 … 15
   const ks = RK(same, { hours: 0, days: 0 });
-  ok(ks.has(ringName(ms, 36)) && ks.has(ringName(ms, 41)) && !ks.has(ringName(ms, 30)) && !ks.has(ringName(ms, 31)), '§9 PURE ringKeep: inside one millisecond the writer\'s sequence orders (base 36: «10» comes after «z») — the newest ten are seq 32…41, never the name\'s letters', [...ks]);
+  ok(gateOf(ks.has(ringName(ms, 36))) && gateOf(ks.has(ringName(ms, 41))) && !ks.has(ringName(ms, 30)) && !ks.has(ringName(ms, 31)), '§9 PURE ringKeep: inside one millisecond the writer\'s sequence orders (base 36: «10» comes after «z») — the newest ten are seq 32…41, never the name\'s letters', [...ks]);
   const odd = RK([...names.slice(-11), 'layout-backup.json'], { hours: 0, days: 0 });
   ok(!odd.has('layout-backup.json') && odd.size === 10, '§9 PURE ringKeep: a name with no stamp is the OLDEST — it never holds one of the newest ten', [...odd]);
-  ok(RK(names, { pinned: [names[2], names[3]], hours: 0, days: 0 }).has(names[2]) && RK(names, { pinned: [names[2], names[3]], hours: 0, days: 0 }).has(names[3]), '§9 PURE ringKeep: `pinned` takes a list (the newest boot points)');
+  ok(gateOf(RK(names, { pinned: [names[2], names[3]], hours: 0, days: 0 }).has(names[2])) && verdictOf(RK(names, { pinned: [names[2], names[3]], hours: 0, days: 0 }).has(names[3])), '§9 PURE ringKeep: `pinned` takes a list (the newest boot points)');
   ok(P.ringSeq(ringName(ms, 46).replace(/\.json$/, '.restart.json')) === 46 && P.ringStampMs(ringName(ms, 3).replace(/\.json$/, '.restart.json')) === ms && J(P.ringSort([ringName(ms + 1, 0).replace(/\.json$/, '.restart.json'), ringName(ms, 5)])) === J([ringName(ms, 5), ringName(ms + 1, 0).replace(/\.json$/, '.restart.json')]), '§9 PURE: a restart\'s point (…Z-<seq>.restart.json) keeps its stamp and its sequence; ringSort orders by time');
   // RED CONTROLS: the base's prune (the first ten + the newest thirty); the pin taken out
   delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))];
   const PIN = 'const keep = ringKeep(files, { pinned: boots.slice(-RING_KEEP.boots) });';
   const base = await ringBurst(mutantModule('src/routes/persistence.js', PIN, "if (files.length <= 40) return; const keep = new Set([...files.slice(0, 10), ...files.slice(-30)]);"));
-  ok(!base.left.includes(base.yesterday) && [3, 4, 5].every((d) => !base.left.includes(base.noons[d])) && !base.left.includes(base.boot && base.boot.id), '§9 CONTROL: with b06f36e90\'s prune (the oldest ten + the newest thirty) the same burst evicts yesterday, every recent day and the point from before the restart (the legs above go RED)', { left: base.left.length, yesterday: base.left.includes(base.yesterday) });
+  ok(!base.left.includes(base.yesterday) && gateOf([3, 4, 5].every((d) => !base.left.includes(base.noons[d]))) && !base.left.includes(base.boot && base.boot.id), '§9 CONTROL: with b06f36e90\'s prune (the oldest ten + the newest thirty) the same burst evicts yesterday, every recent day and the point from before the restart (the legs above go RED)', { left: base.left.length, yesterday: base.left.includes(base.yesterday) });
   const nopin = await ringBurst(mutantModule('src/routes/persistence.js', PIN, 'const keep = ringKeep(files, { pinned: null });'));
-  ok(!!nopin.boot === false && nopin.yesterday && nopin.left.includes(nopin.yesterday), '§9 CONTROL: the pin taken out ⇒ the point from before the restart is pushed out by the burst (it is neither its hour\'s nor its day\'s oldest) — the pin leg goes RED', { boot: nopin.boot });
+  ok(!!nopin.boot === false && gateOf(nopin.yesterday) && verdictOf(nopin.left.includes(nopin.yesterday)), '§9 CONTROL: the pin taken out ⇒ the point from before the restart is pushed out by the burst (it is neither its hour\'s nor its day\'s oldest) — the pin leg goes RED', { boot: nopin.boot });
   // A SECOND RESTART AFTER A BAD ONE (the adversarial read): restart 1 finds the good layout, a burst damages it, the person restarts
   // again — the point before restart 1 must stay (one pin moved to restart 2's point, the damaged state, and let the good one go)
   const twice = async (load) => {
@@ -1299,11 +1299,11 @@ await section('§9 B-b05e THE RING IS SPREAD OVER TIME — the REAL router resta
   };
   const lb = labels(fresh);
   ok(J(lb.said) === J(lb.pinned) && lb.said.length === 3 && !lb.said.includes(lb.oldest) && !lb.said.includes(lb.legacy), '§9 …the dialog says «before the server restarted» of EXACTLY the points the prune pins — the newest three `.restart.json` NAMES in ring order (seq «10» after «z»); a point only its meta marks is not said to be one (B-b05e cure 3)', lb);
-  ok(/const bootsNamed = \(files\) => new Set\(ringSort\(files\.filter\(\(f\) => f\.endsWith\('\.restart\.json'\)\)\)\.slice\(-RING_KEEP\.boots\)\);/.test(read('src/routes/persistence.js')) && read('src/routes/persistence.js').includes("const keep = ringKeep(files, { pinned: boots.slice(-RING_KEEP.boots) });"), '§9 …the label and the pin are one expression (ringSort over the `.restart.json` names, the newest RING_KEEP.boots)');
+  ok(gateOf(/const bootsNamed = \(files\) => new Set\(ringSort\(files\.filter\(\(f\) => f\.endsWith\('\.restart\.json'\)\)\)\.slice\(-RING_KEEP\.boots\)\);/.test(read('src/routes/persistence.js'))) && verdictOf(read('src/routes/persistence.js').includes("const keep = ringKeep(files, { pinned: boots.slice(-RING_KEEP.boots) });")), '§9 …the label and the pin are one expression (ringSort over the `.restart.json` names, the newest RING_KEEP.boots)');
   const lbName = labels(() => mutantModule('src/routes/persistence.js', "const bootsNamed = (files) => new Set(ringSort(files.filter((f) => f.endsWith('.restart.json'))).slice(-RING_KEEP.boots));", "const bootsNamed = (files) => new Set(files.filter((f) => f.endsWith('.restart.json')).sort().reverse().slice(0, RING_KEEP.boots));"));
-  ok(lbName.said.includes(lb.oldest) && J(lbName.said) !== J(lbName.pinned), '§9 CONTROL: the label in the NAME order (the cure-2 list order) says «restart» of a point the prune lets go (seq x) and not of the newest (the label leg goes RED)', lbName);
+  ok(gateOf(lbName.said.includes(lb.oldest)) && J(lbName.said) !== J(lbName.pinned), '§9 CONTROL: the label in the NAME order (the cure-2 list order) says «restart» of a point the prune lets go (seq x) and not of the newest (the label leg goes RED)', lbName);
   const lbMeta = labels(() => mutantModule('src/routes/persistence.js', '{ refused: m.refused } : {}), ...(named.has(f) ? { restart: true } : {}), ...(unread', '{ refused: m.refused } : {}), ...(named.has(f) || m.restart ? { restart: true } : {}), ...(unread'));
-  ok(lbMeta.said.includes(lbMeta.legacy), '§9 CONTROL: the meta\'s mark read too (the cure-2 label) ⇒ an unpinned point is said to be a restart\'s (the label leg goes RED)', lbMeta);
+  ok(verdictOf(lbMeta.said.includes(lbMeta.legacy)), '§9 CONTROL: the meta\'s mark read too (the cure-2 label) ⇒ an unpinned point is said to be a restart\'s (the label leg goes RED)', lbMeta);
 });
 
 await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL LayoutManager: a window opened, the page hidden or left while its save still waits', async () => {
@@ -1337,15 +1337,15 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
     return { before, now: at.length, carried, sent, after: after.length, deferred, stillDeferred, gates, W };
   };
   const ph = await scene(LM, 'pagehide', { timer: true });
-  ok(ph.before === 0 && ph.now === 1 && ph.carried, '§9 a window opened, then pagehide 50 ms into the 500 ms debounce ⇒ its save goes AT ONCE, carrying the window (b06f36e90: nothing until the timer — a reload in between showed another conversation)', { before: ph.before, now: ph.now, carried: ph.carried });
+  ok(ph.before === 0 && ph.now === 1 && verdictOf(ph.carried), '§9 a window opened, then pagehide 50 ms into the 500 ms debounce ⇒ its save goes AT ONCE, carrying the window (b06f36e90: nothing until the timer — a reload in between showed another conversation)', { before: ph.before, now: ph.now, carried: ph.carried });
   ok(ph.after === 1, '§9 …and the debounce\'s own timer sends no second copy of that save', ph.after);
   const hd = await scene(LM, 'hidden');
-  ok(hd.now === 1 && hd.carried, '§9 …the page turning HIDDEN with no gate up does the same', { now: hd.now, carried: hd.carried });
+  ok(hd.now === 1 && verdictOf(hd.carried), '§9 …the page turning HIDDEN with no gate up does the same', { now: hd.now, carried: hd.carried });
   // NO SAVE IN THE MIDDLE OF A RESTORE (the cure of the batch-4 verdict): under a gate nothing leaves from here, hidden or leaving
   const bt = await scene(LM, 'pagehide', { gate: 'boot', timer: true });
-  ok(bt.deferred && bt.now === 0 && bt.after === 0 && J(bt.gates) === J([true, false]) && bt.stillDeferred, '§9 THE BOOT\'s 5 s GATE: the door tap\'s save deferred past it, then the page LEAVES ⇒ NOTHING leaves mid-restore (the gate never lowered, the deferral untouched) — the price, said: that act is lost on a leave inside the gate', { deferred: bt.deferred, now: bt.now, after: bt.after, gates: bt.gates });
+  ok(gateOf(bt.deferred) && bt.now === 0 && bt.after === 0 && J(bt.gates) === J([true, false]) && verdictOf(bt.stillDeferred), '§9 THE BOOT\'s 5 s GATE: the door tap\'s save deferred past it, then the page LEAVES ⇒ NOTHING leaves mid-restore (the gate never lowered, the deferral untouched) — the price, said: that act is lost on a leave inside the gate', { deferred: bt.deferred, now: bt.now, after: bt.after, gates: bt.gates });
   const sw = await scene(LM, 'hidden', { gate: 'switch' });
-  ok(sw.deferred && sw.now === 0 && sw.stillDeferred, '§9 …a page turning HIDDEN under a gate (a tab switch, the page lives on) sends nothing — its held save waits for the gate as before', { now: sw.now, stillDeferred: sw.stillDeferred });
+  ok(gateOf(sw.deferred) && sw.now === 0 && verdictOf(sw.stillDeferred), '§9 …a page turning HIDDEN under a gate (a tab switch, the page lives on) sends nothing — its held save waits for the gate as before', { now: sw.now, stillDeferred: sw.stillDeferred });
   // a deferral that owed only RECIPES sends only them; a deferral that holds a PERSON's act re-arms it (even with a recipe owed elsewhere)
   {
     const owedScene = async (Lm, { user = false } = {}) => {
@@ -1382,10 +1382,10 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
       if (cb) cb();
       return { fired: !!cb, held, at: W.lm._deferUserAt, t: W.lm._deferUserT, deferT: W.lm._deferT }; };
     const fs3 = fireScene(LM);
-    ok(fs3.fired && fs3.held.at && fs3.held.t && fs3.at === null && fs3.t === null && fs3.deferT === null, '§9 …the person\'s-deferral stamp ENDS with its own timer: set while the 1.1 s deferral waits, both cleared when it fires (B-46fc cure 3)', fs3);
+    ok(gateOf(fs3.fired) && gateOf(fs3.held.at) && gateOf(fs3.held.t) && fs3.at === null && fs3.t === null && fs3.deferT === null, '§9 …the person\'s-deferral stamp ENDS with its own timer: set while the 1.1 s deferral waits, both cleared when it fires (B-46fc cure 3)', fs3);
     const { LayoutManager: LMk } = await mutantEsm('src/lib/layout.js', 'this._deferT = null; this._deferUserAt = null; this._deferUserT = null; // the stamp ends with its own timer (B-46fc cure 3)', 'this._deferT = null;');
     const fs3red = fireScene(LMk);
-    ok(fs3red.fired && fs3red.at !== null && fs3red.t !== null, '§9 CONTROL: the cure-2 callback (no clear) leaves the stamp after its timer fired (the leg above goes RED)', fs3red);
+    ok(gateOf(fs3red.fired) && fs3red.at !== null && fs3red.t !== null, '§9 CONTROL: the cure-2 callback (no clear) leaves the stamp after its timer fired (the leg above goes RED)', fs3red);
     ok(o.recipes === 1 && o.full === 0 && o.dirty === false, '§9 …a deferral that owed only RECIPES sends only them (_doAutoSave\'s own road) — never a whole desktop, the dirty bit never set for it', o);
     ok(u.full === 1, '§9 …a deferral that holds a PERSON\'s act (an apply cleared its dirty bit) re-arms it and the act leaves — also with a recipe owed on another desktop (the verdict\'s reader: `owed` anywhere lost it)', u);
     const { LayoutManager: LMo } = await mutantEsm('src/lib/layout.js', 'const act = this._userDirty || (deferred && this._deferUserT === this._deferT && this._deferUserAt != null && !(this._savedAt > this._deferUserAt));', 'const act = this._userDirty || (deferred && !!this._lastUserInputAt && !(this._savedAt > this._lastUserInputAt));');
@@ -1423,7 +1423,7 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
     return { due, sent, frames: frames.length, ids: frames.length ? frames[0].state.windows.map((w) => w.winId) : null };
   };
   const rl = await restoreLeave(LM);
-  ok(rl.due.rearmed && !rl.due.gate && rl.due.base && rl.sent === false && rl.frames === 0, '§9 A RESTORE-ARMED RELOAD SENDS NOTHING AT ITS LEAVE (found reading the 2.369.410 hosted red): the stale save refused, the kept record adopted, a save re-armed under the NEW base (due, no gate up) — the restore landed, the page leaves: no frame', rl);
+  ok(gateOf(rl.due.rearmed) && !rl.due.gate && gateOf(rl.due.base) && rl.sent === false && rl.frames === 0, '§9 A RESTORE-ARMED RELOAD SENDS NOTHING AT ITS LEAVE (found reading the 2.369.410 hosted red): the stale save refused, the kept record adopted, a save re-armed under the NEW base (due, no gate up) — the restore landed, the page leaves: no frame', rl);
   const { LayoutManager: LMrr } = await mutantEsm('src/lib/layout.js', '    if (this._restoreArmed()) return false; // a restore armed this page\'s reload: nothing leaves at its leave (_restoreArmed)\n', '');
   const rl0 = await restoreLeave(LMrr);
   ok(rl0.sent === true && rl0.frames === 1, '§9 CONTROL: the train\'s tip as it was (the flag not read) sends the adopted merge at the leave — under the new base the hub takes it (the leg above goes RED)', rl0);
@@ -1438,7 +1438,7 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
     clearTimeout(W.lm._autoSaveTimer); clearTimeout(W.lm._deferT); return out;
   };
   const ra = await rearmScene(LM);
-  ok(ra.armed === false && ra.adopted, '§9 …and a refused save is NOT re-armed once a restore armed the reload (the adopt still shows the kept record) — nothing could leave by the debounce while the old document lives on', ra);
+  ok(ra.armed === false && verdictOf(ra.adopted), '§9 …and a refused save is NOT re-armed once a restore armed the reload (the adopt still shows the kept record) — nothing could leave by the debounce while the old document lives on', ra);
   const { LayoutManager: LMra } = await mutantEsm('src/lib/layout.js', "    if (this._restoreArmed()) return; // a restore armed this page's reload: a refused save is not re-armed (_restoreArmed)\n", '');
   const ra0 = await rearmScene(LMra);
   ok(ra0.armed === true, '§9 CONTROL: the re-arm that does not ask the predicate arms the save (the leg above goes RED)', ra0);
@@ -1456,13 +1456,13 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
     const due = !!W.lm._autoSaveTimer && W.lm._saveAskedAt > (W.lm._savedAt || 0);
     const n0 = W.syncs('desk-w').length, atLeave = W.lm._flushOnLeave('pagehide'), n1 = W.syncs('desk-w').length;
     W.lm._doAutoSave(); const n2 = W.syncs('desk-w').length; clearTimeout(W.lm._autoSaveTimer);
-    ok(due && atLeave === false && n1 === n0 && n2 === n1 + 1, '§9 …a person\'s close made after the restore landed is not sent at the leave (the release lost it too: refused as stale, its re-send killed by the reload — no new loss; the reloaded page shows the restored point) — and the flag holds only its two roads: the debounce\'s own save still leaves', { due, atLeave, n0, n1, n2 });
+    ok(gateOf(due) && atLeave === false && n1 === n0 && n2 === n1 + 1, '§9 …a person\'s close made after the restore landed is not sent at the leave (the release lost it too: refused as stale, its re-send killed by the reload — no new loss; the reloaded page shows the restored point) — and the flag holds only its two roads: the debounce\'s own save still leaves', { due, atLeave, n0, n1, n2 });
   }
   // …the flag is SET on exactly two roads, READ by ONE predicate asked at its two roads (the leave, the re-arm), never stored
   {
     const SF = read('src/lib/setup-flows.js'), AP = read('src/lib/app.js'), LJ = read('src/lib/layout.js');
     const writes = [SF, AP].map((x) => (x.match(/this\.layoutManager\._restoreReload = true;/g) || []).length), reads = (LJ.match(/_restoreReload/g) || []).length, asks = (LJ.match(/this\._restoreArmed\(\)/g) || []).length;
-    ok(J(writes) === J([2, 1]) && reads === 1 && asks === 2 && /if \(res\?\.code === 'store_unsaved'\) \{ own\.over = true; if \(this\.layoutManager\) this\.layoutManager\._restoreReload = true;[^\n]*setTimeout\(\(\) => location\.reload\(\), 4000\);/.test(SF) && /_restoreArmed\(\) \{ return this\._restoreReload === true; \}/.test(LJ) && /rearmSave\(\) \{\n\s*if \(this\._restoreArmed\(\)\) return;/.test(LJ) && /if \(res\?\.success\) \{ own\.over = true; if \(this\.layoutManager\) this\.layoutManager\._restoreReload = true;/.test(SF) && /this\.layoutManager\._restoreReload = true;[^\n]*\n\s*setTimeout\(\(\) => location\.reload\(\), 900\);/.test(AP) && /_flushOnLeave\(why\) \{\n\s*if \(this\._restoreArmed\(\)\) return false;/.test(LJ) && !/localStorage[^\n]*_restoreReload|_restoreReload[^\n]*localStorage/.test(SF + AP + LJ), '§9 …the flag is SET on exactly three roads (setup-flows: its own restore landed · its own restore whose write the storage refused, B-225b\'s second half · app.js: another device\'s broadcast — each just before its reload) and READ by ONE predicate (_restoreArmed) asked at its two roads — _flushOnLeave\'s and rearmSave\'s first lines; never stored', { writes, reads, asks });
+    ok(J(writes) === J([2, 1]) && reads === 1 && asks === 2 && gateOf(/if \(res\?\.code === 'store_unsaved'\) \{ own\.over = true; if \(this\.layoutManager\) this\.layoutManager\._restoreReload = true;[^\n]*setTimeout\(\(\) => location\.reload\(\), 4000\);/.test(SF)) && gateOf(/_restoreArmed\(\) \{ return this\._restoreReload === true; \}/.test(LJ)) && gateOf(/rearmSave\(\) \{\n\s*if \(this\._restoreArmed\(\)\) return;/.test(LJ)) && gateOf(/if \(res\?\.success\) \{ own\.over = true; if \(this\.layoutManager\) this\.layoutManager\._restoreReload = true;/.test(SF)) && gateOf(/this\.layoutManager\._restoreReload = true;[^\n]*\n\s*setTimeout\(\(\) => location\.reload\(\), 900\);/.test(AP)) && gateOf(/_flushOnLeave\(why\) \{\n\s*if \(this\._restoreArmed\(\)\) return false;/.test(LJ)) && !/localStorage[^\n]*_restoreReload|_restoreReload[^\n]*localStorage/.test(SF + AP + LJ), '§9 …the flag is SET on exactly three roads (setup-flows: its own restore landed · its own restore whose write the storage refused, B-225b\'s second half · app.js: another device\'s broadcast — each just before its reload) and READ by ONE predicate (_restoreArmed) asked at its two roads — _flushOnLeave\'s and rearmSave\'s first lines; never stored', { writes, reads, asks });
   }
   // RED CONTROLS: the pagehide listener taken out ⇒ the save waits for its timer; the gates lowered (the first cut) ⇒ a save mid-restore
   const { LayoutManager: LM0 } = await mutantEsm('src/lib/layout.js', "    if (typeof window !== 'undefined') window.addEventListener?.('pagehide', () => this._flushOnLeave('pagehide'));\n", '');
@@ -1494,13 +1494,13 @@ await section('§9 B-6352 A DISMISSED RESUME-ALL OFFER HAS A WAY BACK — the RE
     return { W, stopped, rows, asked, ran, doorA, doorB, doorC, barA, said, before, afterNo, setAnswer: (v) => { answer = v; }, setBoom: (v) => { boom = v; } };
   };
   const s = await scene(LM);
-  ok(J(s.before) === J([null, null]) && s.barA.children.includes(s.doorA) && s.doorA.className.includes('chat-resume-btn'), '§9 before the offer is answered the bars carry the door HIDDEN (the offer itself is on screen)', s.before);
+  ok(J(s.before) === J([null, null]) && gateOf(s.barA.children.includes(s.doorA)) && verdictOf(s.doorA.className.includes('chat-resume-btn')), '§9 before the offer is answered the bars carry the door HIDDEN (the offer itself is on screen)', s.before);
   ok(s.asked.length === 1 && J(s.afterNo) === J(['Resume all 3', 'Resume all 3', null]), '§9 the boot offer DISMISSED ⇒ the Resume bar of each of ITS windows says «Resume all 3»; a stopped window of another conversation shows no door (its press would resume others) — b06f36e90: nothing, only a reload asked again', s.afterNo);
   s.rows[0].status = 'live'; s.W.lm.paintOfferDoors(); // the person resumed «Ledger» by its own bar; the sidebar's list says it runs (its merge repaints)
   ok(s.said(s.doorB) === 'Resume all 2' && s.said(s.doorA) === null, '§9 …one resumed by its own bar ⇒ the count follows the list: «Resume all 2» (its own bar shows none — it is no longer one of them)', [s.said(s.doorA), s.said(s.doorB)]);
   s.setAnswer(true);
   await s.doorB.onclick();
-  ok(s.asked.length === 2 && s.asked[1].confirmText === 'Resume all 2' && /^2 sessions were interrupted/.test(s.asked[1].message) && s.asked[1].title === 'Resume interrupted sessions?', '§9 the door\'s press asks THE SAME question over the ones still stopped («2 sessions were interrupted…», «Resume all 2»)', s.asked[1]);
+  ok(s.asked.length === 2 && s.asked[1].confirmText === 'Resume all 2' && gateOf(/^2 sessions were interrupted/.test(s.asked[1].message)) && s.asked[1].title === 'Resume interrupted sessions?', '§9 the door\'s press asks THE SAME question over the ones still stopped («2 sessions were interrupted…», «Resume all 2»)', s.asked[1]);
   ok(J(s.ran) === J([[NAMES[1], NAMES[2]]]), '§9 …and its yes resumes exactly those through the same paced door (_resumeAll)', s.ran);
   s.W.lm.paintOfferDoors();
   ok(J([s.said(s.doorA), s.said(s.doorB)]) === J([null, null]), '§9 …all running again ⇒ the door hides', [s.said(s.doorA), s.said(s.doorB)]);
@@ -1518,10 +1518,10 @@ await section('§9 B-6352 A DISMISSED RESUME-ALL OFFER HAS A WAY BACK — the RE
   await tick(5); const open = t3.asked.length; release(false); await p1; await p2;
   ok(open === 2 && t3.said(t3.doorA) === 'Resume all 3', '§9 …two presses while its question is open ask ONE question; dismissed again, the door stays', { open });
   t3.doorA.isConnected = false; t3.W.lm.paintOfferDoors({ judge: true }); // the sidebar's merge
-  ok(!t3.W.lm._offerDoors.has(t3.doorA) && t3.W.lm._offerDoors.has(t3.doorB), '§9 …a door whose bar left the page is forgotten');
+  ok(!t3.W.lm._offerDoors.has(t3.doorA) && verdictOf(t3.W.lm._offerDoors.has(t3.doorB)), '§9 …a door whose bar left the page is forgotten');
   const never = async (Lm) => { const t = await scene(Lm); const b = mkEl('div'); const d = t.W.lm.offerDoor(b, { backend: 'claude', id: CID(2) }); d.isConnected = false; const one = t.W.lm._offerDoors.has(d); t.W.lm.paintOfferDoors({ judge: true }); const two = t.W.lm._offerDoors.has(d); t.W.lm.paintOfferDoors({ judge: true }); return { one, two, three: t.W.lm._offerDoors.has(d) }; }; // its bar never on the page (the window closed before the sidebar's merges)
   const nv = await never(LM);
-  ok(nv.one && nv.two && !nv.three, '§9 …a door whose bar NEVER stood on the page is dropped at the second of the sidebar\'s repaints that find it off the page — never at its own birth, never by another door\'s (the cure of the batch-4 verdict: it stayed for the page\'s life)', nv);
+  ok(gateOf(nv.one) && gateOf(nv.two) && !nv.three, '§9 …a door whose bar NEVER stood on the page is dropped at the second of the sidebar\'s repaints that find it off the page — never at its own birth, never by another door\'s (the cure of the batch-4 verdict: it stayed for the page\'s life)', nv);
   const { LayoutManager: LMd } = await mutantEsm('src/lib/layout.js', '{ if (b._shown || b._seenOff) { this._offerDoors.delete(b); continue; }', '{ if (b._shown) { this._offerDoors.delete(b); continue; }'); // stale-pins: kept — the control writes the first cut's rule back on purpose
   ok((await never(LMd)).three === true, '§9 CONTROL: the first cut (only a door seen on the page is dropped) keeps it — the leg above goes RED');
   // cure 2 (the cure's verdict): only the sidebar's merges judge — an offer's own repaints (kept, pressed) never drop a door whose bar is detached
@@ -1531,10 +1531,10 @@ await section('§9 B-6352 A DISMISSED RESUME-ALL OFFER HAS A WAY BACK — the RE
   ok((await detached(LMj)) === false, '§9 CONTROL: every paint judging (the cure\'s first form) drops it after two offer repaints — the leg above goes RED');
   const t4 = await scene(LM); t4.setAnswer(true); t4.setBoom(true);
   let threw = false; try { await t4.doorA.onclick(); } catch { threw = true; }
-  ok(threw && t4.said(t4.doorA) === 'Resume all 3', '§9 …a bulk resume that THROWS gives the door back (the list kept in a finally)', { threw, now: t4.said(t4.doorA) });
+  ok(gateOf(threw) && t4.said(t4.doorA) === 'Resume all 3', '§9 …a bulk resume that THROWS gives the door back (the list kept in a finally)', { threw, now: t4.said(t4.doorA) });
   // the wiring: chat-view's Resume bar hands its bar and its conversation; the sidebar's merge repaints; the two-button bar keeps the note on its own line
-  ok(/bar\.append\(note, btn\);\n\s+this\.app\?\.layoutManager\?\.offerDoor\?\.\(bar, \{ backend: spec\.backend, id: spec\.backendSessionId \}\);/.test(read('src/lib/chat-view.js')) && /_mergeAndRender\(\) \{\n\s+this\._merge\(\);\n\s+this\.app\?\.layoutManager\?\.paintOfferDoors\?\.\(\{ judge: true \}\);/.test(read('src/lib/sidebar.js')), '§9 …wired: chat-view _showResumeBar hands its bar and conversation to offerDoor; Sidebar _mergeAndRender repaints the count');
-  ok(/\.chat-resume-all-btn\[hidden\] \{ display: none; \}/.test(read('public/chat.css')) && /\.chat-resume-bar:has\(\.chat-resume-all-btn:not\(\[hidden\]\)\) \.chat-resume-note \{ flex-basis: 100%; \}/.test(read('public/chat.css')), '§9 …a hidden door takes no room; with two buttons the note keeps its own line (a phone\'s 360 px)');
+  ok(gateOf(/bar\.append\(note, btn\);\n\s+this\.app\?\.layoutManager\?\.offerDoor\?\.\(bar, \{ backend: spec\.backend, id: spec\.backendSessionId \}\);/.test(read('src/lib/chat-view.js'))) && verdictOf(/_mergeAndRender\(\) \{\n\s+this\._merge\(\);\n\s+this\.app\?\.layoutManager\?\.paintOfferDoors\?\.\(\{ judge: true \}\);/.test(read('src/lib/sidebar.js'))), '§9 …wired: chat-view _showResumeBar hands its bar and conversation to offerDoor; Sidebar _mergeAndRender repaints the count');
+  ok(gateOf(/\.chat-resume-all-btn\[hidden\] \{ display: none; \}/.test(read('public/chat.css'))) && verdictOf(/\.chat-resume-bar:has\(\.chat-resume-all-btn:not\(\[hidden\]\)\) \.chat-resume-note \{ flex-basis: 100%; \}/.test(read('public/chat.css'))), '§9 …a hidden door takes no room; with two buttons the note keeps its own line (a phone\'s 360 px)');
   // RED CONTROL: the dismissal keeps nothing (b06f36e90's `if (!ok) return;`)
   const { LayoutManager: LM1 } = await mutantEsm('src/lib/layout.js', 'if (!ok) { this._keepOffer(stopped); return; }', 'if (!ok) return;');
   const red = await scene(LM1);
@@ -1561,7 +1561,7 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
   };
   const { MobileNav } = await import(pathToFileURL(path.join(LIB, 'mobile-nav.js')).href);
   const n3 = await rows3(MobileNav), n3b = await rows3(MobileNav, { reopen: true });
-  ok(n3.kept && n3.redraws === 1 && n3b.redraws === 1, '§9 N3 three cancelled ✕ on a tile that asks first — and the switcher opened again — leave ONE wait on the window: its close redraws once (r4: one wait per press)', { n3, n3b });
+  ok(gateOf(n3.kept) && n3.redraws === 1 && n3b.redraws === 1, '§9 N3 three cancelled ✕ on a tile that asks first — and the switcher opened again — leave ONE wait on the window: its close redraws once (r4: one wait per press)', { n3, n3b });
   const { MobileNav: MN0 } = await mutantEsm('src/lib/mobile-nav.js', "else { win._switcherWait?.abort?.(); const wait = win._switcherWait = new AbortController(); win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true, signal: wait.signal }); } };", "else win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true }); };");
   const n3red = await rows3(MN0, { reopen: true });
   ok(n3red.redraws === 4, '§9 N3 CONTROL: the r4 line ⇒ four waits, four redraws (the leg above goes RED)', n3red);
@@ -1607,10 +1607,10 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
   const ar = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3']);
   const ar2 = await hintOf(Sidebar, ['live'], null, undefined, ['old-3']);
   ok(J(ar.first) === J(['1 more match is archived. Show archived']) && J(ar2.first) === J(['1 more match is hidden by your status filter.', '1 more match is archived. Show archived']), '§9 N5 …an ARCHIVED match is said as archived (the default filter hides Archived — the person narrowed nothing), its own line beside the filter\'s (the cure of the batch-4 verdict)', { ar: ar.first, ar2: ar2.first });
-  ok(['1 more match is archived.', '{n} more matches are archived.', 'Show archived'].every((k) => read('src/lib/i18n-zh.js').includes(J(k) + ': "') && read('src/lib/i18n-ja.js').includes(J(k) + ': "')), '§9 N5 …the archived words (and the door\'s) have a zh AND a ja entry');
+  ok(verdictOf(['1 more match is archived.', '{n} more matches are archived.', 'Show archived'].every((k) => read('src/lib/i18n-zh.js').includes(J(k) + ': "') && read('src/lib/i18n-ja.js').includes(J(k) + ': "'))), '§9 N5 …the archived words (and the door\'s) have a zh AND a ja entry');
   // THE ARCHIVED LINE CARRIES ITS DOOR (cure 3 — the cure-2 verdict: the line named no way to the rows): «Show archived», Locate's own act
   const pr = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3'], { press: true });
-  ok(pr.door === 'Show archived' && pr.filter.includes('archived') && pr.handed.includes('old-3') && J(pr.after) === J([]), '§9 N5 …the archived line\'s door «Show archived» turns Archived on in the person\'s status filter (Locate\'s own writes): the archived match is listed and the line goes', pr);
+  ok(pr.door === 'Show archived' && gateOf(pr.filter.includes('archived')) && gateOf(pr.handed.includes('old-3')) && J(pr.after) === J([]), '§9 N5 …the archived line\'s door «Show archived» turns Archived on in the person\'s status filter (Locate\'s own writes): the archived match is listed and the line goes', pr);
   const { Sidebar: SBd } = await mutantEsm('src/lib/sidebar.js', ", { label: tr('Show archived'), why: 'archived' }); // the default filter hides Archived", '); // the default filter hides Archived');
   const pr0 = await hintOf(SBd, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3'], { press: true });
   ok(pr0.door === null && !pr0.filter.includes('archived'), '§9 N5 CONTROL: the line without its door (the cure-2 line) ⇒ nothing to press, the archived match stays out of reach (the door leg goes RED)', pr0);
@@ -1618,16 +1618,16 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
   ok(J((await hintOf(SBa, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3'])).first) === J(['1 more match is hidden by your status filter.', '1 more match is archived. Show archived']), '§9 N5 CONTROL: the first cut\'s count (archived inside the filter\'s) blames the person\'s filter for an archived match — the archived leg goes RED');
   const qv = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, 'live');
   ok(J(qv.later) === J([]), '§9 N5 …rows a QUICK VIEW (LIVE) hides are not worded as the status filter\'s', qv.later);
-  ok(/this\.listEl\.innerHTML = '';[\s\S]{0,400}this\._appendKindHint\?\.\(\);[^\n]*\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-workbench.js')) && /this\.listEl\.innerHTML = '';\n\s*this\._appendKindHint\?\.\(\);\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-column.js')), '§9 N5 …the two renders that WIPE the list (the workbench, the column list) draw the line again after the wipe (the adversarial read: drawn once in _renderInner, it was wiped)');
+  ok(gateOf(/this\.listEl\.innerHTML = '';[\s\S]{0,400}this\._appendKindHint\?\.\(\);[^\n]*\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-workbench.js'))) && verdictOf(/this\.listEl\.innerHTML = '';\n\s*this\._appendKindHint\?\.\(\);\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-column.js'))), '§9 N5 …the two renders that WIPE the list (the workbench, the column list) draw the line again after the wipe (the adversarial read: drawn once in _renderInner, it was wiped)');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  ok(['1 more match is hidden by your status filter.', '{n} more matches are hidden by your status filter.'].every((k) => zh.includes(J(k) + ': "') && ja.includes(J(k) + ': "')), '§9 N5 …both words have a zh AND a ja entry');
+  ok(verdictOf(['1 more match is hidden by your status filter.', '{n} more matches are hidden by your status filter.'].every((k) => zh.includes(J(k) + ': "') && ja.includes(J(k) + ': "'))), '§9 N5 …both words have a zh AND a ja entry');
   const { Sidebar: SB0 } = await mutantEsm('src/lib/sidebar.js', '    this._statusHid = door ? searched - statusLeft - archivedHid : 0;', '    this._statusHid = 0;');
   const red = await hintOf(SB0, ['live']);
   ok(J(red.first) === J([]), '§9 N5 CONTROL: the line taken out ⇒ the narrowed list says nothing (the first N5 leg goes RED)', red.first);
   // N1 + N2 live in the heavy chrome suite (test-layout-placeholder-ui): the second tile's shot no longer stands in for the first;
   // the scratch hub keeps its worktree's own data/bin
   const PU = read('scripts/test-layout-placeholder-ui.mjs');
-  ok(PU.indexOf("await P1.shot('dialog-zh')") >= 0 && PU.indexOf("await P1.shot('dialog-zh')") < PU.indexOf("await P1.shot('dialog-second-tile-zh')") && !/execFileSync\('cp', \['-r', path\.join\(repo, 'data', 'bin'\)/.test(PU) && /if \(e !== 'bin'\) fs\.rmSync\(path\.join\(wt, 'data', e\)/.test(PU), '§9 N1/N2 (pins on the heavy chrome suite): «dialog-zh» is shot BEFORE the second tile\'s press; the scratch data/ is wiped except its own data/bin (never copied from the caller\'s tree)');
+  ok(PU.indexOf("await P1.shot('dialog-zh')") >= 0 && PU.indexOf("await P1.shot('dialog-zh')") < PU.indexOf("await P1.shot('dialog-second-tile-zh')") && !/execFileSync\('cp', \['-r', path\.join\(repo, 'data', 'bin'\)/.test(PU) && verdictOf(/if \(e !== 'bin'\) fs\.rmSync\(path\.join\(wt, 'data', e\)/.test(PU)), '§9 N1/N2 (pins on the heavy chrome suite): «dialog-zh» is shot BEFORE the second tile\'s press; the scratch data/ is wiped except its own data/bin (never copied from the caller\'s tree)');
 });
 
 await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {
@@ -1636,7 +1636,7 @@ await section('§5 CONTROL — the server\'s keepNames taken out of the handler'
   await S.send(W0());
   const n = H.layouts().desktops['desk-p'].autoSave.windows.filter((w) => !isNamed(w)).length;
   ok(n === 7, `§5 without keepNames the 09:18:22 write is stored with seven nameless windows (§1 can go RED: ${n})`);
-  ok(/\{ name: 'test-layout-stopped-window', tier: 'fast'/.test(read('scripts/ci.mjs')), '§5 ci.mjs carries test-layout-stopped-window in the fast tier');
+  ok(verdictOf(/\{ name: 'test-layout-stopped-window', tier: 'fast'/.test(read('scripts/ci.mjs'))), '§5 ci.mjs carries test-layout-stopped-window in the fast tier');
 });
 
 // B-7e49 (s1126): the cooldown row's RED — it runs after the mutant helpers it builds the copy with (§2 runs before them)
@@ -1650,4 +1650,4 @@ await section('§2 CONTROL (B-7e49): the apply\'s cooldown taken out of a copy �
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

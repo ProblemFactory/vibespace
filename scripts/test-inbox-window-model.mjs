@@ -26,7 +26,7 @@ const SRC = fs.readFileSync(path.join(ROOT, REL), 'utf8');
 const L = await import(pathToFileURL(path.join(ROOT, REL)).href);
 const U = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-layout.js')).href);
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 const J = JSON.stringify;
 const read = (f) => { try { return fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch { return ''; } };
 const M = mutantCopies('inbox-window-model', ROOT);
@@ -62,8 +62,8 @@ for (const [label, entries, id, want] of NEXT) ok(L.nextSelection(entries, id) =
   const noNext = await mutant('next-first-open', 'for (let k = at + 1; k < list.length; k++) if', 'for (let k = at + 1; k < -1; k++) if');
   const takeResolved = await mutant('next-takes-resolved', 'for (let k = at + 1; k < list.length; k++) if (isOpenEntry(list[k]) &&', 'for (let k = at + 1; k < list.length; k++) if (');
   const rows = (m) => NEXT.filter(([, entries, id, want]) => m.nextSelection(entries, id) !== want).map(([label]) => label);
-  ok(noNext && rows(noNext).includes('the next open row below'), `control: a copy without the "next below" leg picks the row ABOVE (${noNext ? rows(noNext).length : '?'} table rows red)`, noNext && rows(noNext));
-  ok(takeResolved && rows(takeResolved).includes('rows resolved in place are skipped (below)'), `control: a copy that does not skip resolved rows selects a struck row (${takeResolved ? rows(takeResolved).length : '?'} table rows red)`, takeResolved && rows(takeResolved));
+  ok(gateOf(noNext) && verdictOf(rows(noNext).includes('the next open row below')), `control: a copy without the "next below" leg picks the row ABOVE (${noNext ? rows(noNext).length : '?'} table rows red)`, noNext && rows(noNext));
+  ok(gateOf(takeResolved) && verdictOf(rows(takeResolved).includes('rows resolved in place are skipped (below)')), `control: a copy that does not skip resolved rows selects a struck row (${takeResolved ? rows(takeResolved).length : '?'} table rows red)`, takeResolved && rows(takeResolved));
 }
 
 console.log('② holdSelection — the selection survives what does not remove its row');
@@ -79,7 +79,7 @@ for (const [label, entries, id, want] of HOLD) ok(L.holdSelection(entries, id) =
 {
   const openOnly = await mutant('hold-open-only', 'if (selectedId != null && list.some((e) => idOf(e) === selectedId)) return selectedId;', 'if (selectedId != null && list.some((e) => idOf(e) === selectedId && !e.resolved)) return selectedId;');
   const bad = openOnly ? HOLD.filter(([, entries, id, want]) => openOnly.holdSelection(entries, id) !== want).map(([l]) => l) : [];
-  ok(bad.length === 1 && /another client/.test(bad[0]), 'control: a copy that holds only OPEN rows moves the reader off an item another client resolved', bad);
+  ok(bad.length === 1 && verdictOf(/another client/.test(bad[0])), 'control: a copy that holds only OPEN rows moves the reader off an item another client resolved', bad);
 }
 
 console.log('③ paneMode — one pane or two');
@@ -129,7 +129,7 @@ ok(J(L.scopeRows(null, {})) === '[]' && J(ids(L.scopeRows([null, { item: null },
 {
   const anyTerm = await mutant('scope-any-term', 'if (!terms.every((w) => hay.includes(w))) return false;', 'if (!terms.some((w) => hay.includes(w))) return false;');
   const bad = anyTerm ? SCOPE.filter(([, opts, want]) => J(ids(anyTerm.scopeRows(ROWS, opts))) !== J(want)).map(([l]) => l) : [];
-  ok(bad.length === 1 && /does not match drops/.test(bad[0]), 'control: a copy that ORs the terms lets a half-matching row through', bad);
+  ok(bad.length === 1 && verdictOf(/does not match drops/.test(bad[0])), 'control: a copy that ORs the terms lets a half-matching row through', bad);
   const noScope = await mutant('scope-no-session', 'if (ks.size && !ks.has(e.item.sessionKey)) return false;', '');
   const bad2 = noScope ? SCOPE.filter(([, opts, want]) => J(ids(noScope.scopeRows(ROWS, opts))) !== J(want)).map(([l]) => l) : [];
   ok(bad2.length === 2, 'control: a copy without the session scope lists every session\'s rows under "this session"', bad2);
@@ -155,7 +155,7 @@ for (const [label, d, max, want] of PREV) ok(L.rowPreview(d, max) === want, `${l
     "const line = String(detail || '').split('\\n').find((l) => l.trim()) || ''; const plain = line.replace(/\\*\\*|`/g, '').replace(/(^|[\\s(])__(?=\\S)|(?<=\\S)__(?=[\\s).,;:!?]|$)/g, '$1').replace(/^\\s*(?:#{1,6}|>|[-*+]|\\d+[.)])\\s+/, '').trim();");
   const red = base ? PREV.filter(([, d, max, want]) => base.rowPreview(d, max) !== want).map(([l]) => l) : [];
   // lane ui-language: the list row now drops a leading heading / quote mark too — the base agrees on those two rows, so ≥ 4 red
-  ok(red.length >= 4 && red.some((l) => /THE STRESS ROW/.test(l)) && base.rowPreview('A test/（现有）；B __tests__/', 160) === 'A test/（现有）；B tests__/', `RED CONTROL: the base's strip turns the agent's \`B __tests__/\` into «B tests__/» (${red.length} rows red)`, red);
+  ok(red.length >= 4 && gateOf(red.some((l) => /THE STRESS ROW/.test(l))) && base.rowPreview('A test/（现有）；B __tests__/', 160) === 'A test/（现有）；B tests__/', `RED CONTROL: the base's strip turns the agent's \`B __tests__/\` into «B tests__/» (${red.length} rows red)`, red);
 }
 
 console.log('⑤ itemView — the pane as STRUCTURE (fed the REAL replyButtonState)');
@@ -169,7 +169,7 @@ const ctx = (item, extra = {}) => ({
 const it = (x = {}) => ({ id: 'ut-1', sessionKey: 'claude:s1', text: 'Ship it?', detail: 'line one\n\nline two', urgency: 'high', kind: 'action', options: null, reply: null, status: 'open', createdAt: 100, resolvedAt: null, resolvedBy: null, ...x });
 {
   const v = L.itemView(it({ options: ['Yes', 'No'] }), ctx(it({ options: ['Yes', 'No'] })));
-  ok(J(v.actions) === J(['reply', 'done', 'dismiss', 'copy']) && v.reply.show && v.reply.enabled && v.reply.why === '', 'an open ask of a live chat session ⇒ Reply · Mark done · Dismiss · Copy, the box enabled', v);
+  ok(J(v.actions) === J(['reply', 'done', 'dismiss', 'copy']) && gateOf(v.reply.show) && gateOf(v.reply.enabled) && v.reply.why === '', 'an open ask of a live chat session ⇒ Reply · Mark done · Dismiss · Copy, the box enabled', v);
   ok(J(v.options) === J([{ idx: 0, label: 'Yes' }, { idx: 1, label: 'No' }]), 'its option chips, addressed by INDEX');
   ok(J(v.meta) === J([{ kind: 'urgency', text: '«high»' }, { kind: 'age', text: 'ago(100)' }, { kind: 'origin', text: '«Agents»' }]), 'the meta words: urgency (t), age (the injected word), the producer (t of its label) — in that order', v.meta);
   ok(v.title === 'Ship it?' && v.detail === 'line one\n\nline two' && v.name === 'my session' && v.status === 'open' && v.urgency === 'high' && !v.resolved, 'title / detail / name verbatim, open, high');
@@ -180,7 +180,7 @@ const it = (x = {}) => ({ id: 'ut-1', sessionKey: 'claude:s1', text: 'Ship it?',
   const v = L.itemView(item, ctx(item, { fact: null }));
   // lane inbox-reply-dead-session: `enabled` is the VERDICT (a direct send would be refused) — the window draws the box
   // TYPEABLE all the same (replyBoxView, §⑦'s wiring pins) and its send reopens the conversation
-  ok(v.reply.show && !v.reply.enabled && v.reply.why === 'This conversation has ended — sending reopens it with this reply as its first message' && J(v.actions) === J(['reply', 'done', 'dismiss', 'copy']), 'a stopped session ⇒ the box is DRAWN with the verdict\'s sentence: the conversation ended, the send reopens it (the real verdict)', v.reply);
+  ok(gateOf(v.reply.show) && !v.reply.enabled && v.reply.why === 'This conversation has ended — sending reopens it with this reply as its first message' && J(v.actions) === J(['reply', 'done', 'dismiss', 'copy']), 'a stopped session ⇒ the box is DRAWN with the verdict\'s sentence: the conversation ended, the send reopens it (the real verdict)', v.reply);
   const term = L.itemView(item, ctx(item, { fact: { live: true, mode: 'terminal' } }));
   ok(!term.reply.enabled && term.reply.why === 'Terminal session — reply in its window', 'a terminal session ⇒ the verdict refuses a direct send, "reply in its window" said', term.reply);
 }
@@ -191,17 +191,17 @@ const it = (x = {}) => ({ id: 'ut-1', sessionKey: 'claude:s1', text: 'Ship it?',
   ok(J(v.meta) === J([{ kind: 'notice', text: '«notice»' }, { kind: 'age', text: 'ago(100)' }, { kind: 'expires', text: 'exp(5000)' }, { kind: 'origin', text: '«Login expiry»' }]) && v.urgency === '', 'its meta: notice · age · expires · the producer', v.meta);
   const card = it({ action: { type: 'helper-ask', requestId: 'r1' } });
   const vc = L.itemView(card, ctx(card));
-  ok(!vc.reply.show && vc.reply.why === U.replyButtonState(card, chat).why && /conversation’s card/.test(vc.reply.why) && vc.reply.code === 'card_item', 'a helper\'s ask (card_item) ⇒ no box, the pane SAYS where it is answered, and the view keeps the CODE (the parked ask\'s door is drawn off it — lane ui-needs-a-button)', vc.reply);
+  ok(!vc.reply.show && vc.reply.why === U.replyButtonState(card, chat).why && gateOf(/conversation’s card/.test(vc.reply.why)) && vc.reply.code === 'card_item', 'a helper\'s ask (card_item) ⇒ no box, the pane SAYS where it is answered, and the view keeps the CODE (the parked ask\'s door is drawn off it — lane ui-needs-a-button)', vc.reply);
   const job = it({ jobId: 'job-1' });
-  ok(/job panel/.test(L.itemView(job, ctx(job)).reply.why) && !L.itemView(job, ctx(job)).reply.show, 'a Background Work item ⇒ no box, "answer it in the job panel"');
+  ok(gateOf(/job panel/.test(L.itemView(job, ctx(job)).reply.why)) && !L.itemView(job, ctx(job)).reply.show, 'a Background Work item ⇒ no box, "answer it in the job panel"');
 }
 {
   const done = it({ status: 'done', resolvedBy: 'reply', resolvedAt: 900, reply: { text: 'x'.repeat(300), at: 900 }, options: ['Yes', 'No'] });
   const v = L.itemView(done, ctx(done));
-  ok(J(v.actions) === J(['reopen', 'copy']) && !v.reply.show && J(v.options) === '[]' && v.resolved && v.status === 'done', 'a resolved item ⇒ Reopen · Copy only; no box, no chips', v);
+  ok(J(v.actions) === J(['reopen', 'copy']) && !v.reply.show && J(v.options) === '[]' && gateOf(v.resolved) && v.status === 'done', 'a resolved item ⇒ Reopen · Copy only; no box, no chips', v);
   ok(v.replied === 'x'.repeat(300), 'the WHOLE reply (a row shows 80 chars)', v.replied && v.replied.length);
   ok(J(v.meta) === J([{ kind: 'status', text: '«done»' }, { kind: 'by', text: 'by(reply)' }, { kind: 'age', text: 'ago(100)' }, { kind: 'resolved-at', text: 'ago(900)' }, { kind: 'origin', text: '«Agents»' }]), 'its meta: done · by your reply · filed · resolved', v.meta);
-  ok(v.copy.endsWith('\n\n---\n\n«You replied: ' + 'x'.repeat(300) + '»'), 'Copy carries the reply too');
+  ok(verdictOf(v.copy.endsWith('\n\n---\n\n«You replied: ' + 'x'.repeat(300) + '»')), 'Copy carries the reply too');
   const dis = it({ status: 'dismissed', resolvedAt: 5 });
   ok(L.itemView(dis, ctx(dis)).meta[0].text === '«dismissed»' && L.itemView(dis, ctx(dis)).status === 'dismissed', 'a dismissed item says dismissed');
   const inPlace = it();
@@ -210,7 +210,7 @@ const it = (x = {}) => ({ id: 'ut-1', sessionKey: 'claude:s1', text: 'Ship it?',
 {
   const rc = it({ action: { type: 'reset-credit', accountKey: 'acct-1', sessionId: 'w1' } });
   const v = L.itemView(rc, ctx(rc, { fact: null }));
-  ok(v.actions.includes('producer') && J(v.producer) === J({ type: 'reset-credit', accountKey: 'acct-1', sessionId: 'w1' }), 'a reset-credit ask ⇒ the producer\'s action (its facts, not a verb)', v);
+  ok(gateOf(v.actions.includes('producer')) && J(v.producer) === J({ type: 'reset-credit', accountKey: 'acct-1', sessionId: 'w1' }), 'a reset-credit ask ⇒ the producer\'s action (its facts, not a verb)', v);
   const unknown = it({ action: { type: 'something-new', accountKey: 'a' } });
   ok(!L.itemView(unknown, ctx(unknown)).actions.includes('producer'), 'an action type this client does not own ⇒ no button');
 }
@@ -228,17 +228,17 @@ const it = (x = {}) => ({ id: 'ut-1', sessionKey: 'claude:s1', text: 'Ship it?',
   ok(!!loading.cut && loading.cut.state === 'loading' && loading.cut.text === '«Showing the first 300 characters — loading the rest…»', 'a previewed detail while the rest loads ⇒ "Showing the first 300 characters — loading the rest…" (through t)', loading.cut);
   const failed = L.itemView(prev, ctx(prev, { detailState: 'failed', loadError: 'server unreachable' }));
   ok(!!failed.cut && failed.cut.state === 'failed' && failed.cut.text === '«Could not load the rest of the text: server unreachable»', 'a failed load names its reason under the text (never silent)', failed.cut);
-  ok(L.itemView(prev, ctx(prev, { detailState: 'garbage' })).cut === null && loading.copy.endsWith('p'.repeat(300)), 'an unknown state reads as whole; Copy carries what the pane holds (the window loads the rest before copying)');
+  ok(L.itemView(prev, ctx(prev, { detailState: 'garbage' })).cut === null && verdictOf(loading.copy.endsWith('p'.repeat(300))), 'an unknown state reads as whole; Copy carries what the pane holds (the window loads the rest before copying)');
   const noCut = await mutant('view-no-cut', "const cut = state === 'whole' ? null", "const cut = null; const _cutUnused = state === 'whole' ? null");
   ok(!!noCut && noCut.itemView(prev, ctx(prev, { detailState: 'loading' })).cut === null, 'control: a copy without the cut sentence shows 300 chars as if they were all');
 }
 {
   const resolvedOffers = await mutant('view-resolved-offers-done', "const actions = resolved ? ['reopen', 'copy']", "const actions = resolved ? ['reopen', 'done', 'copy']");
   const done = it({ status: 'done' });
-  ok(resolvedOffers && J(resolvedOffers.itemView(done, ctx(done)).actions) !== J(['reopen', 'copy']), 'control: a copy that offers Mark done on a resolved item fails the resolved row');
+  ok(gateOf(resolvedOffers) && J(resolvedOffers.itemView(done, ctx(done)).actions) !== J(['reopen', 'copy']), 'control: a copy that offers Mark done on a resolved item fails the resolved row');
   const noiseNote = await mutant('view-no-session-noise', "why: rs.code && rs.code !== 'no_session' ? String(rs.why || '') : ''", "why: String(rs.why || '')");
   const note = it({ sessionKey: 'accounts', kind: 'notice' });
-  ok(noiseNote && noiseNote.itemView(note, ctx(note)).reply.why !== '', 'control: a copy without the no_session rule prints "nothing to reply to" on every notice');
+  ok(gateOf(noiseNote) && noiseNote.itemView(note, ctx(note)).reply.why !== '', 'control: a copy without the no_session rule prints "nothing to reply to" on every notice');
 }
 
 console.log('⑧ readOnSight — a notice that asks nothing is read by being read (lane inbox-fyi-mark-all)');
@@ -263,96 +263,96 @@ console.log('⑧ readOnSight — a notice that asks nothing is read by being rea
   ok(L.NOTICE_READ_MS === 1500, 'NOTICE_READ_MS = 1.5 s — arrowing past a row reads nothing, opening one does', L.NOTICE_READ_MS);
   // CONTROL: the button guard dropped ⇒ the Check again notice would be read under the reader's pointer ⇒ RED here
   const Mx = await mutant('read-any-notice', '&& !i.action && ', '&& ');
-  ok(Mx && Mx.readOnSight(n({ action: { type: 'browser-floor-check' } })) === true && L.readOnSight(n({ action: { type: 'browser-floor-check' } })) === false, 'CONTROL: without its button guard the rule reads a notice that offers Check again — the table above goes red on that copy');
+  ok(gateOf(Mx) && Mx.readOnSight(n({ action: { type: 'browser-floor-check' } })) === true && L.readOnSight(n({ action: { type: 'browser-floor-check' } })) === false, 'CONTROL: without its button guard the rule reads a notice that offers Check again — the table above goes red on that copy');
 }
 
 console.log('⑥ the patched copies live outside the checkout');
-for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 12, label: '⑥ ' })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 12, label: '⑥ ' })) ok(verdictOf(row.pass), row.name, row.detail);
 
 console.log('⑦ wiring pins — the window really calls every rule; the doors; THE model\'s verbs');
 {
   const w = read('src/lib/inbox-window.js');
-  ok(/import \{ TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS \} from '\.\/inbox-window-layout\.js';/.test(w) && /const sub = rowPreview\(model\.detailOf\(i\), 160\);/.test(w), 'inbox-window.js imports the six rules + TABS from the PURE module (the row\'s cut form is rowPreview)');
-  ok(/const next = nextSelection\(st\.display, id\);/.test(w) && /if \(await model\.setStatus\(id, a === 'done' \? 'done' : 'dismissed'\)\) advance\(id\);/.test(w) && /if \(ok && wasOpen\) advance\(c\.id\);/.test(w),
+  ok(gateOf(/import \{ TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS \} from '\.\/inbox-window-layout\.js';/.test(w)) && verdictOf(/const sub = rowPreview\(model\.detailOf\(i\), 160\);/.test(w)), 'inbox-window.js imports the six rules + TABS from the PURE module (the row\'s cut form is rowPreview)');
+  ok(gateOf(/const next = nextSelection\(st\.display, id\);/.test(w)) && gateOf(/if \(await model\.setStatus\(id, a === 'done' \? 'done' : 'dismissed'\)\) advance\(id\);/.test(w)) && verdictOf(/if \(ok && wasOpen\) advance\(c\.id\);/.test(w)),
     'the mail-client rule runs after THIS client\'s Mark done / Dismiss succeeded and after a reply that resolved an OPEN item');
-  ok(/st\.selected = holdSelection\(st\.display, st\.selected\);/.test(w), 'every render holds the selection through holdSelection');
-  ok(/const m = paneMode\(root\.clientWidth, \{ touch \}\);/.test(w) && /if \(!m\) return;/.test(w) && /root\.classList\.toggle\('iw-single', m\.mode === 'single'\)/.test(w) && /--iw-row-min/.test(w), 'the pane mode is paneMode over the MEASURED width (unmeasured ⇒ kept), a class + the touch row floor');
-  ok(/scopeRows\(entries, \{ sessionKey: keys, query: st\.query, tab: st\.tab, textOf \}\)/.test(w) && /const keys = st\.scopeKey \? model\.keysFor\(st\.scopeKey\) : null;/.test(w), 'the list is scopeRows over the tab, the SESSION\'S keys (model.keysFor) and the filter');
-  ok(/itemView\(it, \{/.test(w) && /reply: model\.replyState\(it\)/.test(w), 'the pane is itemView fed THE model\'s reply verdict');
-  ok(/st\.layout = st\.layout \? nextLayout\(st\.layout, todos\) : openLayout\(sortGroups\(todos\.open\)\);/.test(w) && /splitNotices\(entriesFor\(layout, todos\)/.test(w) && /noticeGroups\(ns, 'all', \{ prev: st\.noticeOrder \}\)/.test(w),
+  ok(verdictOf(/st\.selected = holdSelection\(st\.display, st\.selected\);/.test(w)), 'every render holds the selection through holdSelection');
+  ok(gateOf(/const m = paneMode\(root\.clientWidth, \{ touch \}\);/.test(w)) && gateOf(/if \(!m\) return;/.test(w)) && gateOf(/root\.classList\.toggle\('iw-single', m\.mode === 'single'\)/.test(w)) && verdictOf(/--iw-row-min/.test(w)), 'the pane mode is paneMode over the MEASURED width (unmeasured ⇒ kept), a class + the touch row floor');
+  ok(gateOf(/scopeRows\(entries, \{ sessionKey: keys, query: st\.query, tab: st\.tab, textOf \}\)/.test(w)) && verdictOf(/const keys = st\.scopeKey \? model\.keysFor\(st\.scopeKey\) : null;/.test(w)), 'the list is scopeRows over the tab, the SESSION\'S keys (model.keysFor) and the filter');
+  ok(gateOf(/itemView\(it, \{/.test(w)) && verdictOf(/reply: model\.replyState\(it\)/.test(w)), 'the pane is itemView fed THE model\'s reply verdict');
+  ok(gateOf(/st\.layout = st\.layout \? nextLayout\(st\.layout, todos\) : openLayout\(sortGroups\(todos\.open\)\);/.test(w)) && gateOf(/splitNotices\(entriesFor\(layout, todos\)/.test(w)) && verdictOf(/noticeGroups\(ns, 'all', \{ prev: st\.noticeOrder \}\)/.test(w)),
     'the list is the popup\'s order: sortGroups → openLayout, nextLayout on every broadcast (resolved rows keep their slot), splitNotices, noticeGroups');
   const panel = read('src/lib/user-todos-panel.js');
-  ok(/const gs = sortGroups\(todos\.open\);/.test(panel) && /layout = layout \? nextLayout\(layout, todos\) : openLayout\(gs\);/.test(panel) && !/const gs = \[\.\.\.groups\.entries\(\)\]\.sort/.test(panel), '…the SAME sortGroups the popup lays out by (moved out of the panel — one implementation)');
-  ok(/reconcileKeyed\(box, entries, \{/.test(w) && /reconcileKeyed\(container, entries, \{/.test(panel) && /export function reconcileKeyed\(/.test(read('src/lib/user-todos-row.js')), 'rows are keyed and patched in place by THE reconciler both surfaces use');
+  ok(gateOf(/const gs = sortGroups\(todos\.open\);/.test(panel)) && gateOf(/layout = layout \? nextLayout\(layout, todos\) : openLayout\(gs\);/.test(panel)) && !/const gs = \[\.\.\.groups\.entries\(\)\]\.sort/.test(panel), '…the SAME sortGroups the popup lays out by (moved out of the panel — one implementation)');
+  ok(gateOf(/reconcileKeyed\(box, entries, \{/.test(w)) && gateOf(/reconcileKeyed\(container, entries, \{/.test(panel)) && verdictOf(/export function reconcileKeyed\(/.test(read('src/lib/user-todos-row.js'))), 'rows are keyed and patched in place by THE reconciler both surfaces use');
   // the verbs: every one THE model's (the same routes the popup calls) — the window has no fetch of its own
-  ok(/model\.setStatus\(id, 'open'\)/.test(w) && /model\.postReply\(c\.id, body\)/.test(w) && /model\.runAction\(it\)/.test(w) && /model\.jump\(it\.sessionKey, it\)/.test(w) && !/fetchJson|fetch\(/.test(w),
+  ok(gateOf(/model\.setStatus\(id, 'open'\)/.test(w)) && gateOf(/model\.postReply\(c\.id, body\)/.test(w)) && gateOf(/model\.runAction\(it\)/.test(w)) && gateOf(/model\.jump\(it\.sessionKey, it\)/.test(w)) && !/fetchJson|fetch\(/.test(w),
     'every verb is THE model\'s (setStatus / postReply / runAction / jump); the window holds no fetch of its own');
   const acts = read('src/lib/user-todos-actions.js');
-  ok(/export function inboxModel\(app\) \{\s*if \(app\._inboxModel\) return app\._inboxModel;/.test(acts) && /const model = inboxModel\(app\);/.test(panel) && /const model = inboxModel\(app\);/.test(w), 'ONE model per app, memoized — the popup and the window share it');
-  ok(/model\.on\('todos', \(\) => render\(\), \{ signal \}\)/.test(w) && /model\.on\('live', \(\) => \{/.test(w) && /model\.on\('status', \(\) => patchBoardPane\(\), \{ signal \}\)/.test(w), 'the window follows the three broadcasts (todos / live / status) and unsubscribes with its own listener signal');
+  ok(gateOf(/export function inboxModel\(app\) \{\s*if \(app\._inboxModel\) return app\._inboxModel;/.test(acts)) && gateOf(/const model = inboxModel\(app\);/.test(panel)) && verdictOf(/const model = inboxModel\(app\);/.test(w)), 'ONE model per app, memoized — the popup and the window share it');
+  ok(gateOf(/model\.on\('todos', \(\) => render\(\), \{ signal \}\)/.test(w)) && gateOf(/model\.on\('live', \(\) => \{/.test(w)) && verdictOf(/model\.on\('status', \(\) => patchBoardPane\(\), \{ signal \}\)/.test(w)), 'the window follows the three broadcasts (todos / live / status) and unsubscribes with its own listener signal');
   // the reply box keeps its node across broadcasts; Enter / Ctrl+Enter send, Shift+Enter is a newline, Esc returns to the list
-  ok(/if \(!st\.cur \|\| st\.cur\.id !== id\) \{/.test(w) && /if \(e\.key === 'Enter' && !e\.shiftKey && !e\.isComposing && e\.keyCode !== 229\) \{ e\.preventDefault\(\); sendReply\(ta\.value\); \}/.test(w)
-    && /if \(e\.key === 'Escape' && !e\.isComposing\) \{/.test(w) && /e\.key === 'ArrowDown' \|\| e\.key === 'j'/.test(w) && /e\.key === 'ArrowUp' \|\| e\.key === 'k'/.test(w), 'the pane is rebuilt only when the selected id changes (a typed reply survives); the keys: ↑/↓ j/k · Enter · Esc · (Ctrl/Cmd+)Enter');
+  ok(gateOf(/if \(!st\.cur \|\| st\.cur\.id !== id\) \{/.test(w)) && gateOf(/if \(e\.key === 'Enter' && !e\.shiftKey && !e\.isComposing && e\.keyCode !== 229\) \{ e\.preventDefault\(\); sendReply\(ta\.value\); \}/.test(w))
+    && gateOf(/if \(e\.key === 'Escape' && !e\.isComposing\) \{/.test(w)) && gateOf(/e\.key === 'ArrowDown' \|\| e\.key === 'j'/.test(w)) && verdictOf(/e\.key === 'ArrowUp' \|\| e\.key === 'k'/.test(w)), 'the pane is rebuilt only when the selected id changes (a typed reply survives); the keys: ↑/↓ j/k · Enter · Esc · (Ctrl/Cmd+)Enter');
   // XSS: item strings are TEXT; markdown through the escaping renderer + sanitizeHtml (src/lib/safe-html.js); the only innerHTML writes are those two
   const inner = [...w.matchAll(/\.innerHTML\s*=\s*([^;]+);/g)].map((m) => m[1].trim());
   // design 009: + an app install's ONE card — THE row renderer's escaped HTML (every hole escHtml'd or a closed value: scripts/test-app-card.mjs §5)
   // lane foryou-honest (P1-2): the words are THE tray's renderer (user-todos-row.js wordsHtml — every segment escaped), never markdown
   // lane wake-approve-card r7: + the vault-run card's FACTS — THE row renderer's escaped HTML (every value escHtml'd, an unknown code monospace: test-wake-approve-card ⑮)
-  ok(J(inner) === J(['wordsHtml(src, { whole })', 'icon', 'runFactsHtml(it, t, { buttons: false })', 'appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false })']) && /import \{[^}]*\bwordsHtml\b[^}]*\} from '\.\/user-todos-row\.js';/.test(w) && !/from 'marked'/.test(w) && !/\bmdInto\(/.test(w) && /b\.append\(mk\('span', 'iw-act-label', label\)\)/.test(w),
+  ok(J(inner) === J(['wordsHtml(src, { whole })', 'icon', 'runFactsHtml(it, t, { buttons: false })', 'appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false })']) && gateOf(/import \{[^}]*\bwordsHtml\b[^}]*\} from '\.\/user-todos-row\.js';/.test(w)) && !/from 'marked'/.test(w) && !/\bmdInto\(/.test(w) && verdictOf(/b\.append\(mk\('span', 'iw-act-label', label\)\)/.test(w)),
     'XSS: exactly four innerHTML writes — THE tray\'s escaped words (wordsHtml: plain text + its links, every segment escaped — no markdown since lane foryou-honest), a UI_ICONS constant, the run card\'s escaped facts (r7) and an install card\'s escaped HTML (design 009); every other item string is textContent', inner);
-  ok(!/<a\b|createElement\('a'\)/.test(w) && /if \(tg\.open === 'url' \|\| tg\.open === 'mail'\) \{ window\.open\(tg\.href, '_blank', 'noopener'\); return true; \}/.test(acts), 'a link in an item opens beside the workspace, never in place of it (the pane draws no <a>: a link is a .fy-link span — THE model\'s openLink opens a new tab)');
+  ok(!/<a\b|createElement\('a'\)/.test(w) && verdictOf(/if \(tg\.open === 'url' \|\| tg\.open === 'mail'\) \{ window\.open\(tg\.href, '_blank', 'noopener'\); return true; \}/.test(acts)), 'a link in an item opens beside the workspace, never in place of it (the pane draws no <a>: a link is a .fy-link span — THE model\'s openLink opens a new tab)');
   // the window type + the doors
-  ok(/registerWindowType\(\{\s*type: 'inbox', label: 'For you', singleton: true, icon: ICON,\s*action: 'openInbox',/.test(w) && /app\.openInbox\(\{ itemId: spec && spec\.itemId, sessionKey: spec && spec\.sessionKey, syncId \}\)/.test(w), "registered: type 'inbox', singleton, openSpec action 'openInbox' replayed with its itemId / sessionKey / syncId");
-  ok(/app\.wm\.revealWindow\(id, \{ replay: !!syncId \}\);\s*if \(!syncId && w\._inbox\) w\._inbox\.show\(\{ itemId, sessionKey, scope: wantScope \}\);/.test(w), 'an open window is REVEALED (a replay only raises) and re-pointed by a user\'s door, never by a replay');
-  ok(/openInbox\(opts\) \{ return openInboxWindow\(this, opts \|\| \{\}\); \}/.test(read('src/lib/app.js')), 'app.openInbox is THE door (app.js)');
-  ok(/if \(e\.target\.closest\('\.ut-tabs > \.ut-open-win'\)\) \{ hidePopup\('open-win'\); app\.openInbox\(\{ scope: 'all' \}\); return; \}/.test(panel) && /else if \(scope === 'all'\) st\.scopeKey = null;/.test(w), 'door (a): the popup\'s ⤢ opens the whole inbox — an open window another device scoped is WIDENED to all sessions (lane foryou-honest P3-7)');
-  ok(/else \{ hidePopup\('view'\); app\.openInbox\(\{ itemId: rec\.id \}\); \}/.test(panel) && /app\.openInbox\(\{ itemId: rec\.id, sessionKey: rec\.sessionKey \}\)/.test(panel), 'door (b): a row\'s ⤢ opens the window ON that item (the mini inbox\'s scoped to its session)');
-  ok(/if \(e\.target\.closest\('\.ut-mini-head > \.ut-open-win'\)\) \{ pop\.remove\(\); app\.openInbox\(\{ sessionKey: primaryKey\(mini\?\.keys \|\| keys\) \}\); \}/.test(panel) && /wireMiniRows\(pop, \{ close: \(\) => pop\.remove\(\) \}\);/.test(panel), 'door (c): the mini inbox\'s head ⤢ opens the window scoped to that session');
-  ok(/menu: 'gear', parent: 'comm', order: 5, icon: ICON,/.test(w) && /label: \(\) => t\('For you…'\),\s*run: \(c\) => c\.app\.openInbox\(\),/.test(w), 'door (d): ⚙ Communication ▸ For you…');
+  ok(gateOf(/registerWindowType\(\{\s*type: 'inbox', label: 'For you', singleton: true, icon: ICON,\s*action: 'openInbox',/.test(w)) && verdictOf(/app\.openInbox\(\{ itemId: spec && spec\.itemId, sessionKey: spec && spec\.sessionKey, syncId \}\)/.test(w)), "registered: type 'inbox', singleton, openSpec action 'openInbox' replayed with its itemId / sessionKey / syncId");
+  ok(verdictOf(/app\.wm\.revealWindow\(id, \{ replay: !!syncId \}\);\s*if \(!syncId && w\._inbox\) w\._inbox\.show\(\{ itemId, sessionKey, scope: wantScope \}\);/.test(w)), 'an open window is REVEALED (a replay only raises) and re-pointed by a user\'s door, never by a replay');
+  ok(verdictOf(/openInbox\(opts\) \{ return openInboxWindow\(this, opts \|\| \{\}\); \}/.test(read('src/lib/app.js'))), 'app.openInbox is THE door (app.js)');
+  ok(gateOf(/if \(e\.target\.closest\('\.ut-tabs > \.ut-open-win'\)\) \{ hidePopup\('open-win'\); app\.openInbox\(\{ scope: 'all' \}\); return; \}/.test(panel)) && verdictOf(/else if \(scope === 'all'\) st\.scopeKey = null;/.test(w)), 'door (a): the popup\'s ⤢ opens the whole inbox — an open window another device scoped is WIDENED to all sessions (lane foryou-honest P3-7)');
+  ok(gateOf(/else \{ hidePopup\('view'\); app\.openInbox\(\{ itemId: rec\.id \}\); \}/.test(panel)) && verdictOf(/app\.openInbox\(\{ itemId: rec\.id, sessionKey: rec\.sessionKey \}\)/.test(panel)), 'door (b): a row\'s ⤢ opens the window ON that item (the mini inbox\'s scoped to its session)');
+  ok(gateOf(/if \(e\.target\.closest\('\.ut-mini-head > \.ut-open-win'\)\) \{ pop\.remove\(\); app\.openInbox\(\{ sessionKey: primaryKey\(mini\?\.keys \|\| keys\) \}\); \}/.test(panel)) && verdictOf(/wireMiniRows\(pop, \{ close: \(\) => pop\.remove\(\) \}\);/.test(panel)), 'door (c): the mini inbox\'s head ⤢ opens the window scoped to that session');
+  ok(gateOf(/menu: 'gear', parent: 'comm', order: 5, icon: ICON,/.test(w)) && verdictOf(/label: \(\) => t\('For you…'\),\s*run: \(c\) => c\.app\.openInbox\(\),/.test(w)), 'door (d): ⚙ Communication ▸ For you…');
   // the viewer modal is retired — one door
   const css = read('public/style.css');
   const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1'); // comments may NAME the retired viewer
   ok(!/openViewer|createModalShell|ut-viewer/.test(code(panel)) && !/\.ut-viewer/.test(css) && !/Open in viewer \(copyable, rendered\)/.test(read('src/lib/user-todos-row.js') + read('src/lib/i18n-zh.js') + read('src/lib/i18n-ja.js')), 'the read-only viewer modal is gone (no openViewer / #ut-viewer / .ut-viewer-* CSS / its title key)');
   // the verify round (2026-09-27): the dead tail head, the scoped empty hint, the scope candidate, a navigation re-sorts, an empty Reply focuses the box, a previewed detail loads with its sentence
-  ok(/if \(st\.tailOpen && st\.selected && st\.tailIds\.has\(st\.selected\)\) st\.selected = null;/.test(w) && /st\.tailIds = new Set\(tailRowsIn\.map\(\(e\) => e\.item\.id\)\);/.test(w), 'closing the resolved tail while one of its rows is selected moves the selection off it (the head was dead: render re-opened the tail around the selection)');
-  ok(/: st\.scopeKey \? \(st\.tab === 'notices' \? t\('No notices for this session\.'\) : t\('No open items for this session\.'\)\)/.test(w), 'under a session scope the empty hint names the scope ("Nothing needs you right now" would be a lie)');
-  ok(/const selKey = sel && typeof sel\.sessionKey === 'string' && \(sel\.sessionKey\.includes\(':'\) \|\| sel\.sessionKey === 'jobs'\) \? sel\.sessionKey : null;/.test(w) && /const cand = st\.scopeKey \|\| selKey;/.test(w), 'the scope candidate is a SESSION (or Background Work) — never an instance-level `accounts` notice\'s first name');
-  ok(/st\.tab = tb\.dataset\.tab; st\.noticeOrder = null; st\.layout = null; render\(\);/.test(w) && /st\.scopeKey = sb\.dataset\.scope === 'all' \? null : \(sb\.dataset\.key \|\| null\); st\.layout = null; render\(\);/.test(w) && /if \(id\) st\.pendingItem = id;\s*\n\s*st\.layout = null;/.test(w), 'a tab / scope switch and every door re-sort the list (a navigation is a new view; the append-only slots hold between navigations)');
-  ok(/if \(!String\(txt\)\.trim\(\)\) \{ if \(st\.cur && !st\.cur\.ta\.disabled\) st\.cur\.ta\.focus\(\); return; \}/.test(w), 'Reply with an empty box puts the cursor in the box instead of doing nothing');
+  ok(gateOf(/if \(st\.tailOpen && st\.selected && st\.tailIds\.has\(st\.selected\)\) st\.selected = null;/.test(w)) && verdictOf(/st\.tailIds = new Set\(tailRowsIn\.map\(\(e\) => e\.item\.id\)\);/.test(w)), 'closing the resolved tail while one of its rows is selected moves the selection off it (the head was dead: render re-opened the tail around the selection)');
+  ok(verdictOf(/: st\.scopeKey \? \(st\.tab === 'notices' \? t\('No notices for this session\.'\) : t\('No open items for this session\.'\)\)/.test(w)), 'under a session scope the empty hint names the scope ("Nothing needs you right now" would be a lie)');
+  ok(gateOf(/const selKey = sel && typeof sel\.sessionKey === 'string' && \(sel\.sessionKey\.includes\(':'\) \|\| sel\.sessionKey === 'jobs'\) \? sel\.sessionKey : null;/.test(w)) && verdictOf(/const cand = st\.scopeKey \|\| selKey;/.test(w)), 'the scope candidate is a SESSION (or Background Work) — never an instance-level `accounts` notice\'s first name');
+  ok(gateOf(/st\.tab = tb\.dataset\.tab; st\.noticeOrder = null; st\.layout = null; render\(\);/.test(w)) && gateOf(/st\.scopeKey = sb\.dataset\.scope === 'all' \? null : \(sb\.dataset\.key \|\| null\); st\.layout = null; render\(\);/.test(w)) && verdictOf(/if \(id\) st\.pendingItem = id;\s*\n\s*st\.layout = null;/.test(w)), 'a tab / scope switch and every door re-sort the list (a navigation is a new view; the append-only slots hold between navigations)');
+  ok(verdictOf(/if \(!String\(txt\)\.trim\(\)\) \{ if \(st\.cur && !st\.cur\.ta\.disabled\) st\.cur\.ta\.focus\(\); return; \}/.test(w)), 'Reply with an empty box puts the cursor in the box instead of doing nothing');
   // lane inbox-reply-dead-session (userW inc-mvfuzlom-nwav: ten presses on a disabled box): THE BOX IS NEVER DISABLED
   const live = (w.match(/const patchLivePane = \(\) => \{[\s\S]*?\n  \};\n/) || [''])[0];
-  ok(live.length > 400 && /const box = model\.replyBox\(it\);\n    c\.ta\.disabled = false;/.test(live) && !/\.disabled = [^;]*enabled/.test(live) && /o\.disabled = sending;/.test(live) && /rb\.disabled = sending;/.test(live),
+  ok(live.length > 400 && gateOf(/const box = model\.replyBox\(it\);\n    c\.ta\.disabled = false;/.test(live)) && !/\.disabled = [^;]*enabled/.test(live) && gateOf(/o\.disabled = sending;/.test(live)) && verdictOf(/rb\.disabled = sending;/.test(live)),
     'the window\'s live patch draws THE box (model.replyBox): the textarea never disabled, the send and the chips held only while a send is in flight — no `.disabled = …enabled` left', live.slice(0, 200));
-  ok(/lb\.textContent = t\(box\.send\)/.test(live) && /rb\.title = t\(box\.sendTitle\);/.test(live) && /t\(box\.note\.key, \{ why: box\.note\.why \|\| '' \}\)/.test(live) && /box\.reopen \? t\('Reopen and send "\{label\}"', \{ label: o\.textContent \}\)/.test(live),
+  ok(gateOf(/lb\.textContent = t\(box\.send\)/.test(live)) && gateOf(/rb\.title = t\(box\.sendTitle\);/.test(live)) && gateOf(/t\(box\.note\.key, \{ why: box\.note\.why \|\| '' \}\)/.test(live)) && verdictOf(/box\.reopen \? t\('Reopen and send "\{label\}"', \{ label: o\.textContent \}\)/.test(live)),
     'an ended conversation\'s send READS "Reopen and send" (its visible label), the note says the fact or the last refusal, a chip\'s title says it reopens');
-  ok(/reply\.append\(why, voiceField\(ta, attachDictation\(ta\)\)\);/.test(w) && /c\.reply\.prepend\(c\.why\)/.test(w), 'the note sits ABOVE the box (built first, moved back to the front)');
+  ok(gateOf(/reply\.append\(why, voiceField\(ta, attachDictation\(ta\)\)\);/.test(w)) && verdictOf(/c\.reply\.prepend\(c\.why\)/.test(w)), 'the note sits ABOVE the box (built first, moved back to the front)');
   const actsSrc = read('src/lib/user-todos-actions.js');
-  ok(/const replyBox = \(i\) => replyBoxView\(replyState\(i\), replyFailures\.get\(i\.id\) \|\| null\);/.test(actsSrc) && /if \(r\.reopened\) \{ showToast\(t\('Reopened the conversation and sent your reply'\)\); openReopened\(r, at\); \}/.test(actsSrc) && /replyFailures\.set\(id, \{ code: \(r && r\.code\) \|\| 'unreachable', why \}\);/.test(actsSrc),
+  ok(gateOf(/const replyBox = \(i\) => replyBoxView\(replyState\(i\), replyFailures\.get\(i\.id\) \|\| null\);/.test(actsSrc)) && gateOf(/if \(r\.reopened\) \{ showToast\(t\('Reopened the conversation and sent your reply'\)\); openReopened\(r, at\); \}/.test(actsSrc)) && verdictOf(/replyFailures\.set\(id, \{ code: \(r && r\.code\) \|\| 'unreachable', why \}\);/.test(actsSrc)),
     'THE model: replyBox = the PURE replyBoxView over the verdict + this page\'s last refusal; a reopened reply toasts and OPENS the conversation\'s window; a refusal is kept for the note');
   const rowSrc = read('src/lib/user-todos-row.js');
   const apply = (rowSrc.match(/export function applyLive\(el, item, ctx\) \{[\s\S]*?\n\}\n/) || [''])[0];
-  ok(apply.length > 400 && /btn\.disabled = false;/.test(apply) && /c\.disabled = busy;/.test(apply) && /send\.disabled = busy;/.test(apply) && !/disabled = !rs\.enabled/.test(apply) && /\.ut-reply-why/.test(apply) && /ut-reply-send-label/.test(apply),
+  ok(apply.length > 400 && gateOf(/btn\.disabled = false;/.test(apply)) && gateOf(/c\.disabled = busy;/.test(apply)) && gateOf(/send\.disabled = busy;/.test(apply)) && !/disabled = !rs\.enabled/.test(apply) && gateOf(/\.ut-reply-why/.test(apply)) && verdictOf(/ut-reply-send-label/.test(apply)),
     'the TRAY row (and the mini inbox, the phone sheet — the same rows) never disables its Reply, its chips or its send; its box carries the note and "Reopen and send"');
-  ok(/if \(it\.detailTruncated\) loadDetail\(id\);/.test(w) && /model\.ensureDetail\(id\)\.then\(\(\{ error \}\) => \{ if \(error\) \{ st\.loadErr = \{ id, why: error \};/.test(w) && /detailState: !it\.detailTruncated \? 'whole' : \(st\.loadErr && st\.loadErr\.id === it\.id \? 'failed' : 'loading'\)/.test(w) && /const \{ error \} = await model\.ensureDetail\(id\);/.test(w) && /c\.cutLine\.textContent !== cutTxt/.test(w), 'a previewed detail (a resolved item\'s snapshot) is loaded whole through the model when shown and before Copy; the pane says loading / the failure by name (textContent)');
-  ok(/\.iw-detail-cut \{[^}]*var\(--text-dim\)/.test(css) && /\.iw-detail-cut\[data-state="failed"\] \{[^}]*var\(--red, #e55\)/.test(css), 'the cut line uses theme vars');
+  ok(gateOf(/if \(it\.detailTruncated\) loadDetail\(id\);/.test(w)) && gateOf(/model\.ensureDetail\(id\)\.then\(\(\{ error \}\) => \{ if \(error\) \{ st\.loadErr = \{ id, why: error \};/.test(w)) && gateOf(/detailState: !it\.detailTruncated \? 'whole' : \(st\.loadErr && st\.loadErr\.id === it\.id \? 'failed' : 'loading'\)/.test(w)) && gateOf(/const \{ error \} = await model\.ensureDetail\(id\);/.test(w)) && verdictOf(/c\.cutLine\.textContent !== cutTxt/.test(w)), 'a previewed detail (a resolved item\'s snapshot) is loaded whole through the model when shown and before Copy; the pane says loading / the failure by name (textContent)');
+  ok(gateOf(/\.iw-detail-cut \{[^}]*var\(--text-dim\)/.test(css)) && verdictOf(/\.iw-detail-cut\[data-state="failed"\] \{[^}]*var\(--red, #e55\)/.test(css)), 'the cut line uses theme vars');
   // i18n: every new word has zh + ja
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const NEW = ['For you…', 'Open as a window', "Open this session's inbox as a window", 'Open in the For-you window', 'Only this session: {name}', '{n} options', 'Mark done', 'inbox::Dismiss', 'inbox::Actions', 'Copy the whole item', 'Select an item to read it here.', 'No notices right now.',
     'No open items for this session.', 'No notices for this session.', 'Showing the first {n} characters — loading the rest…', 'Could not load the rest of the text: {why}'];
   const missing = NEW.filter((k) => !zh.includes('  ' + J(k) + ':') || !ja.includes('  ' + J(k) + ':'));
   ok(!missing.length, `every new word (${NEW.length}) has a zh + a ja entry`, missing);
-  ok(/tc\('inbox', 'Actions'\)/.test(w) && /tc\('inbox', 'Dismiss'\)/.test(w), '"Actions" / "Dismiss" are contexted (tc) — the plain keys mean other things (操作 / 关闭)');
-  ok(/\{ name: 'test-inbox-window-model', tier: 'fast'/.test(read('scripts/ci.mjs')), 'ci.mjs carries this suite in the fast tier');
+  ok(gateOf(/tc\('inbox', 'Actions'\)/.test(w)) && verdictOf(/tc\('inbox', 'Dismiss'\)/.test(w)), '"Actions" / "Dismiss" are contexted (tc) — the plain keys mean other things (操作 / 关闭)');
+  ok(verdictOf(/\{ name: 'test-inbox-window-model', tier: 'fast'/.test(read('scripts/ci.mjs'))), 'ci.mjs carries this suite in the fast tier');
   // lane inbox-fyi-mark-all: «Mark all read» on the Notices tab + a notice read by being read
-  ok(/const readAll = mk\('button', 'iw-read-all', t\('Mark all read'\)\);/.test(w) && /bar\.append\(tabs, readAll, scope, filter\);/.test(w), '«Mark all read» sits in the bar right after the tabs (beside the Notices count — never inside the tab button)');
-  ok(/patchReadAll\(st\.tab === 'notices' \? noticeReadAll\(main, 'all'\) : null\);/.test(w) && /const off = !st\.readIds\.length \|\| readAll\.dataset\.busy === '1';/.test(w), '…on the Notices tab only; its ids are PURE noticeReadAll over what the list shows (scope + filter applied); disabled with its reason when none is open');
-  ok(/if \(e\.target\.closest\('\.iw-read-all'\)\) \{ readAllPress\(\); return; \}/.test(w) && /await model\.readNotices\(ids\);/.test(w), '…a press is THE model\'s ONE bulk verb (the window still holds no fetch of its own)');
+  ok(gateOf(/const readAll = mk\('button', 'iw-read-all', t\('Mark all read'\)\);/.test(w)) && verdictOf(/bar\.append\(tabs, readAll, scope, filter\);/.test(w)), '«Mark all read» sits in the bar right after the tabs (beside the Notices count — never inside the tab button)');
+  ok(gateOf(/patchReadAll\(st\.tab === 'notices' \? noticeReadAll\(main, 'all'\) : null\);/.test(w)) && verdictOf(/const off = !st\.readIds\.length \|\| readAll\.dataset\.busy === '1';/.test(w)), '…on the Notices tab only; its ids are PURE noticeReadAll over what the list shows (scope + filter applied); disabled with its reason when none is open');
+  ok(gateOf(/if \(e\.target\.closest\('\.iw-read-all'\)\) \{ readAllPress\(\); return; \}/.test(w)) && verdictOf(/await model\.readNotices\(ids\);/.test(w)), '…a press is THE model\'s ONE bulk verb (the window still holds no fetch of its own)');
   const arm = (w.match(/\n  function armRead\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
-  ok(/const want = it && readOnSight\(it\) && paneOnScreen\(\) \? it\.id : null;/.test(arm) && /\}, NOTICE_READ_MS\);/.test(arm) && /if \(st\.selected === want && cur && readOnSight\(cur\) && paneOnScreen\(\)\) model\.setStatus\(want, 'done'\);/.test(arm) && !/advance\(/.test(arm),
+  ok(gateOf(/const want = it && readOnSight\(it\) && paneOnScreen\(\) \? it\.id : null;/.test(arm)) && gateOf(/\}, NOTICE_READ_MS\);/.test(arm)) && gateOf(/if \(st\.selected === want && cur && readOnSight\(cur\) && paneOnScreen\(\)\) model\.setStatus\(want, 'done'\);/.test(arm)) && !/advance\(/.test(arm),
     'read-on-sight: the selected notice that asks nothing, NOTICE_READ_MS on screen, re-checked when the clock ends, marked through THE status write — the selection never moves under the reader');
-  ok(/const paneOnScreen = \(\) => root\.isConnected && root\.clientWidth > 0 && document\.visibilityState === 'visible' && root\.contains\(document\.activeElement\) && \(st\.mode === 'split' \|\| root\.dataset\.view === 'item'\);/.test(w), '…"on screen" = the page visible, the person IN this window (focus), the pane showing (a window left behind others reads nothing)');
-  ok(/renderPane\(\);\n    armRead\(\);\n  \}/.test(w) && /if \(e\.target\.closest\('\.iw-back'\)\) \{ readOnBack\(\);/.test(w) && /document\.addEventListener\('visibilitychange', \(\) => armRead\(\), \{ signal \}\);/.test(w), '…every render arms the clock; ‹ back reads the notice at once; a hidden page stops the clock');
+  ok(verdictOf(/const paneOnScreen = \(\) => root\.isConnected && root\.clientWidth > 0 && document\.visibilityState === 'visible' && root\.contains\(document\.activeElement\) && \(st\.mode === 'split' \|\| root\.dataset\.view === 'item'\);/.test(w)), '…"on screen" = the page visible, the person IN this window (focus), the pane showing (a window left behind others reads nothing)');
+  ok(gateOf(/renderPane\(\);\n    armRead\(\);\n  \}/.test(w)) && gateOf(/if \(e\.target\.closest\('\.iw-back'\)\) \{ readOnBack\(\);/.test(w)) && verdictOf(/document\.addEventListener\('visibilitychange', \(\) => armRead\(\), \{ signal \}\);/.test(w)), '…every render arms the clock; ‹ back reads the notice at once; a hidden page stops the clock');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -35,7 +35,7 @@ const BS = require('../src/server/browser-stream.js');
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -88,14 +88,14 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   ok(!bad.length && W.TAB_CLICK_ACTS.join() === 'front,switch,watch,follow,none', `tabClickVerdict: ${rows.length} rows — bring forward / switch while driving, watch / follow while watching, another\'s tab watched (view only) but never switched`, bad);
   const v = S.viewerMessageVerdict({ type: 'watch-tab', targetId: T2.toLowerCase() });
   const v0 = S.viewerMessageVerdict({ type: 'watch-tab', targetId: 'nope' });
-  ok(v.kind === 'watch-tab' && v.forward === false && v.targetId === T2 && v0.kind === 'watch-tab' && v0.targetId === null && S.VIEWER_VIEW_TYPES.includes('watch-tab'), 'the viewer verb `watch-tab` {targetId}: never forwarded upstream, the id upper-cased, a malformed one = follow the agent\'s (null)');
+  ok(v.kind === 'watch-tab' && v.forward === false && v.targetId === T2 && v0.kind === 'watch-tab' && v0.targetId === null && verdictOf(S.VIEWER_VIEW_TYPES.includes('watch-tab')), 'the viewer verb `watch-tab` {targetId}: never forwarded upstream, the id upper-cased, a malformed one = follow the agent\'s (null)');
   const st = { browserKey: 'bk-0000aaa1', attachments: [{ profileId: 'bp-0000aaa1', alias: 'w', label: 'W', isDefault: true }], leases: [{ profileId: 'bp-0000aaa1', browserKey: 'bk-0000aaa1', others: 1, driver: { browserKey: 'bk-0000bbb2', by: 'agent' } }], inputs: [] };
   const r1 = S.browserListFor(st)[0];
   const r2 = S.browserListFor({ ...st, leases: [{ ...st.leases[0], driver: { browserKey: 'bk-0000bbb2', by: 'user' } }] })[0];
   ok(r1.driver === 'agent' && r1.driverKey === null && r2.driver === 'other-user' && r2.driverKey === 'bk-0000bbb2', 'the strip: an entry is THIS conversation\'s window — no other conversation\'s agent ever "drives" it (an old `by:agent` record reads as its own agent); the user driving it from another view (an older run\'s shared window) is "you, in …"', { r1, r2 });
   // (① the strip's chip-click source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const bsrc0 = read('src/server/browser-stream.js');
-  ok(W.BACKGROUND_SILENCE_MS === 2000 && W.WATCH_POLL_MS === 500 && W.WATCH_FIRST_FRAME_MS === 1000 && W.UNRESPONSIVE_MS === 8000 && /bgSilenceMs = WIN\.BACKGROUND_SILENCE_MS, bgTickMs = 1000, bgPollMs = WIN\.WATCH_POLL_MS, bgHungMs = WIN\.UNRESPONSIVE_MS \}/.test(bsrc0), 'the SHIPPED clocks: 2 s of silence before the page is asked, a 1 s tick, a 500 ms poll (≤ 2 fps), 8 s without an answer before "not responding" — the bridge\'s defaults are the PURE constants (the gate below runs on short ones)');
+  ok(W.BACKGROUND_SILENCE_MS === 2000 && W.WATCH_POLL_MS === 500 && W.WATCH_FIRST_FRAME_MS === 1000 && W.UNRESPONSIVE_MS === 8000 && verdictOf(/bgSilenceMs = WIN\.BACKGROUND_SILENCE_MS, bgTickMs = 1000, bgPollMs = WIN\.WATCH_POLL_MS, bgHungMs = WIN\.UNRESPONSIVE_MS \}/.test(bsrc0)), 'the SHIPPED clocks: 2 s of silence before the page is asked, a 1 s tick, a 500 ms poll (≤ 2 fps), 8 s without an answer before "not responding" — the bridge\'s defaults are the PURE constants (the gate below runs on short ones)');
   // (① the keeper's tab-act source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // ── lane live-watch-polish (B-93d7, design 006 G1–G5) ──
   const ZH = (await import('../src/lib/i18n-zh.js')).default, JA = (await import('../src/lib/i18n-ja.js')).default;
@@ -118,15 +118,15 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   const hisMenu = W.foldMenuRows(MR.map((r) => ({ ...r, canSwitch: r.targetId !== T1 })), () => ({ act: 'none' }), null).map((m) => m.act + ':' + m.targetId.slice(0, 2)).join(' ');
   ok(!mbad.length && hisMenu === 'switch:B2 switch:C3', 'G1 the "▾+N" menu asks the chip\'s click verdict: Watch / Back / Switch, his own window keeps the row\'s switch, a row with nothing to do is not listed', { mbad, hisMenu });
   const allE = [{}, { watching: T2 }, { driving: true }, { driving: true, mediated: true }].flatMap((o) => menuOf(o, tOfD(ZH)));
-  ok(allE.length === 6 && allE.every((e) => !('disabled' in e) && /^(查看|回到 agent 的标签页|提到最前面|切换到) — (Docs|Agent now|Other conv)$/.test(e.label)), 'G1 no menu entry is ever disabled; each says its act and the tab (zh)', allE);
+  ok(allE.length === 6 && verdictOf(allE.every((e) => !('disabled' in e) && /^(查看|回到 agent 的标签页|提到最前面|切换到) — (Docs|Agent now|Other conv)$/.test(e.label))), 'G1 no menu entry is ever disabled; each says its act and the tab (zh)', allE);
   const lwG = read('src/lib/browser-live-window.js');
   // (G1's menu wiring source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // G2 — the watch line names both tabs (bounded; en / zh / ja)
   const longT = 'L'.repeat(300) + '<b>x</b>';
   const g2 = { en: W.watchLineWords({ watched: 'Docs', current: 'Agent now' }, null), poll: W.watchLineWords({ watched: 'Docs', current: 'Agent now', mode: 'polling' }, null), zh: W.watchLineWords({ watched: 'Docs', current: 'Agent now' }, tOfD(ZH)), ja: W.watchLineWords({ watched: 'Docs', current: 'Agent now', mode: 'polling' }, tOfD(JA)), cut: W.watchLineWords({ watched: longT, current: 'B' }, null), none: W.watchLineWords({ watched: 'Docs', current: '' }, null) };
-  ok(g2.en === 'Watching “Docs” — the agent is on “Agent now”' && g2.poll === 'Watching “Docs” — a new picture every half second; the agent is on “Agent now”' && g2.zh === '正在查看“Docs” — agent 在“Agent now”上' && g2.ja.includes('「Docs」') && g2.ja.includes('「Agent now」') && g2.ja.includes('0.5 秒'), 'G2 the watch line names BOTH tabs — en, the polling clause kept, zh, ja', g2);
+  ok(g2.en === 'Watching “Docs” — the agent is on “Agent now”' && g2.poll === 'Watching “Docs” — a new picture every half second; the agent is on “Agent now”' && g2.zh === '正在查看“Docs” — agent 在“Agent now”上' && gateOf(g2.ja.includes('「Docs」')) && gateOf(g2.ja.includes('「Agent now」')) && verdictOf(g2.ja.includes('0.5 秒')), 'G2 the watch line names BOTH tabs — en, the polling clause kept, zh, ja', g2);
   const cutT = (g2.cut.match(/“(.*?)”/) || [])[1] || '';
-  ok(Array.from(cutT).length === W.WATCH_TITLE_MAX && cutT.endsWith('…') && !g2.cut.includes('<b>') && g2.none === 'Watching another tab of the agent’s — the agent’s current tab is unchanged', `G2 a 300-character page title is cut to ${W.WATCH_TITLE_MAX} characters (…) before it is said; a title not known keeps the unnamed sentence`, g2);
+  ok(Array.from(cutT).length === W.WATCH_TITLE_MAX && gateOf(cutT.endsWith('…')) && !g2.cut.includes('<b>') && g2.none === 'Watching another tab of the agent’s — the agent’s current tab is unchanged', `G2 a 300-character page title is cut to ${W.WATCH_TITLE_MAX} characters (…) before it is said; a title not known keeps the unnamed sentence`, g2);
   // G3 — the watched chip never folds
   const FR = Array.from({ length: 6 }, (_, i) => ({ targetId: String(i + 1).repeat(32), title: 'Tab ' + i, owner: 'agent', active: i === 0 }));
   const FW = Object.fromEntries(FR.map((r) => [r.targetId, 100]));
@@ -139,16 +139,16 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   }
   ok(!foldBad.length && foldsWithout > 0, `G3 tabRowFold keeps the tab on show AND the watched one at every width (6 widths × 3 watched tabs; without watchedRef the watched one folds in ${foldsWithout} cells)`, foldBad);
   const lsSrc = read('src/lib/live-strip-layout.js'); const KEEP = '  if (row && row.keep) return 0;';
-  if (ok(lsSrc.includes(KEEP), 'G3 control setup: the keep clause is found')) {
+  if (ok(verdictOf(lsSrc.includes(KEEP)), 'G3 control setup: the keep clause is found')) {
     const Lc = M.load('src/lib/live-strip-layout.js', editAnchor(lsSrc, KEEP, '', "src/lib/live-strip-layout.js"), 'no-watched-keep');
-    ok(Lc.tabRowFold({ rows: FR, widths: FW, avail: 250, morePx: 44, watchedRef: FR[5].targetId }).folded.includes(FR[5].targetId), 'G3 CONTROL: a layout copy without the watched keep folds the watched chip at 250 px — the leg above can go red');
+    ok(verdictOf(Lc.tabRowFold({ rows: FR, widths: FW, avail: 250, morePx: 44, watchedRef: FR[5].targetId }).folded.includes(FR[5].targetId)), 'G3 CONTROL: a layout copy without the watched keep folds the watched chip at 250 px — the leg above can go red');
   }
   // (G3's refold source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // G4 + G5 — the client's reading (the bridge's halves are in ② b)
   // (G4's hello source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const RW = (refused, why, d = null) => W.watchRefusalWords({ refused, why, error: 'SERVER ENGLISH' }, d ? tOfD(d) : null);
   const g5 = { en: W.WATCH_REFUSALS.map((c) => RW(c)), why: ['unreachable', 'no_screencast', 'no_tab', 'odd'].map((w) => RW('unreadable', w)), zh: [RW('unavailable', '', ZH), RW('unreadable', 'no_tab', ZH)], ja: RW('unreadable', 'unreachable', JA), unknown: RW('brand_new') };
-  ok(![...g5.en, ...g5.why, ...g5.zh, g5.ja].some((x) => /SERVER ENGLISH/.test(x)) && g5.why.join('|') === 'the tab could not be reached|the tab refused a screencast|the tab is gone|the tab could not be shown' && g5.zh.join('|') === '这台服务器无法显示另一个标签页|那个标签页已经关闭' && g5.ja === JA['the tab could not be reached'] && g5.unknown === 'SERVER ENGLISH' && /watchRefusalWords\(\{ refused: m\.refused, why: m\.why, error: m\.error \}, t\)/.test(lwG), 'G5 a refusal is worded BY CODE (driving / not_your_tab / unavailable / unreadable + the capture\'s why) in en/zh/ja — never the server\'s sentence; an unknown code keeps it', g5);
+  ok(![...g5.en, ...g5.why, ...g5.zh, g5.ja].some((x) => /SERVER ENGLISH/.test(x)) && g5.why.join('|') === 'the tab could not be reached|the tab refused a screencast|the tab is gone|the tab could not be shown' && g5.zh.join('|') === '这台服务器无法显示另一个标签页|那个标签页已经关闭' && g5.ja === JA['the tab could not be reached'] && g5.unknown === 'SERVER ENGLISH' && verdictOf(/watchRefusalWords\(\{ refused: m\.refused, why: m\.why, error: m\.error \}, t\)/.test(lwG)), 'G5 a refusal is worded BY CODE (driving / not_your_tab / unavailable / unreadable + the capture\'s why) in en/zh/ja — never the server\'s sentence; an unknown code keeps it', g5);
 }
 
 // ═══ ② THE REAL BRIDGE ════════════════════════════════════════════════════
@@ -249,18 +249,18 @@ async function backgroundLeg(BSmod, { visibility = 'hidden', sayWaitMs = 2500 } 
 }
 {
   const r = await backgroundLeg(BS);
-  ok(r.ready && r.said && r.saidAfterMs >= SILENCE - 100 && r.saidAfterMs <= SILENCE + 1500 && r.vis.includes(T1), `U0b(b): the tab on show sent no frame for the silence clock (${SILENCE} ms here; 2 s shipped) ⇒ the bridge ASKED the page and said \`tab-background\` (${r.saidAfterMs} ms after the view opened) — the user never clicks a frozen picture in silence`, r);
-  ok(r.polled >= 2 && r.logBg, `…its picture is POLLED meanwhile (${r.polled} captures in 0.7 s at the gate's 150 ms poll) and the journal names it`, r);
-  ok(r.lateReplay, '…a viewer that joins later is told at once (replayed)');
-  ok(r.strayKept, '…a STRAY frame while the page still answers hidden does NOT clear it — the frame makes the bridge re-ask the page at once, only `visible` clears', r);
-  ok(r.cleared && r.pollStopped && r.logClear, '…a frame once the page answers visible clears it: `tab-background` null, the polling stops, the journal says why', r);
+  ok(gateOf(r.ready) && gateOf(r.said) && r.saidAfterMs >= SILENCE - 100 && r.saidAfterMs <= SILENCE + 1500 && verdictOf(r.vis.includes(T1)), `U0b(b): the tab on show sent no frame for the silence clock (${SILENCE} ms here; 2 s shipped) ⇒ the bridge ASKED the page and said \`tab-background\` (${r.saidAfterMs} ms after the view opened) — the user never clicks a frozen picture in silence`, r);
+  ok(r.polled >= 2 && verdictOf(r.logBg), `…its picture is POLLED meanwhile (${r.polled} captures in 0.7 s at the gate's 150 ms poll) and the journal names it`, r);
+  ok(verdictOf(r.lateReplay), '…a viewer that joins later is told at once (replayed)');
+  ok(verdictOf(r.strayKept), '…a STRAY frame while the page still answers hidden does NOT clear it — the frame makes the bridge re-ask the page at once, only `visible` clears', r);
+  ok(gateOf(r.cleared) && gateOf(r.pollStopped) && verdictOf(r.logClear), '…a frame once the page answers visible clears it: `tab-background` null, the polling stops, the journal says why', r);
   const v = await backgroundLeg(BS, { visibility: 'visible', sayWaitMs: 3 * SILENCE }); // 3× the silence clock: never said
-  ok(v.ready && !v.said && v.vis.length >= 1, `a SILENT but VISIBLE tab (a static page) is asked (${v.vis.length}×) and NOT said — silence alone is not "background"`, v);
+  ok(gateOf(v.ready) && !v.said && v.vis.length >= 1, `a SILENT but VISIBLE tab (a static page) is asked (${v.vis.length}×) and NOT said — silence alone is not "background"`, v);
   const src = read('src/server/browser-stream.js');
   const ARM = "    if (relay.bgTimer || !keeper || typeof keeper.tabVisibilityFor !== 'function') return;\n";
-  ok(src.includes(ARM), 'control setup: the background check is armed per relay');
+  ok(verdictOf(src.includes(ARM)), 'control setup: the background check is armed per relay');
   const c = await backgroundLeg(M.load('src/server/browser-stream.js', editAnchor(src, ARM, '    return;\n', "src/server/browser-stream.js"), 'no-bg-check'), { sayWaitMs: 3 * SILENCE });
-  ok(c.ready && !c.said && !c.vis.length, 'NEGATIVE CONTROL: a bridge copy without the check leaves the frozen picture unsaid (userW\'s 卡死) — the leg above can go red', JSON.stringify(c));
+  ok(gateOf(c.ready) && !c.said && !c.vis.length, 'NEGATIVE CONTROL: a bridge copy without the check leaves the frozen picture unsaid (userW\'s 卡死) — the leg above can go red', JSON.stringify(c));
 }
 
 // a2. B-d635 (lane browser-reliability, userW's inc-murizo36-ecri): a tab that sends nothing AND never answers (hung, not
@@ -294,12 +294,12 @@ async function hungLeg(BSmod) {
 }
 {
   const r = await hungLeg(BS);
-  ok(r.ready && r.said && r.state === 'unresponsive' && r.saidAfterMs >= SILENCE + HUNG - 150 && r.asksBefore >= 2 && r.captures === 0 && r.logHung && r.lateReplay && r.cleared, `B-d635: a tab on show that sends nothing and NEVER ANSWERS is said \`unresponsive\` (${r.saidAfterMs} ms after the view opened; the journal names it; nothing polled — ${r.captures} captures; a late viewer is told) and an answer + a frame clear it — never a blank canvas with no words`, r);
+  ok(gateOf(r.ready) && gateOf(r.said) && r.state === 'unresponsive' && r.saidAfterMs >= SILENCE + HUNG - 150 && r.asksBefore >= 2 && r.captures === 0 && gateOf(r.logHung) && gateOf(r.lateReplay) && verdictOf(r.cleared), `B-d635: a tab on show that sends nothing and NEVER ANSWERS is said \`unresponsive\` (${r.saidAfterMs} ms after the view opened; the journal names it; nothing polled — ${r.captures} captures; a late viewer is told) and an answer + a frame clear it — never a blank canvas with no words`, r);
   const src = read('src/server/browser-stream.js');
   const HUNG_LINE = "      if (!r || !r.ok) { if (!r || r.error !== 'no tab') noAnswer(relay, id, t, (r && r.error) || 'no answer'); return; }";
-  ok(src.includes(HUNG_LINE), 'B-d635 control setup: the unresponsive verdict line is found');
+  ok(verdictOf(src.includes(HUNG_LINE)), 'B-d635 control setup: the unresponsive verdict line is found');
   const c = await hungLeg(M.load('src/server/browser-stream.js', editAnchor(src, HUNG_LINE, '      if (!r || !r.ok) return;', "src/server/browser-stream.js"), 'hung-silent'));
-  ok(c.ready && !c.said, 'B-d635 CONTROL: a bridge copy that returns silently on no answer (the base) leaves the hung tab unsaid — the leg above can go red', JSON.stringify(c));
+  ok(gateOf(c.ready) && !c.said, 'B-d635 CONTROL: a bridge copy that returns silently on no answer (the base) leaves the hung tab unsaid — the leg above can go red', JSON.stringify(c));
   // (the unresponsive state's client words — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
@@ -321,12 +321,12 @@ async function slowLeg(BSmod, misses) {
 }
 {
   const s1 = await slowLeg(BS, 1), s2 = await slowLeg(BS, 2);
-  ok(s1.ready && s2.ready && s1.asks > 1 && s2.asks > 2 && !s1.saidHung && !s2.saidHung && !s1.records.length && !s2.records.length, `B-d635 verify r1: a slow but ALIVE tab (it missed ${s1.misses}, then ${s2.misses} asks in a row, then answered \`visible\`) is never said "not responding" — ${s1.asks} / ${s2.asks} asks, records ${JSON.stringify(s1.records)} ${JSON.stringify(s2.records)}`, JSON.stringify({ s1, s2 }));
+  ok(gateOf(s1.ready) && gateOf(s2.ready) && s1.asks > 1 && s2.asks > 2 && !s1.saidHung && !s2.saidHung && !s1.records.length && !s2.records.length, `B-d635 verify r1: a slow but ALIVE tab (it missed ${s1.misses}, then ${s2.misses} asks in a row, then answered \`visible\`) is never said "not responding" — ${s1.asks} / ${s2.asks} asks, records ${JSON.stringify(s1.records)} ${JSON.stringify(s2.records)}`, JSON.stringify({ s1, s2 }));
   const src = read('src/server/browser-stream.js');
   const LINE = "noAnswer(relay, id, t, (r && r.error) || 'no answer'); return; }";
-  ok(src.includes(LINE), 'B-d635 verify r1 control setup: the no-answer line is found');
+  ok(verdictOf(src.includes(LINE)), 'B-d635 verify r1 control setup: the no-answer line is found');
   const c = await slowLeg(M.load('src/server/browser-stream.js', editAnchor(src, LINE, "setBackground(relay, id, 'unresponsive', (r && r.error) || 'no answer'); return; }", "src/server/browser-stream.js"), 'one-miss'), 1);
-  ok(c.ready && c.saidHung, `B-d635 verify r1 CONTROL: a bridge copy that says "not responding" at the FIRST missed ask (the lane's a2066802) tells the slow tab so (${JSON.stringify(c.records)}) — the leg above can go red`, JSON.stringify(c));
+  ok(gateOf(c.ready) && verdictOf(c.saidHung), `B-d635 verify r1 CONTROL: a bridge copy that says "not responding" at the FIRST missed ask (the lane's a2066802) tells the slow tab so (${JSON.stringify(c.records)}) — the leg above can go red`, JSON.stringify(c));
 }
 
 // a4. B-d635 verify r1: a miss from long ago does not count — a recorder tap keeps the relay (and its verdict state) alive
@@ -354,12 +354,12 @@ async function staleLeg(BSmod) {
 }
 {
   const r = await staleLeg(BS);
-  ok(r.tapped && r.ready && r.ready2 && r.firstMiss && r.asksBack >= 2 && !r.saidHung, `B-d635 verify r1: a miss from before a pause (nobody watching, a tap kept the relay) does not count — the viewer back is not told "not responding" at its first missed ask (${r.asksBack} asks, records ${JSON.stringify(r.records)})`, JSON.stringify(r));
+  ok(gateOf(r.tapped) && gateOf(r.ready) && gateOf(r.ready2) && gateOf(r.firstMiss) && r.asksBack >= 2 && !r.saidHung, `B-d635 verify r1: a miss from before a pause (nobody watching, a tap kept the relay) does not count — the viewer back is not told "not responding" at its first missed ask (${r.asksBack} asks, records ${JSON.stringify(r.records)})`, JSON.stringify(r));
   const src = read('src/server/browser-stream.js');
   const GAP = ' || t0 - b.noAnswer.last > bgHungMs) b.noAnswer = { id, since: t0 };';
-  ok(src.includes(GAP), 'B-d635 verify r1 control setup: the pause clause is found');
+  ok(verdictOf(src.includes(GAP)), 'B-d635 verify r1 control setup: the pause clause is found');
   const c = await staleLeg(M.load('src/server/browser-stream.js', editAnchor(src, GAP, ') b.noAnswer = { id, since: t0 };', "src/server/browser-stream.js"), 'no-pause'));
-  ok(c.ready2 && c.saidHung, `B-d635 verify r1 CONTROL: a bridge copy that keeps the old miss says "not responding" at the returning viewer's first miss (${JSON.stringify(c.records)}) — the leg above can go red`, JSON.stringify(c));
+  ok(gateOf(c.ready2) && verdictOf(c.saidHung), `B-d635 verify r1 CONTROL: a bridge copy that keeps the old miss says "not responding" at the returning viewer's first miss (${JSON.stringify(c.records)}) — the leg above can go red`, JSON.stringify(c));
 }
 
 // b. a watching viewer's chip moves ITS view
@@ -368,33 +368,33 @@ async function staleLeg(BSmod) {
   const { k, calls, watches } = stubKeeper(U, { visibility: 'visible' });
   const B = await bridgeOn(BS, k);
   const Wv = viewer(B.P), O = viewer(B.P);
-  ok(await Wv.ready() && await O.ready(), 'two viewers of the conversation\'s window');
-  ok(await until(() => Wv.of('tab-owners').length >= 1, 3000), 'the tab owners reached the viewers (whose each tab is)');
-  { const want = (r) => JSON.stringify(r.titles) === JSON.stringify({ [T2]: 'Other page' }) && JSON.stringify(r.names) === JSON.stringify({ [T2]: { sessionId: 'sess-b', name: 'office-devices' } }); await until(() => Wv.of('tab-owners').some(want), 3000); const r = Wv.of('tab-owners').find(want) || Wv.of('tab-owners').at(-1) || {}; ok(want(r) && Wv.of('tab-owners').every((x) => !JSON.stringify(x).includes('E'.repeat(32))), 'accept-fixes-strip F7/F8: the record carries the pages\' own titles and WHO holds another\'s tab (its conversation\'s name) — only for the tabs this view lists', JSON.stringify({ titles: r.titles, names: r.names })); }
+  ok(gateOf(await Wv.ready()) && verdictOf(await O.ready()), 'two viewers of the conversation\'s window');
+  ok(verdictOf(await until(() => Wv.of('tab-owners').length >= 1, 3000)), 'the tab owners reached the viewers (whose each tab is)');
+  { const want = (r) => JSON.stringify(r.titles) === JSON.stringify({ [T2]: 'Other page' }) && JSON.stringify(r.names) === JSON.stringify({ [T2]: { sessionId: 'sess-b', name: 'office-devices' } }); await until(() => Wv.of('tab-owners').some(want), 3000); const r = Wv.of('tab-owners').find(want) || Wv.of('tab-owners').at(-1) || {}; ok(gateOf(want(r)) && verdictOf(Wv.of('tab-owners').every((x) => !JSON.stringify(x).includes('E'.repeat(32)))), 'accept-fixes-strip F7/F8: the record carries the pages\' own titles and WHO holds another\'s tab (its conversation\'s name) — only for the tabs this view lists', JSON.stringify({ titles: r.titles, names: r.names })); }
   Wv.send({ type: 'watch-tab', targetId: T2 });
-  ok(await until(() => calls.watch.includes(T2), 2000) && await until(() => Wv.of('watching').some((m) => m.targetId === T2), 2000), 'watch-tab T2 ⇒ the keeper\'s watch pump is opened on T2 and the viewer is told `watching T2`');
+  ok(gateOf(await until(() => calls.watch.includes(T2), 2000)) && verdictOf(await until(() => Wv.of('watching').some((m) => m.targetId === T2), 2000)), 'watch-tab T2 ⇒ the keeper\'s watch pump is opened on T2 and the viewer is told `watching T2`');
   watches[0].hooks.onFrame({ data: jpegOf(640, 480, 'watched1'), metadata: { deviceWidth: 640, deviceHeight: 480 } });
-  ok(await until(() => Wv.frames.some((f) => f.metadata && f.metadata.watched === T2), 1500) && !O.frames.some((f) => f.metadata && f.metadata.watched), 'the watched tab\'s frame reaches ONLY the watching viewer (the other view keeps the agent\'s)');
+  ok(gateOf(await until(() => Wv.frames.some((f) => f.metadata && f.metadata.watched === T2), 1500)) && !O.frames.some((f) => f.metadata && f.metadata.watched), 'the watched tab\'s frame reaches ONLY the watching viewer (the other view keeps the agent\'s)');
   const wBefore = Wv.frames.length, oBefore = O.frames.length;
   U.frame('agent');
   await until(() => O.frames.length > oBefore, 1500); await sleep(150);
   ok(O.frames.length > oBefore && Wv.frames.length === wBefore, 'the agent\'s next frame reaches the other view and NOT the watching one (its view moved; the agent\'s tab is untouched)', { wBefore, wAfter: Wv.frames.length });
   watches[0].hooks.onMode('polling');
-  ok(await until(() => Wv.of('watching').some((m) => m.targetId === T2 && m.mode === 'polling'), 1500), 'the pump\'s mode is said: a tab that paints nothing is shown by captures (polling)');
+  ok(verdictOf(await until(() => Wv.of('watching').some((m) => m.targetId === T2 && m.mode === 'polling'), 1500)), 'the pump\'s mode is said: a tab that paints nothing is shown by captures (polling)');
   Wv.send({ type: 'watch-tab', targetId: T3 });
-  ok(await until(() => calls.watch.includes(T3) && Wv.of('watching').some((m) => m.targetId === T3), 1500) && B.logs.some((l) => /watches another holder's tab C3333333/.test(l)), 'accept-fixes-strip F8: another conversation\'s tab is WATCHED (view only — a pump opened on it, journaled by whose it is)');
+  ok(gateOf(await until(() => calls.watch.includes(T3) && Wv.of('watching').some((m) => m.targetId === T3), 1500)) && verdictOf(B.logs.some((l) => /watches another holder's tab C3333333/.test(l))), 'accept-fixes-strip F8: another conversation\'s tab is WATCHED (view only — a pump opened on it, journaled by whose it is)');
   Wv.send({ type: 'watch-tab', targetId: 'D'.repeat(32) });
-  ok(await until(() => Wv.of('watching').some((m) => m.refused === 'no_such_tab'), 1500) && !calls.watch.includes('D'.repeat(32)) && B.logs.some((l) => /watch of DDDDDDDD refused no_such_tab/.test(l)), '…a tab that is not one of this browser\'s is REFUSED by name (no pump opened; journaled)');
+  ok(gateOf(await until(() => Wv.of('watching').some((m) => m.refused === 'no_such_tab'), 1500)) && !calls.watch.includes('D'.repeat(32)) && verdictOf(B.logs.some((l) => /watch of DDDDDDDD refused no_such_tab/.test(l))), '…a tab that is not one of this browser\'s is REFUSED by name (no pump opened; journaled)');
   Wv.send({ type: 'watch-tab', targetId: T2 });
   await until(() => calls.watch.filter((x) => x === T2).length === 2, 1500);
   const stops0 = calls.stops, nulls0 = Wv.of('watching').filter((m) => m.targetId === null).length, f0 = Wv.frames.length;
   Wv.send({ type: 'watch-tab', targetId: null });
-  ok(await until(() => calls.stops > stops0 && Wv.of('watching').filter((m) => m.targetId === null).length > nulls0 && Wv.frames.length > f0, 1500) && !(Wv.frames.at(-1).metadata || {}).watched, 'watch-tab null ⇒ the pump is closed, the view says it follows the agent\'s tab again and gets the agent\'s last picture at once');
-  ok(B.logs.some((l) => /viewer \d+ watches the agent's tab B2222222 \(its current tab A1111111 is unchanged\)/.test(l)) && B.logs.some((l) => /follows the agent's tab again/.test(l)), 'every watch and every return is journaled (whose tab, the agent\'s current tab unchanged)');
+  ok(gateOf(await until(() => calls.stops > stops0 && Wv.of('watching').filter((m) => m.targetId === null).length > nulls0 && Wv.frames.length > f0, 1500)) && !(Wv.frames.at(-1).metadata || {}).watched, 'watch-tab null ⇒ the pump is closed, the view says it follows the agent\'s tab again and gets the agent\'s last picture at once');
+  ok(gateOf(B.logs.some((l) => /viewer \d+ watches the agent's tab B2222222 \(its current tab A1111111 is unchanged\)/.test(l))) && verdictOf(B.logs.some((l) => /follows the agent's tab again/.test(l))), 'every watch and every return is journaled (whose tab, the agent\'s current tab unchanged)');
   // lane live-watch-polish G4: a re-sent watch of the tab the agent is on NOW (a reconnected view's, the agent moved there) is answered
   const nullsF = Wv.of('watching').filter((m) => m.targetId === null).length, wF = calls.watch.length;
   Wv.send({ type: 'watch-tab', targetId: T1 });
-  ok(await until(() => Wv.of('watching').filter((m) => m.targetId === null).length > nullsF, 1500) && calls.watch.length === wF, 'G4 a watch-tab of the agent\'s CURRENT tab (a reconnected view re-sending its watch after the agent moved there) is ANSWERED `watching null` — no pump opened, the view\'s line clears');
+  ok(gateOf(await until(() => Wv.of('watching').filter((m) => m.targetId === null).length > nullsF, 1500)) && calls.watch.length === wF, 'G4 a watch-tab of the agent\'s CURRENT tab (a reconnected view re-sending its watch after the agent moved there) is ANSWERED `watching null` — no pump opened, the view\'s line clears');
   // lane live-watch-polish G5: a capture that fails carries its CODE to the view (`why`) — the client words it
   k.watchFail = { ok: false, code: 'unreachable', error: 'the tab could not be reached' };
   Wv.send({ type: 'watch-tab', targetId: T2 });
@@ -405,16 +405,16 @@ async function staleLeg(BSmod) {
   await until(() => calls.watch.filter((x) => x === T2).length === 3, 1500);
   const stops1 = calls.stops;
   Wv.send({ type: 'takeover' });
-  ok(await until(() => calls.stops > stops1 && Wv.of('watching').some((m) => m.targetId === null && /took over/.test(String(m.ended || ''))), 1500), 'a TAKEOVER ends the taker\'s watch (it drives the agent\'s tab) — said');
+  ok(verdictOf(await until(() => calls.stops > stops1 && Wv.of('watching').some((m) => m.targetId === null && /took over/.test(String(m.ended || ''))), 1500)), 'a TAKEOVER ends the taker\'s watch (it drives the agent\'s tab) — said');
   Wv.send({ type: 'watch-tab', targetId: T2 });
-  ok(await until(() => Wv.of('watching').some((m) => m.refused === 'driving'), 1500), 'the holder\'s watch-tab is refused `driving` (its chip switches the agent\'s tab instead)');
+  ok(verdictOf(await until(() => Wv.of('watching').some((m) => m.refused === 'driving'), 1500)), 'the holder\'s watch-tab is refused `driving` (its chip switches the agent\'s tab instead)');
   // c. the chip acts are journaled and answered
   Wv.send({ type: 'tab-act', act: 'switch', targetId: T1, rid: 7 });
-  ok(await until(() => Wv.of('tab-ack').some((m) => m.rid === 7 && m.ok && m.broughtForward), 2000) && B.logs.some((l) => /tab switch on A1111111 — brought the agent's current tab to the front of its window/.test(l)), 'U0b(c): a chip click on the agent\'s current tab while driving is a BRING-FORWARD — answered (`broughtForward`) and journaled');
+  ok(gateOf(await until(() => Wv.of('tab-ack').some((m) => m.rid === 7 && m.ok && m.broughtForward), 2000)) && verdictOf(B.logs.some((l) => /tab switch on A1111111 — brought the agent's current tab to the front of its window/.test(l))), 'U0b(c): a chip click on the agent\'s current tab while driving is a BRING-FORWARD — answered (`broughtForward`) and journaled');
   Wv.send({ type: 'tab-act', act: 'switch', targetId: T2, rid: 8 });
-  ok(await until(() => Wv.of('tab-ack').some((m) => m.rid === 8 && m.ok && !m.broughtForward), 2000) && B.logs.some((l) => /tab switch on B2222222 — switched the agent's current tab/.test(l)), '…a switch to another of its tabs: answered and journaled');
+  ok(gateOf(await until(() => Wv.of('tab-ack').some((m) => m.rid === 8 && m.ok && !m.broughtForward), 2000)) && verdictOf(B.logs.some((l) => /tab switch on B2222222 — switched the agent's current tab/.test(l))), '…a switch to another of its tabs: answered and journaled');
   Wv.send({ type: 'tab-act', act: 'switch', targetId: T3, rid: 9 });
-  ok(await until(() => Wv.of('tab-ack').some((m) => m.rid === 9 && !m.ok && m.code === 'not_your_tab'), 2000) && B.logs.some((l) => /tab switch on C3333333 — refused not_your_tab/.test(l)), '…a refused one: answered by name and journaled (before this lane a user tab act left no line anywhere)');
+  ok(gateOf(await until(() => Wv.of('tab-ack').some((m) => m.rid === 9 && !m.ok && m.code === 'not_your_tab'), 2000)) && verdictOf(B.logs.some((l) => /tab switch on C3333333 — refused not_your_tab/.test(l))), '…a refused one: answered by name and journaled (before this lane a user tab act left no line anywhere)');
   await Wv.close(); await O.close(); await B.close(); await U.close();
 }
 
@@ -430,9 +430,9 @@ console.log('— ②d verify r1 ④: the poll stops with the last viewer; a pain
   const said = await until(() => A.of('tab-background').some((m) => m.targetId === T1), 2500);
   await sleep(400);
   const c0 = calls.cap.length; await A.close(); await sleep(600); const c1 = calls.cap.length;
-  ok(tap.ok && said && c0 >= 1 && c1 === c0, `verify r1 ④: the picture poll STOPS when the last viewer leaves (a recorder tap keeps the relay) — ${c0} capture(s) with a viewer, ${c1 - c0} in the 600 ms after (before: 2 a second for the relay's life)`, { c0, c1 });
+  ok(gateOf(tap.ok) && gateOf(said) && c0 >= 1 && c1 === c0, `verify r1 ④: the picture poll STOPS when the last viewer leaves (a recorder tap keeps the relay) — ${c0} capture(s) with a viewer, ${c1 - c0} in the 600 ms after (before: 2 a second for the relay's life)`, { c0, c1 });
   const L = viewer(B.P); await L.ready(); await sleep(500);
-  ok(calls.cap.length > c1 && L.of('tab-background').some((m) => m.targetId === T1), '…a late viewer is told the verdict at once and the pictures resume for it');
+  ok(calls.cap.length > c1 && verdictOf(L.of('tab-background').some((m) => m.targetId === T1)), '…a late viewer is told the verdict at once and the pictures resume for it');
   await L.close(); try { tap.untap(); } catch { } await B.close(); await U.close();
 }
 {
@@ -442,18 +442,18 @@ console.log('— ②d verify r1 ④: the poll stops with the last viewer; a pain
   const storm = setInterval(() => U.frame('storm'), 16);
   const cleared = await until(() => A.of('tab-background').some((m) => m.targetId === null), 2000);
   clearInterval(storm);
-  ok(said && cleared && B.logs.some((l) => /it paints again \(\d+ frames in a second\)/.test(l)), 'verify r1 ④: a page that LIES hidden under a 60 fps stream is cleared by the FRAME FACTS (5 frames in a second) and the journal says why — never a notice for ever with 2 re-asks + 2 captures a second');
+  ok(gateOf(said) && gateOf(cleared) && verdictOf(B.logs.some((l) => /it paints again \(\d+ frames in a second\)/.test(l))), 'verify r1 ④: a page that LIES hidden under a 60 fps stream is cleared by the FRAME FACTS (5 frames in a second) and the journal says why — never a notice for ever with 2 re-asks + 2 captures a second');
   await A.close(); await B.close(); await U.close();
   const src = read('src/server/browser-stream.js');
   const PAINT = "    { const pa = WIN.paintsAgain({ frameTimes: b.frameTimes || [], now: t }); if (pa.paints) { clearBackground(relay, `it paints again (${pa.recent} frames in a second)`); return; } }\n";
-  ok(src.includes(PAINT), 'control setup: the frame-facts rule is found in the bridge');
+  ok(verdictOf(src.includes(PAINT)), 'control setup: the frame-facts rule is found in the bridge');
   const U2 = await fakeUpstream(); const S2 = stubKeeper(U2, { visibility: 'hidden' }); const B2 = await bridgeOn(M.load('src/server/browser-stream.js', editAnchor(src, PAINT, '', "src/server/browser-stream.js"), 'page-word-only'), S2.k);
   const A2 = viewer(B2.P); await A2.ready();
   const said2 = await until(() => A2.of('tab-background').some((m) => m.targetId === T1), 2500);
   const storm2 = setInterval(() => U2.frame('storm'), 16);
   const cleared2 = await until(() => A2.of('tab-background').some((m) => m.targetId === null), 1500);
   clearInterval(storm2);
-  ok(said2 && !cleared2, 'NEGATIVE CONTROL: a bridge copy that trusts only the page\'s word keeps the notice under the storm — the leg above can go red');
+  ok(gateOf(said2) && !cleared2, 'NEGATIVE CONTROL: a bridge copy that trusts only the page\'s word keeps the notice under the storm — the leg above can go red');
   await A2.close(); await B2.close(); await U2.close();
 }
 
@@ -534,7 +534,7 @@ console.log('— ③ verify r1 T1: the window-ownership table (actor × target �
   const C6 = "  if (owner === 'other' || human) return no('not_your_tab');\n";
   const C8 = 'filter(([, v]) => isObj(v) && Number(v.count) > 1)';
   const C9 = '  if (info.openerId && scope.targets.has(String(info.openerId))) return true;\n';
-  ok([C1, C2, C9].every((x) => msrc.includes(x)) && [C3, C4, C8].every((x) => wsrc.includes(x)) && [C5, C6].every((x) => tsrc.includes(x)), 'control setup: every rule\'s line is found in its module');
+  ok(gateOf([C1, C2, C9].every((x) => msrc.includes(x))) && gateOf([C3, C4, C8].every((x) => wsrc.includes(x))) && verdictOf([C5, C6].every((x) => tsrc.includes(x))), 'control setup: every rule\'s line is found in its module');
   const med1 = M.load('src/browser-mediation.js', editAnchor(msrc, C1, '    if (false) return null;\n', "src/browser-mediation.js"), 'no-target-scope');
   ok(jc(med1, { method: 'Target.activateTarget', params: { targetId: B1 } }, scopeA()) === 'allowed', 'CONTROL R1: a mediation copy without the target fence lets lease A activate B\'s tab — the scope cells can go red');
   const med2 = M.load('src/browser-mediation.js', editAnchor(msrc, C2, '', "src/browser-mediation.js"), 'no-placement');
@@ -559,7 +559,7 @@ console.log('— ③ verify r1 T1: the window-ownership table (actor × target �
   const kp = read('src/server/browser-keeper.js');
   // T2 ⑧ (the owner, 2026-10-01 23:20): ONE WINDOW PER HOLDER — the keeper's later tab opens IN the holder's window (the opener
   // rule, measured reliable; activate-then-create is not) and is verified with Browser.getWindowForTarget (window_mismatch)
-  ok(/openTabInWindow\(rec\.cdpUrl, \{ anchorTargetId: x, windowId: wantWin \}\)/.test(kp) && /openTabByActivate\(rec\.cdpUrl, \{ anchorTargetId: x, windowId: wantWin, tries: WIN\.RUNG2_TRIES, breaker: plan\.breaker \}\)/.test(kp) && /rung2Serialized\(p\.id,/.test(kp) && /window_mismatch/.test(read('src/server/browser-viewport.js')) && W.ONE_WINDOW_PER_HOLDER.mechanism === 'opener-rule' && /^a window-state cycle \(never under a live view, never on a real display\) \+ activate \+ a BACKGROUND create \(verified/.test(W.ONE_WINDOW_PER_HOLDER.rung2), 'T2 ⑧ wiring: a later tab of a holder opens IN its window by the opener rule from each live anchor, then rung 2 (activate + create), every landing verified with Browser.getWindowForTarget (window_mismatch by name) — test-browser-share ③c reads Chrome\'s own windows into the census');
+  ok(gateOf(/openTabInWindow\(rec\.cdpUrl, \{ anchorTargetId: x, windowId: wantWin \}\)/.test(kp)) && gateOf(/openTabByActivate\(rec\.cdpUrl, \{ anchorTargetId: x, windowId: wantWin, tries: WIN\.RUNG2_TRIES, breaker: plan\.breaker \}\)/.test(kp)) && gateOf(/rung2Serialized\(p\.id,/.test(kp)) && gateOf(/window_mismatch/.test(read('src/server/browser-viewport.js'))) && W.ONE_WINDOW_PER_HOLDER.mechanism === 'opener-rule' && verdictOf(/^a window-state cycle \(never under a live view, never on a real display\) \+ activate \+ a BACKGROUND create \(verified/.test(W.ONE_WINDOW_PER_HOLDER.rung2)), 'T2 ⑧ wiring: a later tab of a holder opens IN its window by the opener rule from each live anchor, then rung 2 (activate + create), every landing verified with Browser.getWindowForTarget (window_mismatch by name) — test-browser-share ③c reads Chrome\'s own windows into the census');
 }
 
 
@@ -739,7 +739,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   model.windowReadFails = 1; const owA = model.openWindowCalls; await k3.attach({ profileId: p1.id, browserKey: KB, sessionId: 'x-' + KB }); const lb = B.findLease(k3._reg().leases, p1.id, KB); const hadNoId = !!lb && lb.windowId == null;
   const ow15 = model.openWindowCalls; r = await tabNew(k3, KB, 'https://b.example/15'); c = censusOf(k3, p1, KB);
   row('the first window id unread (null), a later tab', 'tab new', { leaseHadNoId: hadNoId, ok: r.ok, windows: c[KB] ? c[KB].count : 0, newWindowOpened: model.openWindowCalls > ow15, derived: !!lb && Number.isFinite(Number(lb.windowId)) }, { leaseHadNoId: true, ok: true, windows: 1, newWindowOpened: false, derived: true }, r);
-  ok(W.OPENER_PROOF.chrome === '154.0.8037.57' && W.OPENER_PROOF.modes.length === 2 && /hijacked/.test(W.OPENER_PROOF.siteOverridesWindowOpen) && /rung 2 lands/.test(W.OPENER_PROOF.dialogOpen) && W.BACKGROUND_PAINT_PROOF.flipFrames < W.BACKGROUND_PAINT_FRAMES && W.BACKGROUND_PAINT_PROOF.hiddenFrames5s === 0, 'the measured proof behind the table (OPENER_PROOF, both modes): a site overriding window.open hijacks the main-world act, a dialog / crash / navigation fall to rung 2; a hidden tab sends 0 frames in 5 s and 1 at a flip < BACKGROUND_PAINT_FRAMES (verify r2 ⑤: no hysteresis needed)');
+  ok(W.OPENER_PROOF.chrome === '154.0.8037.57' && W.OPENER_PROOF.modes.length === 2 && gateOf(/hijacked/.test(W.OPENER_PROOF.siteOverridesWindowOpen)) && gateOf(/rung 2 lands/.test(W.OPENER_PROOF.dialogOpen)) && W.BACKGROUND_PAINT_PROOF.flipFrames < W.BACKGROUND_PAINT_FRAMES && W.BACKGROUND_PAINT_PROOF.hiddenFrames5s === 0, 'the measured proof behind the table (OPENER_PROOF, both modes): a site overriding window.open hijacks the main-world act, a dialog / crash / navigation fall to rung 2; a hidden tab sends 0 frames in 5 s and 1 at a flip < BACKGROUND_PAINT_FRAMES (verify r2 ⑤: no hysteresis needed)');
   // (the opener act's wiring pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const bad = rows.filter((x) => !x.okc);
   ok(!bad.length, `T1 THE OPENER RULE'S OWN TABLE: ${rows.length} rows (the opener's state × the act ⇒ one window, or refused by name) on the real keeper over the fake target model`, bad.map((x) => `${x.state} | ${x.act} ⇒ ${JSON.stringify(x.got)} (want ${JSON.stringify(x.want)})${x.extra ? ' ' + JSON.stringify(x.extra).slice(0, 200) : ''}`).join('\n    '));
@@ -747,40 +747,40 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   // CONTROL: a keeper copy WITHOUT the opener rule (the pre-r1 path: every tab a new window) — the red cell
   const ksrc = read('src/server/browser-keeper.js');
   const needle = '      if (anchors.length) {\n', needle2 = '      if (!anchors.length || gone) {\n';
-  ok(ksrc.includes(needle) && ksrc.includes(needle2), 'control setup: the opener rule\'s anchor search and the re-mint branch are found in the keeper');
+  ok(gateOf(ksrc.includes(needle)) && verdictOf(ksrc.includes(needle2)), 'control setup: the opener rule\'s anchor search and the re-mint branch are found in the keeper');
   const Kc = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, needle, '      if (false) {\n', "src/server/browser-keeper.js"), needle2, '      if (true) {\n', "src/server/browser-keeper.js"), 'no-opener-rule');
   const kc = mk(Kc, { dataDir: path.join(O, 'data-ctl') }); await kc._facts.probeVersion(); const pc = kc.createProfile({ label: 'Ctl' });
   await kc.attach({ profileId: pc.id, browserKey: KA, sessionId: 'x-' + KA }); await tabNew(kc, KA, 'https://a.example/c1'); await tabNew(kc, KA, 'https://a.example/c2');
   const cc = censusOf(kc, pc, KA);
-  ok(cc[KA] && cc[KA].count === 3 && W.multiWindowHolders(cc).join() === KA, `CONTROL (the pre-r1 path): a keeper copy that creates without an opener gives the holder ${cc[KA] ? cc[KA].count : '?'} windows for 3 tabs — the red cell names it`, cc);
+  ok(gateOf(cc[KA]) && cc[KA].count === 3 && W.multiWindowHolders(cc).join() === KA, `CONTROL (the pre-r1 path): a keeper copy that creates without an opener gives the holder ${cc[KA] ? cc[KA].count : '?'} windows for 3 tabs — the red cell names it`, cc);
   // THE REVERT TABLE of verify r2's parts — a patched copy per part, each flipping its own row
   const scen = async (Kmod, tag) => { const kx = mk(Kmod, { dataDir: path.join(O, 'data-' + tag) }); await kx._facts.probeVersion(); const px = kx.createProfile({ label: 'C ' + tag }); await kx.attach({ profileId: px.id, browserKey: KA, sessionId: 'x-' + KA }); return { kx, px }; };
   { // (a) the window-id reader: `Number(null)` is 0 — the old expression stamps window 0 for an unread id
-    const needleA = '    l2.windowId = WIN.windowIdOf(r.windowId); // T2 ⑧'; ok(ksrc.includes(needleA), 'control (a) setup');
+    const needleA = '    l2.windowId = WIN.windowIdOf(r.windowId); // T2 ⑧'; ok(verdictOf(ksrc.includes(needleA)), 'control (a) setup');
     const Ka = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleA, '    l2.windowId = Number.isFinite(Number(r.windowId)) ? Number(r.windowId) : null; // T2 ⑧', "src/server/browser-keeper.js"), 'window-zero');
     model.windowReadFails = 1; const { kx, px } = await scen(Ka, 'a'); const l = B.findLease(kx._reg().leases, px.id, KA);
-    ok(l && l.windowId === 0, `CONTROL (a): a keeper copy reading the id with Number(…) stamps window ${l && l.windowId} for an unread one (the c15 row goes red: no tab answers window 0 ⇒ re-minted)`, l);
+    ok(gateOf(l) && l.windowId === 0, `CONTROL (a): a keeper copy reading the id with Number(…) stamps window ${l && l.windowId} for an unread one (the c15 row goes red: no tab answers window 0 ⇒ re-minted)`, l);
   }
   { // (b) the derivation: without it a lease with no stamped id opens a window per tab
-    const needleB = '      if (wantWin == null && lease && WIN.hasOwnWindow(lease, WIN.instanceOf(rec))) {'; ok(ksrc.includes(needleB), 'control (b) setup');
+    const needleB = '      if (wantWin == null && lease && WIN.hasOwnWindow(lease, WIN.instanceOf(rec))) {'; ok(verdictOf(ksrc.includes(needleB)), 'control (b) setup');
     const Kb = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleB, '      if (false) {', "src/server/browser-keeper.js"), 'no-derivation');
     const { kx, px } = await scen(Kb, 'b'); delete B.findLease(kx._reg().leases, px.id, KA).windowId; const ow = model.openWindowCalls; await tabNew(kx, KA, 'https://c.example/b');
     ok(model.openWindowCalls > ow, 'CONTROL (b): a keeper copy without the derivation opens a NEW window for a lease whose id was never stamped (the pre-r1 / unread rows go red)');
   }
   { // (c) the window_busy return: without it a living window is traded for the browser's last window (another holder's)
-    const needleC = "    if (made && made.code === 'window_busy') return { ok: false, code: 'window_busy', why: made.why || 'ladder', targetId: null, window: 'own', error: made.error };"; ok(ksrc.includes(needleC), 'control (c) setup');
+    const needleC = "    if (made && made.code === 'window_busy') return { ok: false, code: 'window_busy', why: made.why || 'ladder', targetId: null, window: 'own', error: made.error };"; ok(verdictOf(ksrc.includes(needleC)), 'control (c) setup');
     const Kc2 = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleC, '', "src/server/browser-keeper.js"), 'busy-falls-back');
     const { kx, px } = await scen(Kc2, 'c'); setState(roots(kx, px, KA), 'elsewhere'); model.rung2Fails = true; const r = await tabNew(kx, KA, 'https://c.example/c'); model.rung2Fails = false;
-    ok(r.ok && r.r && r.r.opened && r.r.opened.window === 'shared' && r.r.noteCode === 'tab_shared_window', 'CONTROL (c): a keeper copy without the window_busy return falls back to the shared-window tab (the "every rung mismatches" row goes red)', r);
+    ok(gateOf(r.ok) && gateOf(r.r) && gateOf(r.r.opened) && r.r.opened.window === 'shared' && r.r.noteCode === 'tab_shared_window', 'CONTROL (c): a keeper copy without the window_busy return falls back to the shared-window tab (the "every rung mismatches" row goes red)', r);
   }
   { // (d) rung 2: without it a whole window of blocked tabs is refused instead of landing
-    const needleD = '        if (!(made && made.ok)) made = await viaActivate(anchors[0]); // verify r5: the plan is read in there, at rung 2'; ok(ksrc.includes(needleD), 'control (d) setup');
+    const needleD = '        if (!(made && made.ok)) made = await viaActivate(anchors[0]); // verify r5: the plan is read in there, at rung 2'; ok(verdictOf(ksrc.includes(needleD)), 'control (d) setup');
     const Kd = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleD, "        if (!(made && made.ok)) made = { ok: false, code: 'open_failed', error: 'no rung 2' };", "src/server/browser-keeper.js"), 'no-rung2');
     const { kx, px } = await scen(Kd, 'd'); setState(roots(kx, px, KA), 'crashed'); const r = await tabNew(kx, KA, 'https://c.example/d');
     ok(!r.ok && r.code === 'window_busy', 'CONTROL (d): a keeper copy without rung 2 refuses window_busy where the product lands (the crashed / navigating / override rows go red)', r);
   }
   { // (e) the census: a copy that counts a page's popup window as the holder's second
-    const wsrc2 = read('src/browser-windows.js'); const needleE = "    if (r.popup === true) { if (!out[h].popupWindows.includes(w)) { out[h].popupWindows.push(w); out[h].popups++; } continue; }\n"; ok(wsrc2.includes(needleE), 'control (e) setup');
+    const wsrc2 = read('src/browser-windows.js'); const needleE = "    if (r.popup === true) { if (!out[h].popupWindows.includes(w)) { out[h].popupWindows.push(w); out[h].popups++; } continue; }\n"; ok(verdictOf(wsrc2.includes(needleE)), 'control (e) setup');
     const We = M.load('src/browser-windows.js', editAnchor(wsrc2, needleE, '', "src/browser-windows.js"), 'popup-counted');
     const ce = We.windowCensus([{ holder: 'A', windowId: 1 }, { holder: 'A', windowId: 2, popup: true }]);
     ok(ce.A.count === 2 && We.multiWindowHolders(ce).join() === 'A', 'CONTROL (e): a census copy without the popup row names the holder in the red cell for the page\'s own popup');
@@ -830,7 +830,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   { const r0 = require('../src/store-writer.js').storeWriter().flushSync(); if (r0.deferred || (r0.left && r0.left.length)) throw new Error('the registry did not land before the restart: ' + JSON.stringify(r0.left)); }
   const k9 = mk(K, { dataDir: path.join(O, 'data-r3c') }); const r21 = await tabNew(k9, KA, 'https://r.example/21');
   row3('a keeper restart after the strays were said', 'tab new', { ok: r21.ok, note: (r21.r && r21.r.noteCode) || null }, { ok: true, note: null }, r21);
-  ok(rows3.every((x) => x.okc), `⑤ verify r3 rows: ${rows3.length} (the sandbox kind, the rung named, a counted leak, the display-fact plan, the window gone mid-ladder, the three-window upgrade path, the restart)`, rows3.filter((x) => !x.okc).map((x) => `${x.state} | ${x.act} ⇒ ${JSON.stringify(x.got)} (want ${JSON.stringify(x.want)})${x.extra ? ' ' + JSON.stringify(x.extra).slice(0, 300) : ''}`).join('\n    '));
+  ok(verdictOf(rows3.every((x) => x.okc)), `⑤ verify r3 rows: ${rows3.length} (the sandbox kind, the rung named, a counted leak, the display-fact plan, the window gone mid-ladder, the three-window upgrade path, the restart)`, rows3.filter((x) => !x.okc).map((x) => `${x.state} | ${x.act} ⇒ ${JSON.stringify(x.got)} (want ${JSON.stringify(x.want)})${x.extra ? ' ' + JSON.stringify(x.extra).slice(0, 300) : ''}`).join('\n    '));
   console.log('    ' + rows3.map((x) => `${x.okc ? '·' : '✗'} ${x.state} · ${x.act} ⇒ ${JSON.stringify(x.got).slice(0, 220)}`).join('\n    '));
   // ── ⑥ verify r4 (2026-10-02): r3's ADDITIONS attacked — rows c22–c28 on fresh keepers over the same model ──
   console.log('— ⑥ verify r4: the rows r3 added, attacked');
@@ -875,13 +875,13 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     const bWin = model.targets.get(roots(k13, p13, KB)[0]).windowId; model.active.set(bWin, roots(k13, p13, KB)[0]); const before = model.active.get(bWin); const bTabs = ownOf(k13, p13, KB).slice().sort().join(','); model.otherWindow = bWin;
     setState(roots(k13, p13, KA), 'crashed'); model.rung2LeakOnce = true; const r = await tabNew(k13, KA, 'https://r4.example/28'); setState(roots(k13, p13, KA), 'ok'); model.otherWindow = null;
     row4('a stray in the OTHER holder\'s window (background create), that holder\'s foreground tab not its last', 'tab new', { ok: r.ok, leaked: k13.list().windowLeaks.count, bForegroundUnchanged: model.active.get(bWin) === before, bTabsUnchanged: ownOf(k13, p13, KB).slice().sort().join(',') === bTabs, strayLeft: liveTargets().some(([, t]) => t.holder === 'stray') }, { ok: true, leaked: 1, bForegroundUnchanged: true, bTabsUnchanged: true, strayLeft: false }, r); }
-  ok(rows4.every((x) => x.okc), `⑥ verify r4 rows: ${rows4.length} (no cycle under a live view, rung 2 never while the user drives any window — a takeover or Browse yourself — and again after the handback, both windows gone, the lines per command, which window is "the" window, the other holder's foreground under a stray)`, rows4.filter((x) => !x.okc).map((x) => `${x.state} | ${x.act} ⇒ ${JSON.stringify(x.got)} (want ${JSON.stringify(x.want)})${x.extra ? ' ' + JSON.stringify(x.extra).slice(0, 400) : ''}`).join('\n    '));
+  ok(verdictOf(rows4.every((x) => x.okc)), `⑥ verify r4 rows: ${rows4.length} (no cycle under a live view, rung 2 never while the user drives any window — a takeover or Browse yourself — and again after the handback, both windows gone, the lines per command, which window is "the" window, the other holder's foreground under a stray)`, rows4.filter((x) => !x.okc).map((x) => `${x.state} | ${x.act} ⇒ ${JSON.stringify(x.got)} (want ${JSON.stringify(x.want)})${x.extra ? ' ' + JSON.stringify(x.extra).slice(0, 400) : ''}`).join('\n    '));
   console.log('    ' + rows4.map((x) => `${x.okc ? '·' : '✗'} ${x.state} · ${x.act} ⇒ ${JSON.stringify(x.got).slice(0, 220)}`).join('\n    '));
   // every outcome of BOTH tables names its rung (an ok ⇒ opened.rung ∈ the closed set) or its refusal code
   const RUNGS = ['opener', 'activate', 'new-window'];
   const allRows = [...rows, ...rows3, ...rows4].filter((x) => x.extra && x.extra.r !== undefined ? false : true);
   const named = [...rows, ...rows3, ...rows4].map((x) => x.extra && (x.extra.r || x.extra)).filter((r) => r && typeof r === 'object' && 'ok' in r).map((r) => (r.ok ? (r.r && r.r.opened ? RUNGS.includes(r.r.opened.rung) : true) : !!r.code));
-  ok(named.length >= 18 && named.every(Boolean), `T1 every outcome names the rung that landed (opener / activate / new-window) or its refusal code — ${named.length} outcomes over the three tables`, named);
+  ok(named.length >= 18 && verdictOf(named.every(Boolean)), `T1 every outcome names the rung that landed (opener / activate / new-window) or its refusal code — ${named.length} outcomes over the three tables`, named);
   void allRows;
 
 
@@ -956,7 +956,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     const t33 = takeB(); const e2 = evs.length; backB(); const de33b = evs.slice(e2).filter((e) => e.kind === 'drive-ended');
     row5('the user browsing himself refuses this holder; his window lets go ⇒ ONE drive-ended naming it; a drive with nothing refused ⇒ none', 'browse + tab new + release; takeover + handback', { driving: !!(at && at.ok && at.take), refused: r7.code || null, why: r7.why || null, released: !!(rel && rel.ok), events: de33.length, names: de33[0] ? de33[0].refused : null, human: de33[0] ? de33[0].human : null, none: de33b.length, takeover: t33.ok }, { driving: true, refused: 'window_busy', why: 'user_driving', released: true, events: 1, names: [`${KA}:x-${KA}:1`], human: false, none: 0, takeover: true }, { br, at, rel, de33, de33b });
   }
-  ok(rows5.every((x) => x.okc), `⑦ verify r5 rows: ${rows5.length} (the plan read AT rung 2 — a takeover or a live view that begins during rung 1 or the lock wait is seen; a bind that fails never falls to the shared window; the refused holders are told once when the drive ends)`, rows5.filter((x) => !x.okc).map((x) => `${x.state} | ${x.act} ⇒ ${JSON.stringify(x.got)} (want ${JSON.stringify(x.want)})${x.extra ? ' ' + JSON.stringify(x.extra).slice(0, 500) : ''}`).join('\n    '));
+  ok(verdictOf(rows5.every((x) => x.okc)), `⑦ verify r5 rows: ${rows5.length} (the plan read AT rung 2 — a takeover or a live view that begins during rung 1 or the lock wait is seen; a bind that fails never falls to the shared window; the refused holders are told once when the drive ends)`, rows5.filter((x) => !x.okc).map((x) => `${x.state} | ${x.act} ⇒ ${JSON.stringify(x.got)} (want ${JSON.stringify(x.want)})${x.extra ? ' ' + JSON.stringify(x.extra).slice(0, 500) : ''}`).join('\n    '));
   console.log('    ' + rows5.map((x) => `${x.okc ? '·' : '✗'} ${x.state} · ${x.act} ⇒ ${JSON.stringify(x.got).slice(0, 220)}`).join('\n    '));
   // ── THE SEEDED WALK (T1): ≤ 5 steps from every state, two holders, the invariants after every step ──
   console.log('— T1 the seeded walk over the ladder');
@@ -1057,47 +1057,47 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     const idle = T2.idleInboxItem({ label: 'Work', idleMs: 60000, url: 'https://x', sessionName: 'S' });
     const inboxNeverWindow = !/window/i.test(idle.text) && !/your window/i.test(idle.detail);
     const clientNeverRenders = !/takeoverText|handbackText|takenWho/.test(read('src/lib/browser-live-window.js') + read('src/lib/browser-session-words.js') + read('src/lib/browser-trace-view.js'));
-    ok(twoSources && allSay && !callersWithoutShared.length && inboxNeverWindow && clientNeverRenders, `⑨ THE SHARED-WINDOW WORDS CENSUS: the spelling lives in exactly two PURE sources (${spellings.join(', ')}); the takeover text, handback text, paused refusal, both notices say "the shared window of … (your tab is in it)" for shared:true; every server caller passes shared; the For-you idle item names the browser, never a window; the client never renders the agent's words (its own t() strings)`, JSON.stringify({ spellings, callersWithoutShared, allSay, inboxNeverWindow, clientNeverRenders }));
+    ok(gateOf(twoSources) && gateOf(allSay) && !callersWithoutShared.length && gateOf(inboxNeverWindow) && verdictOf(clientNeverRenders), `⑨ THE SHARED-WINDOW WORDS CENSUS: the spelling lives in exactly two PURE sources (${spellings.join(', ')}); the takeover text, handback text, paused refusal, both notices say "the shared window of … (your tab is in it)" for shared:true; every server caller passes shared; the For-you idle item names the browser, never a window; the client never renders the agent's words (its own t() strings)`, JSON.stringify({ spellings, callersWithoutShared, allSay, inboxNeverWindow, clientNeverRenders }));
   }
   // ── THE REVERT TABLE of verify r3's parts — a patched copy per part ──
   { // (f) the re-ask: without it a window gone during the ladder is called busy ("your tabs are still there")
-    const needleF = '          let answers = 0; for (const c of cands) { const w = await windowOf(c); if (w != null && w === wantWin) answers++; }'; ok(ksrc.includes(needleF), 'control (f) setup');
+    const needleF = '          let answers = 0; for (const c of cands) { const w = await windowOf(c); if (w != null && w === wantWin) answers++; }'; ok(verdictOf(ksrc.includes(needleF)), 'control (f) setup');
     const Kf = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleF, '          let answers = 1;', "src/server/browser-keeper.js"), 'no-reask');
     const { kx, px } = await scen(Kf, 'f'); setState([roots(kx, px, KA)[0]], 'closing-last'); const r = await tabNew(kx, KA, 'https://c.example/f');
-    ok(!r.ok && r.code === 'window_busy' && /still there/.test(r.error), 'CONTROL (f): a keeper copy without the re-ask calls a window that went away during the ladder busy (the c19 row goes red)', r);
+    ok(!r.ok && r.code === 'window_busy' && verdictOf(/still there/.test(r.error)), 'CONTROL (f): a keeper copy without the re-ask calls a window that went away during the ladder busy (the c19 row goes red)', r);
   }
   { // (g) the strays note: without it a lease whose tabs sit in several windows is never told
-    const needleG = "      if (made.window === 'own' && made.strays && made.strays.windows.length && l && l.straysSaidIn !== WIN.instanceOf(rec) && !out.note) {"; ok(ksrc.includes(needleG), 'control (g) setup');
+    const needleG = "      if (made.window === 'own' && made.strays && made.strays.windows.length && l && l.straysSaidIn !== WIN.instanceOf(rec) && !out.note) {"; ok(verdictOf(ksrc.includes(needleG)), 'control (g) setup');
     const Kg = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleG, '      if (false) {', "src/server/browser-keeper.js"), 'no-strays-note');
     const { kx, px } = await scen(Kg, 'g'); const nsg = B.sessionNameFor(px.id); { const l = B.findLease(kx._reg().leases, px.id, KA); l.tabRoots = TBS.addRoot(l.tabRoots, addTab(nsg, mintTid(), { windowId: ++model.nextW, holder: 'keeper' })); }
     const r = await tabNew(kx, KA, 'https://c.example/g');
-    ok(r.ok && !r.r.noteCode, 'CONTROL (g): a keeper copy without the strays note lands the tab and says nothing about the other window (the c20 row goes red)', r);
+    ok(gateOf(r.ok) && !r.r.noteCode, 'CONTROL (g): a keeper copy without the strays note lands the tab and says nothing about the other window (the c20 row goes red)', r);
   }
   { // (h) the leak count: a keeper copy that does not count rung 2's leaks
-    const needleH = '          for (const lk of Array.isArray(made && made.leaks) ? made.leaks : []) {'; ok(ksrc.includes(needleH), 'control (h) setup');
+    const needleH = '          for (const lk of Array.isArray(made && made.leaks) ? made.leaks : []) {'; ok(verdictOf(ksrc.includes(needleH)), 'control (h) setup');
     const Kh = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleH, '          for (const lk of []) {', "src/server/browser-keeper.js"), 'no-leak-count');
     const { kx, px } = await scen(Kh, 'h'); setState(roots(kx, px, KA), 'crashed'); model.rung2LeakOnce = true; const r = await tabNew(kx, KA, 'https://c.example/h');
-    ok(r.ok && kx.list().windowLeaks.count === 0, 'CONTROL (h): a keeper copy that does not count the leaks reports 0 after a leaked rung 2 (the c17 row goes red)', { r, leaks: kx.list().windowLeaks });
+    ok(gateOf(r.ok) && kx.list().windowLeaks.count === 0, 'CONTROL (h): a keeper copy that does not count the leaks reports 0 after a leaked rung 2 (the c17 row goes red)', { r, leaks: kx.list().windowLeaks });
   }
   { // (i) the version table without the named-line rule
-    const fsrc = read('src/browser-facts.js'); const needleI = '  const v = named(so) || named(se) || B.parseVersion(so) || (!err && B.parseVersion(se)) || null;'; ok(fsrc.includes(needleI), 'control (i) setup');
+    const fsrc = read('src/browser-facts.js'); const needleI = '  const v = named(so) || named(se) || B.parseVersion(so) || (!err && B.parseVersion(se)) || null;'; ok(verdictOf(fsrc.includes(needleI)), 'control (i) setup');
     const Fi = M.load('src/browser-facts.js', editAnchor(fsrc, needleI, '  const v = err ? B.parseVersion(so) : B.parseVersion(so + se);', "src/browser-facts.js"), 'no-named-line');
     ok(Fi.versionFromProbe({ stdout: 'npm notice 10.9.0 -> 11.0.0\n', stderr: 'agent-browser 0.38.1\n' }) === '10.9.0', 'CONTROL (i): a facts copy without the named-line rule reads the wrapper\'s notice as the version (the ⑧ table goes red)');
   }
   { // (j) the rung-2 plan: a windows copy that cycles on a real display too
-    const wsrc3 = read('src/browser-windows.js'); const needleJ = "  return { run: true, breaker: false, activate: true, why: 'a real display: the window is never minimized in front of the user', create: RUNG2_CREATE };"; ok(wsrc3.includes(needleJ), 'control (j) setup');
+    const wsrc3 = read('src/browser-windows.js'); const needleJ = "  return { run: true, breaker: false, activate: true, why: 'a real display: the window is never minimized in front of the user', create: RUNG2_CREATE };"; ok(verdictOf(wsrc3.includes(needleJ)), 'control (j) setup');
     const Wj = M.load('src/browser-windows.js', editAnchor(wsrc3, needleJ, "  return { run: true, breaker: true, activate: true, why: 'always', create: RUNG2_CREATE };", "src/browser-windows.js"), 'cycle-on-real-display');
     ok(Wj.rung2Plan({ headed: true, fallback: null }).breaker === true && W.rung2Plan({ headed: true, fallback: null }).breaker === false, 'CONTROL (j): a windows copy that cycles the window on a real display too (the c18 row goes red)');
   }
   { // (k) verify r4 T1: a keeper copy that never asks whether the user drives — rung 2 runs (cycle + activation) under his hands
-    const needleK = '        const planNow = () => WIN.rung2Plan(rec.display, { viewers: watchers.get(inputKey(holderKey, p.id)) || 0, driven: userDrivesAnyWindowOf(p.id) });'; ok(ksrc.includes(needleK), 'control (k) setup');
+    const needleK = '        const planNow = () => WIN.rung2Plan(rec.display, { viewers: watchers.get(inputKey(holderKey, p.id)) || 0, driven: userDrivesAnyWindowOf(p.id) });'; ok(verdictOf(ksrc.includes(needleK)), 'control (k) setup');
     const Kk = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleK, '        const planNow = () => WIN.rung2Plan(rec.display, { viewers: watchers.get(inputKey(holderKey, p.id)) || 0, driven: false });', "src/server/browser-keeper.js"), 'rung2-under-the-users-hands');
     const { kx, px } = await scen(Kk, 'k'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/kb'); const t = kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true });
     const c0 = model.rung2Calls; setState(roots(kx, px, KA), 'crashed'); const r = await tabNew(kx, KA, 'https://c.example/k'); setState(roots(kx, px, KA), 'ok');
-    ok(t.ok && r.ok && model.rung2Calls > c0, 'CONTROL (k): a keeper copy that never asks whether the user drives runs rung 2 under his hands (the c23 / c24 rows and the walk go red)', r);
+    ok(gateOf(t.ok) && gateOf(r.ok) && model.rung2Calls > c0, 'CONTROL (k): a keeper copy that never asks whether the user drives runs rung 2 under his hands (the c23 / c24 rows and the walk go red)', r);
   }
   { // (l) verify r4 ①: a plan copy without the viewer rule cycles the window a live view shows
-    const wsrc4 = read('src/browser-windows.js'); const needleL = '  const watched = (Number(viewers) || 0) > 0;'; ok(wsrc4.includes(needleL), 'control (l) setup');
+    const wsrc4 = read('src/browser-windows.js'); const needleL = '  const watched = (Number(viewers) || 0) > 0;'; ok(verdictOf(wsrc4.includes(needleL)), 'control (l) setup');
     const Wl = M.load('src/browser-windows.js', editAnchor(wsrc4, needleL, '  const watched = false;', "src/browser-windows.js"), 'cycle-under-a-live-view');
     ok(Wl.rung2Plan({ headed: false }, { viewers: 2 }).breaker === true && W.rung2Plan({ headed: false }, { viewers: 2 }).breaker === false, 'CONTROL (l): a plan copy without the viewer rule runs the window-state cycle under a live view (the c22 row goes red)');
   }
@@ -1109,22 +1109,22 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     ok(model.active.get(bWin) !== before && model.active.get(bWin) === roots(kx, px, KB)[roots(kx, px, KB).length - 1], `CONTROL (m): under a foreground create the other holder's foreground moves to its LAST tab when the stray closes (${String(before).slice(0, 8)} → ${String(model.active.get(bWin)).slice(0, 8)}; Chrome's measured rule) — the c28 row and the walk's foreground invariant go red; the product's create is a background one`);
   }
   { // (n) verify r5 ①: a keeper copy that reads the plan at the ladder's TOP (r4's shape) — a takeover that begins during rung 1 runs rung 2 under his hands
-    const needleN1 = '        let plan = null;'; const needleN2 = "rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open("; ok(ksrc.includes(needleN1) && ksrc.includes(needleN2), 'control (n) setup');
+    const needleN1 = '        let plan = null;'; const needleN2 = "rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open("; ok(gateOf(ksrc.includes(needleN1)) && verdictOf(ksrc.includes(needleN2)), 'control (n) setup');
     const Kn = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, needleN1, '        let plan = planNow();', "src/server/browser-keeper.js"), needleN2, "rung2Serialized(p.id, () => { if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open(", "src/server/browser-keeper.js"), 'plan-at-the-top');
     const { kx, px } = await scen(Kn, 'n'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/nb');
     setState(roots(kx, px, KA), 'crashed'); model.onProbe = () => { kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true }); }; const c0 = model.rung2Calls; const r = await tabNew(kx, KA, 'https://c.example/n'); setState(roots(kx, px, KA), 'ok'); kx.handback({ browserKey: KB, profileId: px.id, viewerId: 7, cause: 'explicit' });
-    ok(r.ok && model.rung2Calls > c0, 'CONTROL (n): a keeper copy that reads the plan at the ladder\'s top runs rung 2 under the hands of a user whose takeover began during rung 1 (the c29 / c31 rows and the walk\'s drivenMid steps go red)', r);
+    ok(gateOf(r.ok) && model.rung2Calls > c0, 'CONTROL (n): a keeper copy that reads the plan at the ladder\'s top runs rung 2 under the hands of a user whose takeover began during rung 1 (the c29 / c31 rows and the walk\'s drivenMid steps go red)', r);
   }
   { // (o) verify r5 ③: a keeper copy that falls to the binary's own `tab new` when the bind fails — the tab lands in the browser's last window (another holder's), said shared
-    const needleO = "      if (fallback) { log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: its new tab ${id.slice(0, 8)} could not be bound to its session (${execWhy(b)}) — closed, refused window_busy (bind_failed), never the browser's last window`); made = { ok: false, code: 'window_busy', why: 'bind_failed', error: `your new tab could not be bound to your session (${execWhy(b)}) — nothing opened; run the same \\`tab new\\` once more (a window of yours that is gone gets a new one)` }; }"; ok(ksrc.includes(needleO), 'control (o) setup');
+    const needleO = "      if (fallback) { log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: its new tab ${id.slice(0, 8)} could not be bound to its session (${execWhy(b)}) — closed, refused window_busy (bind_failed), never the browser's last window`); made = { ok: false, code: 'window_busy', why: 'bind_failed', error: `your new tab could not be bound to your session (${execWhy(b)}) — nothing opened; run the same \\`tab new\\` once more (a window of yours that is gone gets a new one)` }; }"; ok(verdictOf(ksrc.includes(needleO)), 'control (o) setup');
     const Ko = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleO, "      if (fallback) made = { ok: false, error: `its new window could not be bound to its session (${execWhy(b)})` };", "src/server/browser-keeper.js"), 'shared-fallback-on-bind-failure');
     const { kx, px } = await scen(Ko, 'o'); const NSo = B.sessionNameFor(px.id);
     model.onCreated = (tid) => { const w = model.targets.get(tid).windowId; for (const [id, t] of [...model.targets]) if (t.windowId === w && t.state !== 'closed') { closeTab(id); fakeRemove(NSo, id); } };
     const r = await tabNew(kx, KA, 'https://c.example/o');
-    ok(r.ok && r.r && r.r.opened && r.r.opened.window === 'shared' && r.r.noteCode === 'tab_shared_window', 'CONTROL (o): a keeper copy that falls back on a bind failure opens the tab in the browser\'s LAST window — shared, beside another conversation\'s page (the c32 row goes red)', r);
+    ok(gateOf(r.ok) && gateOf(r.r) && gateOf(r.r.opened) && r.r.opened.window === 'shared' && r.r.noteCode === 'tab_shared_window', 'CONTROL (o): a keeper copy that falls back on a bind failure opens the tab in the browser\'s LAST window — shared, beside another conversation\'s page (the c32 row goes red)', r);
   }
   { // (p) verify r5 ②: a keeper copy that never remembers a refusal — the handback tells nobody
-    const needleP = '          noteRung2Refused(p.id, holderKey, lease ? lease.sessionId : null);'; ok(ksrc.includes(needleP), 'control (p) setup');
+    const needleP = '          noteRung2Refused(p.id, holderKey, lease ? lease.sessionId : null);'; ok(verdictOf(ksrc.includes(needleP)), 'control (p) setup');
     const Kp = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleP, '', "src/server/browser-keeper.js"), 'refusal-forgotten');
     const { kx, px } = await scen(Kp, 'p'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/pb');
     const evs = []; kx.onInput((ev) => evs.push(ev.kind)); kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true });
@@ -1140,35 +1140,35 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     const slept = await lockWait(kx, px, { act: take, sleepMs: 40, delayB: 60, tag: 'q1' }); back(); const seen = await lockWait(kx, px, { act: take, delayB: 60, tag: 'q2' }); back();
     const right = (x) => !!(x.rb.ok && x.ra.ok === false && x.ra.code === 'window_busy' && x.ra.why === 'user_driving' && !x.aRan);
     const brief = (x) => ({ b: x.rb.ok ? 'ok' : x.rb.code, a: x.ra.ok ? 'ok' : `${x.ra.code}/${x.ra.why}`, aRan: x.aRan, bIn: x.bIn, aQueued: x.aQueued });
-    ok(!right(slept) && right(seen) && seen.bIn === true && seen.aQueued === true, `CONTROL (q): r5's harness (40 ms sleeps, a global rung-2 count) on a runner where B's way to rung 2 is 60 ms slower calls the product red (${JSON.stringify(brief(slept))} — one of its two wrong orderings: B's own rung 2 counted as A's, the CI row of B-81c6, or A overtaking B to the lock); the event-ordered harness under the same delay is green (${JSON.stringify(brief(seen))})`, JSON.stringify({ slept: brief(slept), seen: brief(seen) }));
+    ok(!right(slept) && gateOf(right(seen)) && seen.bIn === true && seen.aQueued === true, `CONTROL (q): r5's harness (40 ms sleeps, a global rung-2 count) on a runner where B's way to rung 2 is 60 ms slower calls the product red (${JSON.stringify(brief(slept))} — one of its two wrong orderings: B's own rung 2 counted as A's, the CI row of B-81c6, or A overtaking B to the lock); the event-ordered harness under the same delay is green (${JSON.stringify(brief(seen))})`, JSON.stringify({ slept: brief(slept), seen: brief(seen) }));
   }
   { // (r) lane browser-windows-rung-race (B-81c6): a keeper copy that reads the plan after rung 1 but BEFORE the lock wait — a
     // takeover or a live view that begins while it waits is missed (the c31 / c31v rows go red), whatever the scheduling
     const needleR1 = "rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false)"; const needleR2 = '        if (!(made && made.ok)) made = await viaActivate(anchors[0]); // verify r5: the plan is read in there, at rung 2';
-    ok(ksrc.includes(needleR1) && ksrc.includes(needleR2), 'control (r) setup');
+    ok(gateOf(ksrc.includes(needleR1)) && verdictOf(ksrc.includes(needleR2)), 'control (r) setup');
     const Kr = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, needleR1, "rung2Serialized(p.id, () => { if (plan.run === false)", "src/server/browser-keeper.js"), needleR2, '        if (!(made && made.ok)) { plan = planNow(); made = await viaActivate(anchors[0]); }', "src/server/browser-keeper.js"), 'plan-before-the-lock');
     const { kx, px } = await scen(Kr, 'r'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/rb');
     const tk = await lockWait(kx, px, { act: () => kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true }), tag: 'r1' }); kx.handback({ browserKey: KB, profileId: px.id, viewerId: 7, cause: 'explicit' });
     const lv = await lockWait(kx, px, { act: () => kx.noteViewers(KA, px.id, 1), tag: 'r2' }); kx.noteViewers(KA, px.id, 0);
-    ok(tk.bIn && tk.aQueued && tk.ra.ok === true && tk.aRan === true && lv.bIn && lv.aQueued && lv.aCycled === true, 'CONTROL (r): a keeper copy that reads the plan after rung 1 but BEFORE the lock wait runs rung 2 under the hands of a user whose takeover began during the wait, and cycles the window under a live view that opened during it (the c31 / c31v rows go red)', JSON.stringify({ tk: { a: tk.ra.ok, aRan: tk.aRan, bIn: tk.bIn, aQueued: tk.aQueued }, lv: { aCycled: lv.aCycled, bIn: lv.bIn, aQueued: lv.aQueued } }));
+    ok(gateOf(tk.bIn) && gateOf(tk.aQueued) && tk.ra.ok === true && tk.aRan === true && gateOf(lv.bIn) && gateOf(lv.aQueued) && lv.aCycled === true, 'CONTROL (r): a keeper copy that reads the plan after rung 1 but BEFORE the lock wait runs rung 2 under the hands of a user whose takeover began during the wait, and cycles the window under a live view that opened during it (the c31 / c31v rows go red)', JSON.stringify({ tk: { a: tk.ra.ok, aRan: tk.aRan, bIn: tk.bIn, aQueued: tk.aQueued }, lv: { aCycled: lv.aCycled, bIn: lv.bIn, aQueued: lv.aQueued } }));
   }
   { // (s) lane browser-windows-rung-race (B-81c6): r3's lock compared `cur`, never the stored tail — its entry outlived every rung 2,
     // so a holder ALONE at the lock is journaled as waiting behind nobody (c31's bQueued goes red)
-    const needleS = 'if (rung2Locks.get(k) === tail) rung2Locks.delete(k);'; ok(ksrc.includes(needleS), 'control (s) setup');
+    const needleS = 'if (rung2Locks.get(k) === tail) rung2Locks.delete(k);'; ok(verdictOf(ksrc.includes(needleS)), 'control (s) setup');
     const Ks = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleS, 'if (rung2Locks.get(k) === cur) rung2Locks.delete(k);', "src/server/browser-keeper.js"), 'lock-entry-kept');
     const { kx, px } = await scen(Ks, 's'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/sb');
     setState(roots(kx, px, KA), 'crashed'); const r0 = await tabNew(kx, KA, 'https://c.example/s0'); setState(roots(kx, px, KA), 'ok'); // one rung 2, alone
     const L = await lockWait(kx, px, { act: () => ({ ok: true }), tag: 's1' });
-    ok(r0.ok && r0.r && r0.r.opened && r0.r.opened.rung === 'activate' && L.bIn && L.bQueued === true, 'CONTROL (s): a keeper copy whose rung-2 lock compares `cur` (r3) keeps its map entry after every rung 2 — a holder ALONE at the lock is journaled as waiting behind nobody (the c31 / c31v rows\' bQueued goes red)', JSON.stringify({ r0: r0.ok && r0.r && r0.r.opened && r0.r.opened.rung, bIn: L.bIn, bQueued: L.bQueued }));
+    ok(gateOf(r0.ok) && gateOf(r0.r) && gateOf(r0.r.opened) && r0.r.opened.rung === 'activate' && gateOf(L.bIn) && L.bQueued === true, 'CONTROL (s): a keeper copy whose rung-2 lock compares `cur` (r3) keeps its map entry after every rung 2 — a holder ALONE at the lock is journaled as waiting behind nobody (the c31 / c31v rows\' bQueued goes red)', JSON.stringify({ r0: r0.ok && r0.r && r0.r.opened && r0.r.opened.rung, bIn: L.bIn, bQueued: L.bQueued }));
   }
   { // verify r5 pins: the drive-ended notice — its kind registered in session-status, its ONE sentence, the announcer's branch, the keeper's three drive-end sites
     const ssrc = read('src/session-status.js'); const hsrc = read('src/server/browser-handback.js');
     const n = W.driveEndedNotice({ label: 'Work', n: 2, at: 5 });
-    ok(n.kind === W.DRIVE_ENDED_NOTICE_KIND && n.kind === 'browser-window-free' && W.renderDriveEndedNotice(n) === '<system-reminder>\n' + W.driveEndedText(n) + '\n</system-reminder>' && /"Work"/.test(W.driveEndedText(n)) && /2 times/.test(W.driveEndedText(n)) && /1 time\b/.test(W.driveEndedText({ n: 1 })) && /'browser-window-free': \(n\) => require\('\.\/browser-windows'\)\.renderDriveEndedNotice\(n\)/.test(ssrc) && /if \(ev\.kind === 'drive-ended'\) \{ try \{ announceDriveEnded\(ev\);/.test(hsrc) && /queueNotice\(sess, WIN\.driveEndedNotice\(\{ label, n: r\.n, at \}\)\)/.test(hsrc) && (ksrc.match(/driveEnded\((profileId|h\.profileId)\);/g) || []).length === 3 && /emitInput\(\{ kind: 'drive-ended', browserKey: null, profileId: pid/.test(ksrc), 'verify r5 pins: the drive-ended notice is the registered browser-window-free kind with ONE sentence; the announcer turns the keeper\'s drive-ended event into that free notice (queueNotice, never a delivery); the keeper ends a drive at the handback, his window letting go and his row ending');
+    ok(n.kind === W.DRIVE_ENDED_NOTICE_KIND && n.kind === 'browser-window-free' && W.renderDriveEndedNotice(n) === '<system-reminder>\n' + W.driveEndedText(n) + '\n</system-reminder>' && gateOf(/"Work"/.test(W.driveEndedText(n))) && gateOf(/2 times/.test(W.driveEndedText(n))) && gateOf(/1 time\b/.test(W.driveEndedText({ n: 1 }))) && gateOf(/'browser-window-free': \(n\) => require\('\.\/browser-windows'\)\.renderDriveEndedNotice\(n\)/.test(ssrc)) && gateOf(/if \(ev\.kind === 'drive-ended'\) \{ try \{ announceDriveEnded\(ev\);/.test(hsrc)) && gateOf(/queueNotice\(sess, WIN\.driveEndedNotice\(\{ label, n: r\.n, at \}\)\)/.test(hsrc)) && (ksrc.match(/driveEnded\((profileId|h\.profileId)\);/g) || []).length === 3 && verdictOf(/emitInput\(\{ kind: 'drive-ended', browserKey: null, profileId: pid/.test(ksrc)), 'verify r5 pins: the drive-ended notice is the registered browser-window-free kind with ONE sentence; the announcer turns the keeper\'s drive-ended event into that free notice (queueNotice, never a delivery); the keeper ends a drive at the handback, his window letting go and his row ending');
   }
   { // verify r4 pins: the viewport's rung-2 create IS the PURE background one; the keeper hands the plan the bridge's viewer count and whether the user drives any window of the browser
     const vsrc = read('src/server/browser-viewport.js');
-    ok(W.RUNG2_CREATE.background === true && W.RUNG2_CREATE.url === 'about:blank' && /'Target\.createTarget', \{ \.\.\.W\.RUNG2_CREATE \}/.test(vsrc) && /const planNow = \(\) => WIN\.rung2Plan\(rec\.display, \{ viewers: watchers\.get\(inputKey\(holderKey, p\.id\)\) \|\| 0, driven: userDrivesAnyWindowOf\(p\.id\) \}\);/.test(ksrc) && /rung2Serialized\(p\.id, \(\) => \{ plan = planNow\(\); if \(plan\.run === false\) return \{ ok: false, code: 'rung2_not_run'/.test(ksrc) && /return holdersOn\(pid\)\.some\(\(h\) => h\.human \? h\.input === 'user' : \(\(inputs\.get\(inputKey\(h\.browserKey, pid\)\) \|\| \{\}\)\.input === 'user'\)\);/.test(ksrc), 'verify r4/r5 pins: rung 2\'s create is W.RUNG2_CREATE (about:blank, background) in the viewport; the plan (the bridge\'s viewer count + whether the user drives any window) is read AT RUNG 2, inside the browser\'s lock — after the opener rung\'s probes and the lock wait (r5 ①/②); the user\'s drive is a HOLDER question asked through holdersOn (r5 ⑥)');
+    ok(W.RUNG2_CREATE.background === true && W.RUNG2_CREATE.url === 'about:blank' && gateOf(/'Target\.createTarget', \{ \.\.\.W\.RUNG2_CREATE \}/.test(vsrc)) && gateOf(/const planNow = \(\) => WIN\.rung2Plan\(rec\.display, \{ viewers: watchers\.get\(inputKey\(holderKey, p\.id\)\) \|\| 0, driven: userDrivesAnyWindowOf\(p\.id\) \}\);/.test(ksrc)) && gateOf(/rung2Serialized\(p\.id, \(\) => \{ plan = planNow\(\); if \(plan\.run === false\) return \{ ok: false, code: 'rung2_not_run'/.test(ksrc)) && verdictOf(/return holdersOn\(pid\)\.some\(\(h\) => h\.human \? h\.input === 'user' : \(\(inputs\.get\(inputKey\(h\.browserKey, pid\)\) \|\| \{\}\)\.input === 'user'\)\);/.test(ksrc)), 'verify r4/r5 pins: rung 2\'s create is W.RUNG2_CREATE (about:blank, background) in the viewport; the plan (the bridge\'s viewer count + whether the user drives any window) is read AT RUNG 2, inside the browser\'s lock — after the opener rung\'s probes and the lock wait (r5 ①/②); the user\'s drive is a HOLDER question asked through holdersOn (r5 ⑥)');
   }
   // ── lane browser-windows-fix (int201, 2026-10-02): THE HOLDER'S OWN WINDOW IS ITS TAB EVERYWHERE, AND A REBIND INTO IT IS SAID —
   //    the integrator's two reds on 2666de5a (heavy test-browser-site-reset-chrome ⑤: a shared profile's bare `site-reset` read no tab
@@ -1200,14 +1200,14 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     ok(JSON.stringify(r8.said) === JSON.stringify({ newWindow: true, rebound: true, how: 'new', why: 'life', boundToOwn: true, words: true, markSpent: true, once: true }), 'bwf ② a lease whose tab went with a replaced browser (L2\'s mark) is bound in a NEW window of its own AND told so — the attach answer carries the rebound note ([tab_rebound]), once', r8.said);
     const n1 = "    for (const h of tabHoldersOf(pid)) if (h && h.key === bk) for (const t of (Array.isArray(h.roots) ? h.roots : [])) if (t) out.add(String(t));\n";
     const n2 = "    if (lostWhy) keepRebound(p.id, browserKey, { how: 'new', targetId: String(r.targetId), url: 'about:blank', why: lostWhy, text: TBS.reboundNoteText({ how: 'new', why: lostWhy }) });\n";
-    ok(ksrc.includes(n1) && ksrc.includes(n2), 'control (bwf) setup: both fix lines are found in src/server/browser-keeper.js');
+    ok(gateOf(ksrc.includes(n1)) && verdictOf(ksrc.includes(n2)), 'control (bwf) setup: both fix lines are found in src/server/browser-keeper.js');
     const c1 = await bwf(M.load('src/server/browser-keeper.js', editAnchor(ksrc, n1, '', "src/server/browser-keeper.js"), 'bwf-no-roots'), 'c1');
-    ok(!c1.tabs.ownA && !c1.tabs.ownB && c1.said.rebound, 'CONTROL (bwf-1): a keeper copy whose holderTabs skips the roots (2666de5a) names NO holder\'s own-window tab — the site-reset-chrome ⑤ shape', c1.tabs);
+    ok(!c1.tabs.ownA && !c1.tabs.ownB && verdictOf(c1.said.rebound), 'CONTROL (bwf-1): a keeper copy whose holderTabs skips the roots (2666de5a) names NO holder\'s own-window tab — the site-reset-chrome ⑤ shape', c1.tabs);
     const c2 = await bwf(M.load('src/server/browser-keeper.js', editAnchor(ksrc, n2, '', "src/server/browser-keeper.js"), 'bwf-silent-rebind'), 'c2');
-    ok(c2.tabs.ownA && c2.said.newWindow && c2.said.markSpent && !c2.said.rebound, 'CONTROL (bwf-2): a keeper copy without the note (2666de5a) opens the new window and SPENDS the mark, saying nothing — the share ⑩ shape', c2.said);
+    ok(gateOf(c2.tabs.ownA) && gateOf(c2.said.newWindow) && gateOf(c2.said.markSpent) && !c2.said.rebound, 'CONTROL (bwf-2): a keeper copy without the note (2666de5a) opens the new window and SPENDS the mark, saying nothing — the share ⑩ shape', c2.said);
   }
 }
 
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'browser-windows controls: ' })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'browser-windows controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -31,7 +31,7 @@ const PROD_SUBS = path.join(repo, 'data', 'subs');
 const wt = '/tmp/vs-oatpool-live';
 const PORT = 3994;
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '  — ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '  — ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── pick two production subs with the most token life (>1.5h) ────────────────
@@ -163,8 +163,8 @@ try {
   console.log('\n── Pooled pseudo-account (B-6217) ──');
   // P1
   const poolDir = am.subDir(pool.id);
-  check('pool creds dir is a SYMLINK (not a real dir)', fs.lstatSync(poolDir).isSymbolicLink());
-  check('pool resolves to a member', [poolA, poolB].includes(am.poolCurrent(pool.id)));
+  check('pool creds dir is a SYMLINK (not a real dir)', verdictOf(fs.lstatSync(poolDir).isSymbolicLink()));
+  check('pool resolves to a member', verdictOf([poolA, poolB].includes(am.poolCurrent(pool.id))));
 
   // P2 — real spawn on the pool, current target
   await fetch(`http://127.0.0.1:${PORT}/api/accounts/pool/${pool.id}/gather`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId: poolA }) });
@@ -172,10 +172,10 @@ try {
   const s2 = await spawnChat(pool.id);
   check('spawn a chat session ON the pool succeeds', !!s2.sid, s2.error);
   const e2 = s2.sid ? await claudeEnvOf(s2.sid) : null;
-  check('claude env points CLAUDE_SECURESTORAGE_CONFIG_DIR at the POOL symlink dir', e2 && e2.CLAUDE_SECURESTORAGE_CONFIG_DIR === poolDir, e2 && e2.CLAUDE_SECURESTORAGE_CONFIG_DIR);
+  check('claude env points CLAUDE_SECURESTORAGE_CONFIG_DIR at the POOL symlink dir', gateOf(e2) && e2.CLAUDE_SECURESTORAGE_CONFIG_DIR === poolDir, e2 && e2.CLAUDE_SECURESTORAGE_CONFIG_DIR);
   check('the pool symlink resolves to member A (real creds behind it)', fs.realpathSync(poolDir) === fs.realpathSync(am.subDir(poolA)));
   const t2 = s2.sid ? await realTurn(s2.sid, 'Reply with exactly the word READY and nothing else.') : { ok: false };
-  check('a REAL turn completes on the pool (creds valid THROUGH the symlink)', t2.ok, t2.authErr ? 'AUTH FAILED' : 'no result');
+  check('a REAL turn completes on the pool (creds valid THROUGH the symlink)', verdictOf(t2.ok), t2.authErr ? 'AUTH FAILED' : 'no result');
 
   // P3 — switch target, spawn again
   await fetch(`http://127.0.0.1:${PORT}/api/accounts/pool/${pool.id}/gather`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId: poolB }) });
@@ -183,22 +183,22 @@ try {
   check('after switch, pool symlink now resolves to member B', fs.realpathSync(poolDir) === fs.realpathSync(am.subDir(poolB)));
   const s3 = await spawnChat(pool.id);
   const e3 = s3.sid ? await claudeEnvOf(s3.sid) : null;
-  check('a new spawn reads member B through the same pool path', e3 && fs.realpathSync(e3.CLAUDE_SECURESTORAGE_CONFIG_DIR) === fs.realpathSync(am.subDir(poolB)));
+  check('a new spawn reads member B through the same pool path', gateOf(e3) && fs.realpathSync(e3.CLAUDE_SECURESTORAGE_CONFIG_DIR) === fs.realpathSync(am.subDir(poolB)));
   const t3 = s3.sid ? await realTurn(s3.sid, 'Reply with exactly the word READY and nothing else.') : { ok: false };
-  check('a REAL turn completes after the target switch', t3.ok, t3.authErr ? 'AUTH FAILED' : 'no result');
+  check('a REAL turn completes after the target switch', verdictOf(t3.ok), t3.authErr ? 'AUTH FAILED' : 'no result');
 
   // P4 — lock sharing: pool(target B) + a NORMAL session on member B → same real dir
   const sN = await spawnChat(poolB);
   const eN = sN.sid ? await claudeEnvOf(sN.sid) : null;
   check('a normal session on member B AND the pooled session resolve to the SAME real dir (shared .oauth_refresh.lock)',
-    eN && e3 && fs.realpathSync(eN.CLAUDE_SECURESTORAGE_CONFIG_DIR) === fs.realpathSync(e3.CLAUDE_SECURESTORAGE_CONFIG_DIR));
+    gateOf(eN) && gateOf(e3) && fs.realpathSync(eN.CLAUDE_SECURESTORAGE_CONFIG_DIR) === fs.realpathSync(e3.CLAUDE_SECURESTORAGE_CONFIG_DIR));
 
   // P6 — remove the pool: symlink gone, member dirs intact
   await fetch(`http://127.0.0.1:${PORT}/api/accounts/${pool.id}`, { method: 'DELETE' });
   await sleep(300);
   check('removing the pool unlinks the symlink', !fs.existsSync(poolDir));
-  check('member A creds survive the pool removal', fs.existsSync(am.subCredsPath(poolA)));
-  check('member B creds survive the pool removal', fs.existsSync(am.subCredsPath(poolB)));
+  check('member A creds survive the pool removal', verdictOf(fs.existsSync(am.subCredsPath(poolA))));
+  check('member B creds survive the pool removal', verdictOf(fs.existsSync(am.subCredsPath(poolB))));
 
   console.log('\n── Long-lived token (B-211a) ──');
   // O1 — oat-only account: env token, NO securestorage dir, real turn works
@@ -206,15 +206,15 @@ try {
   check('spawn an OAT-ONLY account (no local login) succeeds', !!sO.sid, sO.error);
   const eO = sO.sid ? await claudeEnvOf(sO.sid) : null;
   check('oat-only claude env carries CLAUDE_CODE_OAUTH_TOKEN', !!(eO && eO.CLAUDE_CODE_OAUTH_TOKEN));
-  check('oat-only claude env has NO CLAUDE_SECURESTORAGE_CONFIG_DIR', eO && !eO.CLAUDE_SECURESTORAGE_CONFIG_DIR);
+  check('oat-only claude env has NO CLAUDE_SECURESTORAGE_CONFIG_DIR', gateOf(eO) && !eO.CLAUDE_SECURESTORAGE_CONFIG_DIR);
   const tO = sO.sid ? await realTurn(sO.sid, 'Reply with exactly the word READY and nothing else.') : { ok: false };
-  check('a REAL turn completes via the long-lived token (env-token inference works)', tO.ok, tO.authErr ? 'AUTH FAILED' : 'no result');
+  check('a REAL turn completes via the long-lived token (env-token inference works)', verdictOf(tO.ok), tO.authErr ? 'AUTH FAILED' : 'no result');
 
   // O2 — logged-in + oat, LOCAL spawn keeps the DIR (hot-swap intact), no env token
   const sL = await spawnChat(loggedInOat);
   const eL = sL.sid ? await claudeEnvOf(sL.sid) : null;
   check('logged-in+oat LOCAL spawn keeps the securestorage DIR', !!(eL && eL.CLAUDE_SECURESTORAGE_CONFIG_DIR));
-  check('logged-in+oat LOCAL spawn does NOT use the env token', eL && !eL.CLAUDE_CODE_OAUTH_TOKEN);
+  check('logged-in+oat LOCAL spawn does NOT use the env token', gateOf(eL) && !eL.CLAUDE_CODE_OAUTH_TOKEN);
 
   // O3 — ambient CLAUDE_CODE_OAUTH_TOKEN (set in the server env) is STRIPPED
   // from a spawn. Use the plain (no-oat) account: its env must NOT carry the
@@ -222,7 +222,7 @@ try {
   const sP = await spawnChat(plain);
   const eP = sP.sid ? await claudeEnvOf(sP.sid) : null;
   check('server had an ambient CLAUDE_CODE_OAUTH_TOKEN (test setup)', true);
-  check('ambient CLAUDE_CODE_OAUTH_TOKEN is STRIPPED from a normal spawn (no silent re-billing)', eP && !eP.CLAUDE_CODE_OAUTH_TOKEN, eP && eP.CLAUDE_CODE_OAUTH_TOKEN ? 'LEAKED' : '');
+  check('ambient CLAUDE_CODE_OAUTH_TOKEN is STRIPPED from a normal spawn (no silent re-billing)', gateOf(eP) && !eP.CLAUDE_CODE_OAUTH_TOKEN, eP && eP.CLAUDE_CODE_OAUTH_TOKEN ? 'LEAKED' : '');
 
   // O4 — expired-oat refusal is NOT live-testable here: the running server
   // holds its OWN AccountManager instance, so a test-process store edit can't
@@ -237,4 +237,4 @@ try {
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nALL LIVE SCENARIOS PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

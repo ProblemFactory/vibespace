@@ -66,7 +66,7 @@ import { scratch, deadPort } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SM = require(path.join(REPO, 'src/stream-model.js'));
@@ -82,20 +82,20 @@ const FIXTURE = path.join(REPO, 'scripts/fixtures/stream/fake-desk-720p.h264');
 console.log('§1 the webrtc row');
 {
   const row = B.backendById('webrtc');
-  ok(row && row.stream === 'webrtc' && row.remote === 'agent-webrtc' && row.wired === true && row.perWindow === false && row.ownsDisplay === false, 'the row: stream webrtc, remote agent-webrtc, wired, whole screen (perWindow false), the machine\'s own desktop (ownsDisplay false)', row);
-  ok(same(row.needs, [['agent:stream-offer']]) && row.recipes['agent:stream-offer'] === 'agent-stream' && row.fit['agent:stream-offer'] === 'shared', 'its needs = the agent\'s capability as a pseudo-binary fact; its recipe and fit name that group');
-  ok(B.BACKEND_IDS.includes('webrtc') && !B.LADDER_IDS.includes('webrtc'), 'in the table, off the local ladder (a `remote` row)');
+  ok(gateOf(row) && row.stream === 'webrtc' && row.remote === 'agent-webrtc' && row.wired === true && row.perWindow === false && row.ownsDisplay === false, 'the row: stream webrtc, remote agent-webrtc, wired, whole screen (perWindow false), the machine\'s own desktop (ownsDisplay false)', row);
+  ok(gateOf(same(row.needs, [['agent:stream-offer']])) && row.recipes['agent:stream-offer'] === 'agent-stream' && row.fit['agent:stream-offer'] === 'shared', 'its needs = the agent\'s capability as a pseudo-binary fact; its recipe and fit name that group');
+  ok(gateOf(B.BACKEND_IDS.includes('webrtc')) && !B.LADDER_IDS.includes('webrtc'), 'in the table, off the local ladder (a `remote` row)');
   const every = Object.fromEntries(['xpra', 'Xvnc', 'Xvfb', 'x11vnc', 'Xtigervnc', 'xfreerdp', 'agent:stream-offer'].map((b) => [b, '/x/' + b]));
-  ok(B.resolveBackend({ bins: every }, { backendPrefs: ['webrtc'] }).backend !== 'webrtc' && same(B.parseBackendPrefs('webrtc, xpra'), ['xpra']), 'a local launch never lands on it, not even when a preference names it');
+  ok(B.resolveBackend({ bins: every }, { backendPrefs: ['webrtc'] }).backend !== 'webrtc' && verdictOf(same(B.parseBackendPrefs('webrtc, xpra'), ['xpra'])), 'a local launch never lands on it, not even when a preference names it');
   ok(!D.PROBE_BINS.includes('agent:stream-offer') && !D.PROBE_BINS.includes('stream-offer'), 'the hub never probes PATH for it (a name with a colon is a fact, not a file)');
   const e = await D.RECIPES['agent-stream']({}).then(() => null, (x) => x);
-  ok(e && e.code === 'agent-stream' && /agent/.test(e.message), 'its recipe refuses a local bring-up by name (the agent brings the stream up)');
+  ok(gateOf(e) && e.code === 'agent-stream' && verdictOf(/agent/.test(e.message)), 'its recipe refuses a local bring-up by name (the agent brings the stream up)');
 }
 
 console.log('§2 streamRungVerdict');
 {
   const v = (o) => SM.streamRungVerdict(o);
-  ok(same(v({ capabilities: ['stream-offer'], desktop: true, fakeSource: '/x/a.h264' }), { take: true, source: 'fake', sourceId: '/x/a.h264', code: null, why: null }), 'an agent with the op + the instance\'s fake source ⇒ taken, the source\'s path handed on');
+  ok(verdictOf(same(v({ capabilities: ['stream-offer'], desktop: true, fakeSource: '/x/a.h264' }), { take: true, source: 'fake', sourceId: '/x/a.h264', code: null, why: null })), 'an agent with the op + the instance\'s fake source ⇒ taken, the source\'s path handed on');
   ok(v({ capabilities: ['stream-offer', 'stream-screen'], desktop: true, platform: 'win32' }).source === 'screen' && v({ capabilities: ['stream-offer', 'stream-screen'], desktop: true, platform: 'win32', fakeSource: '/x/a.h264' }).source === 'fake' && v({ capabilities: ['stream-offer', 'stream-screen'], desktop: true, platform: 'darwin' }).code === 'agent_too_old' && v({ capabilities: ['stream-offer', 'stream-screen', 'stream-mac'], desktop: true, platform: 'darwin' }).source === 'screen', 'a Windows agent that captures its screen (lane stream-p1b-screen\'s capability) ⇒ the screen; an instance that names a fake source keeps it (an explicit override wins — the suites, demos); a Mac agent captures through its helper (lane stream-p3m-build: stream-mac ⇒ the screen; an older one ⇒ agent_too_old)');
   ok(v({ capabilities: ['display-facts'], desktop: true, fakeSource: '/x/a.h264' }).code === 'agent_too_old', 'an agent without the op ⇒ agent_too_old (it is never asked)');
   ok(v({ capabilities: ['stream-offer'], desktop: false, fakeSource: '/x/a.h264' }).code === 'not_desktop_machine', 'a Linux machine ⇒ not_desktop_machine');
@@ -109,39 +109,39 @@ console.log('§3 the signaling state machine');
 {
   const run = (events, start = { state: 'idle', restarts: 0 }, opts) => events.reduce((acc, ev) => { const r = SM.streamStep(acc.st, typeof ev === 'string' ? { type: ev } : ev, opts); acc.trail.push(`${r.state}:${r.action}`); acc.st = r; acc.last = r; return acc; }, { st: start, trail: [], last: null });
   const happy = run(['start', 'offer', 'answered', 'connected', 'frame']);
-  ok(same(happy.trail, ['starting:start', 'offered:answer', 'connecting:wait', 'connecting:none', 'playing:none']), 'start → offer → answer → connecting (ICE up, waiting for the first frame) → playing', happy.trail);
+  ok(verdictOf(same(happy.trail, ['starting:start', 'offered:answer', 'connecting:wait', 'connecting:none', 'playing:none'])), 'start → offer → answer → connecting (ICE up, waiting for the first frame) → playing', happy.trail);
   ok(run(['start', { type: 'refused', code: 'agent_too_old' }]).last.code === 'agent_too_old' && run(['start', { type: 'refused', code: 'x' }]).last.action === 'fallback', 'a refused start falls back with the refusal\'s code');
   const sick = run(['start', 'offer', 'answered', 'failed', 'restart-offer', 'answered', 'failed', 'restart-offer', 'answered', 'failed']);
-  ok(same(sick.trail.filter((x) => /:restart$|^fallback/.test(x)), ['restarting:restart', 'restarting:restart', 'fallback:fallback']) && sick.last.code === 'ice_failed', 'connecting fails: two ICE restarts (the budget), then the VNC picture (ice_failed)', sick.trail);
+  ok(gateOf(same(sick.trail.filter((x) => /:restart$|^fallback/.test(x)), ['restarting:restart', 'restarting:restart', 'fallback:fallback'])) && sick.last.code === 'ice_failed', 'connecting fails: two ICE restarts (the budget), then the VNC picture (ice_failed)', sick.trail);
   const blip = run(['start', 'offer', 'answered', 'frame', 'disconnected', 'restart-offer', 'answered', 'connected', 'disconnected', 'restart-offer', 'answered', 'connected', 'disconnected']);
   ok(blip.last.state === 'restarting' && blip.last.restarts === 1, 'a restart that comes back plays again and resets the count — the budget is CONSECUTIVE (three blips, still streaming)', blip.trail);
   ok(run(['start', 'offer', 'answered', { type: 'ended', code: 'link_lost' }]).last.code === 'link_lost' && run(['start', 'offer', 'answered', 'frame', 'ended']).last.code === 'stream_ended', 'the machine ends it ⇒ fallback with its reason (stream_ended when it gave none)');
   ok(run(['start', 'offer', 'answered', 'timeout']).last.state === 'restarting' && run(['start', 'timeout']).last.code === 'start_timeout', 'a connect timeout is a sick connection (restart); a start that never answers falls back');
   const closed = run(['start', 'offer', 'close', 'frame', 'start']);
-  ok(same(closed.trail.slice(2), ['stopped:dispose', 'stopped:none', 'stopped:none']), 'close ⇒ stopped; a terminal state takes nothing more', closed.trail);
+  ok(verdictOf(same(closed.trail.slice(2), ['stopped:dispose', 'stopped:none', 'stopped:none'])), 'close ⇒ stopped; a terminal state takes nothing more', closed.trail);
   ok(run(['frame', 'answered']).last.state === 'idle', 'an event a state does not take changes nothing');
   const taken = new Set();
   for (const s of SM.STREAM_STATES) for (const e of SM.STREAM_EVENTS) { const r = SM.streamStep({ state: s, restarts: 0 }, { type: e }); if (r.state !== s || r.action !== 'none') taken.add(e); }
-  ok(SM.STREAM_EVENTS.every((e) => taken.has(e)), `every declared event moves some state (${SM.STREAM_EVENTS.length} events × ${SM.STREAM_STATES.length} states)`, SM.STREAM_EVENTS.filter((e) => !taken.has(e)));
+  ok(verdictOf(SM.STREAM_EVENTS.every((e) => taken.has(e))), `every declared event moves some state (${SM.STREAM_EVENTS.length} events × ${SM.STREAM_STATES.length} states)`, SM.STREAM_EVENTS.filter((e) => !taken.has(e)));
 }
 
 console.log('§4 fallbackVerdict · §5 videoToSource');
 {
   ok(SM.fallbackVerdict({ pc: 'failed' }).event === 'failed' && !SM.fallbackVerdict({ pc: 'disconnected', since: 0, now: 3999 }).sick && SM.fallbackVerdict({ pc: 'disconnected', since: 0, now: 4000 }).event === 'disconnected' && !SM.fallbackVerdict({ pc: 'connected', since: 0, now: 1e9 }).sick, '`failed` is sick at once, `disconnected` after its 4 s grace, `connected` never');
   const box = { left: 10, top: 20, width: 640, height: 480 }, vid = { w: 1280, h: 720 };
-  ok(same(SM.videoToSource({ x: 10 + 320, y: 20 + 240 }, box, vid), { x: 640, y: 360, inside: true }), 'the element\'s centre is the picture\'s centre (16:9 in 4:3: letterboxed top and bottom)');
-  ok(same(SM.videoToSource({ x: 10, y: 20 + 60 }, box, vid), { x: 0, y: 0, inside: true }) && same(SM.videoToSource({ x: 10 + 5, y: 20 + 10 }, box, vid), { x: 10, y: 0, inside: false }), 'the letterbox: the picture starts 60 px down; a point above it clamps to row 0 and says inside: false');
-  ok(same(SM.videoToSource({ x: 330, y: 260 }, box, vid, { x: -1920, y: 0 }), { x: -1280, y: 360, inside: true }), 'the source\'s origin is added (a display left of the primary has negative desktop x)');
+  ok(verdictOf(same(SM.videoToSource({ x: 10 + 320, y: 20 + 240 }, box, vid), { x: 640, y: 360, inside: true })), 'the element\'s centre is the picture\'s centre (16:9 in 4:3: letterboxed top and bottom)');
+  ok(gateOf(same(SM.videoToSource({ x: 10, y: 20 + 60 }, box, vid), { x: 0, y: 0, inside: true })) && verdictOf(same(SM.videoToSource({ x: 10 + 5, y: 20 + 10 }, box, vid), { x: 10, y: 0, inside: false })), 'the letterbox: the picture starts 60 px down; a point above it clamps to row 0 and says inside: false');
+  ok(verdictOf(same(SM.videoToSource({ x: 330, y: 260 }, box, vid, { x: -1920, y: 0 }), { x: -1280, y: 360, inside: true })), 'the source\'s origin is added (a display left of the primary has negative desktop x)');
   ok(SM.videoToSource({ x: 1, y: 1 }, box, { w: 0, h: 0 }) === null, 'nothing decoded yet ⇒ null (no input sent)');
 }
 
 console.log('§6 the input table');
 {
   const good = [{ t: 'mv', x: 1, y: 2 }, { t: 'md', x: 1, y: 2, b: 2 }, { t: 'mu', x: 1, y: 2, b: 0 }, { t: 'wh', x: 1, y: 2, dx: 0, dy: -120 }, { t: 'kd', c: 'KeyA' }, { t: 'ku', c: 'ControlLeft' }, { t: 'clip', text: 'héllo' }, { t: 'ack', f: 4294967295 }];
-  ok(good.every((e) => same(SM.inputEventOf(JSON.stringify(e)), e)) && same(Object.keys(SM.INPUT_KINDS).sort(), good.map((e) => e.t).sort()), `each of the ${good.length} kinds round-trips (a string from the data channel)`);
+  ok(gateOf(good.every((e) => same(SM.inputEventOf(JSON.stringify(e)), e))) && verdictOf(same(Object.keys(SM.INPUT_KINDS).sort(), good.map((e) => e.t).sort())), `each of the ${good.length} kinds round-trips (a string from the data channel)`);
   const bad = [['x'.repeat(SM.STREAM_LIMITS.inputMaxBytes + 1), 'too_big'], ['{', 'not_json'], ['[1]', 'not_an_event'], ['{"t":"__proto__"}', 'unknown_kind'], ['{"t":"constructor"}', 'unknown_kind'], ['{"t":"kd","c":"Key A"}', 'bad_code'], ['{"t":"md","x":1,"y":1,"b":3}', 'bad_button'], ['{"t":"mv","x":40000,"y":1}', 'bad_x'], ['{"t":"mv","x":1,"y":"2"}', 'bad_y'], [JSON.stringify({ t: 'clip', text: 'a'.repeat(SM.STREAM_LIMITS.clipMaxChars + 1) }), 'bad_text'], ['{"t":"ack","f":-1}', 'bad_frame']];
   const got = bad.map(([raw]) => SM.inputEventOf(raw).refused);
-  ok(same(got, bad.map((b) => b[1])), 'every malformed event is refused BY NAME (never guessed): ' + bad.map((b) => b[1]).join(', '), got);
+  ok(verdictOf(same(got, bad.map((b) => b[1]))), 'every malformed event is refused BY NAME (never guessed): ' + bad.map((b) => b[1]).join(', '), got);
   ok(SM.wheelUnitsOf(100, 0) === -120 && SM.wheelUnitsOf(-3, 1) === 120 && SM.wheelUnitsOf(1, 2) === -360 && SM.wheelUnitsOf(1e6, 0) === -1200, 'wheel: 100 px = one notch (down = negative, the desktop\'s convention), 3 lines = one, a page = three, clamped at ten');
 }
 
@@ -149,16 +149,16 @@ console.log('§7 the page\'s door: src/lib/stream-input.js');
 {
   const S = await import(path.join(REPO, 'src/lib/stream-input.js'));
   const mac = S.keyMapFor('mac', 'win32');
-  ok(same(S.keyMessage({ key: 'Meta', code: 'MetaLeft' }, true, mac), { t: 'kd', c: 'ControlLeft' }) && same(S.keyMessage({ key: 'Meta', code: 'MetaRight' }, false, mac), { t: 'ku', c: 'ControlRight' }), 'a Mac viewer\'s ⌘ reaches a Windows machine as Ctrl, its side kept (THE table\'s mac>windows row)');
-  ok(same(S.keyMessage({ key: 'a', code: 'KeyA' }, true, mac), { t: 'kd', c: 'KeyA' }) && same(S.keyMessage({ key: 'Control', code: 'ControlLeft' }, true, mac), { t: 'kd', c: 'ControlLeft' }), 'every other key is the physical key it is (Ctrl stays Ctrl)');
-  ok(same(S.keyMessage({ key: 'Meta', code: 'MetaLeft' }, true, S.keyMapFor('windows', 'win32')), { t: 'kd', c: 'MetaLeft' }), 'a Windows viewer\'s Windows key stays the Windows key');
-  ok(same(S.keyMessage({ key: 'Meta', code: 'MetaLeft' }, true, { shift: 'shift', control: 'control', alt: 'alt', meta: 'meta' }), { t: 'kd', c: 'MetaLeft' }), 'CONTROL: handed an identity row, ⌘ stays Meta — the door moves keys by the map it is handed');
+  ok(gateOf(same(S.keyMessage({ key: 'Meta', code: 'MetaLeft' }, true, mac), { t: 'kd', c: 'ControlLeft' })) && verdictOf(same(S.keyMessage({ key: 'Meta', code: 'MetaRight' }, false, mac), { t: 'ku', c: 'ControlRight' })), 'a Mac viewer\'s ⌘ reaches a Windows machine as Ctrl, its side kept (THE table\'s mac>windows row)');
+  ok(gateOf(same(S.keyMessage({ key: 'a', code: 'KeyA' }, true, mac), { t: 'kd', c: 'KeyA' })) && verdictOf(same(S.keyMessage({ key: 'Control', code: 'ControlLeft' }, true, mac), { t: 'kd', c: 'ControlLeft' })), 'every other key is the physical key it is (Ctrl stays Ctrl)');
+  ok(verdictOf(same(S.keyMessage({ key: 'Meta', code: 'MetaLeft' }, true, S.keyMapFor('windows', 'win32')), { t: 'kd', c: 'MetaLeft' })), 'a Windows viewer\'s Windows key stays the Windows key');
+  ok(verdictOf(same(S.keyMessage({ key: 'Meta', code: 'MetaLeft' }, true, { shift: 'shift', control: 'control', alt: 'alt', meta: 'meta' }), { t: 'kd', c: 'MetaLeft' })), 'CONTROL: handed an identity row, ⌘ stays Meta — the door moves keys by the map it is handed');
   ok(S.viewerPlatform({ userAgentData: { platform: 'macOS' } }) === 'mac' && S.viewerPlatform({ platform: 'Win32' }) === 'windows', 'the viewer\'s platform from userAgentData, else navigator.platform');
   const box = { left: 0, top: 0, width: 640, height: 480 }, vid = { w: 1280, h: 720 };
-  ok(same(S.pointerMessage('md', { clientX: 100, clientY: 60, button: 0 }, box, vid, { x: 0, y: 0 }), { t: 'md', x: 200, y: 0, b: 0 }) && S.pointerMessage('md', { clientX: 100, clientY: 10, button: 0 }, box, vid, { x: 0, y: 0 }) === null && S.pointerMessage('mv', { clientX: 100, clientY: 10 }, box, vid, { x: 0, y: 0 }).y === 0, 'a press in the picture is sent at its pixel; a press in the letterbox is not; a move there clamps');
-  ok(same(S.wheelMessage({ clientX: 320, clientY: 240, deltaY: 100, deltaX: 0, deltaMode: 0 }, box, vid, { x: 0, y: 0 }), { t: 'wh', x: 640, y: 360, dx: 0, dy: -120 }) && S.wheelMessage({ clientX: 1, clientY: 100, deltaY: 0, deltaX: 0 }, box, vid, null) === null, 'the wheel: one notch at the pointer; no notch ⇒ nothing sent');
+  ok(gateOf(same(S.pointerMessage('md', { clientX: 100, clientY: 60, button: 0 }, box, vid, { x: 0, y: 0 }), { t: 'md', x: 200, y: 0, b: 0 })) && S.pointerMessage('md', { clientX: 100, clientY: 10, button: 0 }, box, vid, { x: 0, y: 0 }) === null && S.pointerMessage('mv', { clientX: 100, clientY: 10 }, box, vid, { x: 0, y: 0 }).y === 0, 'a press in the picture is sent at its pixel; a press in the letterbox is not; a move there clamps');
+  ok(gateOf(same(S.wheelMessage({ clientX: 320, clientY: 240, deltaY: 100, deltaX: 0, deltaMode: 0 }, box, vid, { x: 0, y: 0 }), { t: 'wh', x: 640, y: 360, dx: 0, dy: -120 })) && S.wheelMessage({ clientX: 1, clientY: 100, deltaY: 0, deltaX: 0 }, box, vid, null) === null, 'the wheel: one notch at the pointer; no notch ⇒ nothing sent');
   const door = read('src/lib/stream-input.js'), view = read('src/lib/stream-view.js');
-  ok(/^import \{[^}]*\bprimaryModifierMap\b[^}]*\bmodifierKeyOf\b[^}]*\} from '\.\/modifier-map\.js';/m.test(door) && /keyMapFor\(viewerPlatform\(\), r\.platform\)/.test(view) && (view.match(/keyMessage\(e, (true|false), map\)/g) || []).length >= 3, 'the view keys every press through the door with the machine\'s platform from the start answer');
+  ok(gateOf(/^import \{[^}]*\bprimaryModifierMap\b[^}]*\bmodifierKeyOf\b[^}]*\} from '\.\/modifier-map\.js';/m.test(door)) && gateOf(/keyMapFor\(viewerPlatform\(\), r\.platform\)/.test(view)) && (view.match(/keyMessage\(e, (true|false), map\)/g) || []).length >= 3, 'the view keys every press through the door with the machine\'s platform from the start answer');
 }
 
 console.log('§8 statsOf · §9 the relay');
@@ -172,19 +172,19 @@ console.log('§8 statsOf · §9 the relay');
   const g = SM.relayFrame('127.0.0.1', 9, new Uint8Array(1500));
   const both = new Uint8Array([...f, ...g]);
   const u1 = SM.relayUnframe(both.subarray(0, 5)), u2 = SM.relayUnframe(both);
-  ok(u1.frames.length === 0 && u1.rest.length === 5 && u2.frames.length === 2 && u2.frames[0].ip === '10.1.2.3' && u2.frames[0].port === 50000 && same([...u2.frames[0].payload], [1, 2, 3]) && u2.frames[1].payload.length === 1500 && u2.rest.length === 0, 'two datagrams framed, cut anywhere, read back whole (address, port, bytes)');
+  ok(u1.frames.length === 0 && u1.rest.length === 5 && u2.frames.length === 2 && u2.frames[0].ip === '10.1.2.3' && u2.frames[0].port === 50000 && gateOf(same([...u2.frames[0].payload], [1, 2, 3])) && u2.frames[1].payload.length === 1500 && u2.rest.length === 0, 'two datagrams framed, cut anywhere, read back whole (address, port, bytes)');
   ok(SM.relayFrame('::1', 1, new Uint8Array(1)) === null && SM.relayFrame('1.2.3.4', 1, new Uint8Array(1501)) === null && SM.relayUnframe(new Uint8Array([255, 255, 0, 0])).bad === true, 'an IPv6 peer, a datagram over 1500 bytes and an out-of-bounds length are refused (the stream is closed, never resynced by guessing)');
   const lines = SM.relayCandidates(['192.168.1.9', 'bad', '127.0.0.1'], 4000);
   const prio = (l) => Number(l.split(' ')[3]);
-  ok(lines.length === 2 && lines.every((l) => / typ relay /.test(l)) && prio(lines[0]) < 2113937151 && prio(lines[0]) > prio(lines[1]), 'the relay\'s candidates: one per hub IPv4, typ relay, under any host candidate\'s priority', lines);
+  ok(lines.length === 2 && gateOf(lines.every((l) => / typ relay /.test(l))) && prio(lines[0]) < 2113937151 && prio(lines[0]) > prio(lines[1]), 'the relay\'s candidates: one per hub IPv4, typ relay, under any host candidate\'s priority', lines);
 }
 
 console.log('§10 the packetizer over THE fixture');
 {
   const buf = fs.readFileSync(FIXTURE);
   const aus = H.accessUnits(H.splitNalus(buf));
-  ok(buf.length < 2 * 1024 * 1024 && aus.length === 300 && aus.filter((a) => a.key).length === 10 && aus[0].key && H.keyIndexAfter(aus, 1) === 30 && H.keyIndexAfter(aus, 290) === 0, `the fixture: ${buf.length} bytes, 300 pictures, a key every 30 (the loop wraps to 0)`);
-  ok(aus[0].nalus.map(H.typeOf).slice(0, 2).join() === '7,8' && aus.every((a) => a.nalus.every((n) => H.typeOf(n) !== H.NAL.aud)), 'a key picture carries its SPS + PPS first; no access unit delimiter is sent');
+  ok(buf.length < 2 * 1024 * 1024 && aus.length === 300 && aus.filter((a) => a.key).length === 10 && gateOf(aus[0].key) && H.keyIndexAfter(aus, 1) === 30 && H.keyIndexAfter(aus, 290) === 0, `the fixture: ${buf.length} bytes, 300 pictures, a key every 30 (the loop wraps to 0)`);
+  ok(aus[0].nalus.map(H.typeOf).slice(0, 2).join() === '7,8' && verdictOf(aus.every((a) => a.nalus.every((n) => H.typeOf(n) !== H.NAL.aud))), 'a key picture carries its SPS + PPS first; no access unit delimiter is sent');
   let bigOk = true, markOk = true, roundOk = true, fus = 0;
   for (const au of aus) {
     const pl = H.rtpPayloads(au.nalus);
@@ -194,26 +194,26 @@ console.log('§10 the packetizer over THE fixture');
     const back = H.depacketize(pl.map((p) => p.payload));
     if (back.length !== au.nalus.length || !back.every((n, i) => Buffer.compare(n, au.nalus[i]) === 0)) roundOk = false;
   }
-  ok(bigOk && markOk && roundOk, `every payload ≤ ${H.MAX_PAYLOAD} bytes, ONE marker per picture on its last packet, a receiver's reassembly byte-identical (the fixture's slices all fit: ${fus} FU-A)`);
+  ok(gateOf(bigOk) && gateOf(markOk) && verdictOf(roundOk), `every payload ≤ ${H.MAX_PAYLOAD} bytes, ONE marker per picture on its last packet, a receiver's reassembly byte-identical (the fixture's slices all fit: ${fus} FU-A)`);
   const big = Buffer.concat([Buffer.from([0x65]), Buffer.alloc(5000, 7)]), sps = Buffer.from([0x67, 1, 2]);
   const bp = H.rtpPayloads([sps, big]);
   const fu = bp.slice(1);
-  ok(bp.length === 6 && bp[0].payload === sps && fu.every((p) => p.payload[0] === ((0x65 & 0xe0) | 28) && p.payload.length <= H.MAX_PAYLOAD) && (fu[0].payload[1] & 0x80) && (fu[4].payload[1] & 0x40) && !(fu[2].payload[1] & 0xc0) && fu.every((p) => (p.payload[1] & 0x1f) === 5) && same(bp.map((p) => p.marker), [false, false, false, false, false, true]) && Buffer.compare(H.depacketize(bp.map((p) => p.payload))[1], big) === 0, 'a 5 001-byte slice (an encoder\'s key frame): five FU-A fragments — start bit first, end bit last, its type kept, the marker on the very last — reassembled byte-identical');
+  ok(bp.length === 6 && bp[0].payload === sps && gateOf(fu.every((p) => p.payload[0] === ((0x65 & 0xe0) | 28) && p.payload.length <= H.MAX_PAYLOAD)) && (gateOf(fu[0].payload[1] & 0x80)) && (gateOf(fu[4].payload[1] & 0x40)) && !(fu[2].payload[1] & 0xc0) && gateOf(fu.every((p) => (p.payload[1] & 0x1f) === 5)) && gateOf(same(bp.map((p) => p.marker), [false, false, false, false, false, true])) && Buffer.compare(H.depacketize(bp.map((p) => p.payload))[1], big) === 0, 'a 5 001-byte slice (an encoder\'s key frame): five FU-A fragments — start bit first, end bit last, its type kept, the marker on the very last — reassembled byte-identical');
   const four = H.splitNalus(Buffer.from([0, 0, 0, 1, 0x67, 1, 0, 0, 0, 1, 0x68, 2, 0, 0, 1, 0x65, 3, 0]));
-  ok(same(four.map((n) => [...n]), [[0x67, 1], [0x68, 2], [0x65, 3]]), '3- and 4-byte start codes; a trailing zero belongs to the next start code');
+  ok(verdictOf(same(four.map((n) => [...n]), [[0x67, 1], [0x68, 2], [0x65, 3]])), '3- and 4-byte start codes; a trailing zero belongs to the next start code');
 }
 
 console.log('§11 THE injector');
 {
-  ok(same(I.SCAN_CODES.KeyA, [0x1e, 0]) && same(I.SCAN_CODES.ArrowUp, [0x48, 1]) && same(I.SCAN_CODES.MetaLeft, [0x5b, 1]) && same(I.SCAN_CODES.NumpadEnter, [0x1c, 1]) && !('Pause' in I.SCAN_CODES), 'scan codes: KeyA 0x1e, the arrows and the Windows keys extended (E0), Pause (an E1 sequence) absent on purpose');
-  ok(same(I.commandsOf({ t: 'md', x: 5, y: 6, b: 2 }).lines, ['M 5 6', 'D 2']) && same(I.commandsOf({ t: 'ku', c: 'Delete' }).lines, ['K 83 1 1']) && I.commandsOf({ t: 'kd', c: 'Pause' }).refused === 'unmapped_key' && same(I.commandsOf({ t: 'ack', f: 1 }).lines, []), 'commands: a press moves first, a key is its scan code (+ extended, + up), an unmapped key is refused, an ack injects nothing');
+  ok(gateOf(same(I.SCAN_CODES.KeyA, [0x1e, 0])) && gateOf(same(I.SCAN_CODES.ArrowUp, [0x48, 1])) && gateOf(same(I.SCAN_CODES.MetaLeft, [0x5b, 1])) && gateOf(same(I.SCAN_CODES.NumpadEnter, [0x1c, 1])) && !('Pause' in I.SCAN_CODES), 'scan codes: KeyA 0x1e, the arrows and the Windows keys extended (E0), Pause (an E1 sequence) absent on purpose');
+  ok(gateOf(same(I.commandsOf({ t: 'md', x: 5, y: 6, b: 2 }).lines, ['M 5 6', 'D 2'])) && gateOf(same(I.commandsOf({ t: 'ku', c: 'Delete' }).lines, ['K 83 1 1'])) && I.commandsOf({ t: 'kd', c: 'Pause' }).refused === 'unmapped_key' && verdictOf(same(I.commandsOf({ t: 'ack', f: 1 }).lines, [])), 'commands: a press moves first, a key is its scan code (+ extended, + up), an unmapped key is refused, an ack injects nothing');
   ok(Buffer.from(I.commandsOf({ t: 'clip', text: 'hé' }).lines[0].slice(2), 'base64').toString('utf16le') === 'hé', 'clipboard text travels as base64 UTF-16LE (PowerShell\'s Unicode)');
-  ok(/SendInput\(uint n, INPUT\[\] a, int size\)/.test(I.INPUT_PS) && /'D' \{ \$r = if \(-not \$script:Elevated -and \[VsInput\]::FrontElevated\(\)\) \{ 'uipi' \}/.test(I.INPUT_PS) && /public static string FrontClass\(\)/.test(I.INPUT_PS) && /\[Console\]::In\.ReadLine\(\)/.test(I.INPUT_PS) && /WriteLine\('ready'\)/.test(I.INPUT_PS) && /0x0001 \| 0x8000 \| 0x4000/.test(I.INPUT_PS), 'the resident script: SendInput compiled once, ready, one stdin line per command, absolute over the VIRTUAL desktop, UIPI asked before a press only when NOT elevated, the foreground class readable for the elevated fence');
+  ok(gateOf(/SendInput\(uint n, INPUT\[\] a, int size\)/.test(I.INPUT_PS)) && gateOf(/'D' \{ \$r = if \(-not \$script:Elevated -and \[VsInput\]::FrontElevated\(\)\) \{ 'uipi' \}/.test(I.INPUT_PS)) && gateOf(/public static string FrontClass\(\)/.test(I.INPUT_PS)) && gateOf(/\[Console\]::In\.ReadLine\(\)/.test(I.INPUT_PS)) && gateOf(/WriteLine\('ready'\)/.test(I.INPUT_PS)) && verdictOf(/0x0001 \| 0x8000 \| 0x4000/.test(I.INPUT_PS)), 'the resident script: SendInput compiled once, ready, one stdin line per command, absolute over the VIRTUAL desktop, UIPI asked before a press only when NOT elevated, the foreground class readable for the elevated fence');
   const dir = scratch('webrtc-inj'); fs.mkdirSync(dir, { recursive: true }); const stub = path.join(dir, 'stub.jsonl');
   try {
     const st = I.createInjector({ platform: 'linux', fs, stubFile: stub });
     const r = await st.inject([{ t: 'mv', x: 1, y: 2 }, { t: 'kd', c: 'KeyA' }, { t: 'kd', c: 'Pause' }]);
-    ok(st.kind === 'stub' && r.n === 2 && same(r.refused.map((x) => x.code), ['unmapped_key']) && same(fs.readFileSync(stub, 'utf8').trim().split('\n').map((l) => JSON.parse(l).cmd), ['M 1 2', 'K 30 0 0']), 'Linux: the stub records what it would have sent; the unmapped key refused by name');
+    ok(st.kind === 'stub' && r.n === 2 && gateOf(same(r.refused.map((x) => x.code), ['unmapped_key'])) && verdictOf(same(fs.readFileSync(stub, 'utf8').trim().split('\n').map((l) => JSON.parse(l).cmd), ['M 1 2', 'K 30 0 0'])), 'Linux: the stub records what it would have sent; the unmapped key refused by name');
     const none = I.createInjector({ platform: 'linux', fs, stubFile: null });
     ok((await none.inject([{ t: 'mv', x: 1, y: 1 }])).n === 1 && fs.readdirSync(dir).length === 1, 'no stub file named ⇒ nothing recorded anywhere');
     const mac = await I.createInjector({ platform: 'darwin' }).inject([{ t: 'mv', x: 1, y: 1 }]);
@@ -225,8 +225,8 @@ console.log('§11 THE injector');
   const win = I.createInjector({ platform: 'win32', spawn: sp });
   const w1 = await win.inject([{ t: 'mv', x: 10, y: 10 }, { t: 'md', x: 10, y: 10, b: 0 }, { t: 'kd', c: 'KeyA' }]);
   const argv = sp.spawned[0].args;
-  ok(win.kind === 'sendinput' && sp.spawned.length === 1 && sp.spawned[0].cmd === 'powershell.exe' && argv.includes('-EncodedCommand') && Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le') === I.INPUT_PS, 'Windows: ONE resident powershell.exe -EncodedCommand <THE script> (spawned at the first event, kept)');
-  ok(same(sp.spawned[0].lines, ['M 10 10', 'M 10 10', 'D 0', 'K 30 0 0']) && w1.n === 2 && same(w1.refused.map((x) => x.code), ['uipi_blocked']), 'an elevated window in front: the press answers `uipi` ⇒ uipi_blocked by name; the move and the key went in', w1);
+  ok(win.kind === 'sendinput' && sp.spawned.length === 1 && sp.spawned[0].cmd === 'powershell.exe' && gateOf(argv.includes('-EncodedCommand')) && Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le') === I.INPUT_PS, 'Windows: ONE resident powershell.exe -EncodedCommand <THE script> (spawned at the first event, kept)');
+  ok(gateOf(same(sp.spawned[0].lines, ['M 10 10', 'M 10 10', 'D 0', 'K 30 0 0'])) && w1.n === 2 && verdictOf(same(w1.refused.map((x) => x.code), ['uipi_blocked'])), 'an elevated window in front: the press answers `uipi` ⇒ uipi_blocked by name; the move and the key went in', w1);
   const quiet = I.createInjector({ platform: 'win32', spawn: fakeSpawn(() => null), lineMs: 150, readyMs: 300 });
   const q = await quiet.inject([{ t: 'mv', x: 1, y: 1 }]);
   ok(q.n === 0 && q.refused[0].code === 'injector_timeout', 'a resident that stops answering ⇒ injector_timeout by name (and it is killed, respawned at the next event)');
@@ -265,7 +265,7 @@ console.log('§12 the hub\'s half');
   const relayLine = (s.offer.sdp.match(/a=candidate:vsrelay0 [^\r\n]*/) || [''])[0];
   const relayPort = Number(relayLine.split(' ')[5]);
   const { relayLeg: leg0, ...ask0 } = win.calls[0][1] || {};
-  ok(s.take && s.sid === 'sid-1' && same(ask0, { sourceKind: 'fake', sourceId: FIXTURE, maxKbps: null, relay: true }) && leg0 && leg0.port === relayPort && Buffer.from(leg0.key, 'base64').length === 32 && same(leg0.hosts, ['127.0.0.1']) && / 127\.0\.0\.1 \d+ typ relay /.test(relayLine) && / typ host /.test(s.offer.sdp) && win.fwd[0].port === 4242, 'taken: stream-offer asked with the fake source + relay + the UDP leg\'s spec (the relay\'s own port, a 32-byte key, the hub\'s addresses); the offer keeps its host candidates AND gains the relay\'s (its UDP port, forwarded to the agent\'s relay port 4242)', { call: win.calls[0], relayLine });
+  ok(gateOf(s.take) && s.sid === 'sid-1' && gateOf(same(ask0, { sourceKind: 'fake', sourceId: FIXTURE, maxKbps: null, relay: true })) && gateOf(leg0) && leg0.port === relayPort && Buffer.from(leg0.key, 'base64').length === 32 && gateOf(same(leg0.hosts, ['127.0.0.1'])) && gateOf(/ 127\.0\.0\.1 \d+ typ relay /.test(relayLine)) && gateOf(/ typ host /.test(s.offer.sdp)) && win.fwd[0].port === 4242, 'taken: stream-offer asked with the fake source + relay + the UDP leg\'s spec (the relay\'s own port, a 32-byte key, the hub\'s addresses); the offer keeps its host candidates AND gains the relay\'s (its UDP port, forwarded to the agent\'s relay port 4242)', { call: win.calls[0], relayLine });
   // a datagram crosses the relay
   const peer = dgram.createSocket('udp4'); await new Promise((r) => peer.bind(0, '127.0.0.1', r));
   const got = []; peer.on('message', (m) => got.push(m));
@@ -276,10 +276,10 @@ console.log('§12 the hub\'s half');
   peer.send(Buffer.from([1, 2, 3]), relayPort, '127.0.0.1');
   for (let i = 0; i < 40 && !h.written.length; i++) await sleep(10);
   const up = h.written.length ? SM.relayUnframe(new Uint8Array(h.written[0])).frames[0] : null;
-  ok(up && up.ip === '127.0.0.1' && up.port === peer.address().port && same([...up.payload], [1, 2, 3]), 'a browser\'s datagram reaches the forward framed with its address', up);
+  ok(gateOf(up) && up.ip === '127.0.0.1' && up.port === peer.address().port && verdictOf(same([...up.payload], [1, 2, 3])), 'a browser\'s datagram reaches the forward framed with its address', up);
   h.onData(Buffer.from(SM.relayFrame('127.0.0.1', peer.address().port, new Uint8Array([7, 8]))));
   for (let i = 0; i < 40 && !got.length; i++) await sleep(10);
-  ok(got.length === 1 && same([...got[0]], [7, 8]), 'the agent\'s answer goes back out of the relay\'s port to that peer');
+  ok(got.length === 1 && verdictOf(same([...got[0]], [7, 8])), 'the agent\'s answer goes back out of the relay\'s port to that peer');
   peer.close();
   // the long poll
   const p0 = await wr.poll(s.key, 0, -1, 0);
@@ -295,15 +295,15 @@ console.log('§12 the hub\'s half');
   ok(p2.state === 'connected' && p2.stats.fps === 30 && p2.cands.length === 0, 'the agent\'s numbers and state reach the page');
   await wr.answer(s.key, SDP);
   await wr.candidate(s.key, { candidate: 'candidate:5 1 udp 1 10.0.0.5 4000 typ host', sdpMid: '0', sdpMLineIndex: 0 });
-  ok(win.calls.filter((c) => c[0] === 'answer').length === 2 && win.calls[1][2].answer.sdp === SDP && win.calls[2][2].candidate.candidate.includes('10.0.0.5'), 'the page\'s answer and its candidate reach the agent as they are (direct allowed)');
+  ok(win.calls.filter((c) => c[0] === 'answer').length === 2 && win.calls[1][2].answer.sdp === SDP && verdictOf(win.calls[2][2].candidate.candidate.includes('10.0.0.5')), 'the page\'s answer and its candidate reach the agent as they are (direct allowed)');
   const re = await wr.restart(s.key);
-  ok(win.calls.some((c) => c[0] === 'offer' && c[1].iceRestart === true && c[1].sid === 'sid-1') && /typ relay/.test(re.offer.sdp), 'an ICE restart asks the agent for a restart offer of the SAME session; the relay\'s candidates ride it again');
-  ok(same(wr.facts('win').map((f) => [f.sid, f.state, f.source.kind, f.codec.mimeType]), [['sid-1', 'connected', 'fake', 'video/H264']]), 'THE RECORD: the session\'s facts (sid, state, source, codec)');
+  ok(gateOf(win.calls.some((c) => c[0] === 'offer' && c[1].iceRestart === true && c[1].sid === 'sid-1')) && verdictOf(/typ relay/.test(re.offer.sdp)), 'an ICE restart asks the agent for a restart offer of the SAME session; the relay\'s candidates ride it again');
+  ok(verdictOf(same(wr.facts('win').map((f) => [f.sid, f.state, f.source.kind, f.codec.mimeType]), [['sid-1', 'connected', 'fake', 'video/H264']])), 'THE RECORD: the session\'s facts (sid, state, source, codec)');
   win.push({ op: 'stream-stats', sid: 'sid-1', state: 'closed', ended: 'link_lost' });
   const pe = await wr.poll(s.key, 0, p2.seq, 1000);
   ok(pe.ended === 'link_lost' && h.closed === true, 'the agent says it ended ⇒ the page hears `ended` (link_lost) and the relay is closed');
   const st = await wr.stop(s.key);
-  ok(st.stopped && win.calls.some((c) => c[0] === 'stop' && c[1] === 'sid-1') && (await wr.poll(s.key, 0, -1, 0)).ended === 'not_found', 'stop: stream-stop on the agent; the key is gone (not_found)');
+  ok(gateOf(st.stopped) && gateOf(win.calls.some((c) => c[0] === 'stop' && c[1] === 'sid-1')) && (await wr.poll(s.key, 0, -1, 0)).ended === 'not_found', 'stop: stream-stop on the agent; the key is gone (not_found)');
   wr.shutdown();
   // relay-only: both sides' host candidates are stripped
   const win2 = fakeAgent();
@@ -312,7 +312,7 @@ console.log('§12 the hub\'s half');
   await wr2.answer(s2.key, SDP);
   const skipped = await wr2.candidate(s2.key, { candidate: 'candidate:5 1 udp 1 10.0.0.5 4000 typ host', sdpMid: '0', sdpMLineIndex: 0 });
   win2.push({ op: 'stream-ice', sid: 'sid-1', candidate: { candidate: 'candidate:9 1 udp 1 192.168.9.9 50001 typ host' } });
-  ok(!/ typ host/.test(s2.offer.sdp) && /typ relay/.test(s2.offer.sdp) && !/ typ host/.test(win2.calls.find((c) => c[0] === 'answer')[2].answer.sdp) && skipped.skipped === 'host' && (await wr2.poll(s2.key, 0, -1, 0)).cands.length === 0, 'relay-only (direct: false): the offer, the answer and both sides\' trickled candidates keep no host candidate');
+  ok(!/ typ host/.test(s2.offer.sdp) && gateOf(/typ relay/.test(s2.offer.sdp)) && !/ typ host/.test(win2.calls.find((c) => c[0] === 'answer')[2].answer.sdp) && skipped.skipped === 'host' && (await wr2.poll(s2.key, 0, -1, 0)).cands.length === 0, 'relay-only (direct: false): the offer, the answer and both sides\' trickled candidates keep no host candidate');
   wr2.shutdown();
   // the idle sweep
   const win3 = fakeAgent();
@@ -320,7 +320,7 @@ console.log('§12 the hub\'s half');
   const wr3 = DW.create({ access: ACC.create({ hosts: hostsFor({ win3 }), install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: FIXTURE }), log: quiet }), log: quiet, now: () => clock, idleMs: 1000, sweepMs: 20, ips: () => [] });
   const s3 = await wr3.start('win3');
   clock += 1500; await sleep(80);
-  ok(win3.calls.some((c) => c[0] === 'stop') && (await wr3.poll(s3.key, 0, -1, 0)).ended === 'not_found', 'a session no page polled for idleMs is stopped (the page closed without a word)');
+  ok(gateOf(win3.calls.some((c) => c[0] === 'stop')) && (await wr3.poll(s3.key, 0, -1, 0)).ended === 'not_found', 'a session no page polled for idleMs is stopped (the page closed without a word)');
   wr3.shutdown();
 }
 
@@ -328,14 +328,14 @@ console.log('§13 the three touches, by source');
 {
   const ad = read('src/agentd/agentd.js'), cl = read('src/agentd/client.js');
   const caps = (ad.match(/capabilities: \[([^\]]*)\]/) || [])[1] || '';
-  ok(/'stream-offer'/.test(caps) && /'input-events'/.test(caps), '① the hello-ack names stream-offer and input-events (by content)');
-  for (const op of ['stream-offer', 'stream-answer', 'stream-stop', 'stream-stats', 'input-events']) ok(new RegExp(`if \\(msg\\.op === '${op}'\\) \\{[\\s\\S]{0,900}?op: '${op}-result', id: msg\\.id`).test(ad) && new RegExp(`m\\.op === '${op}-result'`).test(cl), `① ${op}: the handler replies \`${op}-result\` by id; ② the client routes it by id`);
+  ok(gateOf(/'stream-offer'/.test(caps)) && verdictOf(/'input-events'/.test(caps)), '① the hello-ack names stream-offer and input-events (by content)');
+  for (const op of ['stream-offer', 'stream-answer', 'stream-stop', 'stream-stats', 'input-events']) ok(gateOf(new RegExp(`if \\(msg\\.op === '${op}'\\) \\{[\\s\\S]{0,900}?op: '${op}-result', id: msg\\.id`).test(ad)) && verdictOf(new RegExp(`m\\.op === '${op}-result'`).test(cl)), `① ${op}: the handler replies \`${op}-result\` by id; ② the client routes it by id`);
   const pushAt = cl.indexOf("if (m.op === 'stream-ice' || m.op === 'stream-stats')"), prevAt = cl.indexOf('prevControl(m);', pushAt);
   const branchStart = cl.lastIndexOf('mux.onControl = (m, bytes) => {', pushAt);   // lane lg-remote-hardening (B-7f0b D8): the handler hears the line's length
-  ok(pushAt > 0 && branchStart > 0 && prevAt > pushAt && cl.slice(branchStart, pushAt).includes("m.op === 'stream-stats-result'"), '③ the pushes (stream-ice / stream-stats) have their own branch BEFORE prevControl — after the id-keyed routing set (stream-stats-result is a reply, stream-stats a push)');
-  ok(/for \(const sid of \[\.\.\.\(this\._streamWatches\?\.keys\(\) \|\| \[\]\)\]\) this\._rearmStream\(sid\);/.test(cl) && /op: 'stream-stats', sid, watch: true/.test(cl), '③ a reconnect re-arms every stream session (stream-stats with watch: this link owns its pushes again)');
-  ok(/if \(streamHost\) streamHost\.linkDead\(mux\);/.test(ad), 'the daemon makes a dead link\'s sessions orphans (their media keeps flowing) until the re-arm');
-  for (const m of ['streamOffer', 'streamAnswer', 'streamStats', 'inputEvents']) ok(new RegExp(`async ${m}\\([^)]*\\) \\{\\n    const conn = await this\\.connect\\(\\);\\n    if \\(!conn\\.info\\?\\.capabilities\\?\\.includes\\?\\.\\('(stream-offer|input-events)'\\)\\)`).test(cl), `② ${m} refuses an agent without the capability BEFORE asking`);
+  ok(pushAt > 0 && branchStart > 0 && prevAt > pushAt && verdictOf(cl.slice(branchStart, pushAt).includes("m.op === 'stream-stats-result'")), '③ the pushes (stream-ice / stream-stats) have their own branch BEFORE prevControl — after the id-keyed routing set (stream-stats-result is a reply, stream-stats a push)');
+  ok(gateOf(/for \(const sid of \[\.\.\.\(this\._streamWatches\?\.keys\(\) \|\| \[\]\)\]\) this\._rearmStream\(sid\);/.test(cl)) && verdictOf(/op: 'stream-stats', sid, watch: true/.test(cl)), '③ a reconnect re-arms every stream session (stream-stats with watch: this link owns its pushes again)');
+  ok(verdictOf(/if \(streamHost\) streamHost\.linkDead\(mux\);/.test(ad)), 'the daemon makes a dead link\'s sessions orphans (their media keeps flowing) until the re-arm');
+  for (const m of ['streamOffer', 'streamAnswer', 'streamStats', 'inputEvents']) ok(verdictOf(new RegExp(`async ${m}\\([^)]*\\) \\{\\n    const conn = await this\\.connect\\(\\);\\n    if \\(!conn\\.info\\?\\.capabilities\\?\\.includes\\?\\.\\('(stream-offer|input-events)'\\)\\)`).test(cl)), `② ${m} refuses an agent without the capability BEFORE asking`);
 }
 
 console.log('§14 THE UDP LEG (lane stream-relay-udp)');
@@ -347,11 +347,11 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   // the codec
   const ping = SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP, counter: 5, nonce, mac });
   const pp = SM.legParse(ping, mac), forged = SM.legParse(ping, macOf(crypto.randomBytes(32)));
-  ok(ping.length === 34 && pp.type === 'ping' && pp.flags === SM.LEG.UP && pp.counter === 5 && pp.ok && Buffer.from(pp.nonce).equals(nonce) && forged.ok === false, 'a PING: 34 bytes (magic · type · flags · counter · nonce · 16-byte HMAC); it parses back and its mac holds only under the session\'s key');
-  ok(same(SM.legPingVerdict({ lastCounter: 0 }, forged), { take: false, code: 'forged' }) && same(SM.legPingVerdict({ lastCounter: 5 }, pp), { take: false, code: 'replayed' }) && same(SM.legPingVerdict({ lastCounter: 4 }, pp), { take: true, code: null }), 'the hub\'s verdict: a wrong mac = forged, a counter not above the last = replayed, else taken');
+  ok(ping.length === 34 && pp.type === 'ping' && pp.flags === SM.LEG.UP && pp.counter === 5 && gateOf(pp.ok) && gateOf(Buffer.from(pp.nonce).equals(nonce)) && forged.ok === false, 'a PING: 34 bytes (magic · type · flags · counter · nonce · 16-byte HMAC); it parses back and its mac holds only under the session\'s key');
+  ok(gateOf(same(SM.legPingVerdict({ lastCounter: 0 }, forged), { take: false, code: 'forged' })) && gateOf(same(SM.legPingVerdict({ lastCounter: 5 }, pp), { take: false, code: 'replayed' })) && verdictOf(same(SM.legPingVerdict({ lastCounter: 4 }, pp), { take: true, code: null })), 'the hub\'s verdict: a wrong mac = forged, a counter not above the last = replayed, else taken');
   const dd = SM.legParse(SM.legData('10.1.2.3', 50000, new Uint8Array([1, 2, 3])));
-  ok(dd.type === 'data' && dd.ip === '10.1.2.3' && dd.port === 50000 && same([...dd.payload], [1, 2, 3]) && SM.legData('::1', 1, new Uint8Array([1])) === null && SM.legData('1.2.3.4', 1, new Uint8Array(1501)) === null, 'DATA carries the browser\'s address + its datagram (relayFrame\'s bounds: IPv4, ≤ 1500 bytes)');
-  ok([[0x00, 0x01], [0x01, 0x01], [0x16, 0xfe], [0x80, 0x60], [0x90, 0xc8]].every((h) => !SM.isLegPacket(new Uint8Array([...h, 0, 0, 0, 0]))) && SM.isLegPacket(ping), 'a STUN / DTLS / RTP / RTCP first byte is never the leg\'s magic (ONE hub socket tells them apart)');
+  ok(dd.type === 'data' && dd.ip === '10.1.2.3' && dd.port === 50000 && gateOf(same([...dd.payload], [1, 2, 3])) && SM.legData('::1', 1, new Uint8Array([1])) === null && SM.legData('1.2.3.4', 1, new Uint8Array(1501)) === null, 'DATA carries the browser\'s address + its datagram (relayFrame\'s bounds: IPv4, ≤ 1500 bytes)');
+  ok(gateOf([[0x00, 0x01], [0x01, 0x01], [0x16, 0xfe], [0x80, 0x60], [0x90, 0xc8]].every((h) => !SM.isLegPacket(new Uint8Array([...h, 0, 0, 0, 0])))) && verdictOf(SM.isLegPacket(ping)), 'a STUN / DTLS / RTP / RTCP first byte is never the leg\'s magic (ONE hub socket tells them apart)');
   // the hub's half over a stand-in daemon socket
   const legAgent = () => {
     const calls = []; let push = null; const fwd = [];
@@ -378,7 +378,7 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   await waitFor(() => fromHub.length);
   const pong = fromHub.length ? SM.legParse(new Uint8Array(fromHub[0].m), lmac) : null;
   const r1 = await rf();
-  ok(pong && pong.type === 'pong' && pong.ok && pong.counter === 1 && Buffer.from(pong.nonce).equals(nonce) && fromHub[0].port === spec.port && r1.leg.addr === `127.0.0.1:${dmn.address().port}` && r1.via === 'link', 'an authenticated PING: answered by a PONG under the same key (its counter + nonce echoed, from the relay\'s port); the daemon\'s address learned — still the device link until it says UP', { pong, r1 });
+  ok(gateOf(pong) && pong.type === 'pong' && gateOf(pong.ok) && pong.counter === 1 && gateOf(Buffer.from(pong.nonce).equals(nonce)) && fromHub[0].port === spec.port && r1.leg.addr === `127.0.0.1:${dmn.address().port}` && r1.via === 'link', 'an authenticated PING: answered by a PONG under the same key (its counter + nonce echoed, from the relay\'s port); the daemon\'s address learned — still the device link until it says UP', { pong, r1 });
   dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { counter: 1, nonce, mac: lmac })), spec.port, '127.0.0.1');
   await sleep(60);
   ok(fromHub.length === 1 && (await rf()).leg.replayed === 1, 'the same PING again (its counter not above the last): dropped as replayed, unanswered');
@@ -388,21 +388,21 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   br.send(Buffer.from([0x00, 0x01, 0x00, 0x00]), spec.port, '127.0.0.1'); // a browser's STUN-shaped datagram
   await waitFor(() => fromHub.length === 3);
   const asData = fromHub[2] ? SM.legParse(new Uint8Array(fromHub[2].m)) : null;
-  ok(r2.via === 'udp' && asData && asData.type === 'data' && asData.ip === '127.0.0.1' && asData.port === br.address().port && same([...asData.payload], [0, 1, 0, 0]) && la.fwd[0].written.length === 0, 'a PING flagged UP ⇒ via udp: the browser\'s datagram reaches the daemon\'s socket as leg DATA with the browser\'s address — nothing went over the device link', { via: r2.via, asData });
+  ok(r2.via === 'udp' && gateOf(asData) && asData.type === 'data' && asData.ip === '127.0.0.1' && asData.port === br.address().port && gateOf(same([...asData.payload], [0, 1, 0, 0])) && la.fwd[0].written.length === 0, 'a PING flagged UP ⇒ via udp: the browser\'s datagram reaches the daemon\'s socket as leg DATA with the browser\'s address — nothing went over the device link', { via: r2.via, asData });
   dmn.send(Buffer.from(SM.legData('127.0.0.1', br.address().port, new Uint8Array([7, 7]))), spec.port, '127.0.0.1');
   dmn.send(Buffer.from(SM.legData('127.0.0.1', 9, new Uint8Array([8, 8]))), spec.port, '127.0.0.1');
   await waitFor(() => toBr.length);
   const stray = dgram.createSocket('udp4'); await new Promise((r) => stray.bind(0, '127.0.0.1', r));
   stray.send(Buffer.from(SM.legData('127.0.0.1', br.address().port, new Uint8Array([6, 6]))), spec.port, '127.0.0.1');
   await sleep(60);
-  ok(toBr.length === 1 && same([...toBr[0]], [7, 7]) && (await rf()).leg.stray === 1, 'the daemon\'s DATA reach the browser that wrote first (not port 9, which never wrote); DATA from any other address is dropped as stray', { toBr: toBr.map((b) => [...b]) });
+  ok(toBr.length === 1 && gateOf(same([...toBr[0]], [7, 7])) && (await rf()).leg.stray === 1, 'the daemon\'s DATA reach the browser that wrote first (not port 9, which never wrote); DATA from any other address is dropped as stray', { toBr: toBr.map((b) => [...b]) });
   la.fwd[0].onData(Buffer.from(SM.relayFrame('127.0.0.1', br.address().port, new Uint8Array([5]))));
   await waitFor(() => toBr.length === 2);
   br.send(Buffer.from([0x00, 0x01, 0x00, 0x02]), spec.port, '127.0.0.1');
   await waitFor(() => fromHub.length === 4);
   const r3 = await rf();
   const asLeg = fromHub[3] ? SM.legParse(new Uint8Array(fromHub[3].m)) : null;
-  ok(r3.via === 'udp' && toBr.length === 2 && la.fwd[0].written.length === 0 && asLeg && asLeg.type === 'data' && same([...asLeg.payload], [0, 1, 0, 2]) && r3.leg.held === 1 && r3.leg.changes.map((c) => c.via).join(',') === 'udp', 'the daemon spoke on the device link ⇒ its frame reaches the browser, and the hub STILL answers on the leg (lane stream-leg-flap: a second path speaking is never a reason to leave the first) — counted (held 1), no change on the record', r3);
+  ok(r3.via === 'udp' && toBr.length === 2 && la.fwd[0].written.length === 0 && gateOf(asLeg) && asLeg.type === 'data' && gateOf(same([...asLeg.payload], [0, 1, 0, 2])) && r3.leg.held === 1 && r3.leg.changes.map((c) => c.via).join(',') === 'udp', 'the daemon spoke on the device link ⇒ its frame reaches the browser, and the hub STILL answers on the leg (lane stream-leg-flap: a second path speaking is never a reason to leave the first) — counted (held 1), no change on the record', r3);
   muted = true;
   dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP, counter: 3, nonce, mac: lmac })), spec.port, '127.0.0.1');
   await sleep(60);
@@ -411,7 +411,7 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   await wrL.stop(sL.key); wrL.shutdown(); dmn.close(); br.close(); stray.close();
   const wrN = DW.create({ access: ACC.create({ hosts: { get: (h) => ({ id: h, name: 'PC' }), isLocal: () => false, deviceBounded: async () => la, connectedDevice: () => la }, install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: FIXTURE }), log: { log() { }, warn() { } } }), log: { log() { }, warn() { } }, ips: () => ['127.0.0.1'], udpLeg: false });
   const sN = await wrN.start('pcN');
-  ok(sN.take && !('relayLeg' in la.calls[la.calls.length - 1][1]) && (await wrN.poll(sN.key, 0, -1, 0)).relay.leg === null, 'udpLeg: false (the device-link control) asks the daemon for no leg');
+  ok(gateOf(sN.take) && !('relayLeg' in la.calls[la.calls.length - 1][1]) && (await wrN.poll(sN.key, 0, -1, 0)).relay.leg === null, 'udpLeg: false (the device-link control) asks the daemon for no leg');
   await wrN.stop(sN.key); wrN.shutdown();
   // the daemon's half on an injected clock (a stand-in socket: nothing is bound; the hub's port is one nothing answers)
   const HP = await deadPort();
@@ -423,19 +423,19 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   const changes = [], fromLeg = [];
   ok(SH.createLeg({ port: HP, key: 'short', hosts: ['10.0.0.9'] }, { socket: fakeSock, timer: false }) === null && SH.createLeg({ port: 0, key: hubKey.toString('base64'), hosts: ['10.0.0.9'] }, { socket: fakeSock, timer: false }) === null, 'a spec without a 32-byte key or a port opens no leg');
   const g = SH.createLeg({ port: HP, key: hubKey.toString('base64'), hosts: ['10.0.0.9', '127.0.0.1', 'bad host!'] }, { extra: ['hub.example'], socket: fakeSock, timer: false, now: () => clock, onChange: (x) => changes.push(x.state), onData: (ip, port, payload) => fromLeg.push([ip, port, [...payload]]) });
-  ok(g.state === 'probing' && same(sent.map((x) => `${x.ip}:${x.port}`), [`hub.example:${HP}`, `10.0.0.9:${HP}`, `127.0.0.1:${HP}`]) && SM.legParse(sent[0].b, hmac).ok && SM.legParse(sent[0].b, hmac).flags === SM.LEG.ANSWERS, 'the first PING goes at once to the dialled host + each hub address (a malformed host skipped), authenticated, not flagged UP (flagged ANSWERS — lane stream-udp-leg-fallback: this daemon answers the hub\'s probe)');
+  ok(g.state === 'probing' && gateOf(same(sent.map((x) => `${x.ip}:${x.port}`), [`hub.example:${HP}`, `10.0.0.9:${HP}`, `127.0.0.1:${HP}`])) && gateOf(SM.legParse(sent[0].b, hmac).ok) && SM.legParse(sent[0].b, hmac).flags === SM.LEG.ANSWERS, 'the first PING goes at once to the dialled host + each hub address (a malformed host skipped), authenticated, not flagged UP (flagged ANSWERS — lane stream-udp-leg-fallback: this daemon answers the hub\'s probe)');
   clock += 120; answer(sent[1].b);
   const confirm = sent[sent.length - 1];
-  ok(g.state === 'up' && g.facts().target === `10.0.0.9:${HP}` && g.facts().rttMs === 120 && same(changes, ['up']) && confirm.ip === '10.0.0.9' && SM.legParse(confirm.b, hmac).flags === (SM.LEG.UP | SM.LEG.ANSWERS), 'the first authenticated PONG (an older hub\'s: no WORDS flag): UP — the hub\'s address locked (10.0.0.9), its rtt 120 ms, and a PING flagged UP goes at once (the hub switches without waiting 15 s)', g.facts());
+  ok(g.state === 'up' && g.facts().target === `10.0.0.9:${HP}` && g.facts().rttMs === 120 && gateOf(same(changes, ['up'])) && confirm.ip === '10.0.0.9' && SM.legParse(confirm.b, hmac).flags === (SM.LEG.UP | SM.LEG.ANSWERS), 'the first authenticated PONG (an older hub\'s: no WORDS flag): UP — the hub\'s address locked (10.0.0.9), its rtt 120 ms, and a PING flagged UP goes at once (the hub switches without waiting 15 s)', g.facts());
   answer(confirm.b);
   handlers.message(Buffer.from(SM.legData('192.168.1.5', 50000, new Uint8Array([4, 2]))), { address: '10.0.0.66', port: HP });
   handlers.message(Buffer.from(SM.legData('192.168.1.5', 50000, new Uint8Array([4, 2]))), { address: '10.0.0.9', port: HP });
-  ok(same(fromLeg, [['192.168.1.5', 50000, [4, 2]]]) && g.facts().stray === 1, 'the hub\'s DATA reach the shims; DATA from another address is stray (dropped)');
+  ok(gateOf(same(fromLeg, [['192.168.1.5', 50000, [4, 2]]])) && g.facts().stray === 1, 'the hub\'s DATA reach the shims; DATA from another address is stray (dropped)');
   const n0 = sent.length;
   clock += 14000; g.tick();
   const idleQuiet = sent.length === n0;
   clock += 1100; g.tick();
-  ok(idleQuiet && sent.length === n0 + 1, 'idle (nothing sent on the leg): the next PING 15 s after the last — the keepalive that keeps the NAT / firewall state');
+  ok(gateOf(idleQuiet) && sent.length === n0 + 1, 'idle (nothing sent on the leg): the next PING 15 s after the last — the keepalive that keeps the NAT / firewall state');
   answer(sent[sent.length - 1].b);
   ok(g.send('192.168.1.5', 50000, new Uint8Array([1])) === true && SM.legParse(sent[sent.length - 1].b).type === 'data', 'up: werift\'s datagram leaves as leg DATA to the hub');
   const n1 = sent.length;
@@ -446,23 +446,23 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   const quietWait = g.state === 'up' && sent.length === n1 + 1;
   clock += 1100; g.tick();
   const p2 = sent[sent.length - 1];
-  ok(quietWait && g.state === 'up' && g.facts().misses === 1 && sent.length === n1 + 2 && SM.legParse(p2.b, hmac).flags === (SM.LEG.UP | SM.LEG.ANSWERS) && g.send('1.2.3.4', 1, new Uint8Array([1])) === true, 'that PING unanswered for 2 s: a MISS, not a verdict (lane stream-leg-flap) — the leg stays UP and carries the picture, the next PING (flagged UP) goes at once', g.facts());
+  ok(gateOf(quietWait) && g.state === 'up' && g.facts().misses === 1 && sent.length === n1 + 2 && SM.legParse(p2.b, hmac).flags === (SM.LEG.UP | SM.LEG.ANSWERS) && g.send('1.2.3.4', 1, new Uint8Array([1])) === true, 'that PING unanswered for 2 s: a MISS, not a verdict (lane stream-leg-flap) — the leg stays UP and carries the picture, the next PING (flagged UP) goes at once', g.facts());
   clock += 500; answer(p1.b);
-  ok(g.state === 'up' && g.facts().misses === 0 && g.facts().missed === 1 && same(changes, ['up']), 'its PONG arriving 2.6 s late still counts: the run of misses ends (missed 1 on the record)', g.facts());
+  ok(g.state === 'up' && g.facts().misses === 0 && g.facts().missed === 1 && verdictOf(same(changes, ['up'])), 'its PONG arriving 2.6 s late still counts: the run of misses ends (missed 1 on the record)', g.facts());
   const nm = sent.length;
   clock += 1600; g.tick(); // the PING asked at the miss, now 2.1 s old: miss 1 → the next at once
   clock += 2100; g.tick(); // miss 2
   const twoMisses = g.state === 'up' && g.facts().misses === 2 && sent.length === nm + 2;
   clock += 2100; g.tick(); // miss 3
-  ok(twoMisses && g.state === 'down' && g.why === 'no_echo' && same(changes, ['up', 'down']) && g.send('1.2.3.4', 1, new Uint8Array([1])) === false, 'THREE PINGs in a row unanswered (legMissMax, 2 s each): DOWN (no_echo) — send() refuses, the device link carries the datagrams', g.facts());
+  ok(gateOf(twoMisses) && g.state === 'down' && g.why === 'no_echo' && gateOf(same(changes, ['up', 'down'])) && g.send('1.2.3.4', 1, new Uint8Array([1])) === false, 'THREE PINGs in a row unanswered (legMissMax, 2 s each): DOWN (no_echo) — send() refuses, the device link carries the datagrams', g.facts());
   const n2 = sent.length;
   clock += 2000; g.tick(); // 4.1 s after the unanswered PING
   const waitReprobe = sent.length === n2;
   clock += 1000; g.tick(); // 5.1 s
   answer(sent[sent.length - 1].b);
-  ok(waitReprobe && sent.length >= n2 + 1 && g.state === 'up' && same(changes, ['up', 'down', 'up']), 'down: re-asked 5 s after the last PING; a PONG brings the leg back UP (fail-back without a new session)');
+  ok(gateOf(waitReprobe) && sent.length >= n2 + 1 && g.state === 'up' && verdictOf(same(changes, ['up', 'down', 'up'])), 'down: re-asked 5 s after the last PING; a PONG brings the leg back UP (fail-back without a new session)');
   handlers.error(Object.assign(new Error('send ENOBUFS'), { code: 'ENOBUFS' }));
-  ok(g.state === 'up' && g.facts().sendErrors === 1 && same(changes, ['up', 'down', 'up']), 'a socket error (a Mac\'s ENOBUFS under a burst) drops one datagram — counted, never a verdict: the leg stays UP', g.facts());
+  ok(g.state === 'up' && g.facts().sendErrors === 1 && verdictOf(same(changes, ['up', 'down', 'up'])), 'a socket error (a Mac\'s ENOBUFS under a burst) drops one datagram — counted, never a verdict: the leg stays UP', g.facts());
   g.close();
   // a fresh leg that never hears a PONG: DOWN 2 s after its first PING (the device link from the start)
   let c2 = 5e6; const s2 = [];
@@ -474,8 +474,8 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   g2.close();
   // the firewall line + the verdicts
   ok(SM.firewallRuleCommand('C:\\Users\\me\\AppData\\Local\\vibespace\\node\\node.exe') === 'netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="C:\\Users\\me\\AppData\\Local\\vibespace\\node\\node.exe" protocol=UDP' && SM.firewallRuleCommand('C:\\Users\\张三\\node.exe') !== null, 'the admin line: netsh … program="<the agent\'s node.exe>" protocol=UDP (a non-ASCII user folder kept)');
-  ok(['C:\\x"\\node.exe', 'C:\\a$b\\node.exe', 'C:\\%TEMP%\\node.exe', 'C:\\a;calc\\node.exe', 'C:\\a&b\\node.exe', '/usr/bin/node', 'C:\\node.cmd', '', null].every((x) => SM.firewallRuleCommand(x) === null), 'no line for a path a shell could act on (quote, $, %, ;, &), a non-Windows path or a non-.exe program');
-  ok(same(SM.directInboundOf({ addrs: ['a', 'b'], reached: [] }), { verdict: 'blocked', addrs: 2, reached: 0 }) && SM.directInboundOf({ addrs: ['a'], reached: ['a'] }).verdict === 'open' && SM.directInboundOf({}).verdict === 'none', 'the direct-inbound verdict: blocked (none arrived) · open · none (no host address)');
+  ok(verdictOf(['C:\\x"\\node.exe', 'C:\\a$b\\node.exe', 'C:\\%TEMP%\\node.exe', 'C:\\a;calc\\node.exe', 'C:\\a&b\\node.exe', '/usr/bin/node', 'C:\\node.cmd', '', null].every((x) => SM.firewallRuleCommand(x) === null)), 'no line for a path a shell could act on (quote, $, %, ;, &), a non-Windows path or a non-.exe program');
+  ok(gateOf(same(SM.directInboundOf({ addrs: ['a', 'b'], reached: [] }), { verdict: 'blocked', addrs: 2, reached: 0 })) && SM.directInboundOf({ addrs: ['a'], reached: ['a'] }).verdict === 'open' && SM.directInboundOf({}).verdict === 'none', 'the direct-inbound verdict: blocked (none arrived) · open · none (no host address)');
   ok(SM.relayPathOf({ path: 'direct' }, { via: 'udp' }) === 'direct' && SM.relayPathOf({ path: 'relay' }, { via: 'udp' }) === 'udp' && SM.relayPathOf({ path: 'relay' }, { via: 'link' }) === 'link' && SM.relayPathOf({ path: 'relay' }, null) === 'relay' && SM.relayPathOf(null, { via: 'udp' }) === null, 'the strip\'s path: direct · udp · link · relay (the leg not heard yet)');
   const os = require('node:os');
   const mine = Object.values(os.networkInterfaces()).flat().filter((a) => a && (a.family === 'IPv4' || a.family === 4) && !a.internal).map((a) => a.address);
@@ -561,13 +561,13 @@ console.log('§14b THE PATH ELECTION (lane stream-leg-flap — the owner\'s Mac 
   const count = (xs, v) => xs.filter((x) => x === v).length;
   const flapLines = (r) => r.lines.filter(([i]) => i >= 2 && i < 80);
   ok(B.lines.length >= 1 && flapLines(B).length >= 3 && count(via(B, 2, 79), 'link') >= 10, `RED CONTROL — the .330 rule (the path the daemon LAST spoke on) through the same hub: ${flapLines(B).length} «relay via» flips in 20 s after the election (≥ 3), ${count(via(B, 2, 79), 'link')} of the browser's 78 datagrams went over the device link`, B.lines.map(([i, m]) => `${i}: ${m.replace(/^.*relay via /, '')}`));
-  ok(A.lines.length >= 1 && A.lines[0][0] === 1 && /udp leg 127\.0\.0\.1:\d+ \(leg up\)$/.test(A.lines[0][1]) && flapLines(A).length === 0 && count(via(A, 2, 79), 'leg') === 78, `THE FLAP ⇒ ONE election: the leg taken at its first PING flagged UP, then ${flapLines(A).length} flips in 20 s while the device link spoke three times and the daemon three times said it heard no answer — all 78 of the browser's datagrams rode the leg`, A.lines.map(([i, m]) => `${i}: ${m.replace(/^.*relay via /, '')}`));
+  ok(A.lines.length >= 1 && A.lines[0][0] === 1 && gateOf(/udp leg 127\.0\.0\.1:\d+ \(leg up\)$/.test(A.lines[0][1])) && flapLines(A).length === 0 && count(via(A, 2, 79), 'leg') === 78, `THE FLAP ⇒ ONE election: the leg taken at its first PING flagged UP, then ${flapLines(A).length} flips in 20 s while the device link spoke three times and the daemon three times said it heard no answer — all 78 of the browser's datagrams rode the leg`, A.lines.map(([i, m]) => `${i}: ${m.replace(/^.*relay via /, '')}`));
   const died = A.lines.filter(([i]) => i >= 80 && i < 120), dieAt = 79 + SM.STREAM_LIMITS.legDeadMs / 250;
-  ok(died.length === 1 && died[0][0] === dieAt && / the device link \(the leg was silent 6 s\)$/.test(died[0][1]) && count(via(A, 80, dieAt - 1), 'leg') === dieAt - 80 && count(via(A, dieAt, 119), 'link') === 120 - dieAt, `THE LEG DIES ⇒ the device link after the silence bound (legDeadMs ${SM.STREAM_LIMITS.legDeadMs} ms = 3 × the 2 s PING of a leg carrying the picture): the browser's datagrams rode the leg ${dieAt - 80} more steps, then the link — one change`, died);
+  ok(died.length === 1 && died[0][0] === dieAt && gateOf(/ the device link \(the leg was silent 6 s\)$/.test(died[0][1])) && count(via(A, 80, dieAt - 1), 'leg') === dieAt - 80 && count(via(A, dieAt, 119), 'link') === 120 - dieAt, `THE LEG DIES ⇒ the device link after the silence bound (legDeadMs ${SM.STREAM_LIMITS.legDeadMs} ms = 3 × the 2 s PING of a leg carrying the picture): the browser's datagrams rode the leg ${dieAt - 80} more steps, then the link — one change`, died);
   const back = A.lines.filter(([i]) => i >= 120);
-  ok(back.length === 1 && back[0][0] === 120 && /\(leg up\)$/.test(back[0][1]) && count(via(A, 121, 159), 'leg') === 39 && A.lines.length === 3, 'THE LEG RETURNS ⇒ taken ONCE at its PING flagged UP; the stale device-link frames every third step change nothing — 3 changes in 40 s on the whole record', A.lines.map(([i, m]) => `${i}: ${m.replace(/^.*relay via /, '')}`));
+  ok(back.length === 1 && back[0][0] === 120 && gateOf(/\(leg up\)$/.test(back[0][1])) && count(via(A, 121, 159), 'leg') === 39 && A.lines.length === 3, 'THE LEG RETURNS ⇒ taken ONCE at its PING flagged UP; the stale device-link frames every third step change nothing — 3 changes in 40 s on the whole record', A.lines.map(([i, m]) => `${i}: ${m.replace(/^.*relay via /, '')}`));
   ok(A.toBr.leg === A.sentLeg && A.toBr.link === A.sentLink && A.sentLink > 50, `frames keep flowing: every datagram the daemon sent reached the browser — ${A.toBr.leg} over the leg, ${A.toBr.link} over the device link — whichever way the hub answers`, { toBr: A.toBr, sentLeg: A.sentLeg, sentLink: A.sentLink });
-  ok(A.facts && A.facts.via === 'udp' && A.facts.leg.held >= 20 && A.facts.leg.quiet === 4, `the record: via udp; the device link spoke ${A.facts && A.facts.leg.held} times while the leg stayed elected (held), 4 PINGs not flagged UP (quiet) — counted, never obeyed`, A.facts && A.facts.leg);
+  ok(gateOf(A.facts) && A.facts.via === 'udp' && A.facts.leg.held >= 20 && A.facts.leg.quiet === 4, `the record: via udp; the device link spoke ${A.facts && A.facts.leg.held} times while the leg stayed elected (held), 4 PINGs not flagged UP (quiet) — counted, never obeyed`, A.facts && A.facts.leg);
 }
 
 console.log('§14c THE DAEMON\'S HYSTERESIS (lane stream-leg-flap — a lossy leg is not a dead one)');
@@ -604,19 +604,19 @@ console.log('§14d legElect (PURE) · THE STALL (lane stream-leg-flap): stallSte
 {
   const E = SM.legElect, D = SM.STREAM_LIMITS.legDeadMs, I = SM.STREAM_LIMITS.legStaleMs;
   const up = E({ via: 'link' }, { type: 'up', at: 1000 }), dat = E({ via: 'link' }, { type: 'data', at: 1000 });
-  ok(up.via === 'udp' && up.changed && up.why === 'leg up' && dat.via === 'udp' && dat.why === 'leg data' && !E(up, { type: 'up', at: 1500 }).changed, 'the device link ⇒ the leg at its first sign of life (a PING flagged UP: «leg up», its DATA: «leg data»), ONCE — the next sign changes nothing');
+  ok(up.via === 'udp' && gateOf(up.changed) && up.why === 'leg up' && dat.via === 'udp' && dat.why === 'leg data' && !E(up, { type: 'up', at: 1500 }).changed, 'the device link ⇒ the leg at its first sign of life (a PING flagged UP: «leg up», its DATA: «leg data»), ONCE — the next sign changes nothing');
   const carrying = E(E({ via: 'link' }, { type: 'data', at: 1000 }), { type: 'up', at: 3000 });
   const held = ['link', 'quiet'].map((t) => E(carrying, { type: t, at: 3100 }));
-  ok(held.every((x) => x.via === 'udp' && !x.changed && x.aliveAt === 3000), 'the leg elected: the device link speaking and a PING not flagged UP leave it where it is (no sign of life either — the clock keeps 3000)');
+  ok(verdictOf(held.every((x) => x.via === 'udp' && !x.changed && x.aliveAt === 3000)), 'the leg elected: the device link speaking and a PING not flagged UP leave it where it is (no sign of life either — the clock keeps 3000)');
   const j1 = E(carrying, { type: 'judge', at: 3000 + D - 1 }), j2 = E(carrying, { type: 'judge', at: 3000 + D });
-  ok(D === 6000 && D === SM.STREAM_LIMITS.legMissMax * SM.STREAM_LIMITS.legLiveMs && !j1.changed && j2.via === 'link' && j2.changed && j2.why === 'the leg was silent 6 s', `a leg that carried the picture: dead after legDeadMs (${D} ms = legMissMax × legLiveMs: three of its PING periods) of silence — not a millisecond before`);
+  ok(D === 6000 && D === SM.STREAM_LIMITS.legMissMax * SM.STREAM_LIMITS.legLiveMs && !j1.changed && j2.via === 'link' && gateOf(j2.changed) && j2.why === 'the leg was silent 6 s', `a leg that carried the picture: dead after legDeadMs (${D} ms = legMissMax × legLiveMs: three of its PING periods) of silence — not a millisecond before`);
   const idle = E({ via: 'link' }, { type: 'up', at: 1000 });
   ok(!E(idle, { type: 'judge', at: 1000 + D }).changed && E(idle, { type: 'judge', at: 1000 + I }).via === 'link' && I > 2 * SM.STREAM_LIMITS.legKeepaliveMs, `an idle leg (PINGs every ${SM.STREAM_LIMITS.legKeepaliveMs / 1000} s, no DATA): never judged on the carrying bound — dead after legStaleMs (${I / 1000} s, two keepalives + 5 s)`);
-  ok(['link', 'quiet', 'judge'].every((t) => !E({ via: 'link', aliveAt: 0 }, { type: t, at: 1e9 }).changed), 'on the device link: nothing but a sign of life on the leg changes the election');
+  ok(verdictOf(['link', 'quiet', 'judge'].every((t) => !E({ via: 'link', aliveAt: 0 }, { type: t, at: 1e9 }).changed)), 'on the device link: nothing but a sign of life on the leg changes the election');
   const T = SM.STREAM_LIMITS.stallMs;
   const s0 = SM.stallStep(null, { playing: true, pageFrames: 10, agentFrames: 100, now: 0 });
   const s1 = SM.stallStep(s0.w, { playing: true, pageFrames: 10, agentFrames: 400, now: T - 1 }), s2 = SM.stallStep(s0.w, { playing: true, pageFrames: 10, agentFrames: 460, now: T });
-  ok(T === 12000 && !s1.stalled && s2.stalled && s2.ms === T, `a PLAYING picture that decoded nothing for stallMs (${T} ms) while the machine sent 360 pictures: STALLED — not a millisecond before`);
+  ok(T === 12000 && !s1.stalled && gateOf(s2.stalled) && s2.ms === T, `a PLAYING picture that decoded nothing for stallMs (${T} ms) while the machine sent 360 pictures: STALLED — not a millisecond before`);
   const still = SM.stallStep(s0.w, { playing: true, pageFrames: 10, agentFrames: 100, now: T * 5 }), moved = SM.stallStep(s0.w, { playing: true, pageFrames: 11, agentFrames: 460, now: T - 1 });
   const after = SM.stallStep(moved.w, { playing: true, pageFrames: 11, agentFrames: 470, now: T + 50 });
   ok(!still.stalled && !moved.stalled && moved.w.at === T - 1 && !after.stalled, 'a still screen (the machine sent nothing either) never stalls; a decoded frame re-arms the watch (12 s from it)');
@@ -624,7 +624,7 @@ console.log('§14d legElect (PURE) · THE STALL (lane stream-leg-flap): stallSte
   const noAgent = SM.stallStep(SM.stallStep(null, { playing: true, pageFrames: 10, agentFrames: null, now: 0 }).w, { playing: true, pageFrames: 10, agentFrames: null, now: T * 2 });
   ok(!hid.stalled && hid.w.at === T * 2 && !off.stalled && off.w === null && !noAgent.stalled, 'a hidden page re-arms (a background tab is not judged); not playing = no watch; no machine numbers yet = never stalled');
   const lk = SM.stallStep(s0.w, { playing: true, paused: true, pageFrames: 10, agentFrames: 460, now: T * 2 }), un = SM.stallStep(lk.w, { playing: true, pageFrames: 10, agentFrames: 490, now: T * 2 + 1000 });
-  ok(!lk.stalled && lk.w === null && !un.stalled && un.w && un.w.at === T * 2 + 1000 && un.w.af === 490 && SM.stallStep(un.w, { playing: true, pageFrames: 10, agentFrames: 850, now: T * 3 + 1000 }).stalled,
+  ok(!lk.stalled && lk.w === null && !un.stalled && gateOf(un.w) && un.w.at === T * 2 + 1000 && un.w.af === 490 && verdictOf(SM.stallStep(un.w, { playing: true, pageFrames: 10, agentFrames: 850, now: T * 3 + 1000 }).stalled),
     'lane mac-locked-capture: a PAUSED stream (a locked Mac — no picture is owed) holds no watch; the first tick after the unlock is a fresh baseline (the machine\'s count moving first is no stall); a real stall after it still ends at stallMs');
 }
 
@@ -639,7 +639,7 @@ console.log('§4b NEVER SILENT (lane stream-fallback-never-silent — incident i
   ok(again.act === 'retry' && again.at === T && near.act === 'ask' && SM.NEVER_SILENT.retryMs === 1000, 'an ending a minute (NEVER_SILENT.windowMs) after the last retry starts the ladder again; the retry waits NEVER_SILENT.retryMs (1 s)');
   const acts = []; let st = { played: true, step: 0, at: 0 };
   for (const [now, gone] of [[T, false], [T + 2000, false], [T + 4000, false], [T + 6000, true]]) { const x = SM.endingVerdict({ ...st, now, gone, named: true }); acts.push(x.act); st = { played: true, step: x.step, at: x.at }; }
-  ok(same(acts, ['retry', 'ask', 'ask', 'ask']) && !acts.includes('fallback'), 'a stream that keeps ending (the window carries step/at): retry once, then the ask every time — the verdict never answers fallback once a picture played', acts);
+  ok(gateOf(same(acts, ['retry', 'ask', 'ask', 'ask'])) && !acts.includes('fallback'), 'a stream that keeps ending (the window carries step/at): retry once, then the ask every time — the verdict never answers fallback once a picture played', acts);
 }
 console.log('§14e THE LEG\'S HEALTH, PURE (lane stream-udp-leg-fallback): the probe, the word, the first data, the damper, the verdict, the road');
 {
@@ -649,7 +649,7 @@ console.log('§14e THE LEG\'S HEALTH, PURE (lane stream-udp-leg-fallback): the p
   const pr = SM.legControl(SM.LEG.PROBE, { counter: 7, nonce, mac: hmac, bytes: PB }), ec = SM.legControl(SM.LEG.ECHO, { counter: 7, nonce, mac: hmac, bytes: pr.length });
   const wd = SM.legControl(SM.LEG.WORD, { flags: SM.LEG.LEAVE, counter: 2, nonce, mac: hmac });
   const pp = SM.legParse(pr, hmac), pe = SM.legParse(ec, hmac), pw = SM.legParse(wd, hmac);
-  ok(pr.length === PB && pp.type === 'probe' && pp.ok && pp.bytes === PB && pp.counter === 7 && pe.type === 'echo' && pe.ok && pw.type === 'word' && pw.ok && pw.flags === SM.LEG.LEAVE && wd.length === 34 && !SM.legParse(pr, (b) => hmac(Buffer.concat([b, Buffer.from([1])]))).ok,
+  ok(pr.length === PB && pp.type === 'probe' && gateOf(pp.ok) && pp.bytes === PB && pp.counter === 7 && pe.type === 'echo' && gateOf(pe.ok) && pw.type === 'word' && gateOf(pw.ok) && pw.flags === SM.LEG.LEAVE && wd.length === 34 && !SM.legParse(pr, (b) => hmac(Buffer.concat([b, Buffer.from([1])]))).ok,
     `the PROBE and its ECHO are padded to the largest datagram the leg carries (${PB} bytes, the mac over the head), the WORD is 34 bytes — authenticated, another key fails`);
   // r2 THE PROBE'S SIZE from the real packetizers + werift's own wire: the largest RTP payload either packetizer writes, in werift's
   // RTP packet with the one header extension it negotiates (transport-cc), sealed under each SRTP profile it offers, as leg DATA
@@ -674,17 +674,17 @@ console.log('§14e THE LEG\'S HEALTH, PURE (lane stream-udp-leg-fallback): the p
   // every flag a WORD or a PING carries, the packet still 34 bytes
   const low = (1 << SM.LEG.seqShift) - 1, flagSets = [0, SM.LEG.UP, SM.LEG.UP | SM.LEG.TRIAL | SM.LEG.ANSWERS, SM.LEG.TAKE | SM.LEG.TRIAL, SM.LEG.LEAVE];
   const seqRt = [0, 1, 2, 17, SM.LEG.seqMax].every((q) => flagSets.every((f) => [SM.LEG.PING, SM.LEG.WORD].every((ty) => { const b = SM.legControl(ty, { flags: f | SM.legSeqFlags(q), counter: 1, nonce, mac: hmac }), p = SM.legParse(b, hmac); return b.length === 34 && p.ok && SM.legSeqOf(p.flags) === q && (p.flags & low) === f; })));
-  ok(seqRt && (SM.LEG.UP | SM.LEG.ANSWERS | SM.LEG.TRIAL | SM.LEG.TAKE | SM.LEG.LEAVE) <= low && SM.legSeqFlags(SM.LEG.seqMax + 1) === 0 && SM.legSeqOf(SM.LEG.UP | SM.LEG.TRIAL | SM.LEG.ANSWERS) === 0 && oldParse(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP | SM.legSeqFlags(SM.LEG.seqMax), counter: 1, nonce, mac: hmac })) === 'control',
+  ok(gateOf(seqRt) && (SM.LEG.UP | SM.LEG.ANSWERS | SM.LEG.TRIAL | SM.LEG.TAKE | SM.LEG.LEAVE) <= low && SM.legSeqFlags(SM.LEG.seqMax + 1) === 0 && SM.legSeqOf(SM.LEG.UP | SM.LEG.TRIAL | SM.LEG.ANSWERS) === 0 && oldParse(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP | SM.legSeqFlags(SM.LEG.seqMax), counter: 1, nonce, mac: hmac })) === 'control',
     `r3: the take's number (0 … ${SM.LEG.seqMax}) rides a WORD's and a PING's flags above TAKE / LEAVE / TRIAL / UP / ANSWERS — it round-trips beside each and never touches them, a flag set alone reads number 0 (an older peer's), the packet stays 34 bytes and an older hub still takes the PING`);
-  ok(SM.STREAM_LIMITS.legTickMs > 0 && /setInterval\(g\.tick, L\.legTickMs\)/.test(read('src/agentd/stream-host.js')) && /L\.legTrialMaxMs \+ L\.legTickMs \+ \(g\.rttMs \|\| 0\) \+ L\.statsMs/.test(read('src/server/desktop-webrtc.js')),
+  ok(SM.STREAM_LIMITS.legTickMs > 0 && gateOf(/setInterval\(g\.tick, L\.legTickMs\)/.test(read('src/agentd/stream-host.js'))) && verdictOf(/L\.legTrialMaxMs \+ L\.legTickMs \+ \(g\.rttMs \|\| 0\) \+ L\.statsMs/.test(read('src/server/desktop-webrtc.js'))),
     `r3: derived, no literal — the daemon's leg ticks every legTickMs (${SM.STREAM_LIMITS.legTickMs} ms), and the hub calls a trial «still on trial» only past legTrialMaxMs + legTickMs + the probe's round trip + statsMs`);
   const E = SM.legElect, F1 = SM.STREAM_LIMITS.legFirstMs;
   const taken = E({ via: 'link' }, { type: 'echo', at: 1000, why: 'leg up — probed' });
-  ok(taken.via === 'udp' && taken.changed && taken.why === 'leg up — probed' && taken.takenAt === 1000 && !E({ via: 'link' }, { type: 'alive', at: 1000 }).changed && E(taken, { type: 'alive', at: 4000 }).aliveAt === 4000,
+  ok(taken.via === 'udp' && gateOf(taken.changed) && taken.why === 'leg up — probed' && taken.takenAt === 1000 && !E({ via: 'link' }, { type: 'alive', at: 1000 }).changed && E(taken, { type: 'alive', at: 4000 }).aliveAt === 4000,
     'a probe\'s ECHO takes the leg (its words on the line); a claim (a PING flagged UP from a daemon that answers) never takes it — it only keeps a taken leg alive');
   const asked = E(taken, { type: 'ask', at: 1250 }), pinged = E(E(asked, { type: 'alive', at: 3000 }), { type: 'alive', at: 7000 });
   const j1 = E(pinged, { type: 'judge', at: 1250 + F1 - 1 }), j2 = E(pinged, { type: 'judge', at: 1250 + F1 });
-  ok(F1 === 7000 && asked.askAt === 1250 && E(asked, { type: 'ask', at: 2000 }).askAt === 1250 && !j1.changed && j2.changed && j2.via === 'link' && j2.fell === 'nothing' && j2.why === 'the leg carried nothing for 7 s' && F1 < SM.STREAM_LIMITS.connectMs,
+  ok(F1 === 7000 && asked.askAt === 1250 && E(asked, { type: 'ask', at: 2000 }).askAt === 1250 && !j1.changed && gateOf(j2.changed) && j2.via === 'link' && j2.fell === 'nothing' && j2.why === 'the leg carried nothing for 7 s' && F1 < SM.STREAM_LIMITS.connectMs,
     `R1: the first datagram out on a taken leg starts the clock; nothing back for legFirstMs (${F1} ms — inside the page's ${SM.STREAM_LIMITS.connectMs} ms connect budget) ⇒ «the leg carried nothing for 7 s» although its PINGs kept coming — not a millisecond before`);
   const fed = E(asked, { type: 'data', at: 1300 });
   const fedAlive = E(fed, { type: 'alive', at: 5000 });
@@ -694,7 +694,7 @@ console.log('§14e THE LEG\'S HEALTH, PURE (lane stream-udp-leg-fallback): the p
   ok(BASE(b, { type: 'judge', at: 46000 }).via === 'udp', 'RED CONTROL — the .358 election (copied): the same leg, carrying nothing, its UP PINGs every 15 s — still elected at 45 s (the owner\'s black pane)');
   let el = { via: 'link' }; const lines = [];
   for (const t of [1000, 21000, 41000]) { el = E(el, { type: 'echo', at: t }); el = E(el, { type: 'ask', at: t + 250 }); const j = E(el, { type: 'judge', at: t + 250 + F1 }); lines.push(j.why); el = j; }
-  ok(el.via === 'link' && el.pinned && el.pinned.falls === 3 && el.falls.length === 3 && /^the leg carried nothing for 7 s — the device link for the rest of the session: it fell back 3 times within 2 min$/.test(lines[2]) && !E(el, { type: 'echo', at: 61000 }).changed && !E(el, { type: 'up', at: 61000 }).changed,
+  ok(el.via === 'link' && gateOf(el.pinned) && el.pinned.falls === 3 && el.falls.length === 3 && gateOf(/^the leg carried nothing for 7 s — the device link for the rest of the session: it fell back 3 times within 2 min$/.test(lines[2])) && !E(el, { type: 'echo', at: 61000 }).changed && !E(el, { type: 'up', at: 61000 }).changed,
     `R3: the third fall within legFlapMs (${SM.STREAM_LIMITS.legFlapMs / 60000} min) PINS the session to the device link (its line says so) — no echo or claim takes the leg again`, lines);
   const spaced = [1000, 71000, 141000].reduce((x, t) => { const y = E(E(E(x, { type: 'echo', at: t }), { type: 'ask', at: t + 1 }), { type: 'judge', at: t + 1 + F1 }); return y; }, { via: 'link' });
   ok(!spaced.pinned && spaced.falls.length === 2, 'falls further apart than legFlapMs never pin (two in the window)');
@@ -707,15 +707,15 @@ console.log('§14e THE LEG\'S HEALTH, PURE (lane stream-udp-leg-fallback): the p
     [{ via: 'link' }, undefined, 'probing', null], [{ via: 'link', probeLost: 2 }, { state: 'ready', pings: 2, pongs: 2 }, 'probing', null],
   ];
   const got = rows.map(([h, d]) => V(h, d));
-  ok(rows.every(([, , st, re], i) => got[i].state === st && got[i].code === re) && /EHOSTUNREACH/.test(got[7].words) && /answered 4 of its PINGs/.test(got[6].words) && got[5].bytes === PB && new RegExp(`^the leg drops ${PB}-byte packets; 34-byte pings pass \\(3 of the hub's probes in a row never reached the machine\\)$`).test(got[5].words),
+  ok(gateOf(rows.every(([, , st, re], i) => got[i].state === st && got[i].code === re)) && gateOf(/EHOSTUNREACH/.test(got[7].words)) && gateOf(/answered 4 of its PINGs/.test(got[6].words)) && got[5].bytes === PB && verdictOf(new RegExp(`^the leg drops ${PB}-byte packets; 34-byte pings pass \\(3 of the hub's probes in a row never reached the machine\\)$`).test(got[5].words)),
     'legVerdictOf: up · no_socket · bind_failed · flapping · carried_nothing · probe_lost · firewall? · unreachable · silent · probing — each in its order, the words carry the counts', got.map((x) => `${x.state}:${x.code}`));
   const R = SM.streamRoadOf;
   const dead = { via: 'link', link: true, down: 0, leg: { pinned: null, verdict: { state: 'dead', code: 'carried_nothing' } } };
-  ok(R({ path: 'host' }, dead).road === 'direct' && R({ path: 'relay' }, { via: 'udp', down: 5, leg: { verdict: { state: 'up' } } }).road === 'udp' && R(null, { via: 'udp', down: 0 }).road === null && R(null, dead).road === 'link' && R(null, dead).code === 'carried_nothing' && !R(null, dead).answered && R(null, { ...dead, down: 3 }).answered && R({ path: 'host' }, null).answered,
+  ok(R({ path: 'host' }, dead).road === 'direct' && R({ path: 'relay' }, { via: 'udp', down: 5, leg: { verdict: { state: 'up' } } }).road === 'udp' && R(null, { via: 'udp', down: 0 }).road === null && R(null, dead).road === 'link' && R(null, dead).code === 'carried_nothing' && !R(null, dead).answered && gateOf(R(null, { ...dead, down: 3 }).answered) && verdictOf(R({ path: 'host' }, null).answered),
     'streamRoadOf: a host pair is direct; a relayed pair names the hub\'s road; before a pair, the device link only once the leg fell back (with its reason); «answered» = a road delivered the machine\'s datagrams');
   const FS = SM.legFallStep, fell1 = { via: 'link', leg: { falls: 1 } };
   const a1 = FS(0, fell1, 'connecting'), a2 = FS(a1.seen, fell1, 'connecting');
-  ok(a1.restart && a1.seen === 1 && !a2.restart && !FS(0, fell1, 'playing').restart && FS(0, fell1, 'playing').seen === 1 && !FS(0, { via: 'udp', leg: { falls: 1 } }, 'connecting').restart && !FS(0, null, 'connecting').restart && !FS(0, fell1, 'offered').restart,
+  ok(gateOf(a1.restart) && a1.seen === 1 && !a2.restart && !FS(0, fell1, 'playing').restart && FS(0, fell1, 'playing').seen === 1 && !FS(0, { via: 'udp', leg: { falls: 1 } }, 'connecting').restart && !FS(0, null, 'connecting').restart && !FS(0, fell1, 'offered').restart,
     'legFallStep: ONE more fall while the page connects ⇒ an ICE restart now (a browser gave the dead pair up); the same fall twice, a playing picture, a hub back on the leg, no record, no answer yet ⇒ none');
 }
 
@@ -767,12 +767,12 @@ console.log('§15 THE BROWSER\'S CHOICE (lane werift-lite-multihomed — a brows
   const HOSTMOD = require(HOST);
   const fx = await nominations(HOSTMOD, 'mhfix', true);
   ok(fx.lite.session === 1 && fx.lite.media === 0, 'the REAL host\'s offer says a=ice-lite ONCE, at the session level (none left in a media section)', fx.lite);
-  ok(fx.first, 'the first nomination (socket A) is answered and taken: the agent\'s DTLS ClientHello goes to A', fx);
-  ok(fx.answeredB && fx.toB >= 1 && fx.toA === 0 && fx.moved.length === 1 && fx.moved[0].endsWith(`→ 127.0.0.1:${fx.B}`), `THE BROWSER'S CHOICE: socket B nominates next ⇒ the agent's DTLS goes to B (${fx.toB} datagram${fx.toB === 1 ? '' : 's'}), none to A; its log: ${fx.moved[0]}`, fx);
+  ok(verdictOf(fx.first), 'the first nomination (socket A) is answered and taken: the agent\'s DTLS ClientHello goes to A', fx);
+  ok(gateOf(fx.answeredB) && fx.toB >= 1 && fx.toA === 0 && fx.moved.length === 1 && verdictOf(fx.moved[0].endsWith(`→ 127.0.0.1:${fx.B}`)), `THE BROWSER'S CHOICE: socket B nominates next ⇒ the agent's DTLS goes to B (${fx.toB} datagram${fx.toB === 1 ? '' : 's'}), none to A; its log: ${fx.moved[0]}`, fx);
   // RED CONTROL: the module as werift alone runs it — the offer's SDP untouched, no pair followed
   const BASE = copyOf('werift-alone', hostSrc.replace(FOLLOW, FOLLOW + '  return true;\n').split('SM.liteSessionSdp(').join('String('));
   const bx = await nominations(BASE, 'mhbase', false);
-  ok(bx.lite.session === 0 && bx.lite.media === 2 && bx.answeredB && bx.toA >= 1 && bx.toB === 0 && bx.moved.length === 0, `RED CONTROL — the host as werift alone runs it: a=ice-lite only inside the media sections (${bx.lite.media}) and, B nominated, its DTLS still goes to A (${bx.toA}), none to B — the first nomination kept for good`, bx);
+  ok(bx.lite.session === 0 && bx.lite.media === 2 && gateOf(bx.answeredB) && bx.toA >= 1 && bx.toB === 0 && bx.moved.length === 0, `RED CONTROL — the host as werift alone runs it: a=ice-lite only inside the media sections (${bx.lite.media}) and, B nominated, its DTLS still goes to A (${bx.toA}), none to B — the first nomination kept for good`, bx);
   // an older ICE generation's nomination moves nothing (the page restarts ICE; a check of the old credentials still in flight)
   async function oldGeneration(SH, sid) {
     const b = await browser(SH, sid), A = await b.sock(), Bk = await b.sock();
@@ -788,8 +788,8 @@ console.log('§15 THE BROWSER\'S CHOICE (lane werift-lite-multihomed — a brows
   const og = await oldGeneration(HOSTMOD, 'mhgen');
   const NOGUARD = copyOf('no-guard', hostSrc.replace(GUARD, ''));
   const ogc = await oldGeneration(NOGUARD, 'mhgenc');
-  ok(og.answered && og.moved.length === 0, 'after an ICE restart, a nomination under the OLD credentials (answered — werift keeps them) moves nothing: the sending pair stays the new generation\'s', og);
-  ok(ogc.answered && ogc.moved.length === 1, 'RED CONTROL: without the generation guard the old nomination moves the agent back to the old pair', ogc);
+  ok(gateOf(og.answered) && og.moved.length === 0, 'after an ICE restart, a nomination under the OLD credentials (answered — werift keeps them) moves nothing: the sending pair stays the new generation\'s', og);
+  ok(gateOf(ogc.answered) && ogc.moved.length === 1, 'RED CONTROL: without the generation guard the old nomination moves the agent back to the old pair', ogc);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

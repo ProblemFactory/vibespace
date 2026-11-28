@@ -31,7 +31,7 @@ const SHOTS = process.env.VS_CNO_SHOTS || null;
 const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 15; SM-S938B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36';
 const FLAPS = 10;
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms, step = 200) => { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch { } await sleep(step); } return false; };
 const procs = new Set(), dirs = new Set();
@@ -242,13 +242,13 @@ for (const secs of [10, 40, 70]) {
   const back = await cycleLanded(b.flips, b.attached);
   const a = await ev('window.__facts()'), life = await ev('window.__cn.life.join(" ")');
   console.log(`    ${secs} s: the page heard «${life}»; ${a.flips - b.flips} flips; last attach held: ${a.lastHeld}; hub cuts ${hubCuts() - c0}`);
-  ok(`frozen ${secs} s: the socket really cycled and the re-attach ran`, back && a.flips - b.flips === 2 && a.attached - b.attached === 1, { back, flips: a.flips - b.flips, attached: a.attached - b.attached });
+  ok(`frozen ${secs} s: the socket really cycled and the re-attach ran`, gateOf(back) && a.flips - b.flips === 2 && a.attached - b.attached === 1, { back, flips: a.flips - b.flips, attached: a.attached - b.attached });
   ok(`frozen ${secs} s: it resumed by seq`, a.lastHeld === true, a.lastHeld);
   ok(`frozen ${secs} s: NO row`, a.rows.length === 0, a.rows);
   ok(`frozen ${secs} s: NO count`, a.n === 0, a.n);
   // the one toast a long sleep has: client.js's page-suspend detector (2.321.0, a 5 s timer gapped > 45 s). It answers the sleep, not the socket, and this lane leaves it alone
-  ok(`frozen ${secs} s: no connection toast`, a.toastWords.slice(b.toastWords.length).every((w) => /^Browser suspended this page for \d+s/.test(w)), a.toastWords.slice(b.toastWords.length));
-  ok(`frozen ${secs} s: the page is awake again (the leg's closing fact)`, await ev('document.visibilityState === "visible"'), await ev('document.visibilityState'));
+  ok(`frozen ${secs} s: no connection toast`, verdictOf(a.toastWords.slice(b.toastWords.length).every((w) => /^Browser suspended this page for \d+s/.test(w))), a.toastWords.slice(b.toastWords.length));
+  ok(`frozen ${secs} s: the page is awake again (the leg's closing fact)`, verdictOf(await ev('document.visibilityState === "visible"')), await ev('document.visibilityState'));
 }
 await shot('frozen-no-row.png');
 console.log('④ a frozen page the hub cut, nothing lost');
@@ -259,8 +259,8 @@ console.log('④ a frozen page the hub cut, nothing lost');
   speakAgain(); await wake();
   const back = await cycleLanded(b.flips, b.attached);
   const a = await ev('window.__facts()');
-  ok('the heartbeat really cut it', cut, hubCuts());
-  ok('it resumed by seq, nothing lost', back && a.lastHeld === true, { back, held: a.lastHeld });
+  ok('the heartbeat really cut it', verdictOf(cut), hubCuts());
+  ok('it resumed by seq, nothing lost', gateOf(back) && a.lastHeld === true, { back, held: a.lastHeld });
   ok('a hub\'s cut of a sleeping page is NOT a miss: no row, no count (a radio that sleeps answers no ping, so this is any long lock; the retry window is past by now too)', a.rows.length === 0 && a.n === 0, a.rows);
 }
 console.log('④ a hidden page');
@@ -269,13 +269,13 @@ console.log('④ a hidden page');
   await freeze('frozen'); await sleep(500); await freeze('active'); // hidden, not frozen: this is how this Chrome hides a page it can then run (the leg's own cycle comes next)
   await cycleLanded(b0.flips, b0.attached);
   const hidden = await ev('document.visibilityState === "hidden"');
-  ok('the page really is hidden and running (the leg\'s starting fact)', hidden, await ev('document.visibilityState'));
+  ok('the page really is hidden and running (the leg\'s starting fact)', verdictOf(hidden), await ev('document.visibilityState'));
   const b = await ev('window.__facts()');
   await ev('(window.app.ws.ws.close(), true)');
   const back = await cycleLanded(b.flips, b.attached);
   const a = await ev('window.__facts()');
-  ok('the page came back to the front (the leg\'s closing fact)', await front());
-  ok('a hidden page\'s cycle ran, resumed by seq', back && a.lastHeld === true, { back, held: a.lastHeld });
+  ok('the page came back to the front (the leg\'s closing fact)', verdictOf(await front()));
+  ok('a hidden page\'s cycle ran, resumed by seq', gateOf(back) && a.lastHeld === true, { back, held: a.lastHeld });
   ok('…no row, no count', a.rows.length === 0 && a.n === 0, a.rows);
   ok('…no toast', a.toasts === b.toasts, a.toastWords);
 }
@@ -289,13 +289,13 @@ ok('the chat is open at its live tail (the leg\'s starting facts)', f0.total > 0
 let flapsDone = 0;
 if (await flap()) flapsDone++;
 const f01 = await ev('window.__facts()');
-ok('④ one awake outage ⇒ one row, counted', f01.rows.length === 1 && f01.n === 1 && /^Reconnected · down /.test(f01.rows[0] || ''), f01.rows);
+ok('④ one awake outage ⇒ one row, counted', f01.rows.length === 1 && f01.n === 1 && verdictOf(/^Reconnected · down /.test(f01.rows[0] || '')), f01.rows);
 await shot('awake-one-row.png');
 for (let i = 1; i < FLAPS; i++) if (await flap()) flapsDone++;
 const f1 = await ev('window.__facts()');
 ok(`${FLAPS} real cycles happened`, flapsDone === FLAPS && f1.flips - f0.flips === 2 * FLAPS, { flapsDone, flips: f1.flips - f0.flips });
 ok('ONE notice in the transcript', f1.rows.length === 1, `${f1.rows.length} rows`);
-ok('…and it counts them', new RegExp(`dropped ${FLAPS} times, last reconnected`).test(f1.rows[0] || ''), f1.rows[0]);
+ok('…and it counts them', verdictOf(new RegExp(`dropped ${FLAPS} times, last reconnected`).test(f1.rows[0] || '')), f1.rows[0]);
 ok('the re-attach ran on every reconnect (one `attached` frame per cycle)', f1.attached - f0.attached === FLAPS, f1.attached - f0.attached);
 ok('the pager\'s numbers did not move', f1.start === f0.start && f1.end === f0.end && f1.total === f0.total, { f0, f1 });
 ok('the window\'s cards did not change', f1.cards === f0.cards, { before: f0.cards, after: f1.cards });
@@ -311,14 +311,14 @@ const totalBefore = f1.total;
 // The wait read the first only (the total moved once); a reply that lands AFTER the next reconnect is, by the notice's own law, what the
 // drop after it reads as new: the mirror's third row. The wait is on the FACT the cycles below are judged on — the turn landed WHOLE —
 // and its bound's expiry fails BY NAME here (placed below: the reply held past a reconnect)
-ok('a live message lands — the turn WHOLE: the person\'s line and the stub\'s reply «one line» (else the cycles below are not judged on what they say)', await until(() => ev(`window.__view()._total > ${totalBefore} && window.__has('one line')`), 15000));
+ok('a live message lands — the turn WHOLE: the person\'s line and the stub\'s reply «one line» (else the cycles below are not judged on what they say)', verdictOf(await until(() => ev(`window.__view()._total > ${totalBefore} && window.__has('one line')`), 15000)));
 await flap();
 const f2 = await ev('window.__facts()');
 ok('the next cycle starts a second notice', f2.rows.length === 2, f2.rows);
 ok('…the first keeps its last words', f2.rows[0] === f1.rows[0], f2.rows);
 await flap();
 const f3 = await ev('window.__facts()');
-ok('…and the one after that patches the second', f3.rows.length === 2 && /dropped 2 times/.test(f3.rows[1] || ''), f3.rows);
+ok('…and the one after that patches the second', f3.rows.length === 2 && verdictOf(/dropped 2 times/.test(f3.rows[1] || '')), f3.rows);
 const look2 = await ev(`(() => { const v = window.__view(), all = document.querySelectorAll('.chat-conn-notice'), n = all[all.length - 1]; if (!n) return null; const nr = n.getBoundingClientRect(), lr = v._messageList.getBoundingClientRect(); return { inView: nr.top >= lr.top - 1 && nr.bottom <= lr.bottom + 1, top: Math.round(nr.top), bottom: Math.round(nr.bottom), listBottom: Math.round(lr.bottom), pinned: !!v._pinned }; })()`);
 ok('…and the row is whole on screen, not cut off under the composer (a pinned view follows it)', !!look2?.inView, look2);
 await shot('flap-message-between.png');
@@ -336,14 +336,14 @@ await shot('flap-message-between.png');
   const landedA = await replyOf('a');
   await flap();
   const ra = await ev('window.__facts()');
-  ok('PLACED, THE OLD WAIT — RED AT WILL: the person\'s line landed (the old wait met) with the reply still held; released after the next reconnect, the cycle after it starts a THIRD row instead of patching the second — the leg\'s verdict on that scene is red, as the mirror of 2.369.419 read', okA && heldA && landedA && ra.rows.length === ra0 + 2 && !/dropped 2 times/.test(ra.rows.at(-1) || ''), { okA, heldA, landedA, rows: ra.rows.slice(ra0) });
+  ok('PLACED, THE OLD WAIT — RED AT WILL: the person\'s line landed (the old wait met) with the reply still held; released after the next reconnect, the cycle after it starts a THIRD row instead of patching the second — the leg\'s verdict on that scene is red, as the mirror of 2.369.419 read', gateOf(okA) && gateOf(heldA) && gateOf(landedA) && ra.rows.length === ra0 + 2 && !/dropped 2 times/.test(ra.rows.at(-1) || ''), { okA, heldA, landedA, rows: ra.rows.slice(ra0) });
   const okB = await lineOf('b'), heldB = !(await ev(`window.__has('held b')`));
   fs.writeFileSync(holdFile, 'go');                // the hold ends only now: the new wait below is what waits for it
   const landedB = await replyOf('b');              // THE NEW WAIT: the turn whole
   const rb0 = (await ev('window.__facts()')).rows.length;
   await flap(); const rb1 = await ev('window.__facts()');
   await flap(); const rb2 = await ev('window.__facts()');
-  ok('PLACED, THE NEW WAIT — GREEN: the person\'s line landed with the reply still held, the wait went on until the reply landed (the turn whole); the next cycle starts ONE new row and the one after that patches it', okB && heldB && landedB && rb1.rows.length === rb0 + 1 && rb2.rows.length === rb0 + 1 && /dropped 2 times/.test(rb2.rows.at(-1) || ''), { okB, heldB, landedB, rows: rb2.rows.slice(rb0 - 1) });
+  ok('PLACED, THE NEW WAIT — GREEN: the person\'s line landed with the reply still held, the wait went on until the reply landed (the turn whole); the next cycle starts ONE new row and the one after that patches it', gateOf(okB) && gateOf(heldB) && gateOf(landedB) && rb1.rows.length === rb0 + 1 && rb2.rows.length === rb0 + 1 && verdictOf(/dropped 2 times/.test(rb2.rows.at(-1) || '')), { okB, heldB, landedB, rows: rb2.rows.slice(rb0 - 1) });
 }
 
 // BEFORE any reload: a reload leaves a stray socket, a silent path gets it cut as well, and that read as this leg's cut (with a reload ahead
@@ -355,8 +355,8 @@ console.log('④ a hub\'s cut while awake');
   speakAgain();
   const back = await cycleLanded(b.flips, b.attached);
   const a = await ev('window.__facts()');
-  ok('the heartbeat really cut it, once', cut && hubCuts() - c0 === 1, hubCuts() - c0);
-  ok('the page\'s socket is the one it cut: only that closes it here', back && a.flips - b.flips === 2, { back, flips: a.flips - b.flips });
+  ok('the heartbeat really cut it, once', gateOf(cut) && hubCuts() - c0 === 1, hubCuts() - c0);
+  ok('the page\'s socket is the one it cut: only that closes it here', gateOf(back) && a.flips - b.flips === 2, { back, flips: a.flips - b.flips });
   ok('counted: an awake drop is the notice, whoever cut it', a.n === b.n + 1 && a.rows.length === b.rows.length, { before: b.n, after: a.n, rows: a.rows });
   await shot('awake-hub-cut.png');
 }
@@ -389,11 +389,11 @@ console.log('④ a frozen page that lost frames off the ring');
   const whole = await until(() => ev(`window.__view()._total === ${owed} && window.__view()._windowEnd === ${owed}`), 30000, 200);
   const a = await ev('window.__facts()');
   console.log(`    the page heard «${await ev('window.__cn.life.join(" ")')}»; owed ${owed - b.total} records; last attach held: ${a.lastHeld}; rows ${JSON.stringify(a.rows)}`);
-  ok('the ring could not hold it: the re-attach came back with a slab', back && a.lastHeld === false, { back, held: a.lastHeld });
+  ok('the ring could not hold it: the re-attach came back with a slab', gateOf(back) && a.lastHeld === false, { back, held: a.lastHeld });
   ok('ONE row, at the resume', a.rows.length === 1, a.rows);
   ok('…counted once, awake-class', a.n === 1, a.n);
-  ok('…in the words of a finished outage, as long as the sleep', /^Reconnected · down (9|[1-9]\d)s$/.test(a.rows[0] || ''), a.rows);
-  ok('the transcript is whole', whole && a.total === owed, { total: a.total, owed, whole });
+  ok('…in the words of a finished outage, as long as the sleep', verdictOf(/^Reconnected · down (9|[1-9]\d)s$/.test(a.rows[0] || '')), a.rows);
+  ok('the transcript is whole', gateOf(whole) && a.total === owed, { total: a.total, owed, whole });
   await shot('frozen-missed-one-row.png');
   await sleep(6000);
 }
@@ -408,7 +408,7 @@ console.log('① the Resume dialog (addendum 1): what the person reads');
 const resumeText = await ev(`(async () => { const fake = (k) => ({ sessionId: 'x' + k, opts: { backend: 'claude', backendSessionId: 'x' + k } }); const p = window.app.layoutManager._offerResumeAll([fake(1), fake(2), fake(3)]); const t0 = Date.now(); let d = null; while (Date.now() - t0 < 5000 && !d) { d = [...document.querySelectorAll('.dialog')].find((x) => /Resume interrupted sessions/.test(x.textContent)); await new Promise((r) => setTimeout(r, 30)); } const text = d ? d.querySelector('.dialog-hint')?.textContent : null; const html = d ? d.querySelector('.dialog-hint')?.innerHTML : null; [...(d?.querySelectorAll('button') || [])].find((b) => /Cancel/.test(b.textContent))?.click(); await p; return { text, html }; })()`);
 ok('the dialog opened', !!resumeText?.text, resumeText);
 ok('no literal tag on the page', !!resumeText?.text && !/<\/?\w|&lt;/.test(resumeText.text) && !/&lt;/.test(resumeText.html), resumeText);
-ok('…it says how many', /^3 sessions were interrupted/.test(resumeText?.text || ''), resumeText);
+ok('…it says how many', verdictOf(/^3 sessions were interrupted/.test(resumeText?.text || '')), resumeText);
 
 // ── ⑤ the owner's pictures: a phone 390 px wide, in Chinese, through 10 real flaps and through a hide / show cycle ──
 // Each from a fresh load (a reload takes every notice away), so each picture shows what its own cycles left. On the release
@@ -420,13 +420,13 @@ console.log('⑤ the owner\'s pictures: 390 px wide, zh');
   await reopen(); await sleep(1500);
   const zh = (rows) => rows.every((r) => /[一-鿿]/.test(r));
   const z0 = await ev('window.__facts()');
-  ok('zh: a fresh load at 390 px, at the live tail, no notice (the leg\'s starting facts)', await ev(`localStorage.getItem('vibespace.lang') === 'zh' && innerWidth === 390`) && z0.rows.length === 0 && z0.end === z0.total, { rows: z0.rows, end: z0.end, total: z0.total });
+  ok('zh: a fresh load at 390 px, at the live tail, no notice (the leg\'s starting facts)', gateOf(await ev(`localStorage.getItem('vibespace.lang') === 'zh' && innerWidth === 390`)) && z0.rows.length === 0 && z0.end === z0.total, { rows: z0.rows, end: z0.end, total: z0.total });
   let done = 0; for (let i = 0; i < FLAPS; i++) if (await flap()) done++;
   const z1 = await ev('window.__facts()');
   console.log(`    ${done} flaps; rows ${JSON.stringify(z1.rows.slice(-3))} (${z1.rows.length} in all)`);
   ok(`zh, ${FLAPS} real flaps: the socket cycled ${FLAPS} times and the re-attach ran each time`, done === FLAPS && z1.attached - z0.attached === FLAPS, { done, attached: z1.attached - z0.attached });
-  ok(`zh, ${FLAPS} real flaps: ONE notice, in Chinese, that counts them`, z1.rows.length === 1 && zh(z1.rows) && new RegExp(`断开 ${FLAPS} 次`).test(z1.rows[0] || ''), z1.rows);
-  ok('zh: its time is the owner\'s clock, 24-hour (no AM / PM)', /最近 \d{2}:\d{2}( \S+)? 已重连/.test(z1.rows[0] || '') && !/AM|PM|上午|下午/.test(z1.rows[0] || ''), z1.rows[0]);
+  ok(`zh, ${FLAPS} real flaps: ONE notice, in Chinese, that counts them`, z1.rows.length === 1 && gateOf(zh(z1.rows)) && verdictOf(new RegExp(`断开 ${FLAPS} 次`).test(z1.rows[0] || '')), z1.rows);
+  ok('zh: its time is the owner\'s clock, 24-hour (no AM / PM)', gateOf(/最近 \d{2}:\d{2}( \S+)? 已重连/.test(z1.rows[0] || '')) && !/AM|PM|上午|下午/.test(z1.rows[0] || ''), z1.rows[0]);
   await shot('zh-390-flap-10.png');
   await reopen(); await sleep(1500);
   const h0 = await ev('window.__facts()');
@@ -436,7 +436,7 @@ console.log('⑤ the owner\'s pictures: 390 px wide, zh');
   await sleep(1500);
   const h1 = await ev('window.__facts()'), life = await ev('window.__cn.life.join(" ")');
   console.log(`    hide / show: the page heard «${life}»; rows ${JSON.stringify(h1.rows)}`);
-  ok('zh, a hide / show cycle: the page was hidden and shown again, and its socket really cycled', back && /hidden/.test(life) && /visible/.test(life) && h1.flips - h0.flips === 2 && await ev('document.visibilityState === "visible"'), { back, life, flips: h1.flips - h0.flips });
+  ok('zh, a hide / show cycle: the page was hidden and shown again, and its socket really cycled', gateOf(back) && gateOf(/hidden/.test(life)) && gateOf(/visible/.test(life)) && h1.flips - h0.flips === 2 && verdictOf(await ev('document.visibilityState === "visible"')), { back, life, flips: h1.flips - h0.flips });
   ok('zh, a hide / show cycle: no row, no count', h1.rows.length === 0 && h1.n === 0, h1.rows);
   await shot('zh-390-hide-show.png');
   await ev(`(localStorage.removeItem('vibespace.lang'), true)`);
@@ -451,4 +451,4 @@ console.log('the real home');
 }
 
 console.log(fail ? `\nFAILED: ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

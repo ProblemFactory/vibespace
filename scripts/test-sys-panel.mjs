@@ -12,7 +12,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const wt = scratch('syspanel-test'), fakeHome = scratch('syspanel-home');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
 try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -60,7 +60,7 @@ check('range switch keeps 2 charts', await evalJs(`(app.sidebar._railSysCharts |
 // THE regression: switch away must not throw/brick
 const sw = await evalJs(`(() => { try { document.querySelector('.rail-item[data-rail="folders"]').click(); return { ok: true }; } catch (e) { return { ok: false, err: String(e) }; } })()`);
 await sleep(800);
-check('switch away from System does not throw', sw.ok);
+check('switch away from System does not throw', verdictOf(sw.ok));
 const st2 = await evalJs(`(() => ({ charts: (app.sidebar._railSysCharts || []).length, foldersActive: !!document.querySelector('.rail-item[data-rail="folders"].active, .rail-item[data-rail="folders"].on') }))()`);
 check('charts destroyed on leave', st2.charts === 0);
 // switch back
@@ -72,4 +72,4 @@ const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, 
 // fixed port or /tmp path» now that the suite is in a tier (the EXCLUDED package)
 if (process.env.SP_SHOT) fs.writeFileSync(path.resolve(process.env.SP_SHOT), Buffer.from(shot.data, 'base64'));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

@@ -32,7 +32,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -82,7 +82,7 @@ const PPM = await import(pathToFileURL(path.join(repo, 'src/lib/pool-priority-mo
 {
   const bad = keyTable(PPM.billingAuthKey);
   ok(bad.length === 0, `billingAuthKey: '' for none, stable per identity, moved by every printed field (member name + id, pool, pin / priority place, host, estimated, kind, tail, detail), not by the pool default, collision-free (${bad.length} bad)`, bad);
-  ok(PPM.billingAuthKey(POOL({ placement: 'pinned', pinned: 'Alpha Max', pinnedId: 'acct-a' }), tEn).includes('"pinned"'), 'the placement note is IN the key (the words the chips print, via placementNote)');
+  ok(verdictOf(PPM.billingAuthKey(POOL({ placement: 'pinned', pinned: 'Alpha Max', pinnedId: 'acct-a' }), tEn).includes('"pinned"')), 'the placement note is IN the key (the words the chips print, via placementNote)');
 }
 
 // ── the fake DOM (what the two renderers touch, nothing more) ─────────────
@@ -160,15 +160,15 @@ function walkBar(Klass) {
   const w = walkBar(ChatStatusBar);
   ok(w.text0 === '⣿ 全部 → Alpha Max', `the phone chip first names the member the conversation runs on (${JSON.stringify(w.text0)})`);
   ok(w.text1 === '⣿ 全部 → Beta Max', `after a per-session switch (same pool, member B) the chip names B (${JSON.stringify(w.text1)}) — the owner's phone kept A`);
-  ok(w.oneRow, `the account stays ONE row of «⚙ 对话设置» after the switch (one billing row under its one key — the keyed-row law; ${w.el1 && w.el1.rows} rows)`);
-  ok(/currently billing Beta Max \(automatic\)/.test(w.el1.getAttribute('title')), `its tooltip names B and how it was placed (${w.el1.getAttribute('title')})`);
+  ok(verdictOf(w.oneRow), `the account stays ONE row of «⚙ 对话设置» after the switch (one billing row under its one key — the keyed-row law; ${w.el1 && w.el1.rows} rows)`);
+  ok(verdictOf(/currently billing Beta Max \(automatic\)/.test(w.el1.getAttribute('title'))), `its tooltip names B and how it was placed (${w.el1.getAttribute('title')})`);
   const bar = w.bar, el = w.el1;
   bar.setBilling(POOL({ ...TO_B, placement: 'pinned', pinned: 'Beta Max', pinnedId: 'acct-b' }));
-  ok(billingEl(bar) === el && /currently billing Beta Max \(pinned\)/.test(el.getAttribute('title')), `a pin repaints the tooltip with the placement words (${el.getAttribute('title')})`);
+  ok(billingEl(bar) === el && verdictOf(/currently billing Beta Max \(pinned\)/.test(el.getAttribute('title'))), `a pin repaints the tooltip with the placement words (${el.getAttribute('title')})`);
   bar.setBilling(POOL({ ...TO_B, placement: 'priority', priorityRank: 2 }));
-  ok(/\(priority #2\)/.test(el.getAttribute('title')), `a priority place repaints it too (${el.getAttribute('title')})`);
+  ok(verdictOf(/\(priority #2\)/.test(el.getAttribute('title'))), `a priority place repaints it too (${el.getAttribute('title')})`);
   bar.setBilling(POOL({ ...TO_B, placement: 'priority', priorityRank: 2, hostName: 'build-box' }));
-  ok(/on "build-box"/.test(el.getAttribute('title')), 'a host repaints it');
+  ok(verdictOf(/on "build-box"/.test(el.getAttribute('title'))), 'a host repaints it');
   const w0 = counters.innerHTML, a0 = el.getAttribute('title');
   let renders = 0; const orig = bar.render.bind(bar); bar.render = () => { renders++; return orig(); };
   for (let i = 0; i < 5; i++) bar.setBilling(POOL({ ...TO_B, placement: 'priority', priorityRank: 2, hostName: 'build-box', poolDefault: 'Other Max' }));
@@ -218,10 +218,10 @@ const { WindowManager } = await import(pathToFileURL(path.join(repo, 'src/lib/wi
     if (win._authBadgeKey !== want) drift.push({ what, renderer: 'title bar', have: win._authBadgeKey, want });
     if ((bar._billingKey ?? '') !== want) drift.push({ what, renderer: 'status bar', have: bar._billingKey, want });
     const badge = titleBar.querySelector(':scope > .win-auth-badge');
-    if (what === 'member A') { ok(!!badge && /wab-pool-tgt"> → Alpha Max</.test(badge.innerHTML), 'the title chip first names member A'); prevBadge = badge; }
-    if (what.startsWith('member B')) ok(badge === prevBadge && /wab-pool-tgt"> → Beta Max</.test(badge.innerHTML), `after the switch the title chip names B, on the same node (${badge?.textContent})`);
-    if (what === 'pinned to G, running on B for now') ok(/pinned to Gamma Max, running here for now/.test(badge?.dataset.tip || ''), 'the title chip\'s tooltip says the pin elsewhere (placement note)');
-    if (what === 'the same API key, another tail') ok(/…9876/.test(badge?.dataset.tip || ''), `an API key's tail it prints repaints it (${badge?.dataset.tip})`);
+    if (what === 'member A') { ok(!!badge && verdictOf(/wab-pool-tgt"> → Alpha Max</.test(badge.innerHTML)), 'the title chip first names member A'); prevBadge = badge; }
+    if (what.startsWith('member B')) ok(badge === prevBadge && verdictOf(/wab-pool-tgt"> → Beta Max</.test(badge.innerHTML)), `after the switch the title chip names B, on the same node (${badge?.textContent})`);
+    if (what === 'pinned to G, running on B for now') ok(verdictOf(/pinned to Gamma Max, running here for now/.test(badge?.dataset.tip || '')), 'the title chip\'s tooltip says the pin elsewhere (placement note)');
+    if (what === 'the same API key, another tail') ok(verdictOf(/…9876/.test(badge?.dataset.tip || '')), `an API key's tail it prints repaints it (${badge?.dataset.tip})`);
     if (what === 'no identity') ok(!badge, 'no identity ⇒ the title chip leaves');
   }
   ok(drift.length === 0, `after each of ${STEPS.length} steps BOTH renderers hold exactly billingAuthKey(auth) — one key, no drift (${drift.length} drifts)`, drift);
@@ -243,7 +243,7 @@ console.log('§4 negative controls (scripts/mutant-copy.mjs)');
   ok(psrc.split(pline).length === 2, 'the PURE key spells its field list once (the control patches exactly it)');
   const M2 = await import(pathToFileURL(MUT.write('src/lib/pool-priority-model.js', editAnchor(psrc, pline, "  return JSON.stringify([auth.source || '', auth.name || '', '', '', // CONTROL: the member forgotten", "src/lib/pool-priority-model.js"), 'no-member')).href);
   const bad = keyTable(M2.billingAuthKey);
-  ok(bad.some((b) => /member the conversation runs on/.test(b)) && bad.some((b) => /member by id/.test(b)), `CONTROL ② — a PURE key that forgets the member fails §1's table (${bad.length} rows)`, bad);
+  ok(gateOf(bad.some((b) => /member the conversation runs on/.test(b))) && verdictOf(bad.some((b) => /member by id/.test(b))), `CONTROL ② — a PURE key that forgets the member fails §1's table (${bad.length} rows)`, bad);
 }
 
 // ── §5 census + wiring ────────────────────────────────────────────────────
@@ -251,8 +251,8 @@ console.log('§5 census + wiring');
 {
   const fnBody = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const j = src.indexOf('\n  }\n', i); return src.slice(i, j < 0 ? undefined : j); };
   const wj = read('src/lib/window.js'), sb = read('src/lib/chat-status-bar.js'), app = read('src/lib/app.js'), cv = read('src/lib/chat-view.js');
-  ok(/const key = billingAuthKey\(auth, t\);/.test(fnBody(wj, '  setAuthBadge(id, auth) {')) && /import \{[^}]*\bbillingAuthKey\b[^}]*\} from '\.\/pool-priority-model\.js';/.test(wj), 'window.js setAuthBadge keys on the PURE billingAuthKey');
-  ok(/const key = billingAuthKey\(auth, t\);/.test(fnBody(sb, '  setBilling(auth, onSwitch) {')) && /import \{[^}]*\bbillingAuthKey\b[^}]*\} from '\.\/pool-priority-model\.js';/.test(sb), 'chat-status-bar.js setBilling keys on the PURE billingAuthKey');
+  ok(gateOf(/const key = billingAuthKey\(auth, t\);/.test(fnBody(wj, '  setAuthBadge(id, auth) {'))) && verdictOf(/import \{[^}]*\bbillingAuthKey\b[^}]*\} from '\.\/pool-priority-model\.js';/.test(wj)), 'window.js setAuthBadge keys on the PURE billingAuthKey');
+  ok(gateOf(/const key = billingAuthKey\(auth, t\);/.test(fnBody(sb, '  setBilling(auth, onSwitch) {'))) && verdictOf(/import \{[^}]*\bbillingAuthKey\b[^}]*\} from '\.\/pool-priority-model\.js';/.test(sb)), 'chat-status-bar.js setBilling keys on the PURE billingAuthKey');
   // the census: no file under src/lib spells a billing identity key of its own (a template over auth fields, or a
   // key assignment beside a billing store) — the two renderers are the only keyed ones and both call the PURE key
   const libDir = path.join(repo, 'src/lib');
@@ -270,21 +270,21 @@ console.log('§5 census + wiring');
   // the census's own control: the two pre-fix key lines, verbatim, are both caught
   const preFix = ["    const key = auth ? `${auth.source}:${auth.name || ''}` : '';",
     "    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.poolTarget || ''}:${auth.hostName || ''}:${auth.guessed ? 1 : 0}:${placementNote(auth, t)}` : '';"];
-  ok(preFix.every((l) => ownKeys('pre-fix', l).length === 1), 'CONTROL — the census catches both pre-fix key lines (the phone chip\'s and the title chip\'s), verbatim');
+  ok(verdictOf(preFix.every((l) => ownKeys('pre-fix', l).length === 1)), 'CONTROL — the census catches both pre-fix key lines (the phone chip\'s and the title chip\'s), verbatim');
   const defs = fs.readdirSync(libDir).filter((x) => x.endsWith('.js') && /export function billingAuthKey\(/.test(fs.readFileSync(path.join(libDir, x), 'utf-8')));
   ok(defs.length === 1 && defs[0] === 'pool-priority-model.js', `billingAuthKey is defined once, in the PURE pool-priority-model.js (${defs.join(', ')})`);
-  ok(/this\.wm\.setAuthBadge\?\.\(winId, match\.auth \|\| null\);/.test(app) && /session\.setBillingIdentity\?\.\(match\.auth \|\| null, /.test(app), 'the active-sessions merge still feeds BOTH renderers the same auth (app.syncSessionIdentity)');
-  ok(/setBillingIdentity\(auth, onSwitch\) \{\n    this\._statusBar\?\.setBilling\?\.\(auth, onSwitch\);/.test(cv), 'ChatView hands it to the status bar unchanged');
+  ok(gateOf(/this\.wm\.setAuthBadge\?\.\(winId, match\.auth \|\| null\);/.test(app)) && verdictOf(/session\.setBillingIdentity\?\.\(match\.auth \|\| null, /.test(app)), 'the active-sessions merge still feeds BOTH renderers the same auth (app.syncSessionIdentity)');
+  ok(verdictOf(/setBillingIdentity\(auth, onSwitch\) \{\n    this\._statusBar\?\.setBilling\?\.\(auth, onSwitch\);/.test(cv)), 'ChatView hands it to the status bar unchanged');
   // the sidebar card: it prints a subscription's name / an API key badge, but NO pool member — so `auth` stays
   // carried-only in LIVE_SESSION_FACTS (a pool switch buys no list re-render). A card that starts printing the
   // member must gate the digest on this key.
   const card = read('src/lib/session-card.js'), side = read('src/lib/sidebar.js');
-  ok(!/poolTarget/.test(card) && /auth: \{ digest: null \}/.test(side), 'the sidebar card prints no pool member, and LIVE_SESSION_FACTS keeps `auth` carried-only (if the card ever prints it: gate `auth` on billingAuthKey)');
-  ok(/\{ name: 'test-billing-chip', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs')), 'ci.mjs carries test-billing-chip in the fast tier');
+  ok(!/poolTarget/.test(card) && verdictOf(/auth: \{ digest: null \}/.test(side)), 'the sidebar card prints no pool member, and LIVE_SESSION_FACTS keeps `auth` carried-only (if the card ever prints it: gate `auth` on billingAuthKey)');
+  ok(verdictOf(/\{ name: 'test-billing-chip', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs'))), 'ci.mjs carries test-billing-chip in the fast tier');
 }
 
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

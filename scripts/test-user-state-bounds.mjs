@@ -42,7 +42,7 @@ const express = require('express');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ueb-'));
 process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { } });
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 900) : '')); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -231,7 +231,7 @@ console.log('§3 law C at the ops door: its bound binds what is READ, through ev
   // landed); the whole-key doors and the import go through server.js's parser, as on master
   const SPELL = ['/api/user-state/batches', '/api/user-state/batches/', '/API/USER-STATE/BATCHES', '/Api/User-State/Batches/'];
   const own = SPELL.every((p) => h.P.router.ownsBody(p)) && !h.P.router.ownsBody('/api/user-state') && !h.P.router.ownsBody('/api/user-state/') && !h.P.router.ownsBody('/api/config/import') && /persistenceRouter\.ownsBody\(req\.path\)/.test(SERVER_SRC);
-  ok(own && JSON_LIMIT === '50mb', `server.js leaves the ops door — every spelling the router takes: ${SPELL.join(' · ')} — to its own parser, by that parser's own match (${own}); the whole-key doors and the import on master's ${JSON_LIMIT}`, { own, JSON_LIMIT });
+  ok(gateOf(own) && JSON_LIMIT === '50mb', `server.js leaves the ops door — every spelling the router takes: ${SPELL.join(' · ')} — to its own parser, by that parser's own match (${own}); the whole-key doors and the import on master's ${JSON_LIMIT}`, { own, JSON_LIMIT });
   await send(h.port, 'patch', '/api/user-state/batches', { text: JSON.stringify({ batches: [{ batch: 'pgparseseed:1', age: 0, ops: [{ key: 'starredSessions', item: k(1), value: true }] }] }) });
   // 2 097 152 bytes as read ⇒ taken; one more — with its length, chunked with none, gzip inflating to it — through EVERY spelling ⇒ 413
   // (a body of exactly n bytes: folder names of 2 000 characters, as many as leave room for the last, which takes the remainder)
@@ -249,7 +249,7 @@ console.log('§3 law C at the ops door: its bound binds what is READ, through ev
   const rev1 = h.rev();
   const aLen = await send(h.port, 'patch', '/API/USER-STATE/BATCHES/', { text: at }), aZip = await send(h.port, 'patch', '/api/user-state/batches', { gen: chunks(atZ), gzip: true });
   const rev2 = h.rev();
-  ok(at.length === 2097152 && over.length === 2097153 && rows.every((x) => [x.len, x.chunk, x.gz].every((v) => v === '413 too-large')) && rev1 === rev0 && aLen.status === 200 && aZip.status === 200 && rev2 > rev1,
+  ok(at.length === 2097152 && over.length === 2097153 && gateOf(rows.every((x) => [x.len, x.chunk, x.gz].every((v) => v === '413 too-large'))) && rev1 === rev0 && aLen.status === 200 && aZip.status === 200 && rev2 > rev1,
     `the ops door, as read, at every spelling: ${over.length} B ⇒ ${rows.map((x) => `${x.p} ${x.len} / chunked ${x.chunk} / gzip ${x.gz}`).join('; ')} — nothing written (rev ${rev0} → ${rev1}); ${at.length} B ⇒ ${aLen.status} (at '/API/USER-STATE/BATCHES/'), gzip-streamed ${aZip.status}`, { rows, aLen, aZip, rev0, rev1, rev2 });
   // MASTER'S ROADS keep master's parser: a whole key past 12 MiB (13.6 MB of renames) through the whole-key door ⇒ taken, as master takes it
   const w0 = h.rev();
@@ -287,7 +287,7 @@ console.log('§5 ONE NUMBER: the page\'s splitter reads the route\'s numbers, an
   eng2.resend();
   for (let t = 0; t < 2000 && eng2.pending(); t++) await new Promise((res) => setImmediate(res));
   const names = Object.keys(JSON.parse(h2.file()).customNames || {}).length;
-  ok(same && names === 1000 && sizes.length > 1 && sizes.every((s) => s.status === 200 && s.bytes <= OPS_BODY && s.vals <= VALUES && s.maxBatch <= BATCH_BYTES),
+  ok(gateOf(same) && names === 1000 && sizes.length > 1 && verdictOf(sizes.every((s) => s.status === 200 && s.bytes <= OPS_BODY && s.vals <= VALUES && s.maxBatch <= BATCH_BYTES)),
     `the splitter reads ${b.maxRequestBytes} B / ${b.maxRequestOps} ops / ${b.maxRequestValueChars} characters of values = the route's, a batch of ≤ ${b.maxBytes} B (${same}); ~15 MiB of renames ⇒ ${sizes.length} requests, the largest ${(Math.max(...sizes.map((s) => s.bytes)) / 1048576).toFixed(2)} MiB / ${Math.max(...sizes.map((s) => s.vals))} characters of values, all ${names} renames on disk`, { b, names, sizes: sizes.slice(0, 4) });
 }
 
@@ -313,7 +313,7 @@ console.log('§7 ROUND 14: a whole key past 20 000 changed items takes back an e
   };
   for (const N of [MOVES, MOVES + 1, 25000]) rows.push(scene(N, false));
   rows.push(scene(25000, true));
-  ok(rows.every((x) => x.w === 200 && x.X && x.Y && x.Z && x.applied === 'pgnewpg001:1+pgnewpg001:3' && x.superseded === 'pgnewpg001:2') && rows[0].nFacts === MOVES && rows[0].record === '' && rows.slice(1).every((x, i) => x.nFacts === 1 && x.record === String([MOVES + 1, 25000, 25000][i])),
+  ok(gateOf(rows.every((x) => x.w === 200 && x.X && x.Y && x.Z && x.applied === 'pgnewpg001:1+pgnewpg001:3' && x.superseded === 'pgnewpg001:2')) && rows[0].nFacts === MOVES && rows[0].record === '' && verdictOf(rows.slice(1).every((x, i) => x.nFacts === 1 && x.record === String([MOVES + 1, 25000, 25000][i]))),
     `ROUND 14 — PAST 20 000 AN ACT ON AN UNTOUCHED ITEM LANDS: ${rows.map((x) => `N ${x.N}: ${x.nFacts} fact(s)${x.record ? ` (the key's record, ${x.record} digests)` : ''}, X ${x.X ? 'kept' : 'TAKEN BACK'}, Y ${x.Y ? 'archived (W decided it later)' : 'un-archived'}, Z ${x.Z ? 'kept' : 'lost'}`).join('; ')}`, rows);
 }
 {
@@ -332,7 +332,7 @@ console.log('§7 ROUND 14: a whole key past 20 000 changed items takes back an e
     const a = new Set(JSON.parse(h.file()).archivedSessions || []);
     rows.push({ N, pre, w: w.status, record: runsOf(st, 'archivedSessions').length, X: a.has(X), applied: ((r.body || {}).applied || []).join('+') });
   }
-  ok(rows.every((x) => x.w === 200 && x.record === 0 && x.X && x.applied === 'pgnewpg002:1'),
+  ok(verdictOf(rows.every((x) => x.w === 200 && x.record === 0 && x.X && x.applied === 'pgnewpg002:1')),
     `ROUND 14 — A STALE KEY THAT ONLY OMITS TAKES BACK NOTHING, AT EVERY SIZE: ${rows.map((x) => `N ${x.N} (${x.pre} confirmed, omitted whole ⇒ ${x.w}, ${x.record} record runs): X ${x.X ? 'kept' : 'TAKEN BACK'}`).join('; ')}`, rows);
 }
 {
@@ -355,7 +355,7 @@ console.log('§7 ROUND 14: a whole key past 20 000 changed items takes back an e
     { batch: 'pgtworuns1:3', age: 90000, ops: [{ key: 'archivedSessions', item: D2[3], value: false }] },
     { batch: 'pgtworuns1:4', age: 135000, ops: [{ key: 'archivedSessions', item: D1[4], value: false }] }] }));
   const a = new Set(JSON.parse(h.file()).archivedSessions || []);
-  ok(runs === `${MOVES + 1}+${MOVES + 1}` && !a.has(D1[1]) && a.has(D1[2]) && a.has(D2[3]) && a.has(D1[4]) && ((r.body || {}).applied || []).join('+') === 'pgtworuns1:1',
+  ok(runs === `${MOVES + 1}+${MOVES + 1}` && !a.has(D1[1]) && gateOf(a.has(D1[2])) && gateOf(a.has(D2[3])) && gateOf(a.has(D1[4])) && ((r.body || {}).applied || []).join('+') === 'pgtworuns1:1',
     `ROUND 14 — EACH WRITE KEEPS ITS TIME: two whole keys of ${MOVES + 1} new ids 60 s apart ⇒ runs ${runs}; an act between them on a W1 item ${a.has(D1[1]) ? 'TAKEN BACK' : 'lands'}, one before W1 ${a.has(D1[2]) ? 'taken back' : 'LANDS'}, one between them on a W2 item ${a.has(D2[3]) ? 'taken back' : 'LANDS'}; one made after the item's own older fact but before W1 ${a.has(D1[4]) ? 'taken back (the later record wins)' : 'LANDS'}`, { runs, body: r.body });
 }
 {
@@ -389,7 +389,7 @@ console.log('§7 ROUND 14: a whole key past 20 000 changed items takes back an e
   const req = UO.parseRequest([{ batch: 'pgtombrec1:1', age: 600, ops: [{ key: 'sessionGroups', item: 'g', member: 'claude:m3', value: true }] }]);
   const j = UO.judgeRequest(facts, req.page, req.list, { sessionGroups: { g: ['claude:n1'] } }, 1500);
   const rec = facts.get(keySet('sessionGroups'));
-  ok(rec && rec.runs && rec.runs[0].set.n === 2 && j.verdicts[0].verdict === 'superseded',
+  ok(gateOf(rec) && gateOf(rec.runs) && rec.runs[0].set.n === 2 && j.verdicts[0].verdict === 'superseded',
     `ROUND 14 — A GROUP DELETED PAST THE BOUND KEEPS ITS TOMBSTONE: the record holds ${rec && rec.runs ? rec.runs[0].set.n : 0} digests (the group and its tombstone); a member add made before it, into the group made again ⇒ ${j.verdicts[0].verdict}`, { verdicts: j.verdicts });
 }
 {
@@ -435,10 +435,10 @@ console.log('§T the heavy twin holds the moved legs');
   const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const MOVED = ['§1 the control, and law A: each door', '§2 law B: what the product', '§4 the ops door: one over each bound', '§6 MASTER', '§W B-518e — WORK, NEVER THE CLOCK', 'const WR = workCounts(WORK);', 'const drive = async (h, pageId, ops, echo = false) =>', 'const ctl = hub().timed('];
   const holds = (t) => MOVED.every((h) => t.includes(h));
-  ok(holds(twin) && MOVED.every((h) => here.split(h).length === 2), `§T the heavy twin holds §1, §2, §4, §6 and §W — their headings, the control, the page's engine, the counting child — and this file runs none of them`);
-  ok(/\{ name: 'test-user-state-bounds-work', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8')), '§T the twin is a HEAVY row of the tier');
+  ok(gateOf(holds(twin)) && verdictOf(MOVED.every((h) => here.split(h).length === 2)), `§T the heavy twin holds §1, §2, §4, §6 and §W — their headings, the control, the page's engine, the counting child — and this file runs none of them`);
+  ok(verdictOf(/\{ name: 'test-user-state-bounds-work', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8'))), '§T the twin is a HEAVY row of the tier');
   ok(!holds(twin.replace(MOVED[4], '§W (gone)')), 'RED CONTROL — a twin whose §W heading is gone is no longer the moved legs: §T goes red');
 }
 
 console.log(`\n${fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -24,7 +24,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -68,7 +68,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
   const w2 = st.appendRecords('a', 'c', [rec('c', 2), rec('c', 3), rec('c', 4)]);
   ok(w2.appended === 1 && w2.duplicates === 2, 'A REPLAYED PAGE IS A NO-OP — Lark\'s anchor semantics guarantee one at every boundary');
   const lines = fs.readFileSync(st.logPath('a', 'c'), 'utf-8').trim().split('\n');
-  ok(lines.length === 4 && lines.every((l) => JSON.parse(l).vendorId), 'the log is NDJSON, one record per line (appending stays O(1))');
+  ok(lines.length === 4 && verdictOf(lines.every((l) => JSON.parse(l).vendorId)), 'the log is NDJSON, one record per line (appending stays O(1))');
   const st2 = S.createChannelStore({ dir: st.dir });
   ok(st2.appendRecords('a', 'c', [rec('c', 3)]).duplicates === 1, 'the dedup set REBUILDS from the log tail — a restart does not forget what it already has');
   st.close(); st2.close();
@@ -81,7 +81,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
   const tail = st.readTail('a', 'c', { limit: 5 });
   ok(tail.length === 5 && tail[4].vendorId === 'v19' && tail[0].vendorId === 'v15', 'readTail returns the NEWEST n, oldest-first', tail.map((r) => r.vendorId).join(','));
   const before = st.readTail('a', 'c', { limit: 3, before: tail[0].at });
-  ok(before.length === 3 && before.every((r) => r.at < tail[0].at), '`before` pages strictly backwards (the window\'s upward scroll)');
+  ok(before.length === 3 && verdictOf(before.every((r) => r.at < tail[0].at)), '`before` pages strictly backwards (the window\'s upward scroll)');
   ok(st.readTail('a', 'nope', { limit: 5 }).length === 0, 'a conversation with no log reads as empty, never as a throw');
   ok(st.countSince('a', 'c', tail[2].at) === 2, 'countSince re-derives unread from the log and the read mark (invariant 7: a derived value is never only a stored one)');
   st.close();
@@ -96,7 +96,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
   st.appendRecords('a', 'c', [...old, ...recent]);
   const t = st.trim('a', 'c');
   ok(t.removed === 5 && t.kept === 5, '200-day-old records are dropped at the 90-day bound', JSON.stringify(t));
-  ok(st.readTail('a', 'c', { limit: 99 }).every((r) => r.at > NOW - 90 * day), 'nothing older than the bound survives');
+  ok(verdictOf(st.readTail('a', 'c', { limit: 99 }).every((r) => r.at > NOW - 90 * day)), 'nothing older than the bound survives');
 
   const st2 = mk('trim-floor');
   st2.appendRecords('a', 'c', Array.from({ length: 12 }, (_, i) => rec('c', i, NOW - (6 - i * 0.4) * day)));
@@ -189,7 +189,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
   fs.mkdirSync(fp, { recursive: true });   // a DIRECTORY where the log must be = EISDIR
   let threw = null;
   try { st.appendRecords('a', 'c', batch); } catch (e) { threw = e; }
-  ok(threw && /EISDIR|illegal operation|directory/i.test(String(threw.message || threw)),
+  ok(gateOf(threw) && verdictOf(/EISDIR|illegal operation|directory/i.test(String(threw.message || threw))),
     'a failed append THROWS rather than reporting success', String(threw && threw.message).slice(0, 80));
   fs.rmdirSync(fp);
   const w = st.appendRecords('a', 'c', batch);
@@ -207,7 +207,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
   fs.writeFileSync(dp, '');
   let threw2 = null;
   try { st2.appendRecords('b', 'd', batch2); } catch (e) { threw2 = e; }
-  ok(threw2 && /^(EEXIST|ENOTDIR)$/.test(String(threw2.code)), 'a throw BEFORE the write (the adapter directory is a file) throws too, and lands nothing', String(threw2 && threw2.code));
+  ok(gateOf(threw2) && verdictOf(/^(EEXIST|ENOTDIR)$/.test(String(threw2.code))), 'a throw BEFORE the write (the adapter directory is a file) throws too, and lands nothing', String(threw2 && threw2.code));
   fs.unlinkSync(dp);
   const w2 = st2.appendRecords('b', 'd', batch2);
   ok(w2.appended === 3 && w2.duplicates === 0, '…and the next pass still writes all three — the set claimed nothing, so there was nothing to forget', JSON.stringify(w2));
@@ -242,7 +242,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
              "      rememberVendorId(set, r.vendorId);\n      fresh.push(r);")
     .replace("    // DURABLE NOW — and only now may the set claim to hold them.\n    for (const r of fresh) rememberVendorId(set, r.vendorId);\n", "");
   const BOTH = R2_ONLY.replace("      dedup.delete(`${adapterId}/${convId}`);   // r4: the log is the only witness now\n", "");
-  ok(R2_ONLY !== src && !/DURABLE NOW/.test(R2_ONLY) && /inBatch/.test(src) && BOTH !== R2_ONLY,
+  ok(R2_ONLY !== src && !/DURABLE NOW/.test(R2_ONLY) && gateOf(/inBatch/.test(src)) && BOTH !== R2_ONLY,
     'NEGATIVE CONTROL setup: both pre-fix spellings were reconstructed from the shipped bytes (a control that cannot be built proves nothing)');
   // one failed append of each shape, then the retry — on the SAME live store
   const drive = (PS, name) => {
@@ -497,7 +497,7 @@ function rebuildUnderFault(PS, name, code) {
     const st = S.createChannelStore({ dir: path.join(ROOT, 'rebuild-enoent') });
     let threw = null, w = null;
     try { w = st.appendRecords('a', 'fresh', [rec('fresh', 1)]); } catch (e) { threw = e; }
-    ok(!threw && w && w.appended === 1, 'POSITIVE CONTROL: a conversation with no log yet (ENOENT) still appends — strict refuses errors, not absence', JSON.stringify({ threw: threw && threw.code, w }));
+    ok(!threw && gateOf(w) && w.appended === 1, 'POSITIVE CONTROL: a conversation with no log yet (ENOENT) still appends — strict refuses errors, not absence', JSON.stringify({ threw: threw && threw.code, w }));
     st.close();
   }
   // READERS stay lenient: a render-side readTail over an unreadable log is an
@@ -509,7 +509,7 @@ function rebuildUnderFault(PS, name, code) {
     let threw = null, got = null;
     faultNextOpen(fp, 'EIO');
     try { got = st.readTail('a', 'c', { limit: 5 }); } catch (e) { threw = e; } finally { unfaultOpen(); }
-    ok(!threw && Array.isArray(got) && got.length === 0, 'a plain (non-strict) reader still answers an unreadable log with an empty read — the refusal is scoped to the one caller whose answer writes bytes', JSON.stringify({ threw: threw && threw.code, got }));
+    ok(!threw && gateOf(Array.isArray(got)) && got.length === 0, 'a plain (non-strict) reader still answers an unreadable log with an empty read — the refusal is scoped to the one caller whose answer writes bytes', JSON.stringify({ threw: threw && threw.code, got }));
     st.close();
   }
   ok(fs.openSync === realOpenSync, 'the open-fault harness restored fs.openSync');
@@ -525,7 +525,7 @@ function rebuildUnderFault(PS, name, code) {
   try {
     const PS = require(pf);
     const r = rebuildUnderFault(PS, 'rebuild-pre-EIO', 'EIO');
-    ok(r.threw === null && r.first && r.first.appended === 2 && r.first.duplicates === 0,
+    ok(r.threw === null && gateOf(r.first) && r.first.appended === 2 && r.first.duplicates === 0,
       'NEGATIVE CONTROL: the r4 bytes read the unreadable log as EMPTY and append the whole replay — v5 written again', JSON.stringify({ threw: r.threw, first: r.first }));
     ok(r.served === 'v1,v2,v3,v4,v5,v5,v6' && r.dup === 1 && r.unread === 7,
       'NEGATIVE CONTROL: …and the log serves seven rows for six records, for ever', `${r.served} unread=${r.unread}`);
@@ -644,7 +644,7 @@ function rebuildUnderFault(PS, name, code) {
 
   // A caller that cannot name a boundary record still TERMINATES (the old
   // shape is the fallback, not a hang).
-  ok(st.readTail('a', 'c', { limit: 2, before: T0 + 1000, beforeId: null }).every((r) => Number(r.at) < T0 + 1000),
+  ok(verdictOf(st.readTail('a', 'c', { limit: 2, before: T0 + 1000, beforeId: null }).every((r) => Number(r.at) < T0 + 1000)),
     'with no beforeId the whole equal-`at` group is at-or-after — lossy, but terminating');
   st.close();
 }
@@ -673,7 +673,7 @@ function rebuildUnderFault(PS, name, code) {
     st.adapters.update((a) => { a.adapters.find((r) => r.id === 'x').consecutiveFailures = 5; }),
     st.adapters.update((a) => { a.adapters.find((r) => r.id === 'y').lastPass = { at: 1, ok: true, code: null }; }),
   ]).then(() => JSON.parse(fs.readFileSync(st.adaptersFile, 'utf-8')).adapters);
-  ok(both.find((r) => r.id === 'x').consecutiveFailures === 5 && both.find((r) => r.id === 'y').lastPass,
+  ok(both.find((r) => r.id === 'x').consecutiveFailures === 5 && verdictOf(both.find((r) => r.id === 'y').lastPass),
     'TWO CONCURRENT UPDATES BOTH SURVIVE — a failing adapter\'s health is not wiped by a healthy neighbour', JSON.stringify(both));
   ok(S.createChannelStore({ dir: st.dir }).adapters.live().adapters.length === 2, 'and the file is read ONCE at construction, never re-parsed per call');
   st.close();
@@ -709,7 +709,7 @@ function rebuildUnderFault(PS, name, code) {
   clock = Date.parse('2026-09-11T09:00:00Z');
   st.audit({ kind: 'z', who: 'me' });
   const shard = path.join(st.archiveDir, 'audit-2026-09-10.ndjson');
-  ok(fs.existsSync(shard) && fs.readFileSync(shard, 'utf-8').trim().split('\n').length === 3, 'yesterday is ARCHIVED, never deleted', fs.readdirSync(st.archiveDir).join(','));
+  ok(gateOf(fs.existsSync(shard)) && fs.readFileSync(shard, 'utf-8').trim().split('\n').length === 3, 'yesterday is ARCHIVED, never deleted', fs.readdirSync(st.archiveDir).join(','));
   ok(fs.readFileSync(st.auditFile, 'utf-8').trim().split('\n').length === 1, 'today starts fresh');
 
   // A SECOND roll naming the SAME archive day (a clock that moved backwards, a
@@ -721,29 +721,29 @@ function rebuildUnderFault(PS, name, code) {
   back.audit({ kind: 'w', who: 'me' });               // rolls 09-10 again
   // 3 lines from the first roll + the ONE `late` line this second roll carries.
   ok(fs.readFileSync(shard, 'utf-8').trim().split('\n').length === 4, 'a SECOND roll onto the same day APPENDS — naming a shard by date and overwriting it is how an archive loses the reason it exists', String(fs.readFileSync(shard, 'utf-8').trim().split('\n').length));
-  ok(fs.existsSync(path.join(st.archiveDir, 'audit-2026-09-11.ndjson')), 'a clock that moves BACKWARDS rolls too — the open file always belongs to exactly one day, whichever direction the clock went');
+  ok(verdictOf(fs.existsSync(path.join(st.archiveDir, 'audit-2026-09-11.ndjson'))), 'a clock that moves BACKWARDS rolls too — the open file always belongs to exactly one day, whichever direction the clock went');
   st.close(); back.close();
 }
 
 // ── ⑧ a vendor id may not escape its directory ──
 {
   const bad = (v) => { try { S.safeSeg(v); return false; } catch { return true; } };
-  ok(bad('a/b') && bad('..') && bad('.') && bad('a\\b') && bad(''), 'a path segment carrying a slash, a backslash, a dot-dot or nothing is REFUSED (channel ids come from vendors — this is a boundary, not a formality)');
-  ok(S.safeSeg('Lark:chat+1@x') === 'Lark:chat+1@x' && S.safeSeg('ünïcode').includes('%'), 'ordinary ids pass through; anything else is percent-encoded rather than silently dropped');
+  ok(gateOf(bad('a/b')) && gateOf(bad('..')) && gateOf(bad('.')) && gateOf(bad('a\\b')) && verdictOf(bad('')), 'a path segment carrying a slash, a backslash, a dot-dot or nothing is REFUSED (channel ids come from vendors — this is a boundary, not a formality)');
+  ok(S.safeSeg('Lark:chat+1@x') === 'Lark:chat+1@x' && verdictOf(S.safeSeg('ünïcode').includes('%')), 'ordinary ids pass through; anything else is percent-encoded rather than silently dropped');
   const st = mk('safe');
   let threw = false;
   try { st.appendRecords('../../etc', 'passwd', [rec('c', 1)]); } catch { threw = true; }
-  ok(threw, 'the refusal reaches the append path, not just the helper');
+  ok(verdictOf(threw), 'the refusal reaches the append path, not just the helper');
   st.close();
 }
 
 // ── ⑧b RETENTION HAS A CALLER — a policy nobody enforces is not a policy ──
 {
   const eng = engineSource(REPO).replace(/^\s*\/\/.*$/gm, '');
-  ok(/store\.trimAsync\(/.test(eng), 'the ingest engine CALLS store.trimAsync (B-0248 row 8: the trim\'s read off the loop; the rewrite still trim\'s) — the retention bounds above are enforced by something, not just implemented');
+  ok(verdictOf(/store\.trimAsync\(/.test(eng)), 'the ingest engine CALLS store.trimAsync (B-0248 row 8: the trim\'s read off the loop; the rewrite still trim\'s) — the retention bounds above are enforced by something, not just implemented');
   // 2026-09-26: at most every TRIM_EVERY_MS per conversation (the trim rewrites the log) — still
   // only after a pass that APPENDED, still on the ONE conversation that grew
-  ok(/if \(trimNow\)[^\n]*store\.trimAsync\(rec\.id, convId\)/.test(eng) && /if \(appended && \(!en\.trimmedAt \|\| now\(\) - en\.trimmedAt >= TRIM_EVERY_MS\)\) \{ en\.trimmedAt = now\(\); trimNow = true; \}/.test(eng), '…right after a pass that actually appended, on the ONE conversation that grew, at most every TRIM_EVERY_MS (a timer sweeping every conversation would re-read logs nothing touched)', eng.split('\n').filter((l) => /store\.trim|trimNow = true/.test(l)).join(' | '));
+  ok(gateOf(/if \(trimNow\)[^\n]*store\.trimAsync\(rec\.id, convId\)/.test(eng)) && verdictOf(/if \(appended && \(!en\.trimmedAt \|\| now\(\) - en\.trimmedAt >= TRIM_EVERY_MS\)\) \{ en\.trimmedAt = now\(\); trimNow = true; \}/.test(eng)), '…right after a pass that actually appended, on the ONE conversation that grew, at most every TRIM_EVERY_MS (a timer sweeping every conversation would re-read logs nothing touched)', eng.split('\n').filter((l) => /store\.trim|trimNow = true/.test(l)).join(' | '));
 }
 
 // (⑨ the tier + hygiene pins — MOVED to the fast scripts/test-channel-store-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -763,15 +763,15 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   else {
     const warns = [];
     const st = S.createChannelStore({ dir, log: { warn: (...a) => warns.push(a.join(' ')), log() {}, info() {} } });
-    ok(['index.json', 'adapters.json', 'outbox.json', 'groups.json'].every((f) => st.quarantined.some((q) => q.file === f && q.held === true && q.kind === 'damaged')), 'FIXTURE: every family is HELD as damaged (named in store.quarantined — B-f276 1b: torn bytes are held, never set aside)', JSON.stringify(st.quarantined));
+    ok(verdictOf(['index.json', 'adapters.json', 'outbox.json', 'groups.json'].every((f) => st.quarantined.some((q) => q.file === f && q.held === true && q.kind === 'damaged'))), 'FIXTURE: every family is HELD as damaged (named in store.quarantined — B-f276 1b: torn bytes are held, never set aside)', JSON.stringify(st.quarantined));
     let ixErr = null;
     const r = await st.index.update((ix) => { ix.conversations['fake/c1'] = { key: 'fake/c1', id: 'c1', adapterId: 'fake', tracked: true }; }).then(() => 'RESOLVED', (e) => { ixErr = e; return 'rejected'; });
-    ok(r === 'rejected' && ixErr && ixErr.code === 'store-blocked' && ixErr.status === 503 && /index\.json/.test(ixErr.message), 'index.update over a BLOCKED index.json REJECTS with code store-blocked (503) — never a success the next restart takes back', JSON.stringify({ r, code: ixErr && ixErr.code, status: ixErr && ixErr.status }));
+    ok(r === 'rejected' && gateOf(ixErr) && ixErr.code === 'store-blocked' && ixErr.status === 503 && verdictOf(/index\.json/.test(ixErr.message)), 'index.update over a BLOCKED index.json REJECTS with code store-blocked (503) — never a success the next restart takes back', JSON.stringify({ r, code: ixErr && ixErr.code, status: ixErr && ixErr.status }));
     ok(!st.index.entry('fake', 'c1', { create: false }), '…and the mutation never ran: nothing lives in memory that the disk will not hold');
     for (const fam of ['adapters', 'outbox', 'groups']) {
       let e = null;
       await st[fam].update(() => {}).catch((x) => { e = x; });
-      ok(e && e.code === 'store-blocked' && e.status === 503, `${fam}.update over a blocked file rejects with code store-blocked (503) — a route answers {error, code} the panel can word`, JSON.stringify(e && { code: e.code, status: e.status }));
+      ok(gateOf(e) && e.code === 'store-blocked' && e.status === 503, `${fam}.update over a blocked file rejects with code store-blocked (503) — a route answers {error, code} the panel can word`, JSON.stringify(e && { code: e.code, status: e.status }));
     }
     // the ROUTE answers the code (routes/channels.js fail()): the panel's routeErrorText words it
     const express = require(path.join(REPO, 'node_modules/express'));
@@ -784,7 +784,7 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
     const srv = await new Promise((resolve) => { const s2 = app.listen(0, '127.0.0.1', () => resolve(s2)); });
     const rr = await fetch(`http://127.0.0.1:${srv.address().port}/api/channel-groups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', members: [RA, RB], quiet: true }) }).then(async (x) => ({ status: x.status, body: await x.json() }));
     await new Promise((resolve) => srv.close(resolve));
-    ok(rr.status === 503 && rr.body.code === 'store-blocked' && /groups\.json/.test(rr.body.error), 'the owner\'s create over a blocked groups.json answers 503 {error, code:"store-blocked"} (was 500 with code null)', JSON.stringify(rr));
+    ok(rr.status === 503 && rr.body.code === 'store-blocked' && verdictOf(/groups\.json/.test(rr.body.error)), 'the owner\'s create over a blocked groups.json answers 503 {error, code:"store-blocked"} (was 500 with code null)', JSON.stringify(rr));
     // (the store-blocked words pin: MOVED to the fast scripts/test-channel-store-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
     const pw = warns.length;
     st.pace.set({ v: 1, pairs: { 'a|b': 1 }, senders: {} });
@@ -821,14 +821,14 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   ok(re.appendSide('a', 'c', [d('v1', NOW, 'add', 'THUMBSUP', 'ou_a')]).duplicates === 1, 'after a restart the side dedup set is rebuilt from the side log (a boundary replay is still a no-op)');
   // readSide by needle: a line naming another message is not parsed
   const onlyV1 = re.readSide('a', 'c', { msgs: new Set(['v1']) });
-  ok(onlyV1.length === 2 && onlyV1.every((x) => x.msg === 'v1'), 'readSide returns only the lines naming the asked messages');
+  ok(onlyV1.length === 2 && verdictOf(onlyV1.every((x) => x.msg === 'v1')), 'readSide returns only the lines naming the asked messages');
   fs.appendFileSync(re.sidePath('a', 'c'), '{"k":"rx","msg":"v3","at":1,"form":"delta" THIS LINE IS NOT JSON\n');
   ok(re.readSide('a', 'c', { msgs: new Set(['v1']) }).length === 2 && re.readSide('a', 'c', { msgs: new Set(['v3']) }).length === 0, '…a line naming another message is skipped without parsing its body; a broken one contributes nothing');
   // invariant 8: the message readers never see a side line
   ok(re.readTail('a', 'c', { limit: 99 }).length === 3 && re.countSince('a', 'c', 0) === 3, 'invariant 8: readTail and countSince (unread) see the three messages only — never a side line');
   const found = await re.search('a', 'THUMBSUP');
   ok(found.results.length === 0 && found.files === 1, 'invariant 8: search reads the message log only (the side log lives in a `~side/` subdirectory it never opens)', JSON.stringify(found));
-  ok(re.sidePath('a', 'c').includes(`${path.sep}~side${path.sep}`) && !S.safeSeg('x~side').includes('~'), 'the side log sits in `~side/` — a name no vendor id can spell (safeSeg escapes `~`), so a conversation `c.side` never collides with `c`\'s side log');
+  ok(gateOf(re.sidePath('a', 'c').includes(`${path.sep}~side${path.sep}`)) && !S.safeSeg('x~side').includes('~'), 'the side log sits in `~side/` — a name no vendor id can spell (safeSeg escapes `~`), so a conversation `c.side` never collides with `c`\'s side log');
   // the r2 / r4 discipline: a throw INSIDE the write drops the cached set; the rebuild is strict
   const sp = re.sidePath('a', 'c');
   const saved = fs.readFileSync(sp);
@@ -836,13 +836,13 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   let threw = null; try { re.appendSide('a', 'c', [d('v2', NOW + 9, 'add', 'OK', 'ou_z')]); } catch (e) { threw = e.code; }
   fs.rmdirSync(sp); fs.writeFileSync(sp, saved);
   const again = re.appendSide('a', 'c', [d('v2', NOW + 9, 'add', 'OK', 'ou_z')]);
-  ok(threw && again.appended === 1, 'a throw INSIDE the side write drops the cached set — the retry re-derives it from the log and writes the line (never a phantom duplicate)', `${threw} ${JSON.stringify(again)}`);
+  ok(gateOf(threw) && again.appended === 1, 'a throw INSIDE the side write drops the cached set — the retry re-derives it from the log and writes the line (never a phantom duplicate)', `${threw} ${JSON.stringify(again)}`);
   const re2 = S.createChannelStore({ dir: st.dir });
   fs.chmodSync(sp, 0o000);
   let strict = null; try { re2.appendSide('a', 'c', [d('v2', NOW + 10, 'add', 'OK', 'ou_q')]); } catch (e) { strict = e.code; }
   fs.chmodSync(sp, 0o644);
   const after = re2.appendSide('a', 'c', [d('v2', NOW + 10, 'add', 'OK', 'ou_q')]);
-  ok((strict === 'EACCES' || process.getuid && process.getuid() === 0) && after.appended === 1, 'a side log that cannot be READ at rebuild THROWS (EACCES) — nothing is cached as "empty"; the next append re-reads it', `${strict} ${JSON.stringify(after)}`);
+  ok((strict === 'EACCES' || gateOf(process.getuid) && process.getuid() === 0) && after.appended === 1, 'a side log that cannot be READ at rebuild THROWS (EACCES) — nothing is cached as "empty"; the next append re-reads it', `${strict} ${JSON.stringify(after)}`);
   st.close(); re.close(); re2.close();
 }
 // the trim: a message dropped by retention drops its side lines; a kept one is COMPACTED (attack 17: 5 000
@@ -891,7 +891,7 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   const oracle = Rx.foldReactions(all, {});
   const folded = Rx.foldReactions(st.readSide('a', 'c', { msgs: new Set(['v1']) }).filter((x) => x.k === 'rx'), {});
   ok(size <= S.SIDE_COMPACT_BYTES + 200 * 1024 && compactions >= 1, `20 000 events on ONE message with no message append: the side log compacts as it grows (${compactions}×) and stays under ${(S.SIDE_COMPACT_BYTES / 1048576).toFixed(0)} MiB + one batch (${(size / 1024).toFixed(0)} KiB)`, JSON.stringify([size, compactions]));
-  ok(JSON.stringify(folded.map((x) => [x.key, x.count])) === JSON.stringify(oracle.map((x) => [x.key, x.count])) && oracle[0] && oracle[0].count === 200, 'the compacted log folds to the SAME counts as the whole stream (200 of 300 members reacted at the end)', JSON.stringify([folded.map((x) => [x.key, x.count]), oracle.map((x) => [x.key, x.count])]));
+  ok(JSON.stringify(folded.map((x) => [x.key, x.count])) === JSON.stringify(oracle.map((x) => [x.key, x.count])) && gateOf(oracle[0]) && oracle[0].count === 200, 'the compacted log folds to the SAME counts as the whole stream (200 of 300 members reacted at the end)', JSON.stringify([folded.map((x) => [x.key, x.count]), oracle.map((x) => [x.key, x.count])]));
   // the READ is the newest window: a line beyond SIDE_READ_BYTES from the end is not read at all
   const st2 = mk('side-window');
   st2.appendRecords('a', 'c', [rec('c', 1), rec('c', 2)]);
@@ -967,7 +967,7 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   const real = run(S, 'side-thrash');
   ok(real.size0 <= S.SIDE_COMPACT_BYTES + 600 * 1024 && real.size <= S.SIDE_COMPACT_BYTES + 64 * 1024, `5 000 messages' snapshots: the compacted log stays bounded (${(real.size0 / 1024).toFixed(0)} KiB after the snapshots, ${(real.size / 1024).toFixed(0)} KiB after the storm; the trigger is ${S.SIDE_COMPACT_BYTES / 1024} KiB, a compaction keeps ≤ ${S.SIDE_KEEP_BYTES / 1024} KiB)`, JSON.stringify(real));
   ok(real.reads <= 3 && real.rewrites <= 1, `300 reaction events on a log past the trigger: ${real.reads} whole-file read(s), ${real.rewrites} rewrite(s) (${real.ms.toFixed(0)} ms) — a compaction is SIDE_KEEP_BYTES of appends away, never one per event`, JSON.stringify(real));
-  ok(real.oldestSeen && real.recentAll, 'a new reaction on the OLDEST message is visible to a read, and so is every recently changed message (the compacted log never outgrows the read window; the most recently changed sit last)', JSON.stringify(real));
+  ok(gateOf(real.oldestSeen) && verdictOf(real.recentAll), 'a new reaction on the OLDEST message is visible to a read, and so is every recently changed message (the compacted log never outgrows the read window; the most recently changed sit last)', JSON.stringify(real));
   // CONTROL: the pre-fix compaction (every message kept, first-appearance order) — re-read + re-written per event, and
   // the oldest message's new reaction folded into a line outside the window
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
@@ -1053,8 +1053,8 @@ console.log('\n⑫ the side-log cost census — bounded reads, append-only write
   const windowRead = /sideTail\(sidePath\(adapterId, convId\), SIDE_READ_BYTES/.test(bodies.get('sideWindow') || '') && /sideTail\(sidePath\(adapterId, convId\), Math\.max\(64 \* 1024, Number\(maxBytes\) \|\| SIDE_READ_BYTES\)\)/.test(bodies.get('readSide') || '');
   const writes = Object.keys(SIDE_FNS).filter((n) => !VIA_ONLY.has(n) && bodies.has(n) && /\bfs\.(?:writeFileSync|appendFileSync|renameSync)\(|\bappendLines\(/.test(bodies.get(n)));
   ok(touches.length >= 6 && !unlisted.length && !dead.length, `(a) every store function that touches a side file is on the closed table (${touches.join(', ')})${unlisted.length ? ' — UNLISTED: ' + unlisted.join(', ') : ''}${dead.length ? ' — dead rows: ' + dead.join(', ') : ''}`);
-  ok(!wholeReads.length && tailRead && windowRead, `(a) no side function reads a file whole — every read is sideTail's bounded readSync, the window SIDE_READ_BYTES (${(S.SIDE_READ_BYTES / 1048576).toFixed(0)} MiB)${wholeReads.length ? ' — whole reads in: ' + wholeReads.join(', ') : ''}`);
-  ok(writes.sort().join() === 'appendSide,trimSide' && /appendLines\(fp, /.test(bodies.get('appendSide')) && /const tmp = `\$\{fp\}\.tmp-\$\{process\.pid\}`;[\s\S]*fs\.renameSync\(tmp, fp\)/.test(bodies.get('trimSide')), `(a) the side writes are appendSide's append (append-only) and trimSide's temp + rename (${writes.join(', ')})`);
+  ok(!wholeReads.length && gateOf(tailRead) && verdictOf(windowRead), `(a) no side function reads a file whole — every read is sideTail's bounded readSync, the window SIDE_READ_BYTES (${(S.SIDE_READ_BYTES / 1048576).toFixed(0)} MiB)${wholeReads.length ? ' — whole reads in: ' + wholeReads.join(', ') : ''}`);
+  ok(writes.sort().join() === 'appendSide,trimSide' && gateOf(/appendLines\(fp, /.test(bodies.get('appendSide'))) && verdictOf(/const tmp = `\$\{fp\}\.tmp-\$\{process\.pid\}`;[\s\S]*fs\.renameSync\(tmp, fp\)/.test(bodies.get('trimSide'))), `(a) the side writes are appendSide's append (append-only) and trimSide's temp + rename (${writes.join(', ')})`);
   const walkJs = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const f = `${d}/${e.name}`; if (e.isDirectory()) walkJs(f, out); else if (/\.(c|m)?js$/.test(e.name)) out.push(f); } return out; };
   const namers = walkJs('src').filter((f) => f !== STORE && /\bsidePath\(|\bSIDE_DIR\b|['"`]~side\b|\bsideTail\(|\bsideLines\(/.test(strip(fs.readFileSync(path.join(REPO, f), 'utf-8'))));
   const eng = strip(engineSource(REPO));
@@ -1100,8 +1100,8 @@ console.log('\n⑫ the side-log cost census — bounded reads, append-only write
   const flat = (rows) => inWindow(rows) && rows[2].perEvent <= 1.25 * rows[0].perEvent;
   const good = bytesLeg(S, false), bad = bytesLeg(S, true);
   const fmt = (rows) => rows.map((r) => `${r.mib} MiB: ${(r.perEvent / 1024).toFixed(0)} KiB/event`).join(', ');
-  ok(flat(good), `(b) 100 events with a working compaction read ≤ one window per event, the same whatever the log's size (${fmt(good)})`);
-  ok(inWindow(bad), `(b) …and with a compaction that FAILS every attempt (the log grows): never more than ONE WINDOW per event whatever its size — a failed compaction is retried SIDE_KEEP_BYTES later, never per event (${fmt(bad)})`);
+  ok(verdictOf(flat(good)), `(b) 100 events with a working compaction read ≤ one window per event, the same whatever the log's size (${fmt(good)})`);
+  ok(verdictOf(inWindow(bad)), `(b) …and with a compaction that FAILS every attempt (the log grows): never more than ONE WINDOW per event whatever its size — a failed compaction is retried SIDE_KEEP_BYTES later, never per event (${fmt(bad)})`);
   // (c) time, interleaved n / 2n, median of 5 pairs, ≤ 3 attempts, on the compaction's worst case
   const timeLeg = (SM) => {
     const out = [];
@@ -1119,7 +1119,7 @@ console.log('\n⑫ the side-log cost census — bounded reads, append-only write
     return out;
   };
   const tl = timeLeg(S);
-  ok(tl.every((x) => x.r <= 2.5), `(c) 100 events on the compaction's worst case (one message's distinct keys): 2× the log ⇒ ≤ 2.5× the time — ${tl.map((x) => `${x.from}→${x.to} MiB ×${x.r.toFixed(2)}${x.tries.length > 1 ? ` (attempts ${x.tries.map((r) => '×' + r.toFixed(2)).join(', ')})` : ''}`).join(', ')}`);
+  ok(verdictOf(tl.every((x) => x.r <= 2.5)), `(c) 100 events on the compaction's worst case (one message's distinct keys): 2× the log ⇒ ≤ 2.5× the time — ${tl.map((x) => `${x.from}→${x.to} MiB ×${x.r.toFixed(2)}${x.tries.length > 1 ? ` (attempts ${x.tries.map((r) => '×' + r.toFixed(2)).join(', ')})` : ''}`).join(', ')}`);
   // CONTROL (i): the pre-r2 store — the whole-file window reader and the per-event retry of a failed compaction
   const PRE_WIN = "    try { tail = sideTail(sidePath(adapterId, convId), SIDE_READ_BYTES, { strict }); } catch (e) { if (strict) throw e; return { lines: [], cut: false }; }";
   const PRE_GATE = '    if (size > SIDE_COMPACT_BYTES && !(failedAt !== undefined && size < failedAt + SIDE_KEEP_BYTES)) {';
@@ -1134,13 +1134,13 @@ console.log('\n⑫ the side-log cost census — bounded reads, append-only write
     '    const order = new Set();   // first appearance, never removed (a key that fell to 0 and came back keeps its place)', '    const order = [];', "src/channel-reactions.js"),
     '      if (count > 0) { state.set(e.key, { count, by }); order.add(e.key); }', '      if (count > 0) { state.set(e.key, { count, by }); order.push(e.key); }', "src/channel-reactions.js"),
     '        if (!s) { s = { count: 0, by: [] }; state.set(x.key, s); order.add(x.key); }', '        if (!s) { s = { count: 0, by: [] }; state.set(x.key, s); if (!order.includes(x.key)) order.push(x.key); }', "src/channel-reactions.js");
-  ok((qSrc.match(/order\.push/g) || []).length === 2 && qSrc.includes('order.includes(x.key)'), 'CONTROL (ii) setup: the pre-r1 quadratic compactSide was reconstructed (3 edits)');
+  ok((qSrc.match(/order\.push/g) || []).length === 2 && verdictOf(qSrc.includes('order.includes(x.key)')), 'CONTROL (ii) setup: the pre-r1 quadratic compactSide was reconstructed (3 edits)');
   const qPath = MUTCS.write('src/channel-reactions.js', qSrc, 'compact-quadratic');
   const IMP = "const { compactSide } = require('./channel-reactions.js');";
   ok(srcS.split(IMP).length === 2, 'CONTROL (ii) setup: the store imports compactSide once');
   const QS = require(MUTCS.write(STORE, srcS.replace(IMP, `const { compactSide } = require(${JSON.stringify(qPath)});`), 'side-quadratic'));
   const qt = timeLeg(QS);
-  ok(qt[0].tries.length === 3 && qt[0].tries.every((r) => r > 2.5), `CONTROL (ii): bound to the pre-r1 quadratic compaction the same leg reads ${qt[0].tries.map((r) => '×' + r.toFixed(2)).join(', ')} per doubling (1→2 MiB) on every attempt — (c) would be red`);
+  ok(qt[0].tries.length === 3 && verdictOf(qt[0].tries.every((r) => r > 2.5)), `CONTROL (ii): bound to the pre-r1 quadratic compaction the same leg reads ${qt[0].tries.map((r) => '×' + r.toFixed(2)).join(', ')} per doubling (1→2 MiB) on every attempt — (c) would be red`);
 }
 
 // ⑫b verify r2 (MONEY): the custom-emoji picture cache's BOUND — the pictures live in the account's attachment LRU
@@ -1201,7 +1201,7 @@ console.log('\n⑬ lane lark-threads: the place door (widen-only)');
     const c2 = st6.widenPlaces('a', 'g', [{ vendorId: 'v1', threadKey: 'omt_OTHER' }], { src: 'recheck' });
     const c3 = st6.appendRecords('a', 'g', [{ ...root, threadKey: 'omt_THIRD' }]);
     const kept = st6.readTail('a', 'g', { limit: 5 }).find((r) => r.vendorId === 'v1').threadKey;
-    ok(c1.widened.length === 0 && JSON.stringify(c1.conflicts) === JSON.stringify([{ vendorId: 'v1', stored: 'omt_first', offered: 'omt_OTHER' }]) && c2.conflicts.length === 1 && c3.widened.length === 0 && kept === 'omt_first' && warned.filter((w) => /DIFFERENT thread id/.test(w)).length === 1 && /omt_first/.test(warned[0]) && /omt_OTHER/.test(warned[0]),
+    ok(c1.widened.length === 0 && JSON.stringify(c1.conflicts) === JSON.stringify([{ vendorId: 'v1', stored: 'omt_first', offered: 'omt_OTHER' }]) && c2.conflicts.length === 1 && c3.widened.length === 0 && kept === 'omt_first' && warned.filter((w) => /DIFFERENT thread id/.test(w)).length === 1 && gateOf(/omt_first/.test(warned[0])) && verdictOf(/omt_OTHER/.test(warned[0])),
       '⑬ verify r1 F5: a copy naming another thread is refused by name (`conflicts`: stored + offered), the stored place never changes, and the door SAYS it once per conversation (three offers, one line)', JSON.stringify({ c1, c2: c2.conflicts, kept, warned }));
     st6.close();
   }
@@ -1214,13 +1214,13 @@ console.log('\n⑬ lane lark-threads: the place door (widen-only)');
   const fr = st2.findRecord('a', 'g', 'v1'), od = st2.oldestRecord('a', 'g');
   {
     const sr = await st2.search('a', 'the post');
-    ok(fr && fr.threadKey === 'omt_born' && od && od.vendorId === 'v1' && od.threadKey === 'omt_born' && sr.results.length === 1 && sr.results[0].threadKey === 'omt_born' && st2.readTail('a', 'g', { limit: 10 }).find((r) => r.vendorId === 'v3').threadKey === 'omt_3',
+    ok(gateOf(fr) && fr.threadKey === 'omt_born' && gateOf(od) && od.vendorId === 'v1' && od.threadKey === 'omt_born' && sr.results.length === 1 && sr.results[0].threadKey === 'omt_born' && st2.readTail('a', 'g', { limit: 10 }).find((r) => r.vendorId === 'v3').threadKey === 'omt_3',
       '⑬ every reader serves the patched record — findRecord, oldestRecord, search, readTail — across a restart (the side line is the durable fact)', JSON.stringify({ fr: fr && fr.threadKey, od: od && od.threadKey, sr: sr.results.map((r) => r.threadKey) }));
   }
   // THE BYTES: the message line is untouched (append-only), the patch is ONE validated side line
   const logText = fs.readFileSync(st2.logPath('a', 'g'), 'utf-8');
   const sideL = fs.readFileSync(st2.sidePath('a', 'g'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  ok(!logText.includes('omt_born') && sideL.length === 2 && sideL.every((x) => x.k === 'pl' && R.validateSide(x).ok) && sideL.find((x) => x.msg === 'v3').src === 'walk',
+  ok(!logText.includes('omt_born') && sideL.length === 2 && gateOf(sideL.every((x) => x.k === 'pl' && R.validateSide(x).ok)) && sideL.find((x) => x.msg === 'v3').src === 'walk',
     '⑬ the message log stays append-only (the line as first written); each widening is ONE validated `pl` side line naming where it came from', JSON.stringify(sideL));
   // THE SIDE COMPACTION KEEPS IT: 1+ MiB of reactions on another message — the place line survives, never "forgotten"
   const many = [];
@@ -1307,8 +1307,8 @@ console.log('\n⑬ the incremental index write (B-f32b verify r1): an async upda
   };
   const head = await legs(S, 'head');
   ok(head.async === 2, `⑬ an async update fn whose await saw a write: the next write carries the row's LAST state (disk v=${head.async}, memory 2) — the update's rows are marked again at its end`);
-  ok(head.born, '⑬ a row born outside entry() reaches the disk within one sweep cycle (the cycle end counts the map against the cached chunks)');
-  ok(head.reborn && head.early, `⑬ the incremental file = the whole-file bytes when a row is removed + re-born (${head.reborn}) and when a row is touched before its birth (${head.early})`);
+  ok(verdictOf(head.born), '⑬ a row born outside entry() reaches the disk within one sweep cycle (the cycle end counts the map against the cached chunks)');
+  ok(gateOf(head.reborn) && verdictOf(head.early), `⑬ the incremental file = the whole-file bytes when a row is removed + re-born (${head.reborn}) and when a row is touched before its birth (${head.early})`);
   const DONE = "const done = () => { curTouch = null; if (t.all) { touchAll('update reached the whole map'); } else for (const k of t) { dirtyKeys.add(k); fire(k); } };";
   const CYCLE = /\n    \/\/ verify r1: a row BORN outside `entry\(\)`[^\n]*\n    const bornOutside = [^\n]*\n    if \(bornOutside !== undefined\) \{[^\n]*\n[^\n]*\n[^\n]*\n    \}/;   // B-360d unit 1: the check found beside the rows owed to the next write
   // B-360d found holder 4's follow (lane bl-loop-b, 主开发 r5065 / r5544): entry()'s re-birth guard has TWO halves since that
@@ -1318,7 +1318,7 @@ console.log('\n⑬ the incremental index write (B-f32b verify r1): an async upda
   // in test-channel-index-births ②b («a guard that knows the chunks only»)
   const REBORN = /\n      if \(layout && \(layout\.chunkOf\.has\(key\) \|\| \(warm && warm\.keys && warm\.keys\.has\(key\)\)\)\) touchAll\([^\n]*/;
   const TOUCH = /  function touch\(key\) \{[^\n]*/;
-  ok(src.includes(DONE) && CYCLE.test(src) && REBORN.test(src) && TOUCH.test(src), '⑬ fixture: the three rules are where the controls cut them');
+  ok(gateOf(src.includes(DONE)) && gateOf(CYCLE.test(src)) && gateOf(REBORN.test(src)) && verdictOf(TOUCH.test(src)), '⑬ fixture: the three rules are where the controls cut them');
   const ma = await legs(require(MUTCS.write('src/channel-store.js', editAnchor(src, DONE, 'const done = () => { curTouch = null; if (t.all) fire(null); else for (const k of t) fire(k); };', "src/channel-store.js"), 'ir1-nore-mark')), 'm-async');
   ok(ma.async === 1, `⑬ CONTROL: the rows NOT marked again at the update's end — the disk keeps the row as the await left it (v=${ma.async}) — red`);
   const mb = await legs(require(MUTCS.write('src/channel-store.js', editAnchor(src, CYCLE, '', "src/channel-store.js"), 'ir1-nocount')), 'm-born');
@@ -1373,9 +1373,9 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const head = await quietRun(S, 'head', false);
   // B-360d unit 1 (line 267, 主开发 r2081): a quiet pass makes no journal line and owes the index nothing, so flush() asks no write
   // at all — the law judged: no index write, the inode kept, the stamp journal's lines (the equal-bytes skip is not met on this road — its own scene below)
-  ok(head.writes === 0 && head.sameFile && head.stamp === T + 50e3 && head.journal === 30, `⑭ ten passes that bring nothing (three rows each, the engine's own update shape): ${head.writes} index writes, the same file (inode kept), ${head.skipped} flushes skipped; the last stamp reads back through stamps.lane(); the journal FILE holds one line per stamp (poll-stamps.log read back: ${head.journal} lines, ${head.jbytes} bytes)`, JSON.stringify(head));
+  ok(head.writes === 0 && gateOf(head.sameFile) && head.stamp === T + 50e3 && head.journal === 30, `⑭ ten passes that bring nothing (three rows each, the engine's own update shape): ${head.writes} index writes, the same file (inode kept), ${head.skipped} flushes skipped; the last stamp reads back through stamps.lane(); the journal FILE holds one line per stamp (poll-stamps.log read back: ${head.journal} lines, ${head.jbytes} bytes)`, JSON.stringify(head));
   const headRow = await quietRun(S, 'head-inrow', true);
-  ok(headRow.writes === 0 && headRow.stamp === T + 50e3 && headRow.disk, `⑭ a pass that still stamps the ROW (a write past the door) is healed where the row is serialized and at the update's end (主开发 r2081): ${headRow.writes} writes, the stamp taken into the side map, the file = the whole-file bytes`, JSON.stringify(headRow));
+  ok(headRow.writes === 0 && headRow.stamp === T + 50e3 && verdictOf(headRow.disk), `⑭ a pass that still stamps the ROW (a write past the door) is healed where the row is serialized and at the update's end (主开发 r2081): ${headRow.writes} writes, the stamp taken into the side map, the file = the whole-file bytes`, JSON.stringify(headRow));
   const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];
   const HEAL = ['      healRow(k, conv[k]);\n', ''];
   const HEAL2 = ['      if (has) healRow(k, conv[k]);\n', ''];   // 主开发 r2081: the update's end heals too
@@ -1404,7 +1404,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   // the ten tmp + rename writes alternate between TWO numbers and the tenth lands on the first again (measured on ext4:
   // 8783115, 8783114, … 8783114 = i0), so `!sameFile` read "never rewritten" there; tmpfs (this machine's /tmp) never
   // reuses one. (`sameFile` stays the witness of NO write above: no rename, no new inode, on any filesystem.)
-  ok(c1.writes === 10 && c1.lastOnDisk, `⑭ CONTROL: the stamp back in the row (kept by the serializer, never healed) — each of the ten quiet passes rewrites the index (${c1.writes} writes, the tenth pass's stamp in the file on disk) — red`, JSON.stringify(c1));
+  ok(c1.writes === 10 && verdictOf(c1.lastOnDisk), `⑭ CONTROL: the stamp back in the row (kept by the serializer, never healed) — each of the ten quiet passes rewrites the index (${c1.writes} writes, the tenth pass's stamp in the file on disk) — red`, JSON.stringify(c1));
   // B-360d unit 1 (the r2061 chain's fresh read): the journal's compare is the ONE wall a quiet pass meets — cut, each pass
   // makes a journal line, the flush after it writes the index whole, and the line's seq moves the index's actsSeq (a
   // top-level field), so the equal-bytes skip never matches here
@@ -1424,7 +1424,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     return r;
   };
   const wq = await wholeQuiet(S, 'head');
-  ok(wq.writes === 0 && wq.skipped >= 10 && wq.sameFile, `⑭ ten updates that reach the whole map and change nothing: ${wq.writes} index writes, ${wq.skipped} skipped as equal bytes, the same file (inode kept)`, JSON.stringify(wq));
+  ok(wq.writes === 0 && wq.skipped >= 10 && verdictOf(wq.sameFile), `⑭ ten updates that reach the whole map and change nothing: ${wq.writes} index writes, ${wq.skipped} skipped as equal bytes, the same file (inode kept)`, JSON.stringify(wq));
   const c3 = await wholeQuiet(cut('qw-noskip', SKIP), 'c-noskip');
   ok(c3.writes === 10, `⑭ CONTROL: without the equal-bytes skip the same ten updates write the index ${c3.writes} times — red`, JSON.stringify(c3));
 
@@ -1481,7 +1481,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const kh = killRun(path.join(REPO, 'src/channel-store.js'), 'head');
   ok(kh.signal === 'SIGKILL' && !kh.side && kh.exact === 40 && kh.walk === 40 && kh.torn === 0, `⑭ THE JOURNAL: a process killed (SIGKILL) after three passes' stamps, before the side file's first write — the next start reads all ${kh.exact} of 40 last poll instants back (walkStartedAt ${kh.walk}/40), no side file needed`, JSON.stringify(kh));
   const kt = killRun(path.join(REPO, 'src/channel-store.js'), 'tear', { tear: true });
-  ok(kt.exact === 40 && kt.torn === 1 && /1 line\(s\) unreadable/.test(kt.said) && kt.after === T + 7000 && kt.torn2 === 1, `⑭ …a line the kill cut short is skipped, counted and said ("${kt.said.slice(0, 120)}"), its conversation keeping its older instant; the next stamp after it starts on its own line and survives a second kill`, JSON.stringify(kt));
+  ok(kt.exact === 40 && kt.torn === 1 && gateOf(/1 line\(s\) unreadable/.test(kt.said)) && kt.after === T + 7000 && kt.torn2 === 1, `⑭ …a line the kill cut short is skipped, counted and said ("${kt.said.slice(0, 120)}"), its conversation keeping its older instant; the next stamp after it starts on its own line and survives a second kill`, JSON.stringify(kt));
   const kj = killRun(cutFile('qk-nojournal', JOURNAL), 'c-nojournal');
   ok(kj.signal === 'SIGKILL' && kj.exact === 0, `⑭ CONTROL: no journal (the side file alone: with no journal line its compaction never comes due, B-360d) — the same kill loses every stamp (${kj.exact} of 40 read back): each row "never polled" after the restart — red`, JSON.stringify(kj));
   const kr = killRun(cutFile('qk-noreplay', REPLAY), 'c-noreplay');
@@ -1509,11 +1509,11 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     return r;
   };
   const lh = await legacyRun(S, 'head', { kill: true });
-  ok(lh.read === T - 7000 && lh.said && lh.stripped && lh.journalFirst && lh.after === T - 7000 && lh.walk === T - 299000 - 5, '⑭ a legacy row is read (through stamps.lane()), said once, and healed: its first index write carries no stamp and the journal holds all 300 healed stamps BEFORE it — a process killed right after that write keeps every stamp', JSON.stringify(lh));
+  ok(lh.read === T - 7000 && gateOf(lh.said) && gateOf(lh.stripped) && gateOf(lh.journalFirst) && lh.after === T - 7000 && lh.walk === T - 299000 - 5, '⑭ a legacy row is read (through stamps.lane()), said once, and healed: its first index write carries no stamp and the journal holds all 300 healed stamps BEFORE it — a process killed right after that write keeps every stamp', JSON.stringify(lh));
   const lc = await legacyRun(cut('ql-noowed', OWED), 'c-noowed', { kill: true });
-  ok(lc.stripped && !lc.after, `⑭ CONTROL: the heal not journaled — the index written without the stamps, killed right after it, the legacy stamps are gone (lastPollAt ${lc.after}) — red`);
+  ok(gateOf(lc.stripped) && !lc.after, `⑭ CONTROL: the heal not journaled — the index written without the stamps, killed right after it, the legacy stamps are gone (lastPollAt ${lc.after}) — red`);
   const lc2 = await legacyRun(cut('ql-noheal', HEAL, LOADHEAL), 'c-noheal');
-  ok(lc2.stripped && !lc2.after, `⑭ CONTROL: no heal — the legacy stamp reads (${lc2.read}) until the first write drops it from the file, and the restart has none (${lc2.after}) — red`);
+  ok(gateOf(lc2.stripped) && !lc2.after, `⑭ CONTROL: no heal — the legacy stamp reads (${lc2.read}) until the first write drops it from the file, and the restart has none (${lc2.after}) — red`);
 
   // a stamp for a conversation that LEFT the index leaves with it; a row re-born under its key starts unstamped
   const leftRun = async (M, tag) => {
@@ -1532,7 +1532,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const xh = await leftRun(S, 'head');
   ok(!xh.c4 && !xh.c5 && xh.reborn === null, '⑭ a stamp for a conversation that left the index leaves the side file with it; a row re-born under the key starts unstamped (due by its own cadence)', JSON.stringify(xh));
   const xp = await leftRun(cut('qx-noprune', PRUNE), 'c-noprune');
-  ok(xp.c4, '⑭ CONTROL: no prune — the side file keeps the stamp of a conversation the index no longer holds — red');
+  ok(verdictOf(xp.c4), '⑭ CONTROL: no prune — the side file keeps the stamp of a conversation the index no longer holds — red');
   const xb = await leftRun(cut('qx-nobirth', BIRTH), 'c-nobirth');
   ok(xb.reborn === T, `⑭ CONTROL: no birth rule — the re-born row inherits the departed row's stamp (${xb.reborn}) — red`);
 
@@ -1549,7 +1549,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     return r;
   };
   const dh = await lostRun(S, 'head');
-  ok(/30 conversation\(s\) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll/.test(dh.line) && dh.lost === 30, `⑭ the side file deleted: the next start says it — "${dh.line.slice(0, 170)}"`);
+  ok(gateOf(/30 conversation\(s\) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll/.test(dh.line)) && dh.lost === 30, `⑭ the side file deleted: the next start says it — "${dh.line.slice(0, 170)}"`);
   const dc = await lostRun(cut('qd-nosay', SAID), 'c-nosay');
   ok(!dc.line, '⑭ CONTROL: the line cut — a start that lost every poll time is silent — red');
 
@@ -1571,10 +1571,10 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     return out;
   };
   const fh = await foreignRun(S, 'head');
-  ok(fh.v2.held && fh.v2.kept && !fh.v2.aside && fh.nofields.held && fh.nofields.kept && !fh.nofields.aside && fh.entries.said && !fh.entries.held && !fh.entries.aside && fh.entries.c2 === T, `⑭ a foreign-shaped poll-stamps.json (v 2 / no columns) is HELD as damaged — kept where it is, never set aside or written over (B-f276 1b); a v1 entry that is not a list is counted, the readable ones kept: ${JSON.stringify(fh)}`);
+  ok(gateOf(fh.v2.held) && gateOf(fh.v2.kept) && !fh.v2.aside && gateOf(fh.nofields.held) && gateOf(fh.nofields.kept) && !fh.nofields.aside && gateOf(fh.entries.said) && !fh.entries.held && !fh.entries.aside && fh.entries.c2 === T, `⑭ a foreign-shaped poll-stamps.json (v 2 / no columns) is HELD as damaged — kept where it is, never set aside or written over (B-f276 1b); a v1 entry that is not a list is counted, the readable ones kept: ${JSON.stringify(fh)}`);
   const VALID = ["v.v === 1 && Array.isArray(v.fields) && v.fields.includes('lastPollAt') && v.stamps", 'Array.isArray(v.fields) && v.stamps'];
   const UNREAD = ['      if (!Array.isArray(arr)) { unreadStamps++; continue; }\n', '      if (!Array.isArray(arr)) continue;\n'];
-  ok([VALID, UNREAD].every(([from]) => src.split(from).length === 2), '⑭ CONTROL setup: the foreign-shape rules are where the control cuts them');
+  ok(verdictOf([VALID, UNREAD].every(([from]) => src.split(from).length === 2)), '⑭ CONTROL setup: the foreign-shape rules are where the control cuts them');
   const fc = await foreignRun(cut('qf-loose', VALID, UNREAD), 'c-loose');
   ok(!fc.v2.said && !fc.v2.held && !fc.nofields.said && !fc.nofields.held && !fc.entries.said, `⑭ CONTROL: the loose shape check (lane head f469d942) — every one read as "no stamps" in silence, each conversation due at once unsaid — red: ${JSON.stringify(fc)}`);
 
@@ -1677,17 +1677,17 @@ console.log('\n⑮ B-f276 (lane bl-windows, 主开发 r457): a failed READ holds
   };
   const r = await heldRun(S, 'head');
   console.log(`    facts: accounts ${JSON.stringify({ refusal: r.ad.refusal, aside: r.ad.aside.length, after: r.ad.after })} · index ${JSON.stringify({ refusal: r.ix.refusal, aside: r.ix.aside.length, after: r.ix.after, next: r.ix.next.rows })} · pace ${JSON.stringify(r.pc)}`);
-  ok(r.ad.held === true && /could not be read/.test(r.ad.blocked || '') && /held/.test(r.ad.blocked || '') && !r.ad.ran && r.ad.refusal === 'store-blocked' && r.ad.aside.length === 0 && r.ad.stillDir && r.ad.q.held && r.ad.q.lifts === 'by-itself', '⑮ adapters.json unreadable at the open: HELD — nothing set aside (no .corrupt-, the file where it was), a change refused by name (store-blocked, its function never ran), the item says it lifts by itself', JSON.stringify(r.ad));
-  ok(r.ad.after.ev === 'loaded' && r.ad.after.id === 'a1' && r.ad.after.blocked === null && r.ad.after.wrote === 'Two' && r.ad.after.loadedAt, '⑮ …it reads again: its records taken in, the hold lifted, a change written again', JSON.stringify(r.ad.after));
-  ok(/could not be read/.test(r.ix.blocked || '') && r.ix.refusal === 'store-blocked' && r.ix.aside.length === 0 && r.ix.q.held && r.ix.q.lifts === 'next-start' && r.ix.rows === 0 && r.ix.journalSame, '⑮ index.json unreadable at the open: HELD — nothing set aside, an act refused by name, the acts journal byte-identical (its lines wait for the next start)', JSON.stringify(r.ix));
-  ok(r.ix.after.ev === 'reads-again' && r.ix.after.stillHeld && r.ix.after.rows === 0 && r.ix.after.readsAt && r.ix.after.said, '⑮ …it reads again: SAID (loaded at the next start of VibeSpace) — never swapped under the running readers, still held', JSON.stringify(r.ix.after));
-  ok(r.ix.next.rows.includes('fake/c1') && !r.ix.next.blocked, '⑮ …the next start loads it: the kept row is there', JSON.stringify(r.ix.next));
+  ok(r.ad.held === true && gateOf(/could not be read/.test(r.ad.blocked || '')) && gateOf(/held/.test(r.ad.blocked || '')) && !r.ad.ran && r.ad.refusal === 'store-blocked' && r.ad.aside.length === 0 && gateOf(r.ad.stillDir) && gateOf(r.ad.q.held) && r.ad.q.lifts === 'by-itself', '⑮ adapters.json unreadable at the open: HELD — nothing set aside (no .corrupt-, the file where it was), a change refused by name (store-blocked, its function never ran), the item says it lifts by itself', JSON.stringify(r.ad));
+  ok(r.ad.after.ev === 'loaded' && r.ad.after.id === 'a1' && r.ad.after.blocked === null && r.ad.after.wrote === 'Two' && verdictOf(r.ad.after.loadedAt), '⑮ …it reads again: its records taken in, the hold lifted, a change written again', JSON.stringify(r.ad.after));
+  ok(gateOf(/could not be read/.test(r.ix.blocked || '')) && r.ix.refusal === 'store-blocked' && r.ix.aside.length === 0 && gateOf(r.ix.q.held) && r.ix.q.lifts === 'next-start' && r.ix.rows === 0 && verdictOf(r.ix.journalSame), '⑮ index.json unreadable at the open: HELD — nothing set aside, an act refused by name, the acts journal byte-identical (its lines wait for the next start)', JSON.stringify(r.ix));
+  ok(r.ix.after.ev === 'reads-again' && gateOf(r.ix.after.stillHeld) && r.ix.after.rows === 0 && gateOf(r.ix.after.readsAt) && verdictOf(r.ix.after.said), '⑮ …it reads again: SAID (loaded at the next start of VibeSpace) — never swapped under the running readers, still held', JSON.stringify(r.ix.after));
+  ok(gateOf(r.ix.next.rows.includes('fake/c1')) && !r.ix.next.blocked, '⑮ …the next start loads it: the kept row is there', JSON.stringify(r.ix.next));
   ok(r.pc.ev === 'loaded' && r.pc.live.join() === 'before,now' && r.pc.disk.join() === 'before,now' && r.pc.s1 === '10,20,30', '⑮ wake-pace.json held, then read: the file\'s floors AND the one granted during the hold, in memory and on disk — a sender\'s wake stamps JOINED (none of the file\'s window dropped)', JSON.stringify(r.pc));
-  ok(r.torn.atStart.aside.length === 0 && r.torn.atStart.kind === 'damaged' && r.torn.atStart.blocked && r.torn.door === 'pass' && r.torn.aside.length === 1 && /\.damaged-/.test(r.torn.aside[0]) && Array.isArray(r.torn.copies) && r.torn.copies.includes(r.torn.aside[0]) && r.torn.blocked === null, '⑮ torn adapters.json (read, does not parse): HELD as damaged at the start — nothing set aside; the person\'s door (Start it empty) sets it aside under a dated name, LISTED among the accounts\' copies the key check counts', JSON.stringify(r.torn));
+  ok(r.torn.atStart.aside.length === 0 && r.torn.atStart.kind === 'damaged' && gateOf(r.torn.atStart.blocked) && r.torn.door === 'pass' && r.torn.aside.length === 1 && gateOf(/\.damaged-/.test(r.torn.aside[0])) && gateOf(Array.isArray(r.torn.copies)) && gateOf(r.torn.copies.includes(r.torn.aside[0])) && r.torn.blocked === null, '⑮ torn adapters.json (read, does not parse): HELD as damaged at the start — nothing set aside; the person\'s door (Start it empty) sets it aside under a dated name, LISTED among the accounts\' copies the key check counts', JSON.stringify(r.torn));
   // CONTROLS: today's rename of a failed read; the ledger taken over (no merge)
   const HOLD = ["    if (st === 'missing') { fam.value = empty(); fam.missing = true; return fam; }\n", "    if (st !== 'data') { fam.value = empty(); fam.missing = true; return fam; }   /* MUTANT: the release — a failed read starts EMPTY */\n"];   // B-f276 1b: the store hold's answer
   const MERGE = ["(v) => { paceSet({ ...v, pairs: unionBy(v.pairs, pc.pairs), senders: unionBy(v.senders, pc.senders) }); }", '(v) => { paceSet(v); }'];
-  ok([HOLD, MERGE].every(([from]) => src.split(from).length === 2), '⑮ CONTROL setup: the hold and the merge are where the controls cut them');
+  ok(verdictOf([HOLD, MERGE].every(([from]) => src.split(from).length === 2)), '⑮ CONTROL setup: the hold and the merge are where the controls cut them');
   const mut = (tag, ...cs) => require(MUTCS.write('src/channel-store.js', cs.reduce((t, [from, to]) => editAnchor(t, from, to, "src/channel-store.js"), src), tag));
   const c1 = await heldRun(mut('held-rename', HOLD), 'c-rename');
   ok(c1.ad.ran === true && c1.ad.refusal !== 'store-blocked', '⑮ CONTROL: the hold cut (the release\'s read: a failed read starts EMPTY) — a change RUNS over the accounts nobody read — red', JSON.stringify({ ad: { ran: c1.ad.ran, refusal: c1.ad.refusal } }));
@@ -1720,17 +1720,17 @@ console.log('\n⑮b B-f276 A2 (主开发 r487): A CLEANUP DELETES ONLY WHAT IT K
   const st = S.createChannelStore({ dir, log: { log() {}, info() {}, warn() {}, error() {} }, heldRetry: { firstMs: 5, maxMs: 10 } });
   const heldNow = st.wallHeld('filesSweep');
   st.close();
-  ok(heldNow === true && fs.existsSync(path.join(dir, 'outbox-files', 'p-x-1', 'a.txt')), '⑮b a held outbox: the files sweep\'s wall is up (wallHeld) — the waiting card\'s folder is there', JSON.stringify({ heldNow }));
+  ok(heldNow === true && verdictOf(fs.existsSync(path.join(dir, 'outbox-files', 'p-x-1', 'a.txt'))), '⑮b a held outbox: the files sweep\'s wall is up (wallHeld) — the waiting card\'s folder is there', JSON.stringify({ heldNow }));
   // trim: only a MISSING message log is «no log» — a failed read trims nothing (unknown is never an orphan)
   const d2 = path.join(ROOT, 'wall-trim'); const st2 = S.createChannelStore({ dir: d2, log: { log() {}, info() {}, warn() {}, error() {} } });
   const lp = path.join(d2, 'msgs', 'fake', 'c1.ndjson'); fs.mkdirSync(lp, { recursive: true });   // the log's read fails (EISDIR)
   const t = st2.trim('fake', 'c1');
   st2.close();
-  ok(t && t.unread === true && t.removed === 0, '⑮b trim: a message log whose read FAILED trims nothing and keeps its side log (only ENOENT is «no log»)', JSON.stringify(t));
+  ok(gateOf(t) && t.unread === true && t.removed === 0, '⑮b trim: a message log whose read FAILED trims nothing and keeps its side log (only ENOENT is «no log»)', JSON.stringify(t));
 }
 
 console.log('\n⑩ the patched copies never touch the tree');
-for (const r of copiesCensus(MUTCS.files, MUTCS.dir, REPO, { minCopies: 5 })) ok(r.pass, '⑩ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTCS.files, MUTCS.dir, REPO, { minCopies: 5 })) ok(verdictOf(r.pass), '⑩ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

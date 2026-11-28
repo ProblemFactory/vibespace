@@ -32,7 +32,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const MUTRC = mutantCopies('rcui', REPO);
 
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -56,19 +56,19 @@ console.log('§1 dialogModel (PURE)');
   ok('…with the right numbers (7d period, until = now + P, wait 2h, 2 left) and the name', walled.lines[0].params.account === 'Alpha' && walled.lines[1].params.period === '7d' && walled.lines[1].params.until === 'T605800' && walled.lines[2].params.resetsAt === 'T8200' && walled.lines[3].params.wait === '2h' && walled.lines[4].params.n === 2);
   ok('…confirmable, no refusal', walled.canConfirm === true && walled.refusal === null);
   const open = RC.dialogModel({ key: 'cxs-1', name: 'Alpha', vendor: 'openai', creditsLeft: 1, resetsAtSec: 1000 + 7200, periodSec: 18000, remainingPct: 40 }, { nowSec: 1000, fmtTime: fmt });
-  ok('openai NOT at a wall: says what it discards (40 %), and saves NO wait (nobody is waiting)', keys(open).includes('The {pct}% still left in the current window is discarded.') && open.lines.find((l) => /discarded/.test(l.key)).params.pct === 40 && !keys(open).includes('Saves a wait of {wait}.'), JSON.stringify(keys(open)));
-  ok('…the LAST credit is named as such', keys(open).includes('This is the last stored reset credit.'));
-  ok('NEGATIVE CONTROL: the same facts at a wall DO save the wait — the leg above sees the walled gate', keys(RC.dialogModel({ vendor: 'openai', resetsAtSec: 8200, periodSec: 18000, remainingPct: 0 }, { nowSec: 1000, fmtTime: fmt })).includes('Saves a wait of {wait}.'));
+  ok('openai NOT at a wall: says what it discards (40 %), and saves NO wait (nobody is waiting)', gateOf(keys(open).includes('The {pct}% still left in the current window is discarded.')) && open.lines.find((l) => /discarded/.test(l.key)).params.pct === 40 && !keys(open).includes('Saves a wait of {wait}.'), JSON.stringify(keys(open)));
+  ok('…the LAST credit is named as such', verdictOf(keys(open).includes('This is the last stored reset credit.')));
+  ok('NEGATIVE CONTROL: the same facts at a wall DO save the wait — the leg above sees the walled gate', verdictOf(keys(RC.dialogModel({ vendor: 'openai', resetsAtSec: 8200, periodSec: 18000, remainingPct: 0 }, { nowSec: 1000, fmtTime: fmt })).includes('Saves a wait of {wait}.')));
   const an = RC.dialogModel({ key: 'sub-1', name: 'Max', vendor: 'anthropic', resetsAtSec: 9000, remainingPct: 0, creditsLeft: 2 }, { nowSec: 1000, fmtTime: fmt });
   ok('anthropic (P3 reuse): refills in place, the reset time unchanged; no "discarded" line', keys(an)[1] === 'Refills the limit now; it still resets at {resetsAt} (the period does not change).' && !keys(an).some((k) => /discarded/.test(k)));
   const none = RC.dialogModel({ key: '__global__', vendor: null }, { nowSec: 1000, fmtTime: fmt });
   ok('no vendor ⇒ not_supported refusal, not confirmable, only the account line', none.canConfirm === false && none.refusal.key === RC.refusalLine('not_supported').key && none.lines.length === 1);
   for (const code of ['no_live_session', 'no_credits', 'cooldown', 'spend_refused']) {
     const m = RC.dialogModel({ key: 'cxs-1', vendor: 'openai', code, cooldownUntilSec: 5000, error: 'hour cap' }, { nowSec: 1000, fmtTime: fmt });
-    ok(`code ${code} ⇒ its own refusal sentence, not confirmable`, m.canConfirm === false && m.refusal && m.refusal.key === RC.refusalLine(code, { until: 'x' }).key);
+    ok(`code ${code} ⇒ its own refusal sentence, not confirmable`, m.canConfirm === false && gateOf(m.refusal) && m.refusal.key === RC.refusalLine(code, { until: 'x' }).key);
   }
   ok('cooldown names the instant it lifts; spend_refused carries the ceiling\'s why', RC.dialogModel({ vendor: 'openai', code: 'cooldown', cooldownUntilSec: 5000 }, { nowSec: 1000, fmtTime: fmt }).refusal.params.until === 'T5000' && RC.dialogModel({ vendor: 'openai', code: 'spend_refused', error: 'hour cap' }, { fmtTime: fmt }).refusal.params.why === 'hour cap');
-  ok('every REFUSAL_CODE has its own sentence (none falls to the generic line)', RC.REFUSAL_CODES.every((c) => RC.refusalLine(c, { until: 'x' }).key !== RC.refusalLine('zzz').key));
+  ok('every REFUSAL_CODE has its own sentence (none falls to the generic line)', verdictOf(RC.REFUSAL_CODES.every((c) => RC.refusalLine(c, { until: 'x' }).key !== RC.refusalLine('zzz').key)));
   ok('offerOf keeps a plain accountKey and drops anything else (the card\'s button target)', RC.offerOf({ available: 2, mode: 'off', accountKey: 'cxs-ab_12' }).accountKey === 'cxs-ab_12' && RC.offerOf({ available: 2, mode: 'off', accountKey: '<img src=x>' }).accountKey === undefined && RC.offerOf({ available: 2, mode: 'off', accountKey: 7 }).accountKey === undefined);
 }
 
@@ -80,9 +80,9 @@ console.log('\n§2 the roster chip');
   ok('not capable WITH a passive grant ⇒ a chip whose button cannot be used', JSON.stringify(RC.rosterResetOffer({ resetGrant: { resetsLeft: 1, useBySec: 2e9 } }, { capable: false })) === '{"count":1,"useBySec":2000000000,"canUse":false}');
   const MA = await import(path.join(REPO, 'src/lib/manage-agents.js'));
   const live = MA.resetChipHtml({ count: 3, useBySec: null, canUse: true }, { key: 'cxs-"x' });
-  ok('resetChipHtml (usable): the count + a LIVE "Use…" button carrying the escaped key', /· 3 reset credits/.test(live) && /<button class="agent-btn acct-reset-use" data-reset-key="cxs-&quot;x"/.test(live) && !/disabled/.test(live), live);
+  ok('resetChipHtml (usable): the count + a LIVE "Use…" button carrying the escaped key', gateOf(/· 3 reset credits/.test(live)) && gateOf(/<button class="agent-btn acct-reset-use" data-reset-key="cxs-&quot;x"/.test(live)) && !/disabled/.test(live), live);
   const dead = MA.resetChipHtml({ count: 1, useBySec: 2e9, canUse: false }, { key: 'sub-1', disabledWhy: 'Claude Code offers only the interactive /limit-reset — run it in a terminal session' });
-  ok('resetChipHtml (claude): the button is DISABLED and its title says why (the interactive /limit-reset)', /<button class="agent-btn acct-reset-use" disabled title="Claude Code offers only the interactive \/limit-reset — run it in a terminal session"/.test(dead) && !/data-reset-key/.test(dead), dead);
+  ok('resetChipHtml (claude): the button is DISABLED and its title says why (the interactive /limit-reset)', gateOf(/<button class="agent-btn acct-reset-use" disabled title="Claude Code offers only the interactive \/limit-reset — run it in a terminal session"/.test(dead)) && !/data-reset-key/.test(dead), dead);
   ok('no offer ⇒ empty (a row without credits says nothing)', MA.resetChipHtml(null, { key: 'k' }) === '');
   // (§2 the rosters' wiring pins — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -228,7 +228,7 @@ console.log('\n§3 the route over the real engine');
   const pv = w.call('GET', w.A);
   ok('GET preview on the codex account: vendor openai, the stored count, the carrier session, the most-spent window (7d, reset, walled)',
     pv.code === 200 && pv.body.vendor === 'openai' && pv.body.creditsLeft === 3 && pv.body.sessionId === 'cx1' && pv.body.name === 'Cx Alpha' && pv.body.periodSec === 604800 && pv.body.resetsAtSec === w.nowS + 2 * 86400 && pv.body.remainingPct === 0 && !pv.body.code, JSON.stringify(pv.body));
-  ok('an agent\'s session token is refused (human-triggered only) — and writes nothing', (() => { const r = w.call('POST', w.A, { headers: { authorization: 'Bearer vsst_abc' } }); return r.code === 403 && r.body.code === 'agent_forbidden' && w.verbs() === 0; })());
+  ok('an agent\'s session token is refused (human-triggered only) — and writes nothing', verdictOf((() => { const r = w.call('POST', w.A, { headers: { authorization: 'Bearer vsst_abc' } }); return r.code === 403 && r.body.code === 'agent_forbidden' && w.verbs() === 0; })()));
   const before = w.charged();
   const r1 = w.quietly(() => w.call('POST', w.A, { body: { sessionId: 'cx1' } }));
   ok('POST on the codex account ⇒ 200 {ok, sessionId}', r1.code === 200 && r1.body.ok === true && r1.body.sessionId === 'cx1', JSON.stringify(r1.body));
@@ -239,7 +239,7 @@ console.log('\n§3 the route over the real engine');
   ok('a second POST inside the 10-min floor ⇒ 429 cooldown (with the instant it lifts), no second verb', r2.code === 429 && r2.body.code === 'cooldown' && r2.body.cooldownUntilSec > w.nowS && w.verbs() === 1, JSON.stringify(r2.body));
   // the outcome: a PERSON's failed attempt is reported and never walks the ladder
   w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, { type: 'reset_credit_result', outcome: 'nothingToReset' }));
-  ok('a failed PERSON\'s attempt ⇒ ONE notice naming the account and the vendor\'s answer (in words: codex-cli 0.159.3\'s own outcome description)', w.notices.some((n) => /Reset credit not used on Cx Alpha — no current limit window is eligible for a reset \(nothing was spent\)\./.test(n)), JSON.stringify(w.notices));
+  ok('a failed PERSON\'s attempt ⇒ ONE notice naming the account and the vendor\'s answer (in words: codex-cli 0.159.3\'s own outcome description)', verdictOf(w.notices.some((n) => /Reset credit not used on Cx Alpha — no current limit window is eligible for a reset \(nothing was spent\)\./.test(n))), JSON.stringify(w.notices));
   ok('…and NO wait is armed from it (the ladder is not walked a second time)', w.arms.length === 0, JSON.stringify(w.arms));
   ok('…the origin is consumed (one answer per attempt)', w.s1._resetCreditOrigin === null);
   // CONTRAST (the control for the two legs above): an AUTO attempt's failure says nothing and walks the ladder
@@ -253,7 +253,7 @@ console.log('\n§3 the route over the real engine');
     const w3 = world();
     w3.quietly(() => w3.call('POST', w3.A));
     w3.quietly(() => w3.eng.recordCodexQuotaSignal(w3.s1, { type: 'reset_credit_result', outcome: 'reset' }));
-    ok('a PERSON\'s successful attempt ⇒ the consumed notice (the same success path as the rung)', w3.notices.some((n) => /reset credit consumed/.test(n)), JSON.stringify(w3.notices));
+    ok('a PERSON\'s successful attempt ⇒ the consumed notice (the same success path as the rung)', verdictOf(w3.notices.some((n) => /reset credit consumed/.test(n))), JSON.stringify(w3.notices));
   }
   // lane-codex-0159 — THE PRESS'S IDEMPOTENCY KEY (incident 2026-09-30: codex-cli 0.159.3 answered the keyless consume
   // "Invalid request: missing field `idempotencyKey`"; its schema: "reuse the same value when retrying that attempt")
@@ -263,32 +263,32 @@ console.log('\n§3 the route over the real engine');
     const keyOf = (i) => { const v = wk.wrote.filter((x) => /"codex-reset-credit"/.test(x))[i]; try { return JSON.parse(v).idempotencyKey; } catch { return null; } };
     wk.quietly(() => wk.call('POST', wk.A, { body: { sessionId: 'cx1' } }));
     const k1 = keyOf(0);
-    ok('codex-0159: the verb carries a server-minted idempotencyKey (a v4 UUID — the schema\'s recommendation)', UUID.test(String(k1)), String(wk.wrote[0]));
+    ok('codex-0159: the verb carries a server-minted idempotencyKey (a v4 UUID — the schema\'s recommendation)', verdictOf(UUID.test(String(k1))), String(wk.wrote[0]));
     ok('codex-0159: …the identity\'s try record holds the SAME key (the press\'s key, one per press)', wk.eng._resetCreditTries.get(wk.A)?.idempotencyKey === k1);
     wk.quietly(() => wk.eng.recordCodexQuotaSignal(wk.s1, { type: 'reset_credit_result', outcome: 'noCredit', idempotencyKey: k1, attempts: 1 }));
-    ok('codex-0159: 0.159.3\'s new `noCredit` outcome is a failed attempt, said in words', wk.notices.some((n) => /Reset credit not used on Cx Alpha — the account has no reset credits available\./.test(n)), JSON.stringify(wk.notices));
+    ok('codex-0159: 0.159.3\'s new `noCredit` outcome is a failed attempt, said in words', verdictOf(wk.notices.some((n) => /Reset credit not used on Cx Alpha — the account has no reset credits available\./.test(n))), JSON.stringify(wk.notices));
     { const t = wk.eng._resetCreditTries.get(wk.A); t.at -= 11 * 60e3; if (t.sentAt) t.sentAt -= 11 * 60e3; } // the 10-min floor passed (the _poolAutoLast seam — never a sleep; it runs from the SEND since lane reset-path)
     wk.quietly(() => wk.call('POST', wk.A, { body: { sessionId: 'cx1' } }));
     const k2 = keyOf(1);
-    ok('codex-0159: a NEW press mints a NEW key (never the previous press\'s)', wk.verbs() === 2 && UUID.test(String(k2)) && k2 !== k1, `${k1} / ${k2}`);
+    ok('codex-0159: a NEW press mints a NEW key (never the previous press\'s)', wk.verbs() === 2 && gateOf(UUID.test(String(k2))) && k2 !== k1, `${k1} / ${k2}`);
     wk.quietly(() => wk.eng.recordCodexQuotaSignal(wk.s1, { type: 'reset_credit_result', outcome: 'alreadyRedeemed', idempotencyKey: k2, attempts: 2 }));
-    ok('codex-0159: a KEYED `alreadyRedeemed` (the vendor: "the same idempotency key already completed a reset") = this press\'s own reset ⇒ the consumed path', wk.notices.some((n) => /Codex reset credit consumed/.test(n)) && wk.eng._resetCreditTries.get(wk.A)?.outcome === 'reset', JSON.stringify(wk.notices));
+    ok('codex-0159: a KEYED `alreadyRedeemed` (the vendor: "the same idempotency key already completed a reset") = this press\'s own reset ⇒ the consumed path', gateOf(wk.notices.some((n) => /Codex reset credit consumed/.test(n))) && wk.eng._resetCreditTries.get(wk.A)?.outcome === 'reset', JSON.stringify(wk.notices));
   }
   {
     const wo = world();
     wo.quietly(() => wo.call('POST', wo.A, { body: { sessionId: 'cx1' } }));
     wo.quietly(() => wo.eng.recordCodexQuotaSignal(wo.s1, { type: 'reset_credit_result', outcome: 'alreadyRedeemed' }));
-    ok('codex-0159 CONTROL: a KEYLESS `alreadyRedeemed` (a wrapper older than the key — the 0.153 meaning) keeps the superseded path, never "consumed"', !wo.notices.some((n) => /Codex reset credit consumed/.test(n)) && wo.notices.some((n) => /already redeemed/.test(n)), JSON.stringify(wo.notices));
+    ok('codex-0159 CONTROL: a KEYLESS `alreadyRedeemed` (a wrapper older than the key — the 0.153 meaning) keeps the superseded path, never "consumed"', !wo.notices.some((n) => /Codex reset credit consumed/.test(n)) && verdictOf(wo.notices.some((n) => /already redeemed/.test(n))), JSON.stringify(wo.notices));
   }
   {
     const ws = world();
     ws.quietly(() => ws.call('POST', ws.A, { body: { sessionId: 'cx1' } }));
     ws.quietly(() => ws.eng.recordCodexQuotaSignal(ws.s1, { type: 'reset_credit_result', error: 'Invalid request: missing field `idempotencyKey`' }));
-    ok('codex-0159: an OLD wrapper (no key echoed) refused locally by codex-cli 0.159 ⇒ the notice names the remedy (Terminate + Resume, or the Agents list — the helper), never the raw vendor text', ws.notices.some((n) => /Reset credit not used on Cx Alpha — this conversation's codex wrapper predates the reset-credit fix and codex refused the request \(nothing was sent\) — Terminate \+ Resume the conversation, or use the credit from the Agents list/.test(n)) && !ws.notices.some((n) => /missing field/.test(n)), JSON.stringify(ws.notices));
+    ok('codex-0159: an OLD wrapper (no key echoed) refused locally by codex-cli 0.159 ⇒ the notice names the remedy (Terminate + Resume, or the Agents list — the helper), never the raw vendor text', gateOf(ws.notices.some((n) => /Reset credit not used on Cx Alpha — this conversation's codex wrapper predates the reset-credit fix and codex refused the request \(nothing was sent\) — Terminate \+ Resume the conversation, or use the credit from the Agents list/.test(n))) && !ws.notices.some((n) => /missing field/.test(n)), JSON.stringify(ws.notices));
     const wn = world();
     wn.quietly(() => wn.call('POST', wn.A, { body: { sessionId: 'cx1' } }));
     wn.quietly(() => wn.eng.recordCodexQuotaSignal(wn.s1, { type: 'reset_credit_result', error: 'Invalid request: missing field `idempotencyKey`', idempotencyKey: wn.keyOf(0), attempts: 1 })); // the key the wrapper echoes is the press's own (verify r4: a key no record holds is a LATE answer, ignored)
-    ok('codex-0159 CONTROL: the same words from a wrapper that SENT a key are a different drift — quoted as the vendor said them', wn.notices.some((n) => /the vendor answered Invalid request: missing field/.test(n)) && !wn.notices.some((n) => /Terminate \+ Resume/.test(n)), JSON.stringify(wn.notices));
+    ok('codex-0159 CONTROL: the same words from a wrapper that SENT a key are a different drift — quoted as the vendor said them', gateOf(wn.notices.some((n) => /the vendor answered Invalid request: missing field/.test(n))) && !wn.notices.some((n) => /Terminate \+ Resume/.test(n)), JSON.stringify(wn.notices));
   }
   // verify-r6 R1: the POST names the window the dialog SHOWED — a window that reset (or moved) while the dialog stayed
   // open would spend the credit on a FRESH window ("0% discarded" shown): refused by name, nothing spent
@@ -302,7 +302,7 @@ console.log('\n§3 the route over the real engine');
     const same = wr.quietly(() => wr.call('POST', wr.A, { body: { sessionId: 'cx1', expect: { resetsAtSec: shown } } }));
     ok('verify-r6 R1: the window it showed ⇒ spent (one verb)', same.code === 200 && same.body.ok === true && wr.verbs() === 1, JSON.stringify(same.body));
     const RC = require(path.join(REPO, 'src/reset-credit.js'));
-    ok('verify-r6 R1: the dialog words preview_changed (nothing was spent), and the dialog POSTs the window it showed', RC.refusalLine('preview_changed').key === 'The limit this dialog showed has reset since it opened — nothing was spent. Open it again to see the account now.' && /expect: \{ resetsAtSec: p\.resetsAtSec \?\? null \}/.test(read('src/lib/reset-credit-dialog.js')));
+    ok('verify-r6 R1: the dialog words preview_changed (nothing was spent), and the dialog POSTs the window it showed', RC.refusalLine('preview_changed').key === 'The limit this dialog showed has reset since it opened — nothing was spent. Open it again to see the account now.' && verdictOf(/expect: \{ resetsAtSec: p\.resetsAtSec \?\? null \}/.test(read('src/lib/reset-credit-dialog.js'))));
     // CONTROL (r1): an engine that ignores what the dialog showed spends the credit on the moved window
     const esrc = read('src/server/usage-pool-engine.js');
     const emut = editAnchor(esrc, "  if (expect && typeof expect === 'object' && expect.resetsAtSec != null) {", '  if (false) {', "src/server/usage-pool-engine.js");
@@ -333,7 +333,7 @@ console.log('\n§3 the route over the real engine');
     ok('reset-path: a consume that went out and got NO answer keeps the ten-minute wait (counted from the send)', pu.code === 'cooldown' && sentAt > 0 && pu.cooldownUntilSec === Math.ceil((sentAt + 10 * 60e3) / 1000), JSON.stringify(pu));
     const pu2 = wu.quietly(() => wu.call('POST', wu.A, { body: { sessionId: 'cx1' } }));
     ok('reset-path: …a second press inside it ⇒ 429 cooldown, no second verb', pu2.code === 429 && pu2.body.code === 'cooldown' && wu.verbs() === 1, JSON.stringify(pu2.body));
-    ok('reset-path: …and the person is told it may still land (never "nothing was spent")', wu.notices.some((n) => /Reset credit not used on Cx Alpha — no answer came back \(account\/rateLimitResetCredit\/consume timed out after 30000ms\) — it may still land, so the next try waits ten minutes\./.test(n)), JSON.stringify(wu.notices));
+    ok('reset-path: …and the person is told it may still land (never "nothing was spent")', verdictOf(wu.notices.some((n) => /Reset credit not used on Cx Alpha — no answer came back \(account\/rateLimitResetCredit\/consume timed out after 30000ms\) — it may still land, so the next try waits ten minutes\./.test(n))), JSON.stringify(wu.notices));
     // (3) the wrapper takes the verb and never says it went out (an old or a hung one)
     const wh = world({ sends: false, ackMs: 80 });
     wh.quietly(() => wh.call('POST', wh.A, { body: { sessionId: 'cx1' } }));
@@ -344,7 +344,7 @@ console.log('\n§3 the route over the real engine');
     await new Promise((r) => setTimeout(r, 200));
     const ph3 = wh.call('GET', wh.A).body;
     ok('reset-path: nothing said it went out within the ack window ⇒ no wait at all, the spend hold given back, nothing charged', !ph3.code && ph3.cooldownUntilSec === null && wh.holdsOpen() === 0 && wh.charged() === 0, JSON.stringify(ph3) + ` holds=${wh.holdsOpen()} charged=${wh.charged()}`);
-    ok('reset-path: …and the person is told the request was never sent (nothing spent)', wh.notices.some((n) => /Reset credit not used on Cx Alpha — the conversation's codex wrapper never sent the request \(nothing was spent\)/.test(n)), JSON.stringify(wh.notices));
+    ok('reset-path: …and the person is told the request was never sent (nothing spent)', verdictOf(wh.notices.some((n) => /Reset credit not used on Cx Alpha — the conversation's codex wrapper never sent the request \(nothing was spent\)/.test(n))), JSON.stringify(wh.notices));
     // (4) the shape of the owner's report: a wrapper older than the key — codex refused the keyless consume locally
     const ws = world({ sends: false });
     ws.quietly(() => ws.call('POST', ws.A, { body: { sessionId: 'cx1' } }));
@@ -355,7 +355,7 @@ console.log('\n§3 the route over the real engine');
     // CONTROL: the pre-fix rule (the floor stamped at the WRITE, whatever happened) answers the owner's screenshot
     const esrc = read('src/server/usage-pool-engine.js');
     const from = 'function resetCreditBlock(key, now = Date.now()) { return resetCredit.attemptBlock(resetCreditTryFor(key), { now, floorMs: RESET_CREDIT_FLOOR_MS, ackMs: RESET_CREDIT_ACK_MS }); }';
-    ok('reset-path CONTROL: the patch hits the product source', esrc.includes(from));
+    ok('reset-path CONTROL: the patch hits the product source', verdictOf(esrc.includes(from)));
     const pre = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc, from, 'function resetCreditBlock(key, now = Date.now()) { const t = resetCreditTryFor(key); return t && now - t.at < RESET_CREDIT_FLOOR_MS ? { code: \'cooldown\', until: t.at + RESET_CREDIT_FLOOR_MS, armedAt: t.at } : { code: null, until: 0, armedAt: 0 }; }', "src/server/usage-pool-engine.js"), 'prefloor'));
     const wc = world({ sends: false, engine: pre });
     wc.quietly(() => wc.call('POST', wc.A, { body: { sessionId: 'cx1' } }));
@@ -385,14 +385,14 @@ console.log('\n§3 the route over the real engine');
     ok('helper: the POST ⇒ 200 {ok, via:helper} (no conversation needed)', r1.code === 200 && r1.body.ok === true && r1.body.via === 'helper' && r1.body.sessionId === null, JSON.stringify(r1.body));
     await until(() => wh.notices.some((n) => /reset credit used on Cx Alpha/.test(n)));
     const L1 = rpc1();
-    ok('helper: ONE app-server child spoke exactly the wrapper\'s protocol — initialize → initialized → rateLimits/read (verify r8 T0: the read before EVERY press) → consume {idempotencyKey} → rateLimits/read, every request valid on the measured 0.159.3 table', JSON.stringify(L1.map((x) => x.method)) === JSON.stringify(['initialize', 'initialized', 'account/rateLimits/read', 'account/rateLimitResetCredit/consume', 'account/rateLimits/read']) && L1.every((x) => x.verdict === 'ok') && /^[0-9a-f-]{36}$/.test(String(L1[3] && L1[3].params.idempotencyKey)), JSON.stringify(L1.map((x) => [x.method, x.verdict])));
-    ok('helper: …on the ACCOUNT\'S OWN login (CODEX_HOME = its isolated home), started as `<codex> app-server`', L1.every((x) => x.home === wh.wam.codexSubDir(wh.A)) && JSON.stringify(L1[0].args) === '["app-server"]', JSON.stringify([L1[0] && L1[0].home, wh.wam.codexSubDir(wh.A)]));
+    ok('helper: ONE app-server child spoke exactly the wrapper\'s protocol — initialize → initialized → rateLimits/read (verify r8 T0: the read before EVERY press) → consume {idempotencyKey} → rateLimits/read, every request valid on the measured 0.159.3 table', JSON.stringify(L1.map((x) => x.method)) === JSON.stringify(['initialize', 'initialized', 'account/rateLimits/read', 'account/rateLimitResetCredit/consume', 'account/rateLimits/read']) && gateOf(L1.every((x) => x.verdict === 'ok')) && verdictOf(/^[0-9a-f-]{36}$/.test(String(L1[3] && L1[3].params.idempotencyKey))), JSON.stringify(L1.map((x) => [x.method, x.verdict])));
+    ok('helper: …on the ACCOUNT\'S OWN login (CODEX_HOME = its isolated home), started as `<codex> app-server`', gateOf(L1.every((x) => x.home === wh.wam.codexSubDir(wh.A))) && JSON.stringify(L1[0].args) === '["app-server"]', JSON.stringify([L1[0] && L1[0].home, wh.wam.codexSubDir(wh.A)]));
     const t1 = wh.eng._resetCreditTries.get(wh.A);
-    ok('helper: the attempt went out (sentAt), answered `reset`, the key on the record is the one sent', t1 && t1.via === 'helper' && t1.sentAt > 0 && t1.outcome === 'reset' && t1.idempotencyKey === L1[3].params.idempotencyKey, JSON.stringify(t1 && { via: t1.via, sentAt: t1.sentAt, outcome: t1.outcome }));
+    ok('helper: the attempt went out (sentAt), answered `reset`, the key on the record is the one sent', gateOf(t1) && t1.via === 'helper' && t1.sentAt > 0 && t1.outcome === 'reset' && t1.idempotencyKey === L1[3].params.idempotencyKey, JSON.stringify(t1 && { via: t1.via, sentAt: t1.sentAt, outcome: t1.outcome }));
     ok('helper: …charged ONCE on the spend ceiling, no hold left open', wh.charged() === 1 && wh.holdsOpen() === 0, `${wh.charged()} / ${wh.holdsOpen()}`);
     const c1 = JSON.parse(fs.readFileSync(path.join(wh.cacheDir, wh.A + '.json'), 'utf8'));
-    ok('helper: the post-consume reading went through the ONE cache writer, stamped `codex-reset-helper`, newer than the attempt, with the stored count', c1.source === 'codex-reset-helper' && c1.fetchedAt > t1.at && c1.resetCredits && c1.resetCredits.availableCount === 1 && Math.round(c1.sevenDay?.usedPercent ?? -1) === 0, JSON.stringify({ src: c1.source, rc: c1.resetCredits, u: c1.sevenDay?.usedPercent }));
-    ok('helper: the person hears the outcome as a notice naming the account', wh.notices.some((n) => /Codex reset credit used on Cx Alpha — the limit was reset\./.test(n)), JSON.stringify(wh.notices));
+    ok('helper: the post-consume reading went through the ONE cache writer, stamped `codex-reset-helper`, newer than the attempt, with the stored count', c1.source === 'codex-reset-helper' && c1.fetchedAt > t1.at && gateOf(c1.resetCredits) && c1.resetCredits.availableCount === 1 && Math.round(c1.sevenDay?.usedPercent ?? -1) === 0, JSON.stringify({ src: c1.source, rc: c1.resetCredits, u: c1.sevenDay?.usedPercent }));
+    ok('helper: the person hears the outcome as a notice naming the account', verdictOf(wh.notices.some((n) => /Codex reset credit used on Cx Alpha — the limit was reset\./.test(n))), JSON.stringify(wh.notices));
     const p1b = wh.call('GET', wh.A).body;
     const r1b = wh.quietly(() => wh.call('POST', wh.A));
     ok('helper: a reset arms the floor like any other — the next press ⇒ 429 cooldown, and NO second child', p1b.code === 'cooldown' && r1b.code === 429 && rpc1().filter((x) => x.method === 'account/rateLimitResetCredit/consume').length === 1, JSON.stringify(p1b));
@@ -402,18 +402,18 @@ console.log('\n§3 the route over the real engine');
     const p2 = wp.call('GET', wp.A).body;
     ok('helper: a live conversation whose wrapper predates the fix ⇒ the helper (wrapper-predates), not a refusal', p2.via === 'helper' && p2.helperWhy === 'wrapper-predates' && !p2.code, JSON.stringify(p2));
     const m2 = RC.dialogModel(p2, { nowSec: wp.nowS, fmtTime: (x) => 'T' + x, harness: 'Codex' });
-    ok('helper: …the dialog says why and both ways out (Terminate + Resume it, or use the credit from here)', m2.lines.some((l) => /predates the reset-credit fix — Terminate \+ Resume it, or use the credit from here/.test(l.key)) && m2.canConfirm, JSON.stringify(m2.lines.map((l) => l.key)));
+    ok('helper: …the dialog says why and both ways out (Terminate + Resume it, or use the credit from here)', gateOf(m2.lines.some((l) => /predates the reset-credit fix — Terminate \+ Resume it, or use the credit from here/.test(l.key))) && verdictOf(m2.canConfirm), JSON.stringify(m2.lines.map((l) => l.key)));
     wp.quietly(() => wp.call('POST', wp.A, { body: { sessionId: 'cx1' } }));
     await until(() => wp.notices.some((n) => /reset credit used/.test(n)));
-    ok('helper: …the press never touched the old wrapper (no verb on its stdin) and went out through the helper', wp.verbs() === 0 && rpc2().some((x) => x.method === 'account/rateLimitResetCredit/consume'), `verbs=${wp.verbs()}`);
+    ok('helper: …the press never touched the old wrapper (no verb on its stdin) and went out through the helper', wp.verbs() === 0 && verdictOf(rpc2().some((x) => x.method === 'account/rateLimitResetCredit/consume')), `verbs=${wp.verbs()}`);
     // H3 sent, never answered (the wall): it may still land ⇒ the floor
     const rpc3 = stubEnv('h3', { mode: 'hang-consume' });
     const wg = world({ session: false, helper: { ...helper, wallMs: 400 } });
     wg.quietly(() => wg.call('POST', wg.A));
     await until(() => wg.notices.some((n) => /Reset credit not used/.test(n)), 5000);
     const t3 = wg.eng._resetCreditTries.get(wg.A);
-    ok('helper: a consume the app-server never answered (the 30 s wall, shortened here) ⇒ sent + unanswered ⇒ THE FLOOR, the person told it may still land', t3 && t3.outcome === 'unanswered' && t3.sentAt > 0 && wg.call('GET', wg.A).body.code === 'cooldown' && wg.notices.some((n) => /no answer came back .* it may still land/.test(n)), JSON.stringify({ o: t3 && t3.outcome, n: wg.notices }));
-    ok('helper: …and the child was ended at the wall (no stub left running)', await until(() => !fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).some((d) => { try { return fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').includes(STUB) && fs.readFileSync(`/proc/${d}/environ`, 'utf8').includes('STUB_MODE=hang-consume'); } catch { return false; } }), 4000));
+    ok('helper: a consume the app-server never answered (the 30 s wall, shortened here) ⇒ sent + unanswered ⇒ THE FLOOR, the person told it may still land', gateOf(t3) && t3.outcome === 'unanswered' && t3.sentAt > 0 && wg.call('GET', wg.A).body.code === 'cooldown' && verdictOf(wg.notices.some((n) => /no answer came back .* it may still land/.test(n))), JSON.stringify({ o: t3 && t3.outcome, n: wg.notices }));
+    ok('helper: …and the child was ended at the wall (no stub left running)', verdictOf(await until(() => !fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).some((d) => { try { return fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').includes(STUB) && fs.readFileSync(`/proc/${d}/environ`, 'utf8').includes('STUB_MODE=hang-consume'); } catch { return false; } }), 4000)));
     void rpc3;
     // H4 the vendor's `nothingToReset`: went out, spent nothing ⇒ no floor
     stubEnv('h4', { mode: 'nothing', readUsed: 100 }); // the window still spent: the vendor's word decides (a 0 % read would be the superseded path)
@@ -421,22 +421,22 @@ console.log('\n§3 the route over the real engine');
     wz.quietly(() => wz.call('POST', wz.A));
     await until(() => wz.notices.some((n) => /Reset credit not used/.test(n)));
     const p4 = wz.call('GET', wz.A).body;
-    ok('helper: `nothingToReset` ⇒ said in words, NO floor (the next press is free)', wz.notices.some((n) => /no current limit window is eligible for a reset \(nothing was spent\)/.test(n)) && !p4.code && p4.cooldownUntilSec === null, JSON.stringify(p4) + ' ' + JSON.stringify(wz.notices));
+    ok('helper: `nothingToReset` ⇒ said in words, NO floor (the next press is free)', gateOf(wz.notices.some((n) => /no current limit window is eligible for a reset \(nothing was spent\)/.test(n))) && !p4.code && p4.cooldownUntilSec === null, JSON.stringify(p4) + ' ' + JSON.stringify(wz.notices));
     // H5 a login that is not signed in on this machine: nothing can carry it — refused by name, no child
     const wl = world({ session: false, helper });
     fs.rmSync(path.join(wl.wam.codexSubDir(wl.A), 'auth.json'), { force: true });
     const p5 = wl.call('GET', wl.A).body;
-    ok('helper: an account not signed in here ⇒ no_live_session naming why, and nothing spawned', p5.code === 'no_live_session' && /not signed in on this machine/.test(p5.error || ''), JSON.stringify(p5));
+    ok('helper: an account not signed in here ⇒ no_live_session naming why, and nothing spawned', p5.code === 'no_live_session' && verdictOf(/not signed in on this machine/.test(p5.error || '')), JSON.stringify(p5));
     // H5b (verify r1) a call refused BEFORE the spawn resolves with a named error — it never rejects (the module's contract)
     { const HM = require(path.join(REPO, 'src/codex-reset-helper.js'));
       const outcomes = await Promise.all([HM.consumeResetCreditViaAppServer({ idempotencyKey: '', env: { CODEX_HOME: SDIR }, codexCmd: STUB, pressedBy: 'person' }), HM.consumeResetCreditViaAppServer({ idempotencyKey: 'k', env: { CODEX_HOME: SDIR }, codexCmd: null, pressedBy: 'person' })].map((p) => p.then((r) => ({ ok: true, r }), (e) => ({ ok: false, e: String(e) }))));
-      ok('helper: a refusal before the spawn (no key / no codex) RESOLVES with a named error — never rejects', outcomes.every((o) => o.ok) && /idempotencyKey is required/.test(outcomes[0].r.error || '') && /not configured/.test(outcomes[1].r.error || '') && outcomes.every((o) => o.r.sent === false), JSON.stringify(outcomes));
+      ok('helper: a refusal before the spawn (no key / no codex) RESOLVES with a named error — never rejects', gateOf(outcomes.every((o) => o.ok)) && gateOf(/idempotencyKey is required/.test(outcomes[0].r.error || '')) && gateOf(/not configured/.test(outcomes[1].r.error || '')) && verdictOf(outcomes.every((o) => o.r.sent === false)), JSON.stringify(outcomes));
       const hsrc = read('src/codex-reset-helper.js');
       const fromT = "    let child = null, settled = false, buf = '', nextId = 1, timer = null;";
-      ok('helper CONTROL: the timer patch hits the product source', hsrc.includes(fromT) && hsrc.includes('    timer = setTimeout(() => finish(out.stage === \'consume\''));
+      ok('helper CONTROL: the timer patch hits the product source', gateOf(hsrc.includes(fromT)) && verdictOf(hsrc.includes('    timer = setTimeout(() => finish(out.stage === \'consume\'')));
       const preT = require(MUTRC.write('src/codex-reset-helper.js', editAnchor(editAnchor(editAnchor(hsrc, fromT, "    let child = null, settled = false, buf = '', nextId = 1;", "src/codex-reset-helper.js"), "    timer = setTimeout(() => finish(out.stage === 'consume'", "    const timer = setTimeout(() => finish(out.stage === 'consume'", "src/codex-reset-helper.js"), '      if (timer) clearTimeout(timer);', '      clearTimeout(timer);', "src/codex-reset-helper.js"), 'tdz'));
       const ctl = await preT.consumeResetCreditViaAppServer({ idempotencyKey: '', env: { CODEX_HOME: SDIR }, codexCmd: STUB, pressedBy: 'person' }).then(() => 'resolved', (e) => String(e));
-      ok('helper CONTROL: with the wall declared below finish, the same refusal REJECTS (Cannot access timer) — the row above sees the rule', /Cannot access 'timer'/.test(ctl), ctl);
+      ok('helper CONTROL: with the wall declared below finish, the same refusal REJECTS (Cannot access timer) — the row above sees the rule', verdictOf(/Cannot access 'timer'/.test(ctl)), ctl);
     }
     // H5c (verify r1, the credential class) THE BELTS: the app-server's own children die with it; no env / no login /
     //     no person's press ⇒ refused before the spawn
@@ -450,7 +450,7 @@ console.log('\n§3 the route over the real engine');
       ok('helper belts: the app-server\'s OWN child (like its git ls-remote / bwrap) dies with it at the wall — the child is a process group', rg.sent === true && alive(mark).length === 0, JSON.stringify([rg.sent, rg.error, alive(mark).length]));
       const hsrc = read('src/codex-reset-helper.js');
       const fromG = "      child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], env, cwd: cwd || undefined, detached: true });";
-      ok('helper belts CONTROL: the group patch hits the product source', hsrc.includes(fromG) && hsrc.includes('process.kill(-child.pid, sig)'));
+      ok('helper belts CONTROL: the group patch hits the product source', gateOf(hsrc.includes(fromG)) && verdictOf(hsrc.includes('process.kill(-child.pid, sig)')));
       const preG = require(MUTRC.write('src/codex-reset-helper.js', editAnchor(editAnchor(hsrc, fromG, "      child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], env, cwd: cwd || undefined });", "src/codex-reset-helper.js"), 'process.kill(-child.pid, sig)', 'child.kill(sig)', "src/codex-reset-helper.js"), 'nogroup'));
       const mark2 = String(process.pid) + '2';
       await preG.consumeResetCreditViaAppServer({ idempotencyKey: 'k-g2', env: { PATH: process.env.PATH, CODEX_HOME: SDIR, MARK: mark2 }, codexCmd: gstub, wallMs: 300, pressedBy: 'person' });
@@ -462,9 +462,9 @@ console.log('\n§3 the route over the real engine');
       const noEnv = await HM.consumeResetCreditViaAppServer({ idempotencyKey: 'k-b1', codexCmd: STUB, pressedBy: 'person' });
       const noHome = await HM.consumeResetCreditViaAppServer({ idempotencyKey: 'k-b2', env: { PATH: process.env.PATH, STUB_TABLE: TABLE, STUB_LOG: process.env.STUB_LOG }, codexCmd: STUB, pressedBy: 'person' });
       const noPerson = await HM.consumeResetCreditViaAppServer({ idempotencyKey: 'k-b3', env: { PATH: process.env.PATH, STUB_TABLE: TABLE, STUB_LOG: process.env.STUB_LOG, CODEX_HOME: SDIR }, codexCmd: STUB, pressedBy: 'auto' });
-      ok('helper belts: no env ⇒ refused by name before the spawn (never the server\'s own process.env — the machine\'s global login)', noEnv.sent === false && /explicit CODEX_HOME/.test(noEnv.error || ''), JSON.stringify(noEnv.error));
-      ok('helper belts: an env without CODEX_HOME ⇒ refused by name before the spawn', noHome.sent === false && /explicit CODEX_HOME/.test(noHome.error || ''), JSON.stringify(noHome.error));
-      ok('helper belts: a caller that is not a person\'s press ⇒ refused by name before the spawn (the runtime belt under the static census)', noPerson.sent === false && /only a person/.test(noPerson.error || ''), JSON.stringify(noPerson.error));
+      ok('helper belts: no env ⇒ refused by name before the spawn (never the server\'s own process.env — the machine\'s global login)', noEnv.sent === false && verdictOf(/explicit CODEX_HOME/.test(noEnv.error || '')), JSON.stringify(noEnv.error));
+      ok('helper belts: an env without CODEX_HOME ⇒ refused by name before the spawn', noHome.sent === false && verdictOf(/explicit CODEX_HOME/.test(noHome.error || '')), JSON.stringify(noHome.error));
+      ok('helper belts: a caller that is not a person\'s press ⇒ refused by name before the spawn (the runtime belt under the static census)', noPerson.sent === false && verdictOf(/only a person/.test(noPerson.error || '')), JSON.stringify(noPerson.error));
       ok('helper belts: …none of the three spawned anything', rpcB().length === 0, JSON.stringify(rpcB()));
       // (the helper belts' wiring pin — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     }
@@ -475,7 +475,7 @@ console.log('\n§3 the route over the real engine');
     // CONTROL: the engine without the helper fallback answers the owner's report (409 no_live_session)
     const esrc = read('src/server/usage-pool-engine.js');
     const from = "  const via = carrier ? 'session' : (helper && helper.ok ? 'helper' : null);";
-    ok('helper CONTROL: the patch hits the product source', esrc.includes(from));
+    ok('helper CONTROL: the patch hits the product source', verdictOf(esrc.includes(from)));
     const noHelper = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc, from, "  const via = carrier ? 'session' : null;", "src/server/usage-pool-engine.js"), 'nohelper'));
     const wn = world({ session: false, helper, engine: noHelper });
     const rn = wn.quietly(() => wn.call('POST', wn.A));
@@ -492,18 +492,18 @@ console.log('\n§3 the route over the real engine');
     const wr3 = world();
     const N = withNormalizer(wr3);
     wr3.quietly(() => wr3.eng.recordCodexQuotaSignal(wr3.s1, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: wr3.nowS + 7200 }));
-    ok('R3: the wall drew ONE card offering the credit (the owner\'s card: "Usage limit hit … stored reset credits available")', N.cards().length === 1 && /Usage limit hit on Cx Alpha — 3 stored reset credits available/.test(N.cards()[0].content[0].text) && N.cards()[0].resetCredit.accountKey === wr3.A, JSON.stringify(N.cards().map((m) => m.resetCredit)));
+    ok('R3: the wall drew ONE card offering the credit (the owner\'s card: "Usage limit hit … stored reset credits available")', N.cards().length === 1 && gateOf(/Usage limit hit on Cx Alpha — 3 stored reset credits available/.test(N.cards()[0].content[0].text)) && N.cards()[0].resetCredit.accountKey === wr3.A, JSON.stringify(N.cards().map((m) => m.resetCredit)));
     const before = N.ops.length;
     wr3.quietly(() => wr3.call('POST', wr3.A, { body: { sessionId: 'cx1' } }));
     { const t0 = Date.now(); while (Date.now() < t0 + 3) { } } // the post-reset reading is LATER than the attempt (a same-millisecond tie is not "after")
     wr3.quietly(() => wr3.eng.recordCodexQuotaSignal(wr3.s1, { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 0, window_minutes: 10080, resets_at: wr3.nowS + 7 * 86400 }, secondary: null }, resetCredits: { availableCount: 2 } }));
     wr3.quietly(() => wr3.eng.recordCodexQuotaSignal(wr3.s1, { type: 'reset_credit_result', outcome: 'reset', idempotencyKey: wr3.keyOf(0), attempts: 1 }));
     const card = N.cards()[0];
-    ok('R3: the credit USED ⇒ the card is resolved on the message itself (how used, when, the new window\'s end) — every re-render carries it', card && card.resetCredit.resolved && card.resetCredit.resolved.how === 'used' && card.resetCredit.resolved.untilSec === wr3.nowS + 7 * 86400, JSON.stringify(card && card.resetCredit));
+    ok('R3: the credit USED ⇒ the card is resolved on the message itself (how used, when, the new window\'s end) — every re-render carries it', gateOf(card) && gateOf(card.resetCredit.resolved) && card.resetCredit.resolved.how === 'used' && card.resetCredit.resolved.untilSec === wr3.nowS + 7 * 86400, JSON.stringify(card && card.resetCredit));
     const edits = N.ops.slice(before).filter((op) => op.op === 'edit' && op.id === (card && card.id) && op.fields && op.fields.resetCredit);
-    ok('R3: …and the live carrier: ONE `edit` op for THAT card, carrying only its resetCredit (patched in place, never a re-created card)', edits.length === 1 && Object.keys(edits[0].fields).join() === 'resetCredit' && N.ops.slice(before).every((op) => op.op !== 'create' || !op.message.resetCredit), JSON.stringify(N.ops.slice(before).map((o) => o.op)));
+    ok('R3: …and the live carrier: ONE `edit` op for THAT card, carrying only its resetCredit (patched in place, never a re-created card)', edits.length === 1 && Object.keys(edits[0].fields).join() === 'resetCredit' && verdictOf(N.ops.slice(before).every((op) => op.op !== 'create' || !op.message.resetCredit)), JSON.stringify(N.ops.slice(before).map((o) => o.op)));
     const v = RC.resetCreditCardView(card.resetCredit, { fmtTime: (x) => 'T' + x });
-    ok('R3: the card\'s view: no button, one line stating the outcome ("Used at … — the 7d window runs until …")', v.button === false && v.line && v.line.key === 'Used at {time} — the new window runs until {until}.' && v.line.params.until === 'T' + (wr3.nowS + 7 * 86400), JSON.stringify(v));
+    ok('R3: the card\'s view: no button, one line stating the outcome ("Used at … — the 7d window runs until …")', v.button === false && gateOf(v.line) && v.line.key === 'Used at {time} — the new window runs until {until}.' && v.line.params.until === 'T' + (wr3.nowS + 7 * 86400), JSON.stringify(v));
     // the WALL IS GONE by itself: a reading of the account that is usable again
     const wo = world();
     const N2 = withNormalizer(wo);
@@ -511,12 +511,12 @@ console.log('\n§3 the route over the real engine');
     { const t0 = Date.now(); while (Date.now() < t0 + 3) { } }
     wo.quietly(() => wo.eng.recordCodexQuotaSignal(wo.s1, { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 4, window_minutes: 10080, resets_at: wo.nowS + 7 * 86400 }, secondary: null } }));
     const c2 = N2.cards()[0];
-    ok('R3: a reading that shows the account usable again resolves the card (how open) — no credit was needed', c2 && c2.resetCredit.resolved && c2.resetCredit.resolved.how === 'open', JSON.stringify(c2 && c2.resetCredit));
-    ok('R3: …its view says so, no button', (() => { const vv = RC.resetCreditCardView(c2.resetCredit, { fmtTime: (x) => 'T' + x }); return vv.button === false && /no credit was needed/.test(vv.line.key); })());
+    ok('R3: a reading that shows the account usable again resolves the card (how open) — no credit was needed', gateOf(c2) && gateOf(c2.resetCredit.resolved) && c2.resetCredit.resolved.how === 'open', JSON.stringify(c2 && c2.resetCredit));
+    ok('R3: …its view says so, no button', verdictOf((() => { const vv = RC.resetCreditCardView(c2.resetCredit, { fmtTime: (x) => 'T' + x }); return vv.button === false && /no credit was needed/.test(vv.line.key); })()));
     // a card AFTER the event is about a NEW wall: it keeps its button
     wo.quietly(() => wo.eng.recordCodexQuotaSignal(wo.s1, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: wo.nowS + 9000 }));
     const c3 = N2.cards()[1];
-    ok('R3: a wall card drawn AFTER the reading keeps its button (a new wall is a new offer)', c3 && !c3.resetCredit.resolved && RC.resetCreditCardView(c3.resetCredit).button === true, JSON.stringify(N2.cards().map((m) => m.resetCredit)));
+    ok('R3: a wall card drawn AFTER the reading keeps its button (a new wall is a new offer)', gateOf(c3) && !c3.resetCredit.resolved && RC.resetCreditCardView(c3.resetCredit).button === true, JSON.stringify(N2.cards().map((m) => m.resetCredit)));
     // the PURE rule's edges (a card older/newer than the fact, a reading past the stated reset, the sanitizer)
     ok('R3 rule: a reading taken past the card\'s stated reset resolves it `reset` at that reset, even if it is not usable', JSON.stringify(RC.offerResolution({ available: 1, mode: 'off', accountKey: 'a', resetsAtSec: 100 }, 50e3, { kind: 'reading', at: 101e3, usable: false })) === '{"how":"reset","at":100000}');
     ok('R3 rule: a reading that is NOT usable and before the reset answers nothing', RC.offerResolution({ available: 1, mode: 'off', accountKey: 'a', resetsAtSec: 100 }, 50e3, { kind: 'reading', at: 60e3, usable: false }) === null);
@@ -526,7 +526,7 @@ console.log('\n§3 the route over the real engine');
     // CONTROL: the engine without the resolution at the credit's answer reproduces the owner's card
     const esrc = read('src/server/usage-pool-engine.js');
     const fromR3 = "      resolveResetCreditCards(tKey, { kind: 'used', at: Date.now(), untilSec });";
-    ok('R3 CONTROL: the patch hits the product source', esrc.includes(fromR3));
+    ok('R3 CONTROL: the patch hits the product source', verdictOf(esrc.includes(fromR3)));
     const noR3 = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc, fromR3, '', "src/server/usage-pool-engine.js"), 'nor3'));
     const wn3 = world({ engine: noR3 });
     const Nn = withNormalizer(wn3);
@@ -558,12 +558,12 @@ console.log('\n§3 the route over the real engine');
     w4.s1.stubLimits = () => ({ type: 'rate_limits_updated', onDemand: true, error: 'codex account authentication required to read rate limits' });
     const b = await w4.quietly(() => route({ key: w4.A }));
     const tb = US.codexRefreshToast(b.body, { fmtTime: fmt });
-    ok('R4: a read the session\'s codex refused ⇒ 502 refused, and the toast quotes why', b.code === 502 && b.body.code === 'refused' && tb.error && /Codex ⟳ on Cx Alpha failed — codex account authentication required to read rate limits/.test(tb.text), JSON.stringify(b.body) + ' ' + tb.text);
+    ok('R4: a read the session\'s codex refused ⇒ 502 refused, and the toast quotes why', b.code === 502 && b.body.code === 'refused' && gateOf(tb.error) && verdictOf(/Codex ⟳ on Cx Alpha failed — codex account authentication required to read rate limits/.test(tb.text)), JSON.stringify(b.body) + ' ' + tb.text);
     // no answer at all
     w4.s1.stubLimits = null;
     const c = await w4.quietly(() => w4.eng.refreshCodexForPerson({ key: w4.A, timeoutMs: 1000 }));
     const tc4 = US.codexRefreshToast(c, { fmtTime: fmt });
-    ok('R4: the session\'s codex never answers ⇒ `timeout`, named in seconds', c.ok === false && c.code === 'timeout' && tc4.error && /no answer from its codex within 1 s/.test(tc4.text), JSON.stringify(c) + ' ' + tc4.text);
+    ok('R4: the session\'s codex never answers ⇒ `timeout`, named in seconds', c.ok === false && c.code === 'timeout' && gateOf(tc4.error) && verdictOf(/no answer from its codex within 1 s/.test(tc4.text)), JSON.stringify(c) + ' ' + tc4.text);
     // verify r1 (reproduced): two presses in flight wrote two verbs — two vendor reads for one answer
     { const w2p = world({ credits: null });
       w2p.s1.stubLimits = () => ({ type: 'rate_limits_updated', onDemand: true, rateLimits: { primary: { used_percent: 3, window_minutes: 10080, resets_at: w2p.nowS + 6 * 86400 }, secondary: null } });
@@ -573,7 +573,7 @@ console.log('\n§3 the route over the real engine');
       // the control swaps a guard-less copy's readLive onto the codex source for the two presses, then restores it
       const csrcS = read('src/harnesses/codex-quota.js');
       const fromS = '    if (waiters.length > 1 && !fresh) return;\n';
-      ok('R4 single-flight CONTROL: the patch hits the product source', csrcS.includes(fromS));
+      ok('R4 single-flight CONTROL: the patch hits the product source', verdictOf(csrcS.includes(fromS)));
       const twoReads = require(MUTRC.write('src/harnesses/codex-quota.js', editAnchor(csrcS, fromS, '', "src/harnesses/codex-quota.js"), 'tworeads'));
       const cxQ = require(path.join(REPO, 'src/harnesses/codex-quota.js'));
       const keepRL = cxQ.readLive;
@@ -600,18 +600,18 @@ console.log('\n§3 the route over the real engine');
       ok('R4 pool: the popup shows the POOL (the default account) — the read rides its current MEMBER\'s session and the answer names the member', ap.code === 200 && ap.body.ok === true && ap.body.key === wp.A && ap.body.name === 'Cx Alpha' && wp.wrote.filter((x) => /"codex-read-limits"/.test(x)).length === 1, JSON.stringify([ap.code, ap.body && ap.body.code, ap.body && ap.body.key, ap.body && ap.body.name]));
       const esrcP = read('src/server/usage-pool-engine.js');
       const fromP = "  if (key) { try { const a = accounts.get(String(key)); if (a && a.type === 'pooled') key = accounts.poolCurrentFor(String(key), null) || accounts.poolCurrent(String(key)) || key; } catch { } }\n";
-      ok('R4 pool CONTROL: the patch hits the product source', esrcP.includes(fromP));
+      ok('R4 pool CONTROL: the patch hits the product source', verdictOf(esrcP.includes(fromP)));
       const noPool = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcP, fromP, '', "src/server/usage-pool-engine.js"), 'nopool'));
       const wq = world({ credits: null, engine: noPool });
       wq.wam.createPool({ name: 'CxPool', backend: 'codex', members: [wq.A] });
       const pq = wq.wam.list().accounts.find((a) => a.type === 'pooled' && a.backend === 'codex').id;
       const aq = await wq.quietly(() => wq.eng.refreshCodexForPerson({ key: pq, timeoutMs: 500 }));
-      ok('R4 pool CONTROL: without the resolution the pool key matches no session ⇒ no_live_session naming the pool — the row above sees the rule', aq.ok === false && aq.code === 'no_live_session' && /CxPool/.test(aq.error || ''), JSON.stringify(aq));
+      ok('R4 pool CONTROL: without the resolution the pool key matches no session ⇒ no_live_session naming the pool — the row above sees the rule', aq.ok === false && aq.code === 'no_live_session' && verdictOf(/CxPool/.test(aq.error || '')), JSON.stringify(aq));
       void pool;
     }
     // no session on the account the popup shows
     const d = await route({ key: '__global_codex__' });
-    ok('R4: no running session on the account the popup SHOWS ⇒ 409 no_live_session naming it (never a silent read of another account)', d.code === 409 && d.body.code === 'no_live_session' && /No Codex chat session on CLI login is running/.test(US.codexRefreshToast(d.body).text), JSON.stringify(d.body));
+    ok('R4: no running session on the account the popup SHOWS ⇒ 409 no_live_session naming it (never a silent read of another account)', d.code === 409 && d.body.code === 'no_live_session' && verdictOf(/No Codex chat session on CLI login is running/.test(US.codexRefreshToast(d.body).text)), JSON.stringify(d.body));
     ok('R4: a server that never answered (a lost request) is said too', US.codexRefreshToast(null).error === true);
     // R3 × R4: the fresh reading re-judges an open wall card
     const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
@@ -621,7 +621,7 @@ console.log('\n§3 the route over the real engine');
     { const t0 = Date.now(); while (Date.now() < t0 + 3) { } }
     w5.s1.stubLimits = () => ({ type: 'rate_limits_updated', onDemand: true, rateLimits: { primary: { used_percent: 3, window_minutes: 10080, resets_at: w5.nowS + 7 * 86400 }, secondary: null } });
     await w5.quietly(() => w5.eng.refreshCodexForPerson({ key: w5.A }));
-    ok('R4: …and the reading the ⟳ brought back re-judges the wall card (usable again ⇒ resolved, no button)', mm.messages.filter((m) => m.resetCredit).every((m) => m.resetCredit.resolved && m.resetCredit.resolved.how === 'open'), JSON.stringify(mm.messages.filter((m) => m.resetCredit).map((m) => m.resetCredit)));
+    ok('R4: …and the reading the ⟳ brought back re-judges the wall card (usable again ⇒ resolved, no button)', verdictOf(mm.messages.filter((m) => m.resetCredit).every((m) => m.resetCredit.resolved && m.resetCredit.resolved.how === 'open')), JSON.stringify(mm.messages.filter((m) => m.resetCredit).map((m) => m.resetCredit)));
     // (R4 the client press — source pins with its pre-fix control — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   // ── verify r1 (the MONEY class): THE UNKNOWN CONSUME. A consume that went out — or may have — and was never
@@ -647,14 +647,14 @@ console.log('\n§3 the route over the real engine');
       ok(`unknown/${tag}: the auto rung wrote the verb to the old wrapper`, w.verbs() === 1);
       await new Promise((r) => setTimeout(r, 300));
       const t = w.eng._resetCreditTries.get(w.A);
-      ok(`unknown/${tag}: silence from a carrier that cannot say ⇒ the attempt is UNKNOWN (never not-sent): charged once, no hold, the floor armed`, t && t.outcome === 'unknown' && t.sentAt > 0 && w.charged() === 1 && w.holdsOpen() === 0 && w.call('GET', w.A).body.code === 'cooldown', JSON.stringify({ o: t && t.outcome, c: w.charged(), h: w.holdsOpen(), pv: w.call('GET', w.A).body.code }));
+      ok(`unknown/${tag}: silence from a carrier that cannot say ⇒ the attempt is UNKNOWN (never not-sent): charged once, no hold, the floor armed`, gateOf(t) && t.outcome === 'unknown' && t.sentAt > 0 && w.charged() === 1 && w.holdsOpen() === 0 && w.call('GET', w.A).body.code === 'cooldown', JSON.stringify({ o: t && t.outcome, c: w.charged(), h: w.holdsOpen(), pv: w.call('GET', w.A).body.code }));
       w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: w.nowS + 2 * 86400 + 1 }));
       ok(`unknown/${tag}: a new event inside the floor writes no second verb (the restated wall draws a card offering the stale credit)`, w.verbs() === 1 && mm.messages.filter((m) => m.resetCredit).length >= 1, `verbs=${w.verbs()}`);
       past(t); t.outcome = 'unknown';
       const pv = w.call('GET', w.A).body;
-      ok(`unknown/${tag}: past the floor it is UNSETTLED — the preview carries the fact (no refusal, no cooldown), the button live`, !pv.code && pv.cooldownUntilSec === null && pv.unsettled && pv.unsettled.sinceSec > 0, JSON.stringify(pv));
+      ok(`unknown/${tag}: past the floor it is UNSETTLED — the preview carries the fact (no refusal, no cooldown), the button live`, !pv.code && pv.cooldownUntilSec === null && gateOf(pv.unsettled) && pv.unsettled.sinceSec > 0, JSON.stringify(pv));
       const m = RC.dialogModel(pv, { nowSec: w.nowS, fmtTime: (x) => 'T' + x, harness: 'Codex' });
-      ok(`unknown/${tag}: …the dialog says it (sent at T, got no answer, Use reads first)`, m.canConfirm && m.lines.some((l) => /got no answer — it may have been spent\. Use reads the account first/.test(l.key) && l.params.time === 'T' + pv.unsettled.sinceSec), JSON.stringify(m.lines.map((l) => l.key)));
+      ok(`unknown/${tag}: …the dialog says it (sent at T, got no answer, Use reads first)`, gateOf(m.canConfirm) && verdictOf(m.lines.some((l) => /got no answer — it may have been spent\. Use reads the account first/.test(l.key) && l.params.time === 'T' + pv.unsettled.sinceSec)), JSON.stringify(m.lines.map((l) => l.key)));
       w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: w.nowS + 2 * 86400 + 2 }));
       ok(`unknown/${tag}: the auto rung stays blocked while unsettled (no verb)`, w.verbs() === 1, `verbs=${w.verbs()}`);
       { const t0 = Date.now(); while (Date.now() < t0 + 3) { } }
@@ -662,10 +662,10 @@ console.log('\n§3 the route over the real engine');
       const t2 = w.eng._resetCreditTries.get(w.A);
       if (tag === 'landed') {
         const c = mm.messages.filter((m2) => m2.resetCredit)[0];
-        ok('unknown/landed: the reading (count 3→2) settles it LANDED — the attempt is reset, the person told it did land, the card says USED (never "no credit was needed")', t2.outcome === 'reset' && t2.settled && t2.settled.how === 'landed' && w.notices.some((n) => /did land \(the stored credit count fell 3 → 2\); the limit was reset then/.test(n)) && c.resetCredit.resolved && c.resetCredit.resolved.how === 'used', JSON.stringify([t2.outcome, t2.settled, c.resetCredit.resolved, w.notices]));
+        ok('unknown/landed: the reading (count 3→2) settles it LANDED — the attempt is reset, the person told it did land, the card says USED (never "no credit was needed")', t2.outcome === 'reset' && gateOf(t2.settled) && t2.settled.how === 'landed' && gateOf(w.notices.some((n) => /did land \(the stored credit count fell 3 → 2\); the limit was reset then/.test(n))) && gateOf(c.resetCredit.resolved) && c.resetCredit.resolved.how === 'used', JSON.stringify([t2.outcome, t2.settled, c.resetCredit.resolved, w.notices]));
         ok('unknown/landed: …and the block is gone (a new wall is a new decision)', !w.call('GET', w.A).body.code && !w.call('GET', w.A).body.unsettled, JSON.stringify(w.call('GET', w.A).body));
       } else {
-        ok('unknown/not-landed: the reading (count still 3, the window unchanged) settles it NOT LANDED — the block ends', t2.outcome === 'unknown' && t2.settled && t2.settled.how === 'not-landed' && !w.call('GET', w.A).body.unsettled, JSON.stringify([t2.outcome, t2.settled]));
+        ok('unknown/not-landed: the reading (count still 3, the window unchanged) settles it NOT LANDED — the block ends', t2.outcome === 'unknown' && gateOf(t2.settled) && t2.settled.how === 'not-landed' && !w.call('GET', w.A).body.unsettled, JSON.stringify([t2.outcome, t2.settled]));
         w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: w.nowS + 2 * 86400 + 3 }));
         ok('unknown/not-landed: …the rung is free again: the next event writes a verb with a NEW key', w.verbs() === 2 && w.keyOf(1) !== w.keyOf(0), `verbs=${w.verbs()}`);
       }
@@ -676,12 +676,12 @@ console.log('\n§3 the route over the real engine');
       w.quietly(() => w.call('POST', w.A, { body: { sessionId: 'cx1' } }));
       past(w.eng._resetCreditTries.get(w.A));
       const pv = w.call('GET', w.A).body;
-      ok(`unknown/session/${tag}: a keyed wrapper that sent and never answered ⇒ after the floor, unsettled (fact), via session, the button live`, !pv.code && pv.unsettled && pv.via === 'session', JSON.stringify(pv));
+      ok(`unknown/session/${tag}: a keyed wrapper that sent and never answered ⇒ after the floor, unsettled (fact), via session, the button live`, !pv.code && gateOf(pv.unsettled) && pv.via === 'session', JSON.stringify(pv));
       w.s1.stubLimits = () => reading(w, count, { moved });
       { const t0 = Date.now(); while (Date.now() < t0 + 3) { } } // the read is LATER than the world's own push (a same-millisecond tie is not "after")
       const r = await w.quietly(() => post(w, w.A, { sessionId: 'cx1', expect: { resetsAtSec: pv.resetsAtSec } }));
       const reads = w.wrote.filter((x) => /"codex-read-limits"/.test(x)).length;
-      if (tag === 'landed') ok('unknown/session/landed: the press read the account (ONE read on the conversation), learned the earlier request landed ⇒ 409 preview_changed BY THE READ\'S OWN VERDICT (settled: landed), NO second verb, the person told it landed', reads === 1 && r.code === 409 && r.body.code === 'preview_changed' && r.body.settled === 'landed' && w.verbs() === 1 && w.notices.some((n) => /did land/.test(n)), JSON.stringify([reads, r.code, r.body, w.verbs(), w.call('GET', w.A).body, w.notices, w.eng._resetCreditTries.get(w.A) && { o: w.eng._resetCreditTries.get(w.A).outcome, s: w.eng._resetCreditTries.get(w.A).settled, p: !!w.eng._resetCreditTries.get(w.A).prior }]));
+      if (tag === 'landed') ok('unknown/session/landed: the press read the account (ONE read on the conversation), learned the earlier request landed ⇒ 409 preview_changed BY THE READ\'S OWN VERDICT (settled: landed), NO second verb, the person told it landed', reads === 1 && r.code === 409 && r.body.code === 'preview_changed' && r.body.settled === 'landed' && w.verbs() === 1 && verdictOf(w.notices.some((n) => /did land/.test(n))), JSON.stringify([reads, r.code, r.body, w.verbs(), w.call('GET', w.A).body, w.notices, w.eng._resetCreditTries.get(w.A) && { o: w.eng._resetCreditTries.get(w.A).outcome, s: w.eng._resetCreditTries.get(w.A).settled, p: !!w.eng._resetCreditTries.get(w.A).prior }]));
       else ok('unknown/session/not-landed: the press read the account (ONE read), the earlier one never landed ⇒ the consume goes out with a NEW key', reads === 1 && r.code === 200 && w.verbs() === 2 && w.keyOf(1) !== w.keyOf(0), JSON.stringify([reads, r.code, r.body, w.verbs()]));
     }
     // U3 the HELPER path: ONE child reads first; the consume goes out only over a prior settled NOT landed
@@ -694,14 +694,14 @@ console.log('\n§3 the route over the real engine');
       past(t1); t1.outcome = 'unanswered'; t1.settled = null; t1.creditsAt = creditsAt; // the stub's read answers availableCount 1: 2→1 = landed, 1→1 = not landed
       fs.writeFileSync(process.env.STUB_LOG, '');
       const pv = w.call('GET', w.A).body;
-      ok(`unknown/helper/${tag}: unsettled on the helper path — the fact rides the preview, via helper, no refusal`, pv.unsettled && pv.via === 'helper' && !pv.code, JSON.stringify(pv));
+      ok(`unknown/helper/${tag}: unsettled on the helper path — the fact rides the preview, via helper, no refusal`, gateOf(pv.unsettled) && pv.via === 'helper' && !pv.code, JSON.stringify(pv));
       const n0 = w.notices.length;
       const r = w.quietly(() => w.call('POST', w.A));
       await until(() => w.notices.length > n0, 8000);
       const L = rpc().map((x) => x.method);
       const consumes = L.filter((m) => m === 'account/rateLimitResetCredit/consume').length;
-      if (tag === 'landed') ok('unknown/helper/landed: ONE child — initialize → read → (landed) ⇒ NO consume; the person told the earlier one had landed and this press spent nothing; the hold given back', r.code === 200 && consumes === 0 && L.includes('account/rateLimits/read') && w.notices.some((n) => /had already landed \(the stored credit count fell 2 → 1\); this press spent nothing/.test(n)) && w.holdsOpen() === 0, JSON.stringify([r.code, L, w.notices, w.holdsOpen()]));
-      else ok('unknown/helper/not-landed: ONE child — initialize → read → (not landed) → consume → read; the credit spent once', r.code === 200 && consumes === 1 && JSON.stringify(L) === JSON.stringify(['initialize', 'initialized', 'account/rateLimits/read', 'account/rateLimitResetCredit/consume', 'account/rateLimits/read']) && w.notices.some((n) => /reset credit used on Cx Alpha/.test(n)), JSON.stringify([r.code, L, w.notices]));
+      if (tag === 'landed') ok('unknown/helper/landed: ONE child — initialize → read → (landed) ⇒ NO consume; the person told the earlier one had landed and this press spent nothing; the hold given back', r.code === 200 && consumes === 0 && gateOf(L.includes('account/rateLimits/read')) && gateOf(w.notices.some((n) => /had already landed \(the stored credit count fell 2 → 1\); this press spent nothing/.test(n))) && w.holdsOpen() === 0, JSON.stringify([r.code, L, w.notices, w.holdsOpen()]));
+      else ok('unknown/helper/not-landed: ONE child — initialize → read → (not landed) → consume → read; the credit spent once', r.code === 200 && consumes === 1 && JSON.stringify(L) === JSON.stringify(['initialize', 'initialized', 'account/rateLimits/read', 'account/rateLimitResetCredit/consume', 'account/rateLimits/read']) && verdictOf(w.notices.some((n) => /reset credit used on Cx Alpha/.test(n))), JSON.stringify([r.code, L, w.notices]));
     }
     // U3b (verify r2, reproduced — money): an attempt on an account whose stored count was UNKNOWN at the press
     // was recorded as `creditsAt: 0` (`Number(null)`), so the first reading ("count still 1 ≥ 0") settled it NOT
@@ -715,23 +715,23 @@ console.log('\n§3 the route over the real engine');
       w.quietly(() => w.call('POST', w.A));
       await until(() => !!(w.eng._resetCreditTries.get(w.A) || {}).outcome, 6000);
       const t1 = w.eng._resetCreditTries.get(w.A);
-      ok('no-witness: an attempt with no known count (the cache none, the read before the consume none) records NULL, never a fabricated 0', t1 && t1.creditsAt === null && t1.outcome === 'unanswered', JSON.stringify({ creditsAt: t1 && t1.creditsAt, outcome: t1 && t1.outcome }));
+      ok('no-witness: an attempt with no known count (the cache none, the read before the consume none) records NULL, never a fabricated 0', gateOf(t1) && t1.creditsAt === null && t1.outcome === 'unanswered', JSON.stringify({ creditsAt: t1 && t1.creditsAt, outcome: t1 && t1.outcome }));
       past(t1); t1.outcome = 'unanswered'; t1.settled = null;
       delete process.env.STUB_READ_COUNT;
       process.env.STUB_READ_RESETS_AT = String(w.nowS + 2 * 86400 - 600); // verify r5: the read restates the window EARLIER — no window witness, the count alone speaks (the r2 legs' shape; a restated wall would PROVE not-landed by the window now)
       process.env.STUB_MODE = 'answer'; fs.writeFileSync(process.env.STUB_LOG, '');
       const n0 = w.notices.length; const r = w.quietly(() => w.call('POST', w.A)); await until(() => w.notices.length > n0, 8000);
       const L = rpc().map((x) => x.method);
-      ok('no-witness: the next press reads (the count 1 carried) and does NOT consume over an attempt whose count it cannot compare', r.code === 200 && L.includes('account/rateLimits/read') && !L.includes('account/rateLimitResetCredit/consume'), JSON.stringify([r.code, L]));
+      ok('no-witness: the next press reads (the count 1 carried) and does NOT consume over an attempt whose count it cannot compare', r.code === 200 && gateOf(L.includes('account/rateLimits/read')) && !L.includes('account/rateLimitResetCredit/consume'), JSON.stringify([r.code, L]));
       // verify r2 (1b): …that attempt is UNTOLD — the block ends, the person is told the count the reading carries, and
       // the NEXT press (the dialog now showing that count) spends one credit, once
       const pvU = w.call('GET', w.A).body;
-      ok('no-witness/untold: the reading settles it UNTOLD (no count was known at the send; the account now holds 1) — the block ends, the notice says so', t1.settled && t1.settled.how === 'untold' && !pvU.unsettled && !pvU.code && w.notices.some((n) => /cannot be judged \(no credit count was known when it was sent — the account now holds 1\); nothing was spent this time/.test(n)), JSON.stringify([t1.settled, pvU, w.notices.slice(-2)]));
+      ok('no-witness/untold: the reading settles it UNTOLD (no count was known at the send; the account now holds 1) — the block ends, the notice says so', gateOf(t1.settled) && t1.settled.how === 'untold' && !pvU.unsettled && !pvU.code && verdictOf(w.notices.some((n) => /cannot be judged \(no credit count was known when it was sent — the account now holds 1\); nothing was spent this time/.test(n))), JSON.stringify([t1.settled, pvU, w.notices.slice(-2)]));
       fs.writeFileSync(process.env.STUB_LOG, '');
       process.env.STUB_READ_RESETS_AT = String(JSON.parse(fs.readFileSync(path.join(w.cacheDir, w.A + '.json'), 'utf8')).sevenDay.resetsAt); // the read restates the window the dialog shows now
       const n1 = w.notices.length; const r3 = w.quietly(() => w.call('POST', w.A)); await until(() => w.notices.length > n1, 8000);
       const L3 = rpc().map((x) => x.method);
-      ok('no-witness/untold: the next press consumes ONCE (it reads first — the seam, verify r8 T0 — and nothing unsettled remains)', r3.code === 200 && L3.filter((m) => m === 'account/rateLimitResetCredit/consume').length === 1 && L3.indexOf('account/rateLimits/read') < L3.indexOf('account/rateLimitResetCredit/consume') && w.notices.some((n) => /reset credit used on Cx Alpha/.test(n)), JSON.stringify([r3.code, L3]));
+      ok('no-witness/untold: the next press consumes ONCE (it reads first — the seam, verify r8 T0 — and nothing unsettled remains)', r3.code === 200 && L3.filter((m) => m === 'account/rateLimitResetCredit/consume').length === 1 && L3.indexOf('account/rateLimits/read') < L3.indexOf('account/rateLimitResetCredit/consume') && verdictOf(w.notices.some((n) => /reset credit used on Cx Alpha/.test(n))), JSON.stringify([r3.code, L3]));
       // verify r2 (1b): THE LAPSE on the session path — an unsettled attempt whose wall is gone by itself blocks nothing,
       // the preview carries `lapsed`, the dialog says the count may be one high, and a press writes the verb
       { const wl = world({ readsFirst: false }); // the r2 shape on a wrapper that reads nothing before the send (verify r8 T0: the reads-first shape follows)
@@ -740,13 +740,13 @@ console.log('\n§3 the route over the real engine');
         tl.resetsAtSec = wl.nowS - 2 * 86400; // the wall it was for passed two days ago (its window rolled)
         const pl = wl.call('GET', wl.A).body;
         const ml = RC.dialogModel(pl, { nowSec: wl.nowS, fmtTime: (x) => 'T' + x, harness: 'Codex' });
-        ok('lapsed: the preview is FREE (no unsettled, no refusal) and carries the lapsed fact; the dialog says the count may be one high', !pl.code && !pl.unsettled && pl.lapsed && pl.lapsed.sinceSec > 0 && ml.canConfirm && ml.lines.some((l) => /count shown may be one high/.test(l.key) && l.params.time === 'T' + pl.lapsed.sinceSec), JSON.stringify([pl.code, pl.unsettled, pl.lapsed, ml.lines.map((l) => l.key)]));
+        ok('lapsed: the preview is FREE (no unsettled, no refusal) and carries the lapsed fact; the dialog says the count may be one high', !pl.code && !pl.unsettled && gateOf(pl.lapsed) && pl.lapsed.sinceSec > 0 && gateOf(ml.canConfirm) && verdictOf(ml.lines.some((l) => /count shown may be one high/.test(l.key) && l.params.time === 'T' + pl.lapsed.sinceSec)), JSON.stringify([pl.code, pl.unsettled, pl.lapsed, ml.lines.map((l) => l.key)]));
         const rl = wl.quietly(() => wl.call('POST', wl.A, { body: { sessionId: 'cx1' } }));
         ok('lapsed: a press writes the verb (a new key) — no read first, nothing refused', rl.code === 200 && wl.verbs() === 2 && wl.keyOf(1) !== wl.keyOf(0), JSON.stringify([rl.code, rl.body, wl.verbs()]));
         const tl2 = wl.eng._resetCreditTries.get(wl.A);
         // verify r3 restated the r2 row: the lapsed attempt rides as the new one's prior at the OPEN (the helper's read-first, the
         // route's read can still settle it BEFORE the send) and is DROPPED at the send — nothing can settle it after (superseded)
-        ok('lapsed: the lapsed attempt rode as the new one\'s prior until the send, then was dropped (superseded at the send; charged already, blocks nothing)', tl2 && tl2.sentAt > 0 && tl2.prior === null && tl.supersededAt === tl2.sentAt && RC.isUnsettled(tl), JSON.stringify([!!(tl2 && tl2.prior), tl.supersededAt === tl2.sentAt, tl.outcome, tl.settled]));
+        ok('lapsed: the lapsed attempt rode as the new one\'s prior until the send, then was dropped (superseded at the send; charged already, blocks nothing)', gateOf(tl2) && tl2.sentAt > 0 && tl2.prior === null && tl.supersededAt === tl2.sentAt && verdictOf(RC.isUnsettled(tl)), JSON.stringify([!!(tl2 && tl2.prior), tl.supersededAt === tl2.sentAt, tl.outcome, tl.settled]));
         // verify r8 T0: on a wrapper that READS FIRST the lapsed prior is judged by that reading before the send (the count
         // unchanged, a window other than its own ⇒ untold) and still blocks nothing — the press goes out; the settled prior rides
         const wr = world();
@@ -754,7 +754,7 @@ console.log('\n§3 the route over the real engine');
         const tr = wr.eng._resetCreditTries.get(wr.A); past(tr); tr.outcome = 'unanswered'; tr.settled = null; tr.resetsAtSec = wr.nowS - 2 * 86400;
         const rr = wr.quietly(() => wr.call('POST', wr.A, { body: { sessionId: 'cx1' } }));
         const tr2 = wr.eng._resetCreditTries.get(wr.A);
-        ok('lapsed (verify r8 T0, a reads-first wrapper): the read before the send settles the lapsed prior (untold), the press still goes out — a lapsed prior blocks nothing whatever the reading said about it', rr.code === 200 && tr2 && tr2.sentAt > 0 && tr2.readFirst === true && wr.befores.length === 2 && wr.verbs() === 2 && tr.settled && tr.settled.how === 'untold' && tr2.prior === tr, JSON.stringify([rr.code, tr2 && tr2.sentAt > 0, wr.befores.length, tr.settled, tr2 && tr2.prior === tr]));
+        ok('lapsed (verify r8 T0, a reads-first wrapper): the read before the send settles the lapsed prior (untold), the press still goes out — a lapsed prior blocks nothing whatever the reading said about it', rr.code === 200 && gateOf(tr2) && tr2.sentAt > 0 && tr2.readFirst === true && wr.befores.length === 2 && wr.verbs() === 2 && gateOf(tr.settled) && tr.settled.how === 'untold' && tr2.prior === tr, JSON.stringify([rr.code, tr2 && tr2.sentAt > 0, wr.befores.length, tr.settled, tr2 && tr2.prior === tr]));
       }
       // verify r2 (2, reproduced — money): the helper's app-server EXITED the moment the consume arrived — sent, never
       // answered; its error text ('exited (0) during consume') is not a timeout, so it was settled "error" (nothing
@@ -765,13 +765,13 @@ console.log('\n§3 the route over the real engine');
         await until(() => !!(wx.eng._resetCreditTries.get(wx.A) || {}).outcome, 8000);
         const tx = wx.eng._resetCreditTries.get(wx.A);
         const px = wx.call('GET', wx.A).body;
-        ok('exited app-server: the consume went out (logged by the stub), the attempt is UNANSWERED (may have landed): charged, the floor armed, the preview says cooldown', rpcX().some((x) => x.method === 'account/rateLimitResetCredit/consume') && tx && tx.outcome === 'unanswered' && tx.sentAt > 0 && tx.charged && px.code === 'cooldown' && wx.notices.some((n) => /no answer came back/.test(n)), JSON.stringify([rpcX().map((x) => x.method), tx && tx.outcome, px.code, wx.notices]));
+        ok('exited app-server: the consume went out (logged by the stub), the attempt is UNANSWERED (may have landed): charged, the floor armed, the preview says cooldown', gateOf(rpcX().some((x) => x.method === 'account/rateLimitResetCredit/consume')) && gateOf(tx) && tx.outcome === 'unanswered' && tx.sentAt > 0 && gateOf(tx.charged) && px.code === 'cooldown' && verdictOf(wx.notices.some((n) => /no answer came back/.test(n))), JSON.stringify([rpcX().map((x) => x.method), tx && tx.outcome, px.code, wx.notices]));
         process.env.STUB_MODE = 'answer';
         const rx2 = wx.quietly(() => wx.call('POST', wx.A));
         ok('exited app-server: …a second press is refused by name (429 cooldown), no second key', rx2.code === 429 && rx2.body.code === 'cooldown' && rpcX().filter((x) => x.method === 'account/rateLimitResetCredit/consume').length === 1, JSON.stringify([rx2.code, rx2.body.code]));
         const esrcX = read('src/server/usage-pool-engine.js');
         const fromX = "attempts: res.sent ? 1 : 0, sent: !!res.sent, answered: !!res.answered, via: 'helper' });";
-        ok('exited app-server CONTROL: the patch hits the product source', esrcX.includes(fromX));
+        ok('exited app-server CONTROL: the patch hits the product source', verdictOf(esrcX.includes(fromX)));
         const preX = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcX, fromX, "attempts: res.sent ? 1 : 0, sent: !!res.sent, via: 'helper' });", "src/server/usage-pool-engine.js"), 'noanswered'));
         const rpcC = stubEnv('exit-consume-ctl'); process.env.STUB_MODE = 'exit-on-consume';
         const wc = world({ session: false, helper, engine: preX });
@@ -784,7 +784,7 @@ console.log('\n§3 the route over the real engine');
       }
       const esrcW = read('src/server/usage-pool-engine.js');
       const fromW = "    creditsAt: creditsAt != null && creditsAt !== '' && Number.isFinite(Number(creditsAt)) ? Number(creditsAt) : null, reportsSent: reportsSent !== false,";
-      ok('no-witness CONTROL: the patch hits the product source', esrcW.includes(fromW));
+      ok('no-witness CONTROL: the patch hits the product source', verdictOf(esrcW.includes(fromW)));
       const preW = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcW, fromW, "    creditsAt: Number.isFinite(Number(creditsAt)) ? Number(creditsAt) : null, reportsSent: reportsSent !== false,", "src/server/usage-pool-engine.js"), 'zerowitness'));
       const rpcC = stubEnv('unk-nowitness-ctl'); process.env.STUB_MODE = 'hang-consume'; process.env.STUB_READ_COUNT = 'none'; // the same witness-less read before press 1 (verify r8 T0)
       const wc = world({ session: false, helper: { ...helper, wallMs: 500 }, engine: preW });
@@ -794,7 +794,7 @@ console.log('\n§3 the route over the real engine');
       delete process.env.STUB_READ_COUNT; // (the read restates the SAME wall here: the pre-fix engine then reads "0 → 1, the window unchanged" as not landed and spends again)
       process.env.STUB_MODE = 'answer'; fs.writeFileSync(process.env.STUB_LOG, '');
       const nc = wc.notices.length; wc.quietly(() => wc.call('POST', wc.A)); await until(() => wc.notices.length > nc, 8000);
-      ok('no-witness CONTROL: the pre-fix engine records 0 and the next press spends a SECOND credit ("count still 1") — the legs above see the rule', tc.creditsAt === 0 && rpcC().some((x) => x.method === 'account/rateLimitResetCredit/consume'), JSON.stringify([tc.creditsAt, rpcC().map((x) => x.method)]));
+      ok('no-witness CONTROL: the pre-fix engine records 0 and the next press spends a SECOND credit ("count still 1") — the legs above see the rule', tc.creditsAt === 0 && verdictOf(rpcC().some((x) => x.method === 'account/rateLimitResetCredit/consume')), JSON.stringify([tc.creditsAt, rpcC().map((x) => x.method)]));
     }
     // verify r2 (Q3): the helper's `pressedBy` witness is the PRESS'S OWN attempt's origin — a person's press over a
     // prior the AUTO rung opened (and never got answered) still reaches the helper (it reads first, over that prior)
@@ -802,12 +802,12 @@ console.log('\n§3 the route over the real engine');
       w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: w.nowS + 2 * 86400 }));
       await new Promise((r) => setTimeout(r, 300));
       const ta = w.eng._resetCreditTries.get(w.A); past(ta); ta.outcome = 'unknown'; ta.settled = null;
-      ok('auto prior: the auto rung\'s attempt on the old wrapper is unknown, origin auto, unsettled', ta && ta.origin === 'auto' && RC.isUnsettled(ta), JSON.stringify([ta && ta.origin, ta && ta.outcome]));
+      ok('auto prior: the auto rung\'s attempt on the old wrapper is unknown, origin auto, unsettled', gateOf(ta) && ta.origin === 'auto' && verdictOf(RC.isUnsettled(ta)), JSON.stringify([ta && ta.origin, ta && ta.outcome]));
       fs.writeFileSync(process.env.STUB_LOG, '');
       const n0 = w.notices.length; const r = w.quietly(() => w.call('POST', w.A)); await until(() => w.notices.length > n0, 8000);
       const tp = w.eng._resetCreditTries.get(w.A);
       const L = rpcA().map((x) => x.method);
-      ok('auto prior: a PERSON\'s press opens its own attempt (origin user) whose prior is the auto one, and the helper RAN (pressedBy person — a refused witness would have spawned nothing): initialize → read first', r.code === 200 && tp && tp.origin === 'user' && tp.prior === ta && L[0] === 'initialize' && L.includes('account/rateLimits/read'), JSON.stringify([r.code, tp && tp.origin, tp && tp.prior === ta, L]));
+      ok('auto prior: a PERSON\'s press opens its own attempt (origin user) whose prior is the auto one, and the helper RAN (pressedBy person — a refused witness would have spawned nothing): initialize → read first', r.code === 200 && gateOf(tp) && tp.origin === 'user' && tp.prior === ta && L[0] === 'initialize' && verdictOf(L.includes('account/rateLimits/read')), JSON.stringify([r.code, tp && tp.origin, tp && tp.prior === ta, L]));
     }
     // verify r3 (reproduced): A LAPSED PRIOR JUDGED BY THE READING AFTER ITS SUCCESSOR'S CONSUME. Press 1 unanswered,
     // its wall long gone (lapsed, free, said); press 2 went out and its post-consume reading showed 3 → 2 — the NEW
@@ -826,12 +826,12 @@ console.log('\n§3 the route over the real engine');
       { const t0 = Date.now(); while (Date.now() < t0 + 3) { } }
       w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, reading(w, 2, { moved: true }))); // the post-consume read: 3 → 2 (the NEW consume's)
       w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, { type: 'reset_credit_result', outcome: 'reset', idempotencyKey: w.keyOf(1), attempts: 1 }));
-      ok('superseded: the reading settles NOTHING about press 1 (no "did land" notice); press 2 is the reset', !t1.settled && t1.outcome === 'unanswered' && !w.notices.some((n) => /did land/.test(n)) && t2.outcome === 'reset' && w.notices.some((n) => /reset credit consumed/.test(n)), JSON.stringify([t1.settled, t1.outcome, w.notices.filter((n) => /did land|consumed/.test(n))]));
+      ok('superseded: the reading settles NOTHING about press 1 (no "did land" notice); press 2 is the reset', !t1.settled && t1.outcome === 'unanswered' && !w.notices.some((n) => /did land/.test(n)) && t2.outcome === 'reset' && verdictOf(w.notices.some((n) => /reset credit consumed/.test(n))), JSON.stringify([t1.settled, t1.outcome, w.notices.filter((n) => /did land|consumed/.test(n))]));
       ok('superseded PURE: the same prior judged by a reading BEFORE the send still settles (the helper\'s read-first, the route\'s)', (RC.settleByReading({ ...t1, supersededAt: t2.sentAt, settled: null }, { fetchedAt: t2.sentAt - 1, creditsLeft: 2 }) || {}).how === 'landed');
       // CONTROL: an engine that never supersedes (the pre-r3 send) tells the person the old request "did land"
       const esrcS = read('src/server/usage-pool-engine.js');
       const fromS = "  t.prior = resetCredit.supersede(t.prior, now, clockOpts(now));\n  if (!t.charged) {"; // (verify r10 moved the persist AFTER the charge — the anchor follows it)
-      ok('superseded CONTROL: the patch hits the product source', esrcS.includes(fromS));
+      ok('superseded CONTROL: the patch hits the product source', verdictOf(esrcS.includes(fromS)));
       const preS = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcS, fromS, '  if (!t.charged) {', "src/server/usage-pool-engine.js"), 'nosupersede'));
       const wc = world({ engine: preS, readsFirst: false });
       wc.quietly(() => wc.call('POST', wc.A, { body: { sessionId: 'cx1' } }));
@@ -841,7 +841,7 @@ console.log('\n§3 the route over the real engine');
       wc.quietly(() => wc.call('POST', wc.A, { body: { sessionId: 'cx1' } }));
       { const t0 = Date.now(); while (Date.now() < t0 + 3) { } }
       wc.quietly(() => wc.eng.recordCodexQuotaSignal(wc.s1, reading(wc, 2, { moved: true })));
-      ok('superseded CONTROL: without the supersession the post-consume reading settles the OLD request LANDED and says so — the legs above see the rule', c1.settled && c1.settled.how === 'landed' && wc.notices.some((n) => /did land/.test(n)), JSON.stringify([c1.settled, wc.notices.filter((n) => /did land/.test(n))]));
+      ok('superseded CONTROL: without the supersession the post-consume reading settles the OLD request LANDED and says so — the legs above see the rule', gateOf(c1.settled) && c1.settled.how === 'landed' && verdictOf(wc.notices.some((n) => /did land/.test(n))), JSON.stringify([c1.settled, wc.notices.filter((n) => /did land/.test(n))]));
     }
     // verify r3 (reproduced — money): THE CLOCK, NOT THE TIMER. The floor's end was the TIMER's stamp (`no-answer`): a
     // press landing after the floor elapsed but before the timer's callback ran (a busy event loop — 350 ms here, the
@@ -851,7 +851,7 @@ console.log('\n§3 the route over the real engine');
     { const spin = (ms) => { const t0 = Date.now(); while (Date.now() < t0 + ms) { } };
       const esrcF = read('src/server/usage-pool-engine.js');
       const fromF = 'const RESET_CREDIT_FLOOR_MS = resetCredit.RESET_CREDIT_FLOOR_MS;';
-      ok('clock: the floor constant is the one the engine reads (a short-floor copy is the leg\'s clock)', esrcF.includes(fromF));
+      ok('clock: the floor constant is the one the engine reads (a short-floor copy is the leg\'s clock)', verdictOf(esrcF.includes(fromF)));
       const shortFloor = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcF, fromF, 'const RESET_CREDIT_FLOOR_MS = 300;', "src/server/usage-pool-engine.js"), 'floor300'));
       const w = world({ engine: shortFloor });
       w.quietly(() => w.call('POST', w.A, { body: { sessionId: 'cx1' } }));
@@ -862,10 +862,10 @@ console.log('\n§3 the route over the real engine');
       w.s1.stubLimits = () => reading(w, 3);
       const r2 = await w.quietly(() => post(w, w.A, { sessionId: 'cx1', expect: { resetsAtSec: pv.resetsAtSec } }));
       const reads = w.wrote.filter((x) => /"codex-read-limits"/.test(x)).length;
-      ok('clock: …a press then READS the account first (one read; the count still 3 ⇒ not landed) before its new key goes out', reads === 1 && r2.code === 200 && w.verbs() === 2 && t1.settled && t1.settled.how === 'not-landed', JSON.stringify([reads, r2.code, w.verbs(), t1.settled]));
+      ok('clock: …a press then READS the account first (one read; the count still 3 ⇒ not landed) before its new key goes out', reads === 1 && r2.code === 200 && w.verbs() === 2 && gateOf(t1.settled) && t1.settled.how === 'not-landed', JSON.stringify([reads, r2.code, w.verbs(), t1.settled]));
       await new Promise((r) => setTimeout(r, 400));
       const tn = w.eng._resetCreditTries.get(w.A), fileT = JSON.parse(fs.readFileSync(path.join(w.root, 'data', 'reset-credit-tries.json'), 'utf8')).tries;
-      ok('clock: …the settled record is carried by nobody (the newer attempt has no prior; its own floor timer was cleared — nothing left to wait for) and the file holds the settle', t1.settled.how === 'not-landed' && tn && tn.idempotencyKey === w.keyOf(1) && tn.prior === null && fileT.some((x) => x.idempotencyKey === w.keyOf(1)) && !fileT.some((x) => x.idempotencyKey === w.keyOf(0) && !x.settled), JSON.stringify([t1.outcome, t1.settled, tn && tn.prior, fileT.map((x) => [x.idempotencyKey === w.keyOf(0) ? 'k0' : 'k1', x.outcome, x.settled && x.settled.how])]));
+      ok('clock: …the settled record is carried by nobody (the newer attempt has no prior; its own floor timer was cleared — nothing left to wait for) and the file holds the settle', t1.settled.how === 'not-landed' && gateOf(tn) && tn.idempotencyKey === w.keyOf(1) && tn.prior === null && gateOf(fileT.some((x) => x.idempotencyKey === w.keyOf(1))) && !fileT.some((x) => x.idempotencyKey === w.keyOf(0) && !x.settled), JSON.stringify([t1.outcome, t1.settled, tn && tn.prior, fileT.map((x) => [x.idempotencyKey === w.keyOf(0) ? 'k0' : 'k1', x.outcome, x.settled && x.settled.how])]));
       // the ack window on a carrier that cannot report (the auto rung on an old wrapper)
       const rpcK = stubEnv('clock-ack');
       const wa = worldAuto();
@@ -876,12 +876,12 @@ console.log('\n§3 the route over the real engine');
       const ra = wa.quietly(() => wa.call('POST', wa.A));
       ok('clock: the auto rung\'s open attempt on an old wrapper, 170 ms past a 120 ms ack window, timer not run ⇒ the preview says COOLDOWN (armed from the write by the clock), a person\'s press is refused 429, NO helper spawned, the attempt still in the map', ta.outcome === null && pa.code === 'cooldown' && ra.code === 429 && rpcK().length === 0 && wa.eng._resetCreditTries.get(wa.A) === ta, JSON.stringify([ta.outcome, pa.code, ra.code, rpcK().length]));
       await until(() => ta.outcome !== null, 2000);
-      ok('clock: …the ack timer then stamps it unknown (charged once)', ta.outcome === 'unknown' && ta.charged && wa.charged() === 1);
+      ok('clock: …the ack timer then stamps it unknown (charged once)', ta.outcome === 'unknown' && gateOf(ta.charged) && wa.charged() === 1);
       // CONTROL: the pre-r3 PURE rule (the floor and the ack window judged by the timer's stamp) bound into the short-floor engine
       const psrc = read('src/reset-credit.js');
       const fromP1 = "  return !!(armed && now - armed >= floorMs); // a sent attempt past the floor whose timer has not run is unsettled by the clock\n";
       const fromP2 = "  if (t.reportsSent === false && now - at >= ackMs) return at; // the ack timer's `unknown`, from the write, by the clock\n";
-      ok('clock CONTROL: the two patches hit the PURE source', psrc.includes(fromP1) && psrc.includes(fromP2));
+      ok('clock CONTROL: the two patches hit the PURE source', gateOf(psrc.includes(fromP1)) && verdictOf(psrc.includes(fromP2)));
       const purePre = MUTRC.write('src/reset-credit.js', editAnchor(editAnchor(psrc, fromP1, '  return false;\n', "src/reset-credit.js"), fromP2, '', "src/reset-credit.js"), 'timeronly');
       const fromE = "const resetCredit = require('../reset-credit.js');";
       const engPre = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrcF, fromF, 'const RESET_CREDIT_FLOOR_MS = 300;', "src/server/usage-pool-engine.js"), fromE, `const resetCredit = require(${JSON.stringify(purePre)});`, "src/server/usage-pool-engine.js"), 'timeronly-eng'));
@@ -897,7 +897,7 @@ console.log('\n§3 the route over the real engine');
       spin(170);
       const rd = wd.quietly(() => wd.call('POST', wd.A));
       await until(() => rpcC().some((x) => x.method === 'account/rateLimitResetCredit/consume'), 8000);
-      ok('clock CONTROL: …and the open attempt past the ack window is FREE too — a person\'s press ran the helper (a second key) and the open attempt was replaced in the map', rd.code === 200 && rpcC().some((x) => x.method === 'account/rateLimitResetCredit/consume') && wd.eng._resetCreditTries.get(wd.A) !== td, JSON.stringify([rd.code, rpcC().map((x) => x.method)]));
+      ok('clock CONTROL: …and the open attempt past the ack window is FREE too — a person\'s press ran the helper (a second key) and the open attempt was replaced in the map', rd.code === 200 && gateOf(rpcC().some((x) => x.method === 'account/rateLimitResetCredit/consume')) && wd.eng._resetCreditTries.get(wd.A) !== td, JSON.stringify([rd.code, rpcC().map((x) => x.method)]));
     }
     // verify r3 (reproduced — money): AN UNMEASURED VENDOR WORD. codex answered the consume `cooldownActive` (a word no
     // measured table lists) and the engine settled it "the vendor answered cooldownActive" — nothing armed, the next
@@ -907,20 +907,20 @@ console.log('\n§3 the route over the real engine');
       w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, { type: 'reset_credit_result', outcome: 'cooldownActive', idempotencyKey: w.keyOf(0), attempts: 1 }));
       const tu = w.eng._resetCreditTries.get(w.A); const pu = w.call('GET', w.A).body;
       const ru = w.quietly(() => w.call('POST', w.A, { body: { sessionId: 'cx1' } }));
-      ok('unknown word: a consume answered «cooldownActive» is an attempt of UNKNOWN effect — charged, the floor (429 on the next press, no second key), and the person is told the word and that it may have spent a credit', tu && tu.outcome === 'unknown-outcome' && tu.charged && pu.code === 'cooldown' && ru.code === 429 && w.verbs() === 1 && w.notices.some((n) => /codex answered «cooldownActive», a word VibeSpace does not know .* it may have spent a credit, so the next try waits ten minutes/.test(n)), JSON.stringify([tu && tu.outcome, pu.code, ru.code, w.verbs(), w.notices.slice(-1)]));
+      ok('unknown word: a consume answered «cooldownActive» is an attempt of UNKNOWN effect — charged, the floor (429 on the next press, no second key), and the person is told the word and that it may have spent a credit', gateOf(tu) && tu.outcome === 'unknown-outcome' && gateOf(tu.charged) && pu.code === 'cooldown' && ru.code === 429 && w.verbs() === 1 && verdictOf(w.notices.some((n) => /codex answered «cooldownActive», a word VibeSpace does not know .* it may have spent a credit, so the next try waits ten minutes/.test(n))), JSON.stringify([tu && tu.outcome, pu.code, ru.code, w.verbs(), w.notices.slice(-1)]));
       past(tu); tu.outcome = 'unknown-outcome';
       ok('unknown word: …past the floor it is UNSETTLED (a press reads first), never free by the clock', !!w.call('GET', w.A).body.unsettled);
       { const t0 = Date.now(); while (Date.now() < t0 + 3) { } }
       w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, reading(w, 2, { moved: true })));
-      ok('unknown word: …a reading (3 → 2) settles it LANDED: the word WAS a consume', tu.outcome === 'reset' && tu.settled && tu.settled.how === 'landed');
+      ok('unknown word: …a reading (3 → 2) settles it LANDED: the word WAS a consume', tu.outcome === 'reset' && gateOf(tu.settled) && tu.settled.how === 'landed');
       // CONTROL: the engine over the pre-r3 PURE classifier (the word kept verbatim) frees the press and mints a second key
       const psrc = read('src/reset-credit.js');
       const fromP = "    if (!VENDOR_OUTCOMES.includes(word)) return { outcome: 'unknown-outcome', sent: true, answered: true, keyed, word };\n";
-      ok('unknown word CONTROL: the patch hits the PURE source', psrc.includes(fromP));
+      ok('unknown word CONTROL: the patch hits the PURE source', verdictOf(psrc.includes(fromP)));
       const purePre = MUTRC.write('src/reset-credit.js', editAnchor(psrc, fromP, '', "src/reset-credit.js"), 'openworld');
       const esrcP = read('src/server/usage-pool-engine.js');
       const fromE = "const resetCredit = require('../reset-credit.js');";
-      ok('unknown word CONTROL: the engine binds the PURE rule by that one require', esrcP.includes(fromE));
+      ok('unknown word CONTROL: the engine binds the PURE rule by that one require', verdictOf(esrcP.includes(fromE)));
       const engPre = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcP, fromE, `const resetCredit = require(${JSON.stringify(purePre)});`, "src/server/usage-pool-engine.js"), 'openworld-eng'));
       const wc = world({ engine: engPre });
       wc.quietly(() => wc.call('POST', wc.A, { body: { sessionId: 'cx1' } }));
@@ -942,16 +942,16 @@ console.log('\n§3 the route over the real engine');
       const n0 = w.notices.length; const r2 = w.quietly(() => w.call('POST', w.A)); await until(() => w.notices.length > n0, 6000);
       const t2 = w.eng._resetCreditTries.get(w.A);
       const pv2 = w.call('GET', w.A).body;
-      ok('chain: press 2 could not start the helper ⇒ its record is FREE (error, nothing sent) with press 1 as its prior — and the preview STILL says unsettled (the chain, not the newest record)', r2.code === 200 && t2 && t2.outcome === 'error' && !t2.sentAt && t2.prior === t1 && pv2.unsettled && !pv2.code, JSON.stringify([r2.code, t2 && t2.outcome, t2 && t2.prior === t1, pv2.code, !!pv2.unsettled]));
+      ok('chain: press 2 could not start the helper ⇒ its record is FREE (error, nothing sent) with press 1 as its prior — and the preview STILL says unsettled (the chain, not the newest record)', r2.code === 200 && gateOf(t2) && t2.outcome === 'error' && !t2.sentAt && t2.prior === t1 && gateOf(pv2.unsettled) && !pv2.code, JSON.stringify([r2.code, t2 && t2.outcome, t2 && t2.prior === t1, pv2.code, !!pv2.unsettled]));
       hd.codexCmd = STUB; process.env.STUB_MODE = 'answer'; fs.writeFileSync(process.env.STUB_LOG, '');
       const n1 = w.notices.length; const r3 = w.quietly(() => w.call('POST', w.A)); await until(() => w.notices.length > n1, 8000);
       const L = rpcD().map((x) => x.method);
       const t3 = w.eng._resetCreditTries.get(w.A);
-      ok('chain: press 3 carries press 1 as its prior (through the free record), READS FIRST, learns press 1 had landed (2 → 1) and consumes NOTHING', r3.code === 200 && t3 && t3.prior === t1 && L.includes('account/rateLimits/read') && !L.includes('account/rateLimitResetCredit/consume') && t1.settled && t1.settled.how === 'landed' && w.notices.some((n) => /had already landed \(the stored credit count fell 2 → 1\)/.test(n)), JSON.stringify([r3.code, t3 && t3.prior === t1, L, t1.settled, w.notices.slice(-1)]));
+      ok('chain: press 3 carries press 1 as its prior (through the free record), READS FIRST, learns press 1 had landed (2 → 1) and consumes NOTHING', r3.code === 200 && gateOf(t3) && t3.prior === t1 && gateOf(L.includes('account/rateLimits/read')) && !L.includes('account/rateLimitResetCredit/consume') && gateOf(t1.settled) && t1.settled.how === 'landed' && verdictOf(w.notices.some((n) => /had already landed \(the stored credit count fell 2 → 1\)/.test(n))), JSON.stringify([r3.code, t3 && t3.prior === t1, L, t1.settled, w.notices.slice(-1)]));
       // CONTROL: an engine whose prior is only the immediate record (the pre-r3 rule) consumes on press 3 with no read
       const esrcD = read('src/server/usage-pool-engine.js');
       const fromD = "settled: null, readFirst: via === 'helper' || readFirst === true, prior: resetCredit.priorForPress(prev, clockOpts(now)) };";
-      ok('chain CONTROL: the patch hits the product source', esrcD.includes(fromD));
+      ok('chain CONTROL: the patch hits the product source', verdictOf(esrcD.includes(fromD)));
       const preD = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcD, fromD, "settled: null, readFirst: via === 'helper' || readFirst === true, prior: prev && resetCredit.isUnsettled(prev, clockOpts(now)) ? prev : null };", "src/server/usage-pool-engine.js"), 'prevonly'));
       const rpcC = stubEnv('chain-ctl'); process.env.STUB_MODE = 'hang-consume';
       const hc = { codexCmd: STUB, extraArgs: [], wallMs: 400 };
@@ -964,7 +964,7 @@ console.log('\n§3 the route over the real engine');
       hc.codexCmd = STUB; process.env.STUB_MODE = 'answer'; fs.writeFileSync(process.env.STUB_LOG, '');
       const nc1 = wc.notices.length; wc.quietly(() => wc.call('POST', wc.A)); await until(() => wc.notices.length > nc1, 8000);
       const LC = rpcC().map((x) => x.method);
-      ok('chain CONTROL: with the prior = the immediate record only, press 3 carries NO prior and CONSUMES over the landed request (its read-first — every press reads since verify r8 T0 — had no prior to judge) — the legs above see the rule', (wc.eng._resetCreditTries.get(wc.A) || {}).prior === null && LC.includes('account/rateLimitResetCredit/consume'), JSON.stringify(LC));
+      ok('chain CONTROL: with the prior = the immediate record only, press 3 carries NO prior and CONSUMES over the landed request (its read-first — every press reads since verify r8 T0 — had no prior to judge) — the legs above see the rule', (wc.eng._resetCreditTries.get(wc.A) || {}).prior === null && verdictOf(LC.includes('account/rateLimitResetCredit/consume')), JSON.stringify(LC));
     }
     // ── verify r3 T1: ENGINE PARITY — the REAL engine driven through the table's events (a short floor on a patched copy,
     //    a short ack window), compared phase by phase with src/reset-credit.js attemptStep after every step: the newest
@@ -982,7 +982,7 @@ console.log('\n§3 the route over the real engine');
     { const FLOOR = 300, ACK = 120;
       const esrcP = read('src/server/usage-pool-engine.js');
       const fromFP = 'const RESET_CREDIT_FLOOR_MS = resetCredit.RESET_CREDIT_FLOOR_MS;';
-      ok('parity: the floor constant is the one the engine reads', esrcP.includes(fromFP));
+      ok('parity: the floor constant is the one the engine reads', verdictOf(esrcP.includes(fromFP)));
       const engP = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcP, fromFP, `const RESET_CREDIT_FLOOR_MS = ${FLOOR};`, "src/server/usage-pool-engine.js"), 'parity'));
       const o = () => ({ now: Date.now(), floorMs: FLOOR, ackMs: ACK });
       const shift = (t, ms) => { for (let x = t; x; x = x.prior) { for (const k of ['at', 'sentAt', 'outcomeAt', 'supersededAt']) if (x[k]) x[k] -= ms; if (x.settled && x.settled.at) x.settled.at -= ms; if (x.resetsAtSec) x.resetsAtSec -= Math.round(ms / 1000); if (x.window && x.window.resetsAtSec) x.window.resetsAtSec -= Math.round(ms / 1000); } };
@@ -1097,7 +1097,7 @@ console.log('\n§3 the route over the real engine');
       const parityRun = async (opts) => { globalThis.setTimeout = observedST; try { return await parityRun0(opts); } finally { globalThis.setTimeout = realST; } };
       const { mism, stepsRun, seqs, kinds } = await parityRun({ seqs: SEQS, steps: STEPS, pick: (EVS) => EVS[Math.floor(rnd() * EVS.length)] });
       ok(`parity: ${seqs} seeded sequences × ${STEPS} steps on the real engine (${stepsRun} steps) agree with the table — the newest record and its priors, the block, the preview, the ledger`, stepsRun === SEQS * STEPS && mism.length === 0, JSON.stringify(mism.slice(0, 6)));
-      ok('parity: the sample exercised every event kind (press · sent · answer · the ack and floor waits · reading · clock · boot · torn)', ['press', 'sent', 'answer', 'wait-ack', 'wait-floor', 'reading', 'clock', 'boot', 'torn'].every((k) => kinds.has(k)), [...kinds].join(','));
+      ok('parity: the sample exercised every event kind (press · sent · answer · the ack and floor waits · reading · clock · boot · torn)', verdictOf(['press', 'sent', 'answer', 'wait-ack', 'wait-floor', 'reading', 'clock', 'boot', 'torn'].every((k) => kinds.has(k))), [...kinds].join(','));
       // THE LAW'S CONTROLS (主开发 r1036): scripted runs, each pause PLACED; a scene a pause on the machine could spoil states its
       // precondition and is tried again until it held (at most 3 tries) — said, never assumed
       const script = (ks) => { let i = 0; return (EVS) => { const want = ks[i++]; return EVS.find(([k]) => k === want); }; };
@@ -1107,24 +1107,24 @@ console.log('\n§3 the route over the real engine');
       const earlyHeld = (r) => r.stamps.some((x) => x.type === 'ack-expired' && x.lag + x.delay < ACK);   // the engine's timer was due inside the table's window
       const early = await tries(() => parityRun({ seqs: 1, steps: 1, pick: script(['press']), engAck: 1, pauses: { 0: [0, ACK] } }), earlyHeld);
       ok(`parity CONTROL (RED): an engine that stamps «not sent» EARLY (its ack window 1 ms against the table's ${ACK}) stays red though the step's compare comes ${ACK} ms after its stamp — its timer is given at its own due instant, which the table's guard refuses (${early.tries} tr${early.tries === 1 ? 'y' : 'ies'})`,
-        early.tries > 0 && recordRed(early), JSON.stringify([early.stamps, early.mism.slice(0, 3)]));
+        early.tries > 0 && verdictOf(recordRed(early)), JSON.stringify([early.stamps, early.mism.slice(0, 3)]));
       const earlyW = await tries(() => parityRun({ seqs: 1, steps: 2, pick: script(['press', 'wait-ack']), engAck: 60 }), earlyHeld);
       ok(`parity CONTROL (RED): an engine whose ack window is 60 ms stays red in a WAIT step too — its timer ran, so the wait gives the table that timer at its own due instant, refused, never the wait's own (${earlyW.tries} tr${earlyW.tries === 1 ? 'y' : 'ies'})`,
-        earlyW.tries > 0 && recordRed(earlyW), JSON.stringify([earlyW.stamps, earlyW.mism.slice(0, 3)]));
+        earlyW.tries > 0 && verdictOf(recordRed(earlyW)), JSON.stringify([earlyW.stamps, earlyW.mism.slice(0, 3)]));
       const tail = await parityRun({ seqs: 1, steps: 1, pick: script(['press']), pauses: { 0: [ACK + 30, 0] } });
       const tailWas = await parityRun({ seqs: 1, steps: 1, pick: script(['press']), pauses: { 0: [ACK + 30, 0] }, sync: false });
       ok(`parity: a pause of ${ACK + 30} ms PLACED in a press step's own tail (the engine's real ack timer runs before that step's compare) agrees — CONTROL: the leg as it was (the table told only in its waits) is red there`,
-        tail.stepsRun === 1 && tail.mism.length === 0 && recordRed(tailWas), JSON.stringify([tail.mism.slice(0, 2), tailWas.mism.slice(0, 2)]));
+        tail.stepsRun === 1 && tail.mism.length === 0 && verdictOf(recordRed(tailWas)), JSON.stringify([tail.mism.slice(0, 2), tailWas.mism.slice(0, 2)]));
       const edge = await parityRun({ seqs: 1, steps: 1, pick: script(['press']), pauses: { 0: [ACK - 3, 0] } });
       const edgeWas = await parityRun({ seqs: 1, steps: 1, pick: script(['press']), pauses: { 0: [ACK - 3, 0] }, sync: false });
       ok(`parity: AT THE EDGE — a pause of ${ACK - 3} ms that ends before the timer is due, so the engine's ack timer runs ON TIME inside the step's 5 ms tail (its own clock in whole milliseconds may read 119), agrees: the table is given it at its DUE instant (its arming + its delay, ≥ the window), never when it ran — CONTROL: the leg as it was is red there`,
-        edge.stepsRun === 1 && edge.mism.length === 0 && edge.stamps.length > 0 && edge.stamps.every((x) => x.fedLag === x.lag + x.delay && x.fedLag >= ACK) && recordRed(edgeWas),
+        edge.stepsRun === 1 && edge.mism.length === 0 && edge.stamps.length > 0 && gateOf(edge.stamps.every((x) => x.fedLag === x.lag + x.delay && x.fedLag >= ACK)) && verdictOf(recordRed(edgeWas)),
         JSON.stringify([edge.stamps, edge.mism.slice(0, 2), edgeWas.mism.slice(0, 2)]));
       const refusedHeld = (r) => r.verdicts.length === 2 && r.verdicts[0] === null && !!r.verdicts[1];   // the second press refused (no pause between them spoiled it)
       const twice = await tries(() => parityRun({ seqs: 1, steps: 2, pick: script(['press', 'press']), pauses: { 1: [ACK + 30, 0] } }), refusedHeld);
       const twiceWas = await tries(() => parityRun({ seqs: 1, steps: 2, pick: script(['press', 'press']), pauses: { 1: [ACK + 30, 0] }, sync: false }), refusedHeld);
       ok(`parity: a press, then a REFUSED press (${twice.verdicts[1]}) with a pause of ${ACK + 30} ms placed in its tail, agrees — CONTROL: the leg as it was is red there (${twice.tries} / ${twiceWas.tries} tr${twice.tries + twiceWas.tries === 2 ? 'y each' : 'ies'})`,
-        twice.tries > 0 && twiceWas.tries > 0 && twice.mism.length === 0 && recordRed(twiceWas), JSON.stringify([twice.verdicts, twice.mism.slice(0, 2), twiceWas.mism.slice(0, 2)]));
+        twice.tries > 0 && twiceWas.tries > 0 && twice.mism.length === 0 && verdictOf(recordRed(twiceWas)), JSON.stringify([twice.verdicts, twice.mism.slice(0, 2), twiceWas.mism.slice(0, 2)]));
     }
     // ── verify r3 T2: the helper's stdout cut MID-JSON (the app-server died while writing its answer) — the line never
     //    parses, the exit ends the run: sent + unanswered, never "answered, nothing spent"; a line that parses but is not
@@ -1134,22 +1134,22 @@ console.log('\n§3 the route over the real engine');
       fs.writeFileSync(cut, `#!/usr/bin/env node\nlet b = '';\nprocess.stdin.setEncoding('utf8');\nprocess.stdin.on('data', (d) => { b += d; let i; while ((i = b.indexOf('\\n')) >= 0) { const l = b.slice(0, i); b = b.slice(i + 1); if (!l.trim()) continue; let m; try { m = JSON.parse(l); } catch { continue; } if (m.method === 'initialize') process.stdout.write(JSON.stringify({ id: m.id, result: { userAgent: 'stub' } }) + '\\n'); else if (m.method === 'account/rateLimitResetCredit/consume') { process.stdout.write(process.env.CUT_MODE === 'noise' ? '{"method":"codex/event","params":{}}\\n' : '{"id":' + m.id + ',"result":{"outcome":"re'); if (process.env.CUT_MODE !== 'noise') process.exit(0); } } });\nprocess.stdin.on('end', () => process.exit(0));\n`, { mode: 0o755 });
       const r1 = await HM.consumeResetCreditViaAppServer({ idempotencyKey: 'k-cut', env: { PATH: process.env.PATH, CODEX_HOME: SDIR, CUT_MODE: 'cut' }, codexCmd: cut, wallMs: 3000, pressedBy: 'person' });
       const a1 = RC.creditAnswerOf({ ...r1, idempotencyKey: 'k-cut', attempts: r1.sent ? 1 : 0 });
-      ok('helper stdout cut mid-JSON: the consume was sent, the truncated answer never parsed, the exit ended the run ⇒ sent + unanswered ⇒ UNANSWERED (arms, unsettled), never an answered error', r1.sent === true && r1.answered === false && /exited/.test(r1.error || '') && a1.outcome === 'unanswered' && RC.outcomeArmsFloor(a1.outcome), JSON.stringify([r1.sent, r1.answered, r1.error, a1.outcome]));
+      ok('helper stdout cut mid-JSON: the consume was sent, the truncated answer never parsed, the exit ended the run ⇒ sent + unanswered ⇒ UNANSWERED (arms, unsettled), never an answered error', r1.sent === true && r1.answered === false && gateOf(/exited/.test(r1.error || '')) && a1.outcome === 'unanswered' && verdictOf(RC.outcomeArmsFloor(a1.outcome)), JSON.stringify([r1.sent, r1.answered, r1.error, a1.outcome]));
       const r2 = await HM.consumeResetCreditViaAppServer({ idempotencyKey: 'k-noise', env: { PATH: process.env.PATH, CODEX_HOME: SDIR, CUT_MODE: 'noise' }, codexCmd: cut, wallMs: 700, pressedBy: 'person' });
       const a2 = RC.creditAnswerOf({ ...r2, idempotencyKey: 'k-noise', attempts: 1 });
-      ok('helper stdout: a line that parses but is not the answer keeps the wait — the wall ends it: sent + unanswered (timed out) ⇒ UNANSWERED', r2.sent === true && r2.answered === false && /timed out after/.test(r2.error || '') && a2.outcome === 'unanswered', JSON.stringify([r2.sent, r2.answered, r2.error, a2.outcome]));
+      ok('helper stdout: a line that parses but is not the answer keeps the wait — the wall ends it: sent + unanswered (timed out) ⇒ UNANSWERED', r2.sent === true && r2.answered === false && gateOf(/timed out after/.test(r2.error || '')) && a2.outcome === 'unanswered', JSON.stringify([r2.sent, r2.answered, r2.error, a2.outcome]));
     }
     // ── verify r3 T2: the boot charge when the MEMBER WAS REMOVED between the stop and the boot — charged to the identity
     //    the record carries (its key + name at the press), never dropped, never re-resolved
     { const wo = world({ keyed: true, sends: false, ackMs: 60000 });
       wo.quietly(() => wo.call('POST', wo.A, { body: { sessionId: 'cx1' } }));
       const to = wo.eng._resetCreditTries.get(wo.A);
-      ok('removed member: the attempt is open at the stop (a hold, no charge), its identity recorded on the record', to && !to.outcome && !to.charged && to.identity && to.identity.key === wo.A && wo.charged() === 0, JSON.stringify([to && to.identity, wo.charged()]));
+      ok('removed member: the attempt is open at the stop (a hold, no charge), its identity recorded on the record', gateOf(to) && !to.outcome && !to.charged && gateOf(to.identity) && to.identity.key === wo.A && wo.charged() === 0, JSON.stringify([to && to.identity, wo.charged()]));
       wo.wam.remove(wo.A);
       ok('removed member: the account record is gone before the boot', !wo.wam.get(wo.A));
       const wo2 = world({ root: wo.root, credits: null, acct: wo.A });
       const snap = JSON.stringify(wo2.eng.spendGuard.snapshot());
-      ok('removed member: the new engine revives it unknown and CHARGES the recorded identity (the ledger names the removed key) — never dropped for the lack of a record', (wo2.eng._resetCreditTries.get(wo.A) || {}).charged === true && wo2.charged() === 1 && snap.includes(wo.A), JSON.stringify([(wo2.eng._resetCreditTries.get(wo.A) || {}).outcome, wo2.charged(), snap.includes(wo.A)]));
+      ok('removed member: the new engine revives it unknown and CHARGES the recorded identity (the ledger names the removed key) — never dropped for the lack of a record', (wo2.eng._resetCreditTries.get(wo.A) || {}).charged === true && wo2.charged() === 1 && verdictOf(snap.includes(wo.A)), JSON.stringify([(wo2.eng._resetCreditTries.get(wo.A) || {}).outcome, wo2.charged(), snap.includes(wo.A)]));
     }
     // ── verify r4 T1: THE GROUND-TRUTH TABLE (scripts/reset-credit-scenarios.mjs) — the THIRD judgement. ≥ 30 owner-visible
     //    scenarios drawn from the real incidents (r1–r3's findings, the owner's 2026-10-01 reports), each run through the REAL
@@ -1167,7 +1167,7 @@ console.log('\n§3 the route over the real engine');
       const boot4 = (engine) => async (w, o = {}) => { w.killTimers(); await sleep(600); const todos = { add: () => { w2.tornFiled = true; return { id: 'ut-r4' }; } }; const w2 = world({ root: w.root, credits: null, acct: w.A, engine, ...w.opts, ...o, todos }); return w2; };
       const depsFor = (engine = engMod) => ({ world: (o) => world({ engine, ...o }), stubEnv: stubEnv4, STUB, RC, until, past: past4, boot: boot4(engine), quietly: quietly4, sleep, makeTorn });
       const rows = await runScenarios(depsFor());
-      for (const r of rows) ok(`r4 T1 ${r.id}: ${r.title}`, r.agree.engine && r.agree.table && r.agree.oracle, (r.why.join('; ') || '') + ' | chain ' + r.chain);
+      for (const r of rows) ok(`r4 T1 ${r.id}: ${r.title}`, gateOf(r.agree.engine) && gateOf(r.agree.table) && verdictOf(r.agree.oracle), (r.why.join('; ') || '') + ' | chain ' + r.chain);
       // ── r4316: S26's RACE PLACED BY A HOLD (hosted runs 45584145109 and 45620134828, red on try 1). The engine's handling of the
       // helper's result is HELD (the hop between the helper's resolve and the engine's words: `.then(onResetCreditHelperDone)`). In
       // fail-read mode the read BEFORE the consume fails and the engine says so at once, while the helper still runs. Line 936's wait
@@ -1185,8 +1185,8 @@ console.log('\n§3 the route over the real engine');
           if (OLD && typeof OLD.runScenarios === 'function') held936 = (await OLD.runScenarios(depsFor(), { only: ['S26'] }))[0] || null;
           heldCured = (await runScenarios(depsFor(), { only: ['S26'] }))[0] || null;
         } finally { HMh.consumeResetCreditViaAppServer = holdOrig; }
-        ok('r4316 RED (line 936\'s wait, the helper\'s result HELD 1.5 s): S26 is judged on the pre-consume read\'s notice, before the engine handled the consume — «used» not said yet', !!held936 && !held936.agree.engine && held936.why.some((w) => /engine never said/.test(w)), held936 ? held936.why.join('; ') + ' | chain ' + held936.chain : (OLD && OLD.err) || 'no copy');
-        ok('r4316: S26 under the SAME hold, waiting on the chain\'s own record — engine, table and oracle agree; «reset credit used on Cx Alpha» said once the result is handled (the product never loses it)', !!heldCured && heldCured.agree.engine && heldCured.agree.table && heldCured.agree.oracle, heldCured ? heldCured.why.join('; ') + ' | chain ' + heldCured.chain : 'no row'); }
+        ok('r4316 RED (line 936\'s wait, the helper\'s result HELD 1.5 s): S26 is judged on the pre-consume read\'s notice, before the engine handled the consume — «used» not said yet', !!held936 && !held936.agree.engine && verdictOf(held936.why.some((w) => /engine never said/.test(w))), held936 ? held936.why.join('; ') + ' | chain ' + held936.chain : (OLD && OLD.err) || 'no copy');
+        ok('r4316: S26 under the SAME hold, waiting on the chain\'s own record — engine, table and oracle agree; «reset credit used on Cx Alpha» said once the result is handled (the product never loses it)', !!heldCured && gateOf(heldCured.agree.engine) && gateOf(heldCured.agree.table) && verdictOf(heldCured.agree.oracle), heldCured ? heldCured.why.join('; ') + ' | chain ' + heldCured.chain : 'no row'); }
       const agreed = rows.filter((r) => r.agree.engine && r.agree.table && r.agree.oracle).length;
       // verify r5: ≥ 44 — thirteen scenarios from the pool's reality (a grant between the send and the reading, the carried cache
       // file, a late record, a pool move, a lagging slot, keys crossing, the read-first seam, a replayed answer)
@@ -1216,10 +1216,10 @@ console.log('\n§3 the route over the real engine');
       // and the engine's go written whatever the read said (the session path's window-moved / no-credits refusals gone)
       const fromRBP = 'function readBeforePress() { return true; }';
       const fromGo = "  const go = judgeReadFirst(t, v, { readError: snap ? null : (readError || 'the read before the consume failed') });";
-      ok('r8 T0 CONTROLS: the two patches hit the product source', esrc4.includes(fromRBP) && esrc4.includes(fromGo));
+      ok('r8 T0 CONTROLS: the two patches hit the product source', gateOf(esrc4.includes(fromRBP)) && verdictOf(esrc4.includes(fromGo)));
       const engNoRBP = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc4, fromRBP, 'function readBeforePress() { return false; }', "src/server/usage-pool-engine.js"), 'r8-norbp'));
       const engGoAlways = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc4, fromGo, '  const go = true; void judgeReadFirst;', "src/server/usage-pool-engine.js"), 'r8-goalways'));
-      ok('r4 T1 + r5 + r6 + r7 CONTROLS: the ten patches hit the product source', esrc4.includes(fromE4) && psrc4.includes(fromSup) && esrc4.includes(fromKey) && esrc4.includes(fromF3) && psrc4.includes(fromMoved) && esrc4.includes(fromGate) && esrc4.includes(fromL) && lsrc.includes(fromSkew) && esrc4.includes(fromUntold) && esrc4.includes(fromHold));
+      ok('r4 T1 + r5 + r6 + r7 CONTROLS: the ten patches hit the product source', gateOf(esrc4.includes(fromE4)) && gateOf(psrc4.includes(fromSup)) && gateOf(esrc4.includes(fromKey)) && gateOf(esrc4.includes(fromF3)) && gateOf(psrc4.includes(fromMoved)) && gateOf(esrc4.includes(fromGate)) && gateOf(esrc4.includes(fromL)) && gateOf(lsrc.includes(fromSkew)) && gateOf(esrc4.includes(fromUntold)) && verdictOf(esrc4.includes(fromHold)));
       const pureNoSkew = MUTRC.write('src/record-lateness.js', editAnchor(lsrc, fromSkew, 'if (false && x.inBand && run.n >= SKEW_MIN_RECORDS && now - run.firstArrivedAt >= SKEW_SPAN_MS', "src/record-lateness.js"), 'r6-noskew');
       const engNoHold = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc4, fromHold, '', "src/server/usage-pool-engine.js"), 'r7-nohold'));
       const engNoSkew = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc4, fromL, `const recordLateness = require(${JSON.stringify(pureNoSkew)});`, "src/server/usage-pool-engine.js"), 'r6-noskew-eng'));
@@ -1237,22 +1237,22 @@ console.log('\n§3 the route over the real engine');
         ['r6: no systematic-offset rule (a skewed clock\'s every reading refused — the attempt never settles)', engNoSkew, 'S56', /engine block unsettled/], ['r6: the untold notice gated on a person\'s press (the auto rung\'s untold journal-only)', engUntoldGate, 'S59', /never said/], ['r7: the first minute\'s held facts never replayed (the first wall of a skewed stream dropped for good — no arm until the next wall)', engNoHold, 'S60', /engine arms 0/],
         ['r8 T0: the seam back to false (a helper press with no unsettled prior consumes on the CACHED count — the r3 LOW)', engNoRBP, 'S46', /engine extra/], ['r8 T0: the engine answers go whatever the read said (a moved window consumed on the session path)', engGoAlways, 'S62', /engine ledger 1≠0/], ['r8 T0: …and a read counting zero credits consumed too', engGoAlways, 'S64', /engine ledger 1≠0/]]) {
         const rr = await runScenarios(depsFor(engine), { only: [id] });
-        ok(`r4 T1 + r5 CONTROL (${what}): ${id} goes RED by name`, rr.length === 1 && !(rr[0].agree.engine) && re.test(rr[0].why.join('; ')), rr[0] && rr[0].why.join('; '));
+        ok(`r4 T1 + r5 CONTROL (${what}): ${id} goes RED by name`, rr.length === 1 && !(rr[0].agree.engine) && verdictOf(re.test(rr[0].why.join('; '))), rr[0] && rr[0].why.join('; '));
       }
     }
     // CONTROLS — the pre-verify rules, as patched copies
     const esrc = read('src/server/usage-pool-engine.js');
     const fromAck = "  if (!t.reportsSent) return onResetCreditUnknown(t); // silence from a carrier that cannot say is not \"not sent\" (verify r1)\n";
-    ok('unknown CONTROL: the ack patch hits the product source', esrc.includes(fromAck));
+    ok('unknown CONTROL: the ack patch hits the product source', verdictOf(esrc.includes(fromAck)));
     const preAck = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc, fromAck, '', "src/server/usage-pool-engine.js"), 'notsent'));
     const wc = worldAuto(preAck);
     wc.quietly(() => wc.eng.recordCodexQuotaSignal(wc.s1, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: wc.nowS + 2 * 86400 }));
     await new Promise((r) => setTimeout(r, 300));
     const tc = wc.eng._resetCreditTries.get(wc.A);
     wc.quietly(() => wc.eng.recordCodexQuotaSignal(wc.s1, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: wc.nowS + 2 * 86400 + 1 }));
-    ok('unknown CONTROL: with silence settled "not-sent" the old wrapper\'s consume is called unspent and the next event mints a SECOND key — the U1 legs see the rule', tc && tc.outcome === 'not-sent' && wc.verbs() === 2, JSON.stringify([tc && tc.outcome, wc.verbs()]));
+    ok('unknown CONTROL: with silence settled "not-sent" the old wrapper\'s consume is called unspent and the next event mints a SECOND key — the U1 legs see the rule', gateOf(tc) && tc.outcome === 'not-sent' && wc.verbs() === 2, JSON.stringify([tc && tc.outcome, wc.verbs()]));
     const fromRF = "  const readFirst = (t.prior || readBeforePress()) ? async (rl) => {"; // verify r5: the pinned read-first seam
-    ok('unknown CONTROL: the read-first patch hits the product source', esrc.includes(fromRF));
+    ok('unknown CONTROL: the read-first patch hits the product source', verdictOf(esrc.includes(fromRF)));
     const preRF = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc, fromRF, "  const readFirst = null; const _unusedReadFirst = (t.prior || readBeforePress()) ? async (rl) => {", "src/server/usage-pool-engine.js"), 'noreadfirst'));
     { const rpc = stubEnv('unk-ctl'); const w = world({ session: false, helper, engine: preRF });
       w.quietly(() => w.call('POST', w.A));
@@ -1266,30 +1266,30 @@ console.log('\n§3 the route over the real engine');
     { const w = world();
       w.quietly(() => w.call('POST', w.A, { body: { sessionId: 'cx1' } }));
       const t = w.eng._resetCreditTries.get(w.A);
-      ok('restart: the press went out; the attempt is on disk (data/reset-credit-tries.json), atomic', t && t.sentAt > 0 && fs.existsSync(path.join(w.root, 'data', 'reset-credit-tries.json')) && !fs.existsSync(path.join(w.root, 'data', 'reset-credit-tries.json.tmp')) && JSON.parse(fs.readFileSync(path.join(w.root, 'data', 'reset-credit-tries.json'), 'utf8')).tries.some((x) => x.idempotencyKey === t.idempotencyKey && x.sentAt === t.sentAt));
+      ok('restart: the press went out; the attempt is on disk (data/reset-credit-tries.json), atomic', gateOf(t) && t.sentAt > 0 && gateOf(fs.existsSync(path.join(w.root, 'data', 'reset-credit-tries.json'))) && !fs.existsSync(path.join(w.root, 'data', 'reset-credit-tries.json.tmp')) && verdictOf(JSON.parse(fs.readFileSync(path.join(w.root, 'data', 'reset-credit-tries.json'), 'utf8')).tries.some((x) => x.idempotencyKey === t.idempotencyKey && x.sentAt === t.sentAt)));
       const w2 = world({ root: w.root, credits: null }); // no reading yet after the restart (one would settle it — that is the rule)
       const t2 = w2.eng._resetCreditTries.get(w2.A);
       const p2 = w2.call('GET', w2.A).body;
       const r2 = w2.quietly(() => w2.call('POST', w2.A, { body: { sessionId: 'cx1' } }));
-      ok('restart: a NEW engine over the same data/ restores it as UNKNOWN (it may have gone out) — the floor still stands: 429 cooldown, no second verb', t2 && t2.outcome === 'unknown' && t2.idempotencyKey === t.idempotencyKey && p2.code === 'cooldown' && r2.code === 429 && w2.verbs() === 0, JSON.stringify([t2 && t2.outcome, p2.code, r2.code, w2.verbs()]));
+      ok('restart: a NEW engine over the same data/ restores it as UNKNOWN (it may have gone out) — the floor still stands: 429 cooldown, no second verb', gateOf(t2) && t2.outcome === 'unknown' && t2.idempotencyKey === t.idempotencyKey && p2.code === 'cooldown' && r2.code === 429 && w2.verbs() === 0, JSON.stringify([t2 && t2.outcome, p2.code, r2.code, w2.verbs()]));
       past(t2); t2.outcome = 'unknown';
-      ok('restart: …and past the floor it is unsettled (a press reads first), never free by the restart', w2.call('GET', w2.A).body.unsettled && !w2.call('GET', w2.A).body.code, JSON.stringify(w2.call('GET', w2.A).body));
+      ok('restart: …and past the floor it is unsettled (a press reads first), never free by the restart', gateOf(w2.call('GET', w2.A).body.unsettled) && !w2.call('GET', w2.A).body.code, JSON.stringify(w2.call('GET', w2.A).body));
       // verify r2 (3, reproduced — D6 never under-count): an attempt OPEN at the stop (written, its send not yet reported:
       // the hold taken, nothing charged) came back `unknown` and was never charged — the ledger said nothing was spent
       { const wo = world({ keyed: true, sends: false, ackMs: 60000 }); // a keyed wrapper that has not said "sent" yet
         wo.quietly(() => wo.call('POST', wo.A, { body: { sessionId: 'cx1' } }));
         const to = wo.eng._resetCreditTries.get(wo.A);
-        ok('restart/open: before the stop the attempt is open — a hold, no charge', to && !to.outcome && !to.charged && wo.holdsOpen() === 1 && wo.charged() === 0, JSON.stringify([to && to.outcome, to && to.charged, wo.holdsOpen(), wo.charged()]));
+        ok('restart/open: before the stop the attempt is open — a hold, no charge', gateOf(to) && !to.outcome && !to.charged && wo.holdsOpen() === 1 && wo.charged() === 0, JSON.stringify([to && to.outcome, to && to.charged, wo.holdsOpen(), wo.charged()]));
         const wo2 = world({ root: wo.root, credits: null });
         const to2 = wo2.eng._resetCreditTries.get(wo2.A);
-        ok('restart/open: the new engine revives it UNKNOWN and CHARGES it (the hold died with the process; the identity rides the record): ledger 1, the record says charged', to2 && to2.outcome === 'unknown' && to2.charged === true && wo2.charged() === 1 && JSON.parse(fs.readFileSync(path.join(wo.root, 'data', 'reset-credit-tries.json'), 'utf8')).tries.some((x) => x.idempotencyKey === to.idempotencyKey && x.charged === true), JSON.stringify([to2 && to2.outcome, to2 && to2.charged, wo2.charged()]));
+        ok('restart/open: the new engine revives it UNKNOWN and CHARGES it (the hold died with the process; the identity rides the record): ledger 1, the record says charged', gateOf(to2) && to2.outcome === 'unknown' && to2.charged === true && wo2.charged() === 1 && verdictOf(JSON.parse(fs.readFileSync(path.join(wo.root, 'data', 'reset-credit-tries.json'), 'utf8')).tries.some((x) => x.idempotencyKey === to.idempotencyKey && x.charged === true)), JSON.stringify([to2 && to2.outcome, to2 && to2.charged, wo2.charged()]));
         // the spend guard flushes its ledger 500 ms after a charge (spend-guard.js persist): wait for the file before the next boot
         await until(() => { try { return /codex-reset-credit/.test(fs.readFileSync(path.join(wo.root, 'data', 'spend-budget.json'), 'utf8')); } catch { return false; } }, 4000);
         const wo3 = world({ root: wo.root, credits: null });
         ok('restart/open: a THIRD engine over the same data/ charges nothing more (the file says charged)', wo3.charged() === 1 && (wo3.eng._resetCreditTries.get(wo3.A) || {}).charged === true, `ledger=${wo3.charged()}`);
         const esrcO = read('src/server/usage-pool-engine.js');
         const fromO = "      if (!t.charged) {\n        t.charged = true; charged++;";
-        ok('restart/open CONTROL: the patch hits the product source', esrcO.includes(fromO));
+        ok('restart/open CONTROL: the patch hits the product source', verdictOf(esrcO.includes(fromO)));
         const preO = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcO, fromO, "      if (false) {\n        t.charged = true; charged++;", "src/server/usage-pool-engine.js"), 'nochargeboot'));
         const wc = world({ keyed: true, sends: false, ackMs: 60000 });
         wc.quietly(() => wc.call('POST', wc.A, { body: { sessionId: 'cx1' } }));
@@ -1308,8 +1308,8 @@ console.log('\n§3 the route over the real engine');
         const ow = console.warn; console.warn = (...a) => warned.push(a.join(' '));
         let wt2; try { wt2 = world({ root: wt.root, credits: null, todos: { add: (k, it) => { added.push(it); return { id: 'ut-torn' }; } } }); } finally { console.warn = ow; }
         const aside = fs.readdirSync(path.join(wt.root, 'data')).filter((x) => /^reset-credit-tries\.json\.corrupt-/.test(x));
-        ok('torn file: set aside with its bytes (.corrupt-<ts>), named in the journal, the live file gone', aside.length === 1 && fs.readFileSync(path.join(wt.root, 'data', aside[0]), 'utf8') === torn && !fs.existsSync(f) && warned.some((w) => /reset-credit-tries\.json is unreadable \(not JSON/.test(w) && /UNKNOWN now/.test(w)), JSON.stringify([aside, warned]));
-        ok('torn file: ONE For-you item (origin pool) tells the person to refresh a codex account before spending a credit', added.length === 1 && added[0].origin === 'pool' && /could not be read at start/.test(added[0].text) && /refresh the account/.test(added[0].text) && /set aside as reset-credit-tries\.json\.corrupt-/.test(added[0].detail), JSON.stringify(added));
+        ok('torn file: set aside with its bytes (.corrupt-<ts>), named in the journal, the live file gone', aside.length === 1 && fs.readFileSync(path.join(wt.root, 'data', aside[0]), 'utf8') === torn && !fs.existsSync(f) && verdictOf(warned.some((w) => /reset-credit-tries\.json is unreadable \(not JSON/.test(w) && /UNKNOWN now/.test(w))), JSON.stringify([aside, warned]));
+        ok('torn file: ONE For-you item (origin pool) tells the person to refresh a codex account before spending a credit', added.length === 1 && added[0].origin === 'pool' && gateOf(/could not be read at start/.test(added[0].text)) && gateOf(/refresh the account/.test(added[0].text)) && verdictOf(/set aside as reset-credit-tries\.json\.corrupt-/.test(added[0].detail)), JSON.stringify(added));
         wt2.call('GET', wt2.A); wt2.call('GET', wt2.A);
         ok('torn file: …filed once (a later preview does not file it again)', added.length === 1, `added=${added.length}`);
         // the inbox created AFTER the engine (server.js): the item waits for the first preview
@@ -1322,18 +1322,18 @@ console.log('\n§3 the route over the real engine');
         // CONTROL — the pre-r2 loader: silent, the file left in place, the next press free
         const esrcT = read('src/server/usage-pool-engine.js');
         const fromT = "  if (why) {\n    const asideAs = `${RESET_CREDIT_TRIES_FILE}.corrupt-";
-        ok('torn file CONTROL: the patch hits the product source', esrcT.includes(fromT));
+        ok('torn file CONTROL: the patch hits the product source', verdictOf(esrcT.includes(fromT)));
         const preT = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrcT, fromT, "  if (why) return 0;\n  if (false) {\n    const asideAs = `${RESET_CREDIT_TRIES_FILE}.corrupt-", "src/server/usage-pool-engine.js"), 'silenttorn'));
         const wc = world(); wc.quietly(() => wc.call('POST', wc.A, { body: { sessionId: 'cx1' } }));
         const fc = path.join(wc.root, 'data', 'reset-credit-tries.json'); fs.writeFileSync(fc, torn);
         const warnedC = []; const owc = console.warn; console.warn = (...a) => warnedC.push(a.join(' '));
         let wc2; try { wc2 = world({ root: wc.root, credits: null, engine: preT, todos: { add: () => { throw new Error('never'); } } }); } finally { console.warn = owc; }
-        ok('torn file CONTROL: the pre-r2 loader says nothing, leaves the bytes in place and the next press is free — the legs above see the rule', warnedC.length === 0 && fs.existsSync(fc) && wc2.quietly(() => wc2.call('POST', wc2.A, { body: { sessionId: 'cx1' } })).code === 200, JSON.stringify(warnedC));
+        ok('torn file CONTROL: the pre-r2 loader says nothing, leaves the bytes in place and the next press is free — the legs above see the rule', warnedC.length === 0 && gateOf(fs.existsSync(fc)) && wc2.quietly(() => wc2.call('POST', wc2.A, { body: { sessionId: 'cx1' } })).code === 200, JSON.stringify(warnedC));
       }
       // a settled attempt older than a day is not carried; an unsettled one is
       const esrc2 = read('src/server/usage-pool-engine.js');
       const fromLoad = 'loadResetCreditTries();\n';
-      ok('restart CONTROL: the patch hits the product source', esrc2.includes(fromLoad));
+      ok('restart CONTROL: the patch hits the product source', verdictOf(esrc2.includes(fromLoad)));
       const noLoad = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc2, fromLoad, '', "src/server/usage-pool-engine.js"), 'noload'));
       const w3 = world({ root: w.root, credits: null, engine: noLoad });
       const r3 = w3.quietly(() => w3.call('POST', w3.A, { body: { sessionId: 'cx1' } }));
@@ -1354,7 +1354,7 @@ console.log('\n§3 the route over the real engine');
   {
     const src = read('src/server/usage-pool-engine.js');
     const from = "  try { av = spendGuard.authorize({ reason: 'codex-reset-credit', session, sessionId: session._webuiId, sessionName: session.name || null, identity: key ? { key, name: nameOf(key) || key } : null }); }";
-    ok('NEGATIVE CONTROL: the patch hits the product source', src.includes(from));
+    ok('NEGATIVE CONTROL: the patch hits the product source', verdictOf(src.includes(from)));
     const f = MUTRC.write('src/server/usage-pool-engine.js', editAnchor(src, from, '  try { av = { ok: true }; }', "src/server/usage-pool-engine.js"), 'rcui');
     try {
       const patched = require(f);
@@ -1389,7 +1389,7 @@ console.log('\n§4c the held ring, its replay and the late-wall notice (verify r
   const fromAsOf = "(at) => recordCodexQuotaSignal(session, payload, rec, { asOf: at })";
   const fromRing = '      let i = h.findIndex((x) => !HELD_WALL_KINDS.includes(x.what)); if (i < 0) i = 0;';
   const fromItem = '  if (HELD_WALL_KINDS.includes(what)) fileLateWallItem(session, b, what, v);\n';
-  ok('§4c CONTROLS: the four patches hit the product source', esrc8.includes(fromBelt) && esrc8.includes(fromAsOf) && esrc8.includes(fromRing) && esrc8.includes(fromItem));
+  ok('§4c CONTROLS: the four patches hit the product source', gateOf(esrc8.includes(fromBelt)) && gateOf(esrc8.includes(fromAsOf)) && gateOf(esrc8.includes(fromRing)) && verdictOf(esrc8.includes(fromItem)));
   const engNoBelt = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc8, fromBelt, '    if (false) { continue; }', "src/server/usage-pool-engine.js"), 'r8-nobelt'));
   const engNoAsOf = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc8, fromBelt, '    if (false) { continue; }', "src/server/usage-pool-engine.js"), fromAsOf, '(at) => recordCodexQuotaSignal(session, payload, rec)', "src/server/usage-pool-engine.js"), 'r8-noasof'));
   const engRingAny = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc8, fromRing, '      let i = 0;', "src/server/usage-pool-engine.js"), 'r8-ringany'));
@@ -1404,7 +1404,7 @@ console.log('\n§4c the held ring, its replay and the late-wall notice (verify r
     return { held, live, after, arms: w.arms.length, said: J.slice(), heldAfter: w.s1._heldLate, items: todos.items, skew: w.s1._recordClock && w.s1._recordClock.skewMs }; };
   { const r = leg2();
     ok('§4c ② the wall and the reading of the first minute are held; a newer LIVE reading of the account (another conversation: the window moved, 2 credits) lands meanwhile', r.held.join() === 'codex wall,codex reading' && r.live.used === 0 && r.live.count === 2, JSON.stringify([r.held, r.live]));
-    ok('§4c ② at the declaration the held facts are NOT replayed — a newer reading of the account exists already (said by count and kind); the cache keeps the newer numbers; nothing armed; the ring emptied once', r.arms === 0 && r.after.used === 0 && r.after.resetsAt === r.live.resetsAt && r.after.count === 2 && r.heldAfter === null && r.skew === SKEW && r.said.some((l) => /2 held fact\(s\) not replayed — a newer reading of the account exists already \(1 codex wall, 1 codex reading\)/.test(l)), JSON.stringify([r.arms, r.after, r.said.filter((l) => /held fact/.test(l)).map((l) => l.slice(0, 160))]));
+    ok('§4c ② at the declaration the held facts are NOT replayed — a newer reading of the account exists already (said by count and kind); the cache keeps the newer numbers; nothing armed; the ring emptied once', r.arms === 0 && r.after.used === 0 && r.after.resetsAt === r.live.resetsAt && r.after.count === 2 && r.heldAfter === null && r.skew === SKEW && verdictOf(r.said.some((l) => /2 held fact\(s\) not replayed — a newer reading of the account exists already \(1 codex wall, 1 codex reading\)/.test(l))), JSON.stringify([r.arms, r.after, r.said.filter((l) => /held fact/.test(l)).map((l) => l.slice(0, 160))]));
     ok('§4c ② the burst\'s late-wall item was filed at the wall and resolved when the offset was declared (the conversation is producing records)', r.items.length === 1 && r.items[0].origin === 'pool' && r.items[0].status === 'done' && r.items[0].by === 'offset-declared', JSON.stringify(r.items.map((i) => [i.origin, i.status, i.by])));
     const c1 = leg2(engNoBelt), c2 = leg2(engNoAsOf);
     ok('§4c ② CONTROL (the belt removed): the stale wall is replayed and ARMS auto-resume for a wall the newer reading had answered — the leg sees the rule (the cache survives on asOf alone)', c1.arms === 1 && c1.after.used === 0, JSON.stringify([c1.arms, c1.after]));
@@ -1417,7 +1417,7 @@ console.log('\n§4c the held ring, its replay and the late-wall notice (verify r
     const out = { held, heldN, arms: w.arms.length, said: J.slice(), items: todos.items }; w.killTimers(); return out; };
   { const r = leg4();
     ok('§4c ④ the ring keeps the WALL: 1 wall + 31 readings held of 35 facts (the oldest readings dropped first), the drop counted', r.heldN === 32 && r.held['codex wall'] === 1 && r.held['codex reading'] === 31, JSON.stringify([r.heldN, r.held]));
-    ok('§4c ④ at the declaration the wall is replayed and taken: auto-resume armed once; the close says what was dropped from the ring', r.arms === 1 && r.said.some((l) => /3 dropped from the held ring of 32 \(3 codex reading\)/.test(l)), JSON.stringify([r.arms, r.said.filter((l) => /dropped|taken/.test(l)).map((l) => l.slice(0, 200))]));
+    ok('§4c ④ at the declaration the wall is replayed and taken: auto-resume armed once; the close says what was dropped from the ring', r.arms === 1 && verdictOf(r.said.some((l) => /3 dropped from the held ring of 32 \(3 codex reading\)/.test(l))), JSON.stringify([r.arms, r.said.filter((l) => /dropped|taken/.test(l)).map((l) => l.slice(0, 200))]));
     ok('§4c ④ …and the burst\'s late-wall item is resolved by the replay (wall-replayed)', r.items.length === 1 && r.items[0].status === 'done' && r.items[0].by === 'wall-replayed', JSON.stringify(r.items.map((i) => [i.status, i.by])));
     const c = leg4(engRingAny);
     ok('§4c ④ CONTROL (the ring drops the oldest whatever it is): the wall is pushed out by the readings — no arm at the declaration — the leg sees the rule', c.arms === 0 && !c.held['codex wall'], JSON.stringify([c.arms, c.held])); }
@@ -1426,10 +1426,10 @@ console.log('\n§4c the held ring, its replay and the late-wall notice (verify r
     feed(w, w.s1, wall(w), { skew: 3 * 3600e3 });
     const one = todos.items.slice();
     feed(w, w.s1, wall(w), { skew: 3 * 3600e3 - 1000 });
-    ok('§4c ⑥ a late WALL (3 h, a backlog shape) files ONE For-you item (origin pool) naming the conversation and the lateness, in its i18n shape; a second late wall of the same burst files no second', one.length === 1 && one[0].origin === 'pool' && /A usage limit was hit on cx-conv while its records were arriving 3h00m late/.test(one[0].text) && one[0].i18n && one[0].i18n.text && /auto-resume will not continue it/.test(one[0].i18n.text.key) && Number(one[0].expiresAt) > Date.now() && todos.items.length === 1 && w.arms.length === 0, JSON.stringify(todos.items.map((i) => [i.origin, i.text.slice(0, 90), i.status])));
+    ok('§4c ⑥ a late WALL (3 h, a backlog shape) files ONE For-you item (origin pool) naming the conversation and the lateness, in its i18n shape; a second late wall of the same burst files no second', one.length === 1 && one[0].origin === 'pool' && gateOf(/A usage limit was hit on cx-conv while its records were arriving 3h00m late/.test(one[0].text)) && gateOf(one[0].i18n) && gateOf(one[0].i18n.text) && gateOf(/auto-resume will not continue it/.test(one[0].i18n.text.key)) && Number(one[0].expiresAt) > Date.now() && todos.items.length === 1 && w.arms.length === 0, JSON.stringify(todos.items.map((i) => [i.origin, i.text.slice(0, 90), i.status])));
     { const { replyVerdict } = require(path.join(REPO, 'src/inbox-reply.js')); const live = { live: true, mode: 'chat', remoteState: null };
       ok('§4c ⑥ (verify r9 ⑩, reproduced): the item is filed under the CONVERSATION\'s own key (`codex:<thread>`, the auto rung\'s spelling — the key the reply route and the client\'s jump resolve): Reply is admitted on the live chat; the pre-fix key `webui:late-wall:<id>` matched no session (Reply refused no_live_session on a live conversation)', one[0].key === 'codex:thread-1' && replyVerdict({ item: { sessionKey: one[0].key }, session: live }).ok === true && replyVerdict({ item: { sessionKey: 'webui:late-wall:cx1' }, session: null }).code === 'no_live_session', JSON.stringify([one[0].key, replyVerdict({ item: { sessionKey: one[0].key }, session: live })])); }
-    ok('§4c ⑥ the journal is English-only by design (an operator\'s log: the [stream] lines carry no i18n), the item carries the words', J.some((l) => /^\[stream\] cx1: records arriving 3h00m late/.test(l)) && !/i18n/.test(esrc8.slice(esrc8.indexOf('function noteLateFact('), esrc8.indexOf('function noteLateFact(') + 1200).replace(/fileLateWallItem[^\n]*/g, '')));
+    ok('§4c ⑥ the journal is English-only by design (an operator\'s log: the [stream] lines carry no i18n), the item carries the words', gateOf(J.some((l) => /^\[stream\] cx1: records arriving 3h00m late/.test(l))) && !/i18n/.test(esrc8.slice(esrc8.indexOf('function noteLateFact('), esrc8.indexOf('function noteLateFact(') + 1200).replace(/fileLateWallItem[^\n]*/g, '')));
     feed(w, w.s1, w.reading(3), { skew: 0 });
     ok('§4c ⑥ a LIVE record ends the burst: the conversation is alive, the item resolves itself (stream-alive); the held list is cleared with the run (per run, never a global ring)', todos.items[0].status === 'done' && todos.items[0].by === 'stream-alive' && w.s1._heldLate === null && w.s1._lateBurst === null, JSON.stringify([todos.items[0].status, todos.items[0].by]));
     w.killTimers();
@@ -1439,27 +1439,27 @@ console.log('\n§4c the held ring, its replay and the late-wall notice (verify r
   { J.length = 0; const w = world({ todos: todoStub() });
     feed(w, w.s1, w.reading(3), { skew: 3 * 3600e3 }); // a 3-h-old burst record (held: the ring is undeclared)
     feed(w, w.s1, wall(w)); feed(w, w.s1, w.reading(3), { arrivedAgo: 30e3 }); feed(w, w.s1, w.reading(3), { arrivedAgo: 61e3 });
-    ok('§4c replayed at most once: the 3-h-old record held before the skewed run is re-judged at the declaration (still late by the offset — counted, not taken), the ring is null after, the burst closed with it named', w.s1._heldLate === null && J.some((l) => /held from the offset stream's first minute re-judged live by the offset and taken \(1 codex wall, 1 codex reading\)/.test(l)) && J.some((l) => /first minute over — 1 fact\(s\) not replayed \(1 codex reading/.test(l)), JSON.stringify(J.filter((l) => /\[stream\]/.test(l)).map((l) => l.slice(0, 170))));
+    ok('§4c replayed at most once: the 3-h-old record held before the skewed run is re-judged at the declaration (still late by the offset — counted, not taken), the ring is null after, the burst closed with it named', w.s1._heldLate === null && gateOf(J.some((l) => /held from the offset stream's first minute re-judged live by the offset and taken \(1 codex wall, 1 codex reading\)/.test(l))) && verdictOf(J.some((l) => /first minute over — 1 fact\(s\) not replayed \(1 codex reading/.test(l))), JSON.stringify(J.filter((l) => /\[stream\]/.test(l)).map((l) => l.slice(0, 170))));
     w.killTimers(); }
   // ⑦ (verify r9): "the newest reading of the account" is judged by ARRIVAL on both sides — the held entry's `at` and the cache's
   // `fetchedAt` (a reading written at its arrival; a replay at the fact's own arrival) — never by a raw stamp (a held stream's stamps
   // are the whole skew behind: the raw stamp would call the wall 5 min OLDER than the reading). The bound: a reading EMITTED before
   // the wall but delivered inside LATE_MS is live by the rule and supersedes it — bounded by LATE_MS, self-correcting at the next turn
-  { ok('§4c ⑦ the comparator is arrival vs arrival (code pin): the hold stamps Date.now(), the belt compares the cache\'s fetchedAt to it, a replay runs at the fact\'s own instant, and no stamp enters the comparison', /h\.push\(\{ what, lateMs: Number\(v\.lateMs\) \|\| 0, at: Date\.now\(\), key, replay \}\)/.test(esrc8) && /if \(e\.key && newestAt\[e\.key\] > Number\(e\.at\)\)/.test(esrc8) && /const now = Number\(asOf\) > 0 \? Number\(asOf\) : Date\.now\(\);/.test(esrc8) && !/newestAt\[[^\]]+\] > [^\n]*stampOf/.test(esrc8));
+  { ok('§4c ⑦ the comparator is arrival vs arrival (code pin): the hold stamps Date.now(), the belt compares the cache\'s fetchedAt to it, a replay runs at the fact\'s own instant, and no stamp enters the comparison', gateOf(/h\.push\(\{ what, lateMs: Number\(v\.lateMs\) \|\| 0, at: Date\.now\(\), key, replay \}\)/.test(esrc8)) && gateOf(/if \(e\.key && newestAt\[e\.key\] > Number\(e\.at\)\)/.test(esrc8)) && gateOf(/const now = Number\(asOf\) > 0 \? Number\(asOf\) : Date\.now\(\);/.test(esrc8)) && !/newestAt\[[^\]]+\] > [^\n]*stampOf/.test(esrc8));
     J.length = 0; const w = world({ todos: todoStub() }); const s3 = sib(w);
     feed(w, w.s1, wall(w)); busy(20);
     feed(w, s3, w.reading(2, { moved: true }), { skew: 110e3 }); // cx3 (in step) read A 110 s ago — delivered now: live by the rule (< LATE_MS), its arrival after the wall's
     feed(w, w.s1, w.reading(3), { arrivedAgo: 1e3 }); feed(w, w.s1, w.reading(3), { arrivedAgo: 61e3 });
-    ok('§4c ⑦ the documented bound: a reading of the account emitted 110 s BEFORE the held wall but delivered inside LATE_MS (live by the rule) is the account\'s newest by arrival — the wall is not replayed (said), nothing armed', w.arms.length === 0 && J.some((l) => /held fact\(s\) not replayed — a newer reading of the account exists already \(1 codex wall/.test(l)), JSON.stringify(J.filter((l) => /held fact/.test(l)).map((l) => l.slice(0, 120))));
+    ok('§4c ⑦ the documented bound: a reading of the account emitted 110 s BEFORE the held wall but delivered inside LATE_MS (live by the rule) is the account\'s newest by arrival — the wall is not replayed (said), nothing armed', w.arms.length === 0 && verdictOf(J.some((l) => /held fact\(s\) not replayed — a newer reading of the account exists already \(1 codex wall/.test(l))), JSON.stringify(J.filter((l) => /held fact/.test(l)).map((l) => l.slice(0, 120))));
     w.killTimers(); }
   // ⑧ (verify r9): a burst of 40 WALLS (a flapping limit) inside the first minute — the ring keeps the 32 NEWEST walls (the oldest
   // dropped first, never the newest), every drop said by kind; the declaration replays all 32
   { J.length = 0; const todos = todoStub(); const w = world({ todos }); const arrivals = [];
     for (let i = 0; i < 40; i++) { busy(2); arrivals.push(Date.now()); feed(w, w.s1, wall(w), { arrivedAgo: i ? 1e3 : 0 }); }
     const h = (w.s1._heldLate || []);
-    ok('§4c ⑧ 40 walls ⇒ the ring holds 32, all walls, the 8 OLDEST dropped (the first kept entry arrived with the 9th wall, the last kept with the 40th), the drops counted by kind', h.length === 32 && h.every((e) => e.what === 'codex wall') && h[0].at >= arrivals[8] && h[0].at < arrivals[9] && h[31].at >= arrivals[39] && w.s1._lateBurst.dropped === 8 && w.s1._lateBurst.droppedKinds['codex wall'] === 8, JSON.stringify([h.length, h[0] && h[0].at - arrivals[8], w.s1._lateBurst.dropped]));
+    ok('§4c ⑧ 40 walls ⇒ the ring holds 32, all walls, the 8 OLDEST dropped (the first kept entry arrived with the 9th wall, the last kept with the 40th), the drops counted by kind', h.length === 32 && gateOf(h.every((e) => e.what === 'codex wall')) && h[0].at >= arrivals[8] && h[0].at < arrivals[9] && h[31].at >= arrivals[39] && w.s1._lateBurst.dropped === 8 && w.s1._lateBurst.droppedKinds['codex wall'] === 8, JSON.stringify([h.length, h[0] && h[0].at - arrivals[8], w.s1._lateBurst.dropped]));
     feed(w, w.s1, wall(w), { arrivedAgo: 61e3 });
-    ok('§4c ⑧ at the declaration every kept wall is replayed and taken (32), the close names the 8 dropped walls', J.some((l) => /32 fact\(s\) held from the offset stream's first minute re-judged live by the offset and taken \(32 codex wall\)/.test(l)) && J.some((l) => /8 dropped from the held ring of 32 \(8 codex wall\)/.test(l)) && w.arms.length >= 32, JSON.stringify([w.arms.length, J.filter((l) => /dropped|taken/.test(l)).map((l) => l.slice(0, 140))]));
+    ok('§4c ⑧ at the declaration every kept wall is replayed and taken (32), the close names the 8 dropped walls', gateOf(J.some((l) => /32 fact\(s\) held from the offset stream's first minute re-judged live by the offset and taken \(32 codex wall\)/.test(l))) && gateOf(J.some((l) => /8 dropped from the held ring of 32 \(8 codex wall\)/.test(l))) && w.arms.length >= 32, JSON.stringify([w.arms.length, J.filter((l) => /dropped|taken/.test(l)).map((l) => l.slice(0, 140))]));
     w.killTimers(); }
 }
 
@@ -1473,7 +1473,7 @@ console.log('\n§4d a press that straddles a restart, the two clocks, two conver
   const fromReopen = "      if (payload.beforeReset === true && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey) { try { reopenRevivedReadFirst(session, payload.idempotencyKey); } catch (e) { console.warn('[reset-credit] the revived attempt could not be re-opened:', e.message); } }\n";
   const fromAccept = "    if (tryRec && ans.sent === false && revivedReadFirstWaiting(tryRec)) {";
   const fromRestamp = "  t.pressedAt = t.pressedAt || t.at; t.at = now; t.reopenedAt = now;\n";
-  ok('§4d CONTROLS: the three patches hit the product source', esrc9.includes(fromReopen) && esrc9.includes(fromAccept) && esrc9.includes(fromRestamp));
+  ok('§4d CONTROLS: the three patches hit the product source', gateOf(esrc9.includes(fromReopen)) && gateOf(esrc9.includes(fromAccept)) && verdictOf(esrc9.includes(fromRestamp)));
   const engNoReopen = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc9, fromReopen, '', "src/server/usage-pool-engine.js"), 'r9-noreopen'));
   const engNoAccept = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc9, fromAccept, '    if (false) {', "src/server/usage-pool-engine.js"), 'r9-noaccept'));
   const engNoRestamp = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc9, fromRestamp, '  t.reopenedAt = now;\n', "src/server/usage-pool-engine.js"), 'r9-norestamp'));
@@ -1492,13 +1492,13 @@ console.log('\n§4d a press that straddles a restart, the two clocks, two conver
     const second = jl(() => w2.call('POST', w2.A, { body: { sessionId: 'cx1' } })); // a second press while the go flies / after the send
     return { key, revived, L1, afterPush, block, goes, second: { code: second.code, c: second.body && second.body.code }, verbs: w2.verbs(), w: w2, said: J.slice() }; };
   { const r = await legPush(engMod);
-    ok('§4d ② the boot revives the open read-first press unknown + charged (it MAY have gone out — a failed read consumes at once), marked revived', r.revived.outcome === 'unknown' && r.revived.charged && r.revived.readFirst && r.revived.revived && r.L1 === 1, JSON.stringify(r.revived));
-    ok('§4d ② the wrapper\'s push for that key at the NEW engine proves nothing went out: the record is RE-OPENED (said), judged by the one table, go:true written, the consume sent — ONE consume, charged once (the restart\'s charge stands, nothing twice)', r.afterPush.reopened && r.afterPush.sent && r.afterPush.outcome === null && r.goes.length === 1 && r.goes[0].go === true && r.goes[0].idempotencyKey === r.key && r.w.charged() === 1 && r.said.some((l) => /re-opened and judged now; the restart's charge on the ledger stays/.test(l)), JSON.stringify([r.afterPush, r.goes, r.w.charged()]));
+    ok('§4d ② the boot revives the open read-first press unknown + charged (it MAY have gone out — a failed read consumes at once), marked revived', r.revived.outcome === 'unknown' && gateOf(r.revived.charged) && gateOf(r.revived.readFirst) && gateOf(r.revived.revived) && r.L1 === 1, JSON.stringify(r.revived));
+    ok('§4d ② the wrapper\'s push for that key at the NEW engine proves nothing went out: the record is RE-OPENED (said), judged by the one table, go:true written, the consume sent — ONE consume, charged once (the restart\'s charge stands, nothing twice)', gateOf(r.afterPush.reopened) && gateOf(r.afterPush.sent) && r.afterPush.outcome === null && r.goes.length === 1 && r.goes[0].go === true && r.goes[0].idempotencyKey === r.key && r.w.charged() === 1 && verdictOf(r.said.some((l) => /re-opened and judged now; the restart's charge on the ledger stays/.test(l))), JSON.stringify([r.afterPush, r.goes, r.w.charged()]));
     jl(() => r.w.eng.recordCodexQuotaSignal(r.w.s1, { type: 'reset_credit_result', result: { outcome: 'reset' }, outcome: 'reset', idempotencyKey: r.key, attempts: 1 }));
-    ok('§4d ② …a second press after the send is on the floor (cooldown), and the wrapper\'s reset lands on the re-opened record', r.second.c === 'cooldown' && r.w.tries().outcome === 'reset' && r.w.notices.some((n) => /reset credit consumed/.test(n)), JSON.stringify([r.second, r.w.tries().outcome]));
+    ok('§4d ② …a second press after the send is on the floor (cooldown), and the wrapper\'s reset lands on the re-opened record', r.second.c === 'cooldown' && r.w.tries().outcome === 'reset' && verdictOf(r.w.notices.some((n) => /reset credit consumed/.test(n))), JSON.stringify([r.second, r.w.tries().outcome]));
     r.w.killTimers(); }
   { const c = await legPush(engNoReopen);
-    ok('§4d ② CONTROL (the re-open removed — the r8 engine): the push at the new engine is "sent already — no verdict written": no go, the wrapper waits its 25 s for nothing — the leg sees the rule', c.goes.length === 0 && c.afterPush.outcome === 'unknown' && c.said.some((l) => /sent already/.test(l)), JSON.stringify([c.goes, c.afterPush])); c.w.killTimers(); }
+    ok('§4d ② CONTROL (the re-open removed — the r8 engine): the push at the new engine is "sent already — no verdict written": no go, the wrapper waits its 25 s for nothing — the leg sees the rule', c.goes.length === 0 && c.afterPush.outcome === 'unknown' && verdictOf(c.said.some((l) => /sent already/.test(l))), JSON.stringify([c.goes, c.afterPush])); c.w.killTimers(); }
   { const r = await legPush(engMod, { slow: true, sends: false });
     ok('§4d ② a restart longer than the ack window: the re-opened press is stamped NOW — a second press while the go flies is refused in_flight on the dialog (never a second verb over a consume about to go out)', r.block.code === 'in_flight' && r.second.code === 409 && r.second.c === 'in_flight' && r.verbs === 0 && r.goes.length === 1, JSON.stringify([r.block.code, r.second, r.verbs])); r.w.killTimers();
     const c = await legPush(engNoRestamp, { slow: true, sends: false });
@@ -1508,7 +1508,7 @@ console.log('\n§4d a press that straddles a restart, the two clocks, two conver
     jl(() => w2.eng.recordCodexQuotaSignal(w2.s1, { type: 'reset_credit_result', skipped: true, why: 'no-verdict', idempotencyKey: key, attempts: 0, sent: false, error: 'no verdict on the read before the consume within 25000ms — nothing sent' }));
     const out = { rec: rec(w2.tries()), block: RC.attemptBlock(w2.tries(), { now: Date.now() }), notices: w2.notices.slice(), charged: w2.charged(), said: J.slice(), pv: w2.call('GET', w2.A).body }; w2.killTimers(); return out; };
   { const r = await legSkip(engMod);
-    ok('§4d ② the wrapper\'s keyed `skipped` (sent:false) for the revived press settles it `skipped`: no floor (the dialog is free), the person told (the no-verdict words), the restart\'s charge said to stand', r.rec.outcome === 'skipped' && !r.rec.sent && r.block.code === null && !r.pv.code && r.notices.some((n) => /got no verdict in time; nothing was spent/.test(n)) && r.said.some((l) => /its word stands over the boot's guess; the restart's charge on the ledger stays/.test(l)) && r.charged === 1, JSON.stringify([r.rec, r.block.code, r.pv.code, r.notices]));
+    ok('§4d ② the wrapper\'s keyed `skipped` (sent:false) for the revived press settles it `skipped`: no floor (the dialog is free), the person told (the no-verdict words), the restart\'s charge said to stand', r.rec.outcome === 'skipped' && !r.rec.sent && r.block.code === null && !r.pv.code && gateOf(r.notices.some((n) => /got no verdict in time; nothing was spent/.test(n))) && gateOf(r.said.some((l) => /its word stands over the boot's guess; the restart's charge on the ledger stays/.test(l))) && r.charged === 1, JSON.stringify([r.rec, r.block.code, r.pv.code, r.notices]));
     const c = await legSkip(engNoAccept);
     ok('§4d ② CONTROL (the acceptance removed — the r8 engine, the incident shape): the press ends unknown on a 10-min cooldown, the person told NOTHING', c.rec.outcome === 'unknown' && c.block.code === 'cooldown' && c.notices.length === 0, JSON.stringify([c.rec.outcome, c.block.code, c.notices])); }
   // ① the two clocks: the wrapper gave up (no-verdict) before its push reached the engine (a stalled bridge) — the late push writes no go, re-opens nothing, charges nothing
@@ -1524,7 +1524,7 @@ console.log('\n§4d a press that straddles a restart, the two clocks, two conver
     const pvB = w.call('GET', w.A, { query: { sessionId: 'cx3' } }).body; const r3b = jl(() => w.call('POST', w.A, { body: { sessionId: 'cx3', expect: { resetsAtSec: pvB.resetsAtSec } } }));
     s3.stubHold = false; jl(() => { for (const e of (s3.held || []).splice(0)) e.deliver(); });
     const r1b = jl(() => w.call('POST', w.A, { body: { sessionId: 'cx1' } }));
-    ok('§4d ④ after press 1\'s skip (window-moved) press 2 is free — its own verb, its own read-first, its consume (go ⇒ sent); a third press (the first conversation) is then on the floor', w.goes.some((g) => g.idempotencyKey === key1 && g.go === false) && r3b.code === 200 && !pvB.code && w.tries().sid === 'cx3' && !!w.tries().sentAt && r1b.code === 429 && r1b.body.code === 'cooldown', JSON.stringify([r3b.code, pvB.code, w.tries().sid, !!w.tries().sentAt, r1b.body && r1b.body.code]));
+    ok('§4d ④ after press 1\'s skip (window-moved) press 2 is free — its own verb, its own read-first, its consume (go ⇒ sent); a third press (the first conversation) is then on the floor', gateOf(w.goes.some((g) => g.idempotencyKey === key1 && g.go === false)) && r3b.code === 200 && !pvB.code && w.tries().sid === 'cx3' && !!w.tries().sentAt && r1b.code === 429 && r1b.body.code === 'cooldown', JSON.stringify([r3b.code, pvB.code, w.tries().sid, !!w.tries().sentAt, r1b.body && r1b.body.code]));
     w.killTimers(); }
 }
 
@@ -1537,7 +1537,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
   const fromPersist = "  t.prior = resetCredit.supersede(t.prior, now, clockOpts(now));\n  if (!t.charged) {";
   const fromPersist2 = "  persistResetCreditTries();\n  if (t.outcome) return; // a late \"sent\" after the attempt ended: charged, nothing left to wait for";
   const fromCatchUp = "function catchUpResetCreditFromBuffer(session, id) {\n  if (!session || !id || session.host) return null;";
-  ok('§4e CONTROLS: the three patches hit the product source', esrc10.includes(fromGuess) && esrc10.includes(fromPersist) && esrc10.includes(fromPersist2) && esrc10.includes(fromCatchUp));
+  ok('§4e CONTROLS: the three patches hit the product source', gateOf(esrc10.includes(fromGuess)) && gateOf(esrc10.includes(fromPersist)) && gateOf(esrc10.includes(fromPersist2)) && verdictOf(esrc10.includes(fromCatchUp)));
   const engNoGuess = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc10, fromGuess, "function revivedReadFirstWaiting(t) { return !!(t && t.outcome === 'unknown' && t.revivedAt && t.readFirst === true); }", "src/server/usage-pool-engine.js"), 'r10-noguess'));
   const engPersistFirst = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc10, fromPersist, "  t.prior = resetCredit.supersede(t.prior, now, clockOpts(now));\n  persistResetCreditTries();\n  if (!t.charged) {", "src/server/usage-pool-engine.js"), fromPersist2, "  if (t.outcome) return; // a late \"sent\" after the attempt ended: charged, nothing left to wait for", "src/server/usage-pool-engine.js"), 'r10-persistfirst'));
   const engNoCatchUp = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(esrc10, fromCatchUp, "function catchUpResetCreditFromBuffer(session, id) {\n  return null;", "src/server/usage-pool-engine.js"), 'r10-nocatchup'));
@@ -1558,7 +1558,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
     jl(() => w2.eng.recordCodexQuotaSignal(w2.s1, { type: 'reset_credit_sent', idempotencyKey: key, attempt: 1 }));
     jl(() => { for (const e of held) e.deliver(w2.eng, w2.s1); });
     jl(() => w2.eng.recordCodexQuotaSignal(w2.s1, { type: 'reset_credit_result', result: { outcome: 'reset' }, outcome: 'reset', idempotencyKey: key, attempts: 1 }));
-    ok('§4e ① the same keyed push twice before the send ⇒ two go:true for ONE key (the wrapper\'s single waiter takes one), a third push after the send writes no go ("sent already"); ONE consume, the restart\'s charge the only ledger line, the reset lands', goes1.length === 2 && goes1.every((g) => g.go === true && g.idempotencyKey === key) && w2.goes.length === 2 && w2.tries().outcome === 'reset' && w2.charged() === 1 && J.some((l) => /sent already/.test(l)), JSON.stringify([goes1.map((g) => g.go), w2.goes.length, w2.tries().outcome, w2.charged()]));
+    ok('§4e ① the same keyed push twice before the send ⇒ two go:true for ONE key (the wrapper\'s single waiter takes one), a third push after the send writes no go ("sent already"); ONE consume, the restart\'s charge the only ledger line, the reset lands', goes1.length === 2 && gateOf(goes1.every((g) => g.go === true && g.idempotencyKey === key)) && w2.goes.length === 2 && w2.tries().outcome === 'reset' && w2.charged() === 1 && verdictOf(J.some((l) => /sent already/.test(l))), JSON.stringify([goes1.map((g) => g.go), w2.goes.length, w2.tries().outcome, w2.charged()]));
     w2.killTimers(); }
   // ② a press SENT before the restart (its consume went out, the answer lost): revived unknown with its send a FACT — a replayed copy
   //    of its ORIGINAL push re-opens NOTHING (no go, the floor holds, a second press refused), its late answer lands
@@ -1572,13 +1572,13 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
     const out = { key, L1, L2, diskCharged: onDisk.charged, revived, afterPush, goes, b1, second: { code: second.code, c: second.body && second.body.code }, verbs: w2.verbs(), notices: w2.notices.slice(), w: w2, said: J.slice() };
     return out; };
   { const r = await legSent(engMod);
-    ok('§4e ② a press SENT before the restart is revived unknown with its send a FACT (not guessed): the replayed ORIGINAL push re-opens nothing and writes no go; its reading settles the record NOT LANDED (the count is still 3); the floor holds — a second press is refused cooldown, no second verb', r.revived.outcome === 'unknown' && r.revived.sent && !r.revived.guessed && !r.afterPush.reopened && r.goes.length === 0 && r.afterPush.settled === 'not-landed' && r.b1.code === 'cooldown' && r.second.code === 429 && r.second.c === 'cooldown' && r.verbs === 0, JSON.stringify([r.revived, r.afterPush, r.goes, r.b1.code, r.second, r.verbs]));
+    ok('§4e ② a press SENT before the restart is revived unknown with its send a FACT (not guessed): the replayed ORIGINAL push re-opens nothing and writes no go; its reading settles the record NOT LANDED (the count is still 3); the floor holds — a second press is refused cooldown, no second verb', r.revived.outcome === 'unknown' && gateOf(r.revived.sent) && !r.revived.guessed && !r.afterPush.reopened && r.goes.length === 0 && r.afterPush.settled === 'not-landed' && r.b1.code === 'cooldown' && r.second.code === 429 && r.second.c === 'cooldown' && r.verbs === 0, JSON.stringify([r.revived, r.afterPush, r.goes, r.b1.code, r.second, r.verbs]));
     jl(() => r.w.eng.recordCodexQuotaSignal(r.w.s1, { type: 'reset_credit_result', result: { outcome: 'reset' }, outcome: 'reset', idempotencyKey: r.key, attempts: 1 }));
-    ok('§4e ② …and the first consume\'s late `reset` lands on it (said), the ledger still one line', r.w.tries().outcome === 'reset' && r.w.notices.some((n) => /reset credit consumed/.test(n)) && r.w.charged() === 1, JSON.stringify([r.w.tries().outcome, r.w.charged(), r.w.notices]));
+    ok('§4e ② …and the first consume\'s late `reset` lands on it (said), the ledger still one line', r.w.tries().outcome === 'reset' && gateOf(r.w.notices.some((n) => /reset credit consumed/.test(n))) && r.w.charged() === 1, JSON.stringify([r.w.tries().outcome, r.w.charged(), r.w.notices]));
     ok('§4e THE DOUBLE CHARGE (reproduced, money): the record is on disk `charged:true` WITH its send, so the boot over a sent-and-unanswered press charges nothing — one ledger line before and after the restart', r.diskCharged === true && r.L1 === 1 && r.L2 === 1, JSON.stringify([r.diskCharged, r.L1, r.L2]));
     r.w.killTimers(); }
   { const c = await legSent(engNoGuess);
-    ok('§4e ② CONTROL (the r9 predicate — `revivedAt` alone): the replayed push RE-OPENS the sent record (a go to nobody), the ack window ends it not-sent and a SECOND press is admitted — a second key over a consume that went out (the money leg sees the rule)', c.afterPush.reopened && c.goes.length === 1 && c.second.code === 200 && c.verbs === 1 && c.notices.some((n) => /never sent the request/.test(n)), JSON.stringify([c.afterPush, c.goes.length, c.second, c.verbs])); c.w.killTimers(); }
+    ok('§4e ② CONTROL (the r9 predicate — `revivedAt` alone): the replayed push RE-OPENS the sent record (a go to nobody), the ack window ends it not-sent and a SECOND press is admitted — a second key over a consume that went out (the money leg sees the rule)', gateOf(c.afterPush.reopened) && c.goes.length === 1 && c.second.code === 200 && c.verbs === 1 && verdictOf(c.notices.some((n) => /never sent the request/.test(n))), JSON.stringify([c.afterPush, c.goes.length, c.second, c.verbs])); c.w.killTimers(); }
   { const c = await legSent(engPersistFirst);
     ok('§4e DOUBLE CHARGE CONTROL (the persist moved back before the charge — the pre-r10 order): the file says charged:false at the send and the boot charges the SAME consume again — two ledger lines (the leg sees the rule)', c.diskCharged === false && c.L1 === 1 && c.L2 === 2, JSON.stringify([c.diskCharged, c.L1, c.L2])); c.w.killTimers(); }
   // ③ the clocks after a re-open: a press 9 min old revived (1 min of guessed floor left) → the push re-opens it: in_flight (the ack window
@@ -1588,7 +1588,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
     w2.s1.stubSends = false; jl(() => { for (const e of held) e.deliver(w2.eng, w2.s1); }); const b1 = block(w2); const t1 = w2.tries();
     jl(() => w2.eng.recordCodexQuotaSignal(w2.s1, { type: 'reset_credit_sent', idempotencyKey: key, attempt: 1 })); const b2 = block(w2); const t2 = w2.tries(); const pv = w2.call('GET', w2.A).body;
     ok('§4e ③ revived 9 min old: cooldown with ~1 min left → re-opened: in_flight (≤ the ack window from now, `at` = now, `pressedAt` = the press 9 min ago) → sent: cooldown from the SEND (armedAt = sentAt, ~10 min on the dialog) — the floor follows the consume that went out, never the press', b0.code === 'cooldown' && b0.until - Date.now() < 70e3 && b1.code === 'in_flight' && Date.now() - t1.at < 5000 && Date.now() - t1.pressedAt > 8 * 60e3 && b2.code === 'cooldown' && b2.armedAt === t2.sentAt && b2.until - Date.now() > 9.5 * 60e3 && pv.code === 'cooldown' && Math.round(pv.cooldownUntilSec - Date.now() / 1000) > 9.5 * 60, JSON.stringify([b0.code, Math.round((b0.until - Date.now()) / 1000), b1.code, b2.code, Math.round((b2.until - Date.now()) / 60e3), pv.code]));
-    ok('§4e ③ the re-open\'s journal line names the press\'s own instant (pressedAt is READ, not only persisted)', J.some((l) => /re-opened and judged now/.test(l) && /pressed 5\d\d s ago/.test(l)), JSON.stringify(J.filter((l) => /re-opened/.test(l)).map((l) => l.slice(0, 200))));
+    ok('§4e ③ the re-open\'s journal line names the press\'s own instant (pressedAt is READ, not only persisted)', verdictOf(J.some((l) => /re-opened and judged now/.test(l) && /pressed 5\d\d s ago/.test(l))), JSON.stringify(J.filter((l) => /re-opened/.test(l)).map((l) => l.slice(0, 200))));
     w2.killTimers(); }
   // ④ whose push: cx1's key delivered through ANOTHER conversation (cx3) on the account re-opens nothing and gets no go (by sid at the
   //    re-open); its reading still settles the account's unsettled record like any reading; the key's own conversation re-opens it
@@ -1596,7 +1596,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
     const w2 = await bootW(w, engMod); const s3 = w2.addSession('cx3', w2.A);
     jl(() => { for (const e of held) e.deliver(w2.eng, s3); }); const viaOther = rec(w2.tries()); const goes3 = s3.wrote.filter((x) => /"codex-reset-credit-go"/.test(x)).length;
     jl(() => { for (const e of held) e.deliver(w2.eng, w2.s1); });
-    ok('§4e ④ a push carrying cx1\'s key through cx3 (same account): not re-opened (said: "came from another conversation"), no go to cx3 — its reading settles the unsettled record not-landed (any reading does); the same push through cx1 re-opens it and gets the go', !viaOther.reopened && viaOther.settled === 'not-landed' && goes3 === 0 && J.some((l) => /came from another conversation \(cx1\) — not re-opened/.test(l)) && rec(w2.tries()).reopened && w2.goes.length === 1 && w2.goes[0].go === true, JSON.stringify([viaOther, goes3, rec(w2.tries()), w2.goes.length]));
+    ok('§4e ④ a push carrying cx1\'s key through cx3 (same account): not re-opened (said: "came from another conversation"), no go to cx3 — its reading settles the unsettled record not-landed (any reading does); the same push through cx1 re-opens it and gets the go', !viaOther.reopened && viaOther.settled === 'not-landed' && goes3 === 0 && gateOf(J.some((l) => /came from another conversation \(cx1\) — not re-opened/.test(l))) && gateOf(rec(w2.tries()).reopened) && w2.goes.length === 1 && w2.goes[0].go === true, JSON.stringify([viaOther, goes3, rec(w2.tries()), w2.goes.length]));
     w2.killTimers(); }
   // ⑤ the orphan: the conversation is never resumed after the restart — the record holds the floor (charged: it MAY have gone out), then is
   //    UNSETTLED; the HELPER's next press on the account is admitted over it, its read-first settles the orphan, the consume goes out
@@ -1609,7 +1609,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
     await until(() => w2.notices.length > 0, 9000); await sleep(300);
     const L = fs.readFileSync(log10, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).method);
     const orphan = (() => { for (let x = w2.tries(); x; x = x.prior) if (x.idempotencyKey === key) return x; return null; })();
-    ok('§4e ⑤ never resumed: inside the floor the orphan refuses every press (cooldown, via the helper); past it the preview says unsettled + the helper reads first; the helper press is ADMITTED over it, its read-first settles the orphan NOT LANDED (the count is still 3), the consume goes out once; ledger = the boot\'s guess + the helper\'s consume', pv1.code === 'cooldown' && pv1.via === 'helper' && !pv2.code && pv2.via === 'helper' && !!pv2.unsettled && pv2.readsFirst === true && r.code === 200 && JSON.stringify(L) === JSON.stringify(['initialize', 'initialized', 'account/rateLimits/read', 'account/rateLimitResetCredit/consume', 'account/rateLimits/read']) && orphan && orphan.settled && orphan.settled.how === 'not-landed' && w2.tries().outcome === 'reset' && w2.charged() === 2, JSON.stringify([pv1.code, pv1.via, pv2.code, pv2.via, !!pv2.unsettled, r.code, L, orphan && orphan.settled, w2.tries().outcome, w2.charged()]));
+    ok('§4e ⑤ never resumed: inside the floor the orphan refuses every press (cooldown, via the helper); past it the preview says unsettled + the helper reads first; the helper press is ADMITTED over it, its read-first settles the orphan NOT LANDED (the count is still 3), the consume goes out once; ledger = the boot\'s guess + the helper\'s consume', pv1.code === 'cooldown' && pv1.via === 'helper' && !pv2.code && pv2.via === 'helper' && !!pv2.unsettled && pv2.readsFirst === true && r.code === 200 && JSON.stringify(L) === JSON.stringify(['initialize', 'initialized', 'account/rateLimits/read', 'account/rateLimitResetCredit/consume', 'account/rateLimits/read']) && gateOf(orphan) && gateOf(orphan.settled) && orphan.settled.how === 'not-landed' && w2.tries().outcome === 'reset' && w2.charged() === 2, JSON.stringify([pv1.code, pv1.via, pv2.code, pv2.via, !!pv2.unsettled, r.code, L, orphan && orphan.settled, w2.tries().outcome, w2.charged()]));
     for (const k of ['STUB_TABLE', 'STUB_LOG', 'STUB_MODE', 'STUB_READ_COUNT', 'STUB_READ_USED']) delete process.env[k];
     w2.killTimers(); }
   // ⑦ the late-wall items keyed by the conversation, on the REAL For-you store: two conversations on one account ⇒ two items; one conversation,
@@ -1632,7 +1632,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
     feed10(w.s1, live10(), 0);
     const n0 = all().length; const twin = all().find((i) => i.sessionKey === `codex:${w.s1.backendSessionId}` && /3h01m late/.test(i.text));
     feed10(w.s1, wall10(), 3 * 3600e3 + 1 * 60e3);
-    ok('§4e ⑦ two conversations on one account ⇒ two items under their OWN keys; 21 bursts on one conversation ⇒ 21 resolved + 1 open and the resolved ones untouched by the next filing (never re-notified); the same lateness words re-open THEIR OWN earlier item by id — one open item, never a new one', JSON.stringify(two) === JSON.stringify([[`codex:${w.s1.backendSessionId}`, 'open'], [`codex:${s3.backendSessionId}`, 'open']]) && mine.length === 22 && mine.filter((i) => i.status === 'open').length === 1 && untouched && all().length === n0 && twin && all().find((i) => i.id === twin.id).status === 'open' && all().filter((i) => i.status === 'open').length === 1, JSON.stringify([two, mine.length, untouched, all().length, n0]));
+    ok('§4e ⑦ two conversations on one account ⇒ two items under their OWN keys; 21 bursts on one conversation ⇒ 21 resolved + 1 open and the resolved ones untouched by the next filing (never re-notified); the same lateness words re-open THEIR OWN earlier item by id — one open item, never a new one', JSON.stringify(two) === JSON.stringify([[`codex:${w.s1.backendSessionId}`, 'open'], [`codex:${s3.backendSessionId}`, 'open']]) && mine.length === 22 && mine.filter((i) => i.status === 'open').length === 1 && gateOf(untouched) && all().length === n0 && gateOf(twin) && all().find((i) => i.id === twin.id).status === 'open' && all().filter((i) => i.status === 'open').length === 1, JSON.stringify([two, mine.length, untouched, all().length, n0]));
     w.killTimers(); }
   // ⑧ THE WORD A RESTART LOSES (reproduced on the REAL wrapper file): the restart outlasts the wrapper's wait — its push and its `skipped`
   //    went to stdout with no server attached and into its own buffer FILE; the new engine reads them back at the attach
@@ -1660,11 +1660,11 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
       const pv = w2.call('GET', w2.A).body;
       return { key, file, atBoot, fed, rec: rec(w2.tries()), block: block(w2).code, pv: pv.code || 'free', L: w2.charged(), notices: w2.notices.slice(), said: J.slice(), w: w2 }; };
     { const r = await legLost(engMod, (key) => ({ type: 'codex-reset-credit', idempotencyKey: key, readFirst: true }));
-      ok('§4e ⑧ (A) the REAL wrapper, no server attached: its read-first push and its `skipped {no-verdict}` are in its buffer file, NO consume at the app-server; the boot revives the press unknown + charged on a cooldown, nothing said', JSON.stringify(r.file.inFile) === JSON.stringify(['rate_limits_updated:beforeReset', 'reset_credit_result:skipped']) && r.file.consumes === 0 && r.atBoot.rec.outcome === 'unknown' && r.atBoot.rec.guessed && r.atBoot.block === 'cooldown' && r.atBoot.notices === 0 && r.atBoot.L === 1, JSON.stringify([r.file, r.atBoot]));
-      ok('§4e ⑧ (A) the catch-up at the attach reads the file back: the push (answered before the restart) is NOT re-fed, the `skipped` settles the press `skipped` — the floor gone, the dialog free, the person told, the restart\'s charge the one ledger line (said to stand)', !!r.fed && JSON.stringify(r.fed.fed) === JSON.stringify(['reset_credit_result:skipped']) && r.fed.dropped.length === 1 && /answered before the restart/.test(r.fed.dropped[0]) && r.rec.outcome === 'skipped' && !r.rec.sent && r.block === null && r.pv === 'free' && r.L === 1 && r.notices.some((n) => /got no verdict in time; nothing was spent/.test(n)) && r.said.some((l) => /read back from its buffer file at the attach/.test(l)), JSON.stringify([r.fed, r.rec, r.block, r.pv, r.L, r.notices]));
+      ok('§4e ⑧ (A) the REAL wrapper, no server attached: its read-first push and its `skipped {no-verdict}` are in its buffer file, NO consume at the app-server; the boot revives the press unknown + charged on a cooldown, nothing said', JSON.stringify(r.file.inFile) === JSON.stringify(['rate_limits_updated:beforeReset', 'reset_credit_result:skipped']) && r.file.consumes === 0 && r.atBoot.rec.outcome === 'unknown' && gateOf(r.atBoot.rec.guessed) && r.atBoot.block === 'cooldown' && r.atBoot.notices === 0 && r.atBoot.L === 1, JSON.stringify([r.file, r.atBoot]));
+      ok('§4e ⑧ (A) the catch-up at the attach reads the file back: the push (answered before the restart) is NOT re-fed, the `skipped` settles the press `skipped` — the floor gone, the dialog free, the person told, the restart\'s charge the one ledger line (said to stand)', !!r.fed && JSON.stringify(r.fed.fed) === JSON.stringify(['reset_credit_result:skipped']) && r.fed.dropped.length === 1 && gateOf(/answered before the restart/.test(r.fed.dropped[0])) && r.rec.outcome === 'skipped' && !r.rec.sent && r.block === null && r.pv === 'free' && r.L === 1 && gateOf(r.notices.some((n) => /got no verdict in time; nothing was spent/.test(n))) && verdictOf(r.said.some((l) => /read back from its buffer file at the attach/.test(l))), JSON.stringify([r.fed, r.rec, r.block, r.pv, r.L, r.notices]));
       r.w.killTimers(); }
     { const r = await legLost(engMod, (key) => ({ type: 'codex-reset-credit', idempotencyKey: key }));
-      ok('§4e ⑧ (B) a consume that went out and was ANSWERED during the downtime (sent, the post-reset read, `reset` — all in the file): the catch-up feeds the three at their own instants — the send is now a fact (the guess gone), the press LANDED, said; one ledger line', JSON.stringify(r.file.inFile) === JSON.stringify(['reset_credit_sent', 'rate_limits_updated:afterReset', 'reset_credit_result:reset']) && r.file.consumes === 1 && r.atBoot.rec.guessed && !!r.fed && r.fed.fed.length === 3 && r.rec.outcome === 'reset' && !r.rec.guessed && r.rec.sent && r.L === 1 && r.notices.some((n) => /reset credit consumed|did land/.test(n)), JSON.stringify([r.file, r.fed, r.rec, r.L, r.notices]));
+      ok('§4e ⑧ (B) a consume that went out and was ANSWERED during the downtime (sent, the post-reset read, `reset` — all in the file): the catch-up feeds the three at their own instants — the send is now a fact (the guess gone), the press LANDED, said; one ledger line', JSON.stringify(r.file.inFile) === JSON.stringify(['reset_credit_sent', 'rate_limits_updated:afterReset', 'reset_credit_result:reset']) && r.file.consumes === 1 && gateOf(r.atBoot.rec.guessed) && !!r.fed && r.fed.fed.length === 3 && r.rec.outcome === 'reset' && !r.rec.guessed && gateOf(r.rec.sent) && r.L === 1 && verdictOf(r.notices.some((n) => /reset credit consumed|did land/.test(n))), JSON.stringify([r.file, r.fed, r.rec, r.L, r.notices]));
       r.w.killTimers(); }
     { const c = await legLost(engNoCatchUp, (key) => ({ type: 'codex-reset-credit', idempotencyKey: key, readFirst: true }));
       ok('§4e ⑧ CONTROL (the catch-up removed — the r9 engine): the press stays unknown on a 10-min cooldown, the person told NOTHING — the incident shape for every restart longer than the wrapper\'s wait (the leg sees the rule)', c.fed === null && c.rec.outcome === 'unknown' && c.block === 'cooldown' && c.notices.length === 0, JSON.stringify([c.fed, c.rec.outcome, c.block, c.notices.length]));
@@ -1723,15 +1723,15 @@ console.log('\n§4b the session path reads first on the REAL wrapper (stub app-s
     c.send({ type: 'codex-reset-credit-go', idempotencyKey: 'k-rf-0001', go: true });
     await c.until(() => c.events('reset_credit_result').length > 0);
   } });
-  ok('§4b the real wrapper booted on the stub and advertises resetCreditReadFirst in its sidecar', a.booted && a.sidecar()?.caps?.resetCreditReadFirst === true, JSON.stringify(a.sidecar()?.caps));
+  ok('§4b the real wrapper booted on the stub and advertises resetCreditReadFirst in its sidecar', gateOf(a.booted) && a.sidecar()?.caps?.resetCreditReadFirst === true, JSON.stringify(a.sidecar()?.caps));
   { const before = a.events('rate_limits_updated').find((e) => e.beforeReset === true) || {};
     ok('§4b ① the read before the consume is pushed with the press\'s key (`beforeReset`, `onDemand`, the count and the window), and NO consume went out until the engine\'s go', before.idempotencyKey === 'k-rf-0001' && before.onDemand === true && !!before.rateLimits && !!before.resetCredits && a.noConsumeYet === true, JSON.stringify([before.idempotencyKey, before.onDemand, !!before.rateLimits, a.noConsumeYet]));
     // (the wrapper's own boot read — readAccountLimits(false) at startup — is the first read; the press's are the ones around the consume)
     const readIds = a.rpc().filter((r) => r.method === 'account/rateLimits/read').map((r) => r.id), cI = idOf(a, 'account/rateLimitResetCredit/consume', 0);
     const pre = readIds.filter((i) => i < cI), post = readIds.filter((i) => i > cI);
-    ok('§4b ① by request id: boot read < the pre-consume read < consume < the post-consume read (two reads before the consume, one after; one consume)', Number.isFinite(cI) && pre.length === 2 && post.length === 1 && a.rpc().filter((r) => r.method === 'account/rateLimitResetCredit/consume').length === 1 && pre[1] > pre[0] && post[0] > cI, JSON.stringify([readIds, cI]));
+    ok('§4b ① by request id: boot read < the pre-consume read < consume < the post-consume read (two reads before the consume, one after; one consume)', gateOf(Number.isFinite(cI)) && pre.length === 2 && post.length === 1 && a.rpc().filter((r) => r.method === 'account/rateLimitResetCredit/consume').length === 1 && pre[1] > pre[0] && post[0] > cI, JSON.stringify([readIds, cI]));
     const res = a.events('reset_credit_result')[0] || {};
-    ok('§4b ① the answer is this press\'s reset, one attempt; the post-consume read is still marked afterReset', res.outcome === 'reset' && res.idempotencyKey === 'k-rf-0001' && res.attempts === 1 && a.events('rate_limits_updated').some((e) => e.afterReset === true && e.idempotencyKey === 'k-rf-0001'), JSON.stringify(res)); }
+    ok('§4b ① the answer is this press\'s reset, one attempt; the post-consume read is still marked afterReset', res.outcome === 'reset' && res.idempotencyKey === 'k-rf-0001' && res.attempts === 1 && verdictOf(a.events('rate_limits_updated').some((e) => e.afterReset === true && e.idempotencyKey === 'k-rf-0001')), JSON.stringify(res)); }
   // ② go:false ⇒ no consume, ever; said as skipped with the why
   const b = await runWrapper('nogo', { drive: async (c) => {
     c.send({ type: 'codex-reset-credit', idempotencyKey: 'k-rf-0002', readFirst: true });
@@ -1758,7 +1758,7 @@ console.log('\n§4b the session path reads first on the REAL wrapper (stub app-s
     await sleep(400);
   } });
   { const res = t.events('reset_credit_result')[0] || {};
-    ok('§4b ④ no go within the wait ⇒ NO consume, the result says skipped / no-verdict with its error, sent:false', res.skipped === true && res.why === 'no-verdict' && /no verdict on the read before the consume/.test(String(res.error)) && res.sent === false && t.consumesAtGiveUp === 0, JSON.stringify(res));
+    ok('§4b ④ no go within the wait ⇒ NO consume, the result says skipped / no-verdict with its error, sent:false', res.skipped === true && res.why === 'no-verdict' && gateOf(/no verdict on the read before the consume/.test(String(res.error))) && res.sent === false && t.consumesAtGiveUp === 0, JSON.stringify(res));
     ok('§4b ④ (verify r9 ①, the two clocks) a go:true arriving AFTER the wrapper gave up is DROPPED — still no consume (the wrapper holds no waiter for the key; the engine side: §4d ①)', !t.rpc().some((r) => r.method === 'account/rateLimitResetCredit/consume') && t.events('reset_credit_result').length === 1, JSON.stringify(t.rpc().map((r) => r.method))); }
   // ⑤ a verb WITHOUT the flag (the auto rung, the route's re-ask after its own read, an older server) consumes at once
   const p = await runWrapper('plain', { drive: async (c) => { c.verbMark = Math.max(0, ...c.rpc().map((r) => r.id).filter(Number.isFinite)); c.send({ type: 'codex-reset-credit', idempotencyKey: 'k-rf-0005' }); await c.until(() => c.events('reset_credit_result').length > 0); } });
@@ -1768,10 +1768,10 @@ console.log('\n§4b the session path reads first on the REAL wrapper (stub app-s
   // log counts what a PRESS actually sends — the reads between the verb's arrival and the consume: exactly 1 for a person's press, 0 for a verb
   // without the flag (the auto rung's shape), 1 after the consume on both; the helper's run is pinned as a sequence in §3
   const readsOfPress = (c, { before = true } = {}) => { const cI = idOf(c, 'account/rateLimitResetCredit/consume', 0); return c.rpc().filter((r) => r.method === 'account/rateLimits/read' && r.id > c.verbMark && (before ? r.id < cI : r.id > cI)).length; };
-  ok('§4b RUNTIME READ CENSUS (verify r10 ⑥): a person\'s press = exactly ONE read between the verb and the consume on the real wrapper (the boot read excluded by request id), one after', Number.isFinite(a.verbMark) && readsOfPress(a) === 1 && readsOfPress(a, { before: false }) === 1 && a.rpc().filter((r) => r.method === 'account/rateLimitResetCredit/consume').length === 1, JSON.stringify([a.verbMark, a.rpc().map((r) => [r.id, r.method])]));
-  ok('§4b RUNTIME READ CENSUS: a verb without the flag (the auto rung) = ZERO reads between the verb and the consume, one after', Number.isFinite(p.verbMark) && readsOfPress(p) === 0 && readsOfPress(p, { before: false }) === 1, JSON.stringify([p.verbMark, p.rpc().map((r) => [r.id, r.method])]));
+  ok('§4b RUNTIME READ CENSUS (verify r10 ⑥): a person\'s press = exactly ONE read between the verb and the consume on the real wrapper (the boot read excluded by request id), one after', gateOf(Number.isFinite(a.verbMark)) && readsOfPress(a) === 1 && readsOfPress(a, { before: false }) === 1 && a.rpc().filter((r) => r.method === 'account/rateLimitResetCredit/consume').length === 1, JSON.stringify([a.verbMark, a.rpc().map((r) => [r.id, r.method])]));
+  ok('§4b RUNTIME READ CENSUS: a verb without the flag (the auto rung) = ZERO reads between the verb and the consume, one after', gateOf(Number.isFinite(p.verbMark)) && readsOfPress(p) === 0 && readsOfPress(p, { before: false }) === 1, JSON.stringify([p.verbMark, p.rpc().map((r) => [r.id, r.method])]));
   // ⑥ CONTROL: a wrapper copy that ignores the flag consumes with no read before — leg ① sees the rule
-  { const wsrc = read(WRAPPER); const fromRF = '    if (msg.readFirst === true) {'; ok('§4b CONTROL: the patch hits the wrapper source', wsrc.includes(fromRF));
+  { const wsrc = read(WRAPPER); const fromRF = '    if (msg.readFirst === true) {'; ok('§4b CONTROL: the patch hits the wrapper source', verdictOf(wsrc.includes(fromRF)));
     const f6 = MUTRC.write(WRAPPER, wsrc.replace(fromRF, '    if (false) {'), 'r8-wrapper-noreadfirst');
     const c6 = await runWrapper('control', { wrapperFile: f6, drive: async (c) => { c.send({ type: 'codex-reset-credit', idempotencyKey: 'k-rf-0006', readFirst: true }); await c.until(() => c.events('reset_credit_result').length > 0); } });
     ok('§4b CONTROL: the patched wrapper consumes at once on readFirst:true — no beforeReset push, only the boot read before the consume (leg ① would be RED on it)', !c6.events('rate_limits_updated').some((e) => e.beforeReset === true) && readsBeforeConsume(c6) === 1, JSON.stringify(c6.rpc().map((r) => [r.id, r.method]))); }
@@ -1783,7 +1783,7 @@ console.log('\n§4b the session path reads first on the REAL wrapper (stub app-s
 }
 
 // (§5 the new keys' zh / ja — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-ok('ci.mjs runs this suite', /'test-reset-credit-ui'/.test(read('scripts/ci.mjs')));
+ok('ci.mjs runs this suite', verdictOf(/'test-reset-credit-ui'/.test(read('scripts/ci.mjs'))));
 
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
@@ -1794,7 +1794,7 @@ ok('ci.mjs runs this suite', /'test-reset-credit-ui'/.test(read('scripts/ci.mjs'
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTRC.files, MUTRC.dir, REPO, { minCopies: 1 })) ok('tree: ' + r.name, r.pass, r.detail);
+for (const r of copiesCensus(MUTRC.files, MUTRC.dir, REPO, { minCopies: 1 })) ok('tree: ' + r.name, verdictOf(r.pass), r.detail);
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

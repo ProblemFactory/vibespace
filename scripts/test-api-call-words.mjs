@@ -19,7 +19,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const W = require(path.join(ROOT, 'src/api-call-words.js'));
 const C = require(path.join(ROOT, 'src/channel-api-card.js'));
 let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 600)); } };
+const ok = (c, name, info) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 600)); } };
 
 const DOC = 'DocFixtureAAAAAAAAAA1', BLK = 'BlkFixtureBBBBBBBBBB2', APP = 'AppFixtureCCCCCCCCCC3', TBL = 'tblFixture4';
 const lark = (method, p, body, query = []) => ({ host: 'open.feishu.cn', method, path: p, body: body == null ? null : JSON.stringify(body), query, credLabel: 'Lark · ops' });
@@ -45,15 +45,15 @@ const sameObj = (a, b) => (a === null && b === null) || (!!a && !!b && a.kind ==
 console.log('① the census (rows ↔ fixtures)');
 const ids = W.ROWS.map((r) => r.id);
 ok(new Set(ids).size === ids.length, `every row id is unique (${ids.length} rows)`, ids);
-ok(ids.every((id) => FIXTURES[id]), 'every table row has a fixture here', ids.filter((id) => !FIXTURES[id]));
-ok(Object.keys(FIXTURES).every((id) => ids.includes(id)), 'every fixture names a live row', Object.keys(FIXTURES).filter((id) => !ids.includes(id)));
+ok(verdictOf(ids.every((id) => FIXTURES[id])), 'every table row has a fixture here', ids.filter((id) => !FIXTURES[id]));
+ok(verdictOf(Object.keys(FIXTURES).every((id) => ids.includes(id))), 'every fixture names a live row', Object.keys(FIXTURES).filter((id) => !ids.includes(id)));
 
 console.log('② per row: its words — and RED without the row');
 for (const [id, [p, key, params, obj]] of Object.entries(FIXTURES)) {
   const w = W.wordsOf(p);
-  ok(w.row === id && w.key === key && JSON.stringify(w.params) === JSON.stringify(params) && sameObj(w.object, obj), `${id}: ${p.method} ${p.path.split('/').slice(-2).join('/')} ⇒ "${key}"`, w);
+  ok(w.row === id && w.key === key && JSON.stringify(w.params) === JSON.stringify(params) && verdictOf(sameObj(w.object, obj)), `${id}: ${p.method} ${p.path.split('/').slice(-2).join('/')} ⇒ "${key}"`, w);
   const red = W.wordsOf(p, { rows: W.ROWS.filter((r) => r.id !== id), generated: EMPTY });
-  ok(red.row === null && red.key === FALLBACK && !red.params.call.includes('/') && red.params.call.startsWith(`${p.method} `), `CONTROL ${id}: without its row (and the generated table) the title is the fallback (${red.params.call}), never the raw path`, red);
+  ok(red.row === null && red.key === FALLBACK && !red.params.call.includes('/') && verdictOf(red.params.call.startsWith(`${p.method} `)), `CONTROL ${id}: without its row (and the generated table) the title is the fallback (${red.params.call}), never the raw path`, red);
   const gen = W.wordsOf(p, { rows: W.ROWS.filter((r) => r.id !== id) });
   ok(gen.row !== id && gen.key !== key, `${id}: the hand row is what reads the body (without it: ${gen.row || 'generic'})`, gen);
 }
@@ -88,8 +88,8 @@ const larkIds = byV('lark').map((r) => r[0].split('.'));
 const COVER = { slack: byV('slack').length, gmail: byV('google').length, lark: byV('lark').length, larkResources: new Set(larkIds.map((x) => x[2])).size, larkVerbs: new Set(larkIds.map((x) => x[3])).size };
 console.log(`    coverage: Slack ${COVER.slack} methods · Gmail ${COVER.gmail} methods · Lark ${COVER.lark} methods = ${COVER.larkResources} resources × ${COVER.larkVerbs} verbs (${Object.keys(G.SOURCES).filter((f) => f.startsWith('lark-go/')).map((f) => f.slice(8, -7)).join(', ')}) · ${G.PHRASES.length} phrases · ${G.ROWS.filter((r) => r[7]).length} rows the verb calls sensitive`);
 ok(COVER.slack === 170 && COVER.gmail === 79 && COVER.lark === 164, 'coverage pinned: Slack 170 · Gmail 79 · Lark 164 (a refresh that moves it moves this line)', COVER);
-ok(G.PHRASES.every((ph) => ph.length === 3 && ph.every((s) => typeof s === 'string' && s.trim())) && G.ROWS.every((r) => G.PHRASES[r[4]] && /^\//.test(r[3])), 'every row has a phrase in en / zh / ja and a path pattern');
-ok(G.ROWS.filter((r) => /\.(Batch)?Delete$|\.delete$|\.batchDelete$/.test(r[0])).every((r) => r[7] === 1), 'every delete / batch-delete row is flagged sensitive by its verb (the runtime verdict stays the engine\'s)');
+ok(gateOf(G.PHRASES.every((ph) => ph.length === 3 && ph.every((s) => typeof s === 'string' && s.trim()))) && verdictOf(G.ROWS.every((r) => G.PHRASES[r[4]] && /^\//.test(r[3]))), 'every row has a phrase in en / zh / ja and a path pattern');
+ok(verdictOf(G.ROWS.filter((r) => /\.(Batch)?Delete$|\.delete$|\.batchDelete$/.test(r[0])).every((r) => r[7] === 1)), 'every delete / batch-delete row is flagged sensitive by its verb (the runtime verdict stays the engine\'s)');
 console.log(`    missing words (${G.MISSING.length}, read as their English split): ${G.MISSING.join(' · ')}`);
 ok(G.MISSING.length === 15, 'the missing-word list is PINNED at 15 — a new resource without a word shows up here', G.MISSING);
 const DEL = lark('DELETE', `/open-apis/docx/v1/documents/${DOC}/blocks/${BLK}/children/batch_delete`, {});
@@ -109,7 +109,7 @@ const SAMPLES = [
 ];
 for (const [p, zh, obj] of SAMPLES) {
   const w = W.wordsOf(p);
-  ok(/^gen:/.test(w.row) && w.text.zh === zh && w.text.en && w.text.ja && sameObj(w.object, obj), `${p.method} ${p.path.replace(/^\/open-apis|^\/gmail\/v1\/users\/me/, '…')} ⇒ 「${zh}」 (${w.row})`, w);
+  ok(gateOf(/^gen:/.test(w.row)) && w.text.zh === zh && gateOf(w.text.en) && gateOf(w.text.ja) && verdictOf(sameObj(w.object, obj)), `${p.method} ${p.path.replace(/^\/open-apis|^\/gmail\/v1\/users\/me/, '…')} ⇒ 「${zh}」 (${w.row})`, w);
   const red = W.wordsOf(p, { generated: EMPTY });
   ok(red.row === null && red.key === FALLBACK && !red.text, `CONTROL: the generated table emptied ⇒ only the generic form (${red.params.call})`, red);
 }
@@ -118,9 +118,9 @@ ok(d.text.en === 'batch-delete document block children “{object}”' && d.text
 const bare = W.wordsOf(slack('chat.postMessage', { text: 'hi' }));
 ok(bare.text.zh === '发送 消息' && bare.object === null, 'no object in the request ⇒ the phrase without its 「（…）」', bare);
 const cm = C.cardModel({ id: 'api-g', status: 'pending', principal: { name: 'Odd jobs' }, at: 0, ...DEL });
-ok(cm.head.what.text && cm.head.what.text.zh === SAMPLES[0][1] && cm.head.object.short === `${DOC.slice(0, 8)}…`, 'the card model carries the generated phrase + the doc chip', cm.head);
+ok(gateOf(cm.head.what.text) && cm.head.what.text.zh === SAMPLES[0][1] && cm.head.object.short === `${DOC.slice(0, 8)}…`, 'the card model carries the generated phrase + the doc chip', cm.head);
 const NET = /require\((['"])(https?|net|tls|undici)\1\)|\bfetch\(|XMLHttpRequest/;
-ok(['src/api-call-words.js', 'src/api-call-words.generated.js', 'scripts/gen-api-call-words.mjs'].every((f) => !NET.test(fs.readFileSync(path.join(ROOT, f), 'utf8'))), 'no network on this path: the words module, the table and the generator read files only');
+ok(verdictOf(['src/api-call-words.js', 'src/api-call-words.generated.js', 'scripts/gen-api-call-words.mjs'].every((f) => !NET.test(fs.readFileSync(path.join(ROOT, f), 'utf8')))), 'no network on this path: the words module, the table and the generator read files only');
 
 console.log(fail ? `FAILED: ${fail} of ${pass + fail}` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

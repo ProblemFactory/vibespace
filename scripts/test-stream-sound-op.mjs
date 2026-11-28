@@ -37,7 +37,7 @@ import { writeFakeEncoder, hasOpusFfmpeg, tonePackets } from './fixtures/stream/
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(40); } return false; };
 const SM = require(path.join(REPO, 'src/stream-model.js'));
@@ -124,34 +124,34 @@ const { dm, ready } = deviceOn(home, BUNDLE, { VIBESPACE_MIC_HELPER: FK.exe, ...
 const conn = await ready;
 {
   const caps = conn.info.capabilities;
-  ok(caps.includes('stream-audio') && caps.indexOf('stream-audio') === caps.length - 1 && caps.indexOf('stream-mic') === caps.length - 2, 'the hello-ack names stream-audio (after stream-mic)', caps.slice(-3));
+  ok(gateOf(caps.includes('stream-audio')) && caps.indexOf('stream-audio') === caps.length - 1 && caps.indexOf('stream-mic') === caps.length - 2, 'the hello-ack names stream-audio (after stream-mic)', caps.slice(-3));
   // the leg judges what it says (主开发 r952): the op's reply word and the module's OWN marker (its factory) in the bundle — never the
   // spelling of one statement inside the module (a pin on `hc = r.helper = spawn(h.exe, ["loopback"]…` went stale when row B-147f
   // made the helper's start heard at once); the op's reply itself is judged live just below (by id) and in §2
-  ok(/op: "stream-audio-result"/.test(bundleText) && /function createSound\(/.test(bundleText), 'the bundle answers stream-audio-result and carries src/desktop-sound.js (npm run build:agentd after a change)');
+  ok(gateOf(/op: "stream-audio-result"/.test(bundleText)) && verdictOf(/function createSound\(/.test(bundleText)), 'the bundle answers stream-audio-result and carries src/desktop-sound.js (npm run build:agentd after a change)');
   // (the THREE-TOUCH pin of src/agentd/client.js: MOVED to the fast scripts/test-stream-sound-op-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const raw = await dm._request({ op: 'stream-audio', sid: 'nope', on: true, timeoutMs: 5000 });
-  ok(raw && raw.result && raw.result.ok === false && raw.result.code === 'not_found', 'a raw request is answered BY ID (not a timeout): an unknown session is not_found', raw);
+  ok(gateOf(raw) && gateOf(raw.result) && raw.result.ok === false && raw.result.code === 'not_found', 'a raw request is answered BY ID (not a timeout): an unknown session is not_found', raw);
 }
 
 console.log('§2 THE WINDOWS ROAD: the loopback → the agent\'s ffmpeg → Opus → the stream\'s track');
 const S = await soundStream(...viaDevice(dm));
 {
   const asec = sectionOf(S.off.offer.sdp, 'audio'), vsec = sectionOf(S.off.offer.sdp, 'video');
-  ok(S.off.ok && S.off.audio === true && /a=sendonly/.test(asec) && /a=rtpmap:\d+ opus\/48000\/2/i.test(asec) && /a=group:BUNDLE 0 1 2|a=group:BUNDLE/.test(S.off.offer.sdp), 'a stream asked `audio` offers an Opus 48 kHz stereo m-line the agent SENDS on (sendonly — no microphone asked), in the one BUNDLE', asec.split(/\r?\n/).filter((l) => /^(m=|a=rtpmap|a=send|a=recv|a=msid)/.test(l)));
+  ok(gateOf(S.off.ok) && S.off.audio === true && gateOf(/a=sendonly/.test(asec)) && gateOf(/a=rtpmap:\d+ opus\/48000\/2/i.test(asec)) && verdictOf(/a=group:BUNDLE 0 1 2|a=group:BUNDLE/.test(S.off.offer.sdp)), 'a stream asked `audio` offers an Opus 48 kHz stereo m-line the agent SENDS on (sendonly — no microphone asked), in the one BUNDLE', asec.split(/\r?\n/).filter((l) => /^(m=|a=rtpmap|a=send|a=recv|a=msid)/.test(l)));
   ok(msidOf(asec) === SND.SOUND.streamId && msidOf(vsec) === SND.SOUND.streamId, `the sound and the picture share ONE msid (${SND.SOUND.streamId}) — one MediaStream: the page's <video> carries both`, { a: msidOf(asec), v: msidOf(vsec) });
-  ok(S.connected && await until(() => S.vrtp.length > 10, 5000), 'the stand-in answered it recvonly, connected, and the picture plays');
+  ok(gateOf(S.connected) && verdictOf(await until(() => S.vrtp.length > 10, 5000)), 'the stand-in answered it recvonly, connected, and the picture plays');
   await sleep(1500);
-  ok(FK.loopbacks().length === 0 && S.rtp.length === 0 && S.stats() && S.stats().audio && S.stats().audio.state === 'off', 'OFF (the default): nothing runs on the machine — no loopback, no keep-alive, no Opus — and no packet', { runs: FK.loopbacks().length, rtp: S.rtp.length, audio: S.stats() && S.stats().audio });
+  ok(FK.loopbacks().length === 0 && S.rtp.length === 0 && gateOf(S.stats()) && gateOf(S.stats().audio) && S.stats().audio.state === 'off', 'OFF (the default): nothing runs on the machine — no loopback, no keep-alive, no Opus — and no packet', { runs: FK.loopbacks().length, rtp: S.rtp.length, audio: S.stats() && S.stats().audio });
   const t0 = Date.now();
   const on = await dm.streamAudio(S.off.sid, { on: true });
   const tookMs = Date.now() - t0;
-  ok(on && on.ok === true && on.on === true && on.endpoint === 'Speakers (Sound Blaster X3)', `the press (stream-audio on) ⇒ started in ${tookMs} ms, the endpoint said`, on);
+  ok(gateOf(on) && on.ok === true && on.on === true && on.endpoint === 'Speakers (Sound Blaster X3)', `the press (stream-audio on) ⇒ started in ${tookMs} ms, the endpoint said`, on);
   const runs = FK.loopbacks();
   ok(runs.length === 1 && JSON.stringify(runs[0].argv) === '["loopback"]' && runs[0].device === null, 'ONE loopback run, its argv the verb alone (no name rides argv or env)', runs);
   const got = await until(() => S.rtp.length >= 75, 6000);
   const pt = Number((/a=rtpmap:(\d+) opus/i.exec(sectionOf(S.off.offer.sdp, 'audio')) || [])[1]);
-  ok(got && S.rtp.every((p) => p.pt === pt), `Opus RTP reaches the stand-in on the m-line's payload type (${pt}): ${S.rtp.length} packets`);
+  ok(gateOf(got) && verdictOf(S.rtp.every((p) => p.pt === pt)), `Opus RTP reaches the stand-in on the m-line's payload type (${pt}): ${S.rtp.length} packets`);
   const gaps = S.rtp.slice(5).map((p, i) => p.at - S.rtp[i + 4].at).sort((a, b) => a - b), p50 = gaps[gaps.length >> 1], p95 = gaps[Math.floor(gaps.length * 0.95)];
   if (REAL_FF) ok(p50 >= 10 && p50 <= 30 && p95 <= 80, `paced like the probe's leg 1h (arrival gaps p50 ${p50} ms, p95 ${p95} ms — one 20 ms packet at a time, not the raw demuxer's clumps)`);
   else skip(`the real encoder's pacing (the fake's: p50 ${p50} ms, p95 ${p95} ms)`);
@@ -162,27 +162,27 @@ const S = await soundStream(...viaDevice(dm));
   } else {
     skip('the helper\'s own PCM decoded at the far end (it needs a decoder)');
     const T = tonePackets(), i0 = T.findIndex((p) => p.equals(S.rtp[3].payload));
-    ok(i0 >= 0 && S.rtp.slice(3, 30).every((r, k) => r.payload.equals(T[(i0 + k) % T.length])) && FE.runs().length === 1 && FE.runs()[0].argv.join(' ') === SND.soundEncoderArgs(Number(/:(\d+)\?/.exec(FE.runs()[0].argv.at(-1))[1])).join(' '), 'THE ENCODER\'S packets reach the stand-in byte for byte (the fake replays the committed tone); it was run with the product\'s argv (soundEncoderArgs)', FE.runs());
+    ok(i0 >= 0 && gateOf(S.rtp.slice(3, 30).every((r, k) => r.payload.equals(T[(i0 + k) % T.length]))) && FE.runs().length === 1 && FE.runs()[0].argv.join(' ') === SND.soundEncoderArgs(Number(/:(\d+)\?/.exec(FE.runs()[0].argv.at(-1))[1])).join(' '), 'THE ENCODER\'S packets reach the stand-in byte for byte (the fake replays the committed tone); it was run with the product\'s argv (soundEncoderArgs)', FE.runs());
   }
   // the stream's own numbers ride its once-a-second push (as §3 below says): the count is WAITED for, bounded at four pushes, and red
   // by name past the bound — never one read of a moving number right after the stand-in's 75 packets (主开发 r999: the box read 39 / 39)
   const counted = await until(() => { const a = S.stats() && S.stats().audio; return !!a && a.packets > 40 && a.sent > 40; }, 4000);
   const st = S.stats() && S.stats().audio;
-  ok(counted && st && st.state === 'live' && st.road === 'loopback' && st.packets > 40 && st.sent > 40 && st.stray === 0 && st.kbps > 20 && st.endpoint === 'Speakers (Sound Blaster X3)', `the stream\'s numbers say it: live, the loopback road, its packets / kbps, nothing stray${counted ? '' : ' — its own count never passed 40 within 4 s of its pushes'}`, st);
+  ok(gateOf(counted) && gateOf(st) && st.state === 'live' && st.road === 'loopback' && st.packets > 40 && st.sent > 40 && st.stray === 0 && st.kbps > 20 && st.endpoint === 'Speakers (Sound Blaster X3)', `the stream\'s numbers say it: live, the loopback road, its packets / kbps, nothing stray${counted ? '' : ' — its own count never passed 40 within 4 s of its pushes'}`, st);
   const nOn = S.rtp.length, last1 = S.rtp[S.rtp.length - 1];
   const off = await dm.streamAudio(S.off.sid, { on: false });
-  ok(off && off.ok && off.on === false && off.was === true, 'the second press (stream-audio off) ⇒ off', off);
+  ok(gateOf(off) && gateOf(off.ok) && off.on === false && off.was === true, 'the second press (stream-audio off) ⇒ off', off);
   const closed = await until(() => FK.loopbackEnded(1), 4000);
   await sleep(600);
   const after = S.rtp.length - nOn;
-  ok(closed && after <= 5 && S.stats().audio.state === 'off', `off ⇒ the helper's stdin closed (its keep-alive and loopback with it), no more packets (${after} in flight)`);
+  ok(gateOf(closed) && after <= 5 && S.stats().audio.state === 'off', `off ⇒ the helper's stdin closed (its keep-alive and loopback with it), no more packets (${after} in flight)`);
   await sleep(1500);
   const lastOff = S.rtp[S.rtp.length - 1];
   const on2 = await dm.streamAudio(S.off.sid, { on: true });
   await until(() => S.rtp.length > S.rtp.indexOf(lastOff) + 10, 6000);
   const first2 = S.rtp[S.rtp.indexOf(lastOff) + 1];
   const wallGap = first2 ? first2.at - lastOff.at : 0, tsGap = first2 ? ((first2.ts - lastOff.ts) >>> 0) / 48 : 0;
-  ok(on2.ok && first2 && first2.seq === ((lastOff.seq + 1) & 0xffff) && first2.marker === true && Math.abs(tsGap - wallGap) <= 80, `THE CLOCK across off → on: the SAME sequence goes on (${lastOff.seq} → ${first2 && first2.seq}), the first packet is marked, its timestamp moved by the wall-clock gap (${tsGap.toFixed(0)} ms of samples for ${wallGap} ms)`, { lastOff: lastOff && { seq: lastOff.seq, ts: lastOff.ts }, first2: first2 && { seq: first2.seq, ts: first2.ts, marker: first2.marker } });
+  ok(gateOf(on2.ok) && gateOf(first2) && first2.seq === ((lastOff.seq + 1) & 0xffff) && first2.marker === true && Math.abs(tsGap - wallGap) <= 80, `THE CLOCK across off → on: the SAME sequence goes on (${lastOff.seq} → ${first2 && first2.seq}), the first packet is marked, its timestamp moved by the wall-clock gap (${tsGap.toFixed(0)} ms of samples for ${wallGap} ms)`, { lastOff: lastOff && { seq: lastOff.seq, ts: lastOff.ts }, first2: first2 && { seq: first2.seq, ts: first2.ts, marker: first2.marker } });
   void last1;
   const srA = S.rtcp.filter((x) => x.kind === 'audio' && x.type === 200).length, srV = S.rtcp.filter((x) => x.kind === 'video' && x.type === 200).length;
   ok(srA >= 2 && srV >= 2, `RTCP sender reports on BOTH tracks (audio ${srA}, video ${srV}) — werift sends them; the browser's lip-sync of one MediaStream rides them`);
@@ -194,17 +194,17 @@ const S = await soundStream(...viaDevice(dm));
   const n4 = S.rtp.length;
   const back = await until(() => { const a = S.stats() && S.stats().audio; return a && a.restarts === 1 && a.state === 'live' && S.rtp.length > n4 + 20; }, 5000); // the numbers ride the once-a-second push
   const st3 = S.stats().audio;
-  ok(fresh && back, 'the default speaker went away (the helper ended device_lost) ⇒ a FRESH capture on the new default — the sound goes on', { fresh, st3 });
+  ok(gateOf(fresh) && verdictOf(back), 'the default speaker went away (the helper ended device_lost) ⇒ a FRESH capture on the new default — the sound goes on', { fresh, st3 });
   const nAll = FK.loopbacks().length;
   await dm.streamStop(S.off.sid, { why: 'closed' });
-  ok(await until(() => FK.loopbackEnded(nAll), 4000), 'the stream\'s end ends the capture (the helper\'s stdin closed)');
+  ok(verdictOf(await until(() => FK.loopbackEnded(nAll), 4000)), 'the stream\'s end ends the capture (the helper\'s stdin closed)');
 }
 
 console.log('§3 refusals by name');
 {
   const N = await soundStream(...viaDevice(dm), { audio: false });
   const r = await dm.streamAudio(N.off.sid, { on: true });
-  ok(N.off.ok && !('audio' in N.off) && !/m=audio/.test(N.off.offer.sdp) && r.ok === false && r.code === 'no_audio', 'a stream NOT asked `audio` (an older page) has no m=audio; its 「声音」 is refused no_audio — nothing captured', r);
+  ok(gateOf(N.off.ok) && !('audio' in N.off) && !/m=audio/.test(N.off.offer.sdp) && r.ok === false && r.code === 'no_audio', 'a stream NOT asked `audio` (an older page) has no m=audio; its 「声音」 is refused no_audio — nothing captured', r);
   await dm.streamStop(N.off.sid);
   const nf = await dm.streamAudio('s-gone', { on: true });
   ok(nf.ok === false && nf.code === 'not_found', 'an ended session ⇒ not_found', nf);
@@ -212,14 +212,14 @@ console.log('§3 refusals by name');
   const B = deviceOn(homeBare, BUNDLE); await B.ready;
   const bs = await B.dm.streamOffer({ sourceKind: 'fake', sourceId: FIXTURE, audio: true });
   const br = await B.dm.streamAudio(bs.sid, { on: true });
-  ok(bs.ok && !('audio' in bs) && !/m=audio/.test(bs.offer.sdp) && br.code === 'no_audio', 'a machine that cannot send its sound (this Linux box, no helper) offers no sound track when asked — said no_audio, never a dead toggle', { audio: bs.audio, code: br.code });
+  ok(gateOf(bs.ok) && !('audio' in bs) && !/m=audio/.test(bs.offer.sdp) && br.code === 'no_audio', 'a machine that cannot send its sound (this Linux box, no helper) offers no sound track when asked — said no_audio, never a dead toggle', { audio: bs.audio, code: br.code });
   await B.dm.streamStop(bs.sid); B.dm.stop(); endDaemonsOf(rootOf(homeBare));
   // in-process: the module's own refusals
   const mk = (o) => DSOUND.createSound({ platform: 'win32', spawn, env: process.env, helper: async () => ({ ok: true, exe: FK.exe }), ffmpegPath: async () => FF, ...o });
   const r1 = await mk({ ffmpegPath: async () => null }).capture('a', () => { }).start();
   const r2 = await mk({ helper: async () => ({ ok: false, code: 'helper_missing', error: 'csc said no' }) }).capture('b', () => { }).start();
   const r3 = await mk({ platform: 'linux' }).capture('c', () => { }).start();
-  ok(r1.code === 'no_ffmpeg' && r2.code === 'helper_missing' && /csc said no/.test(r2.error) && r3.code === 'sound_unsupported' && mk({ platform: 'darwin' }).can() === false && mk({ platform: 'linux', fake: true }).can() === true, 'in-process: no ffmpeg ⇒ no_ffmpeg; the helper not built ⇒ helper_missing (its words); not Windows ⇒ sound_unsupported (a Mac\'s sound is its screen source\'s)', { r1, r2, r3 });
+  ok(r1.code === 'no_ffmpeg' && r2.code === 'helper_missing' && gateOf(/csc said no/.test(r2.error)) && r3.code === 'sound_unsupported' && mk({ platform: 'darwin' }).can() === false && mk({ platform: 'linux', fake: true }).can() === true, 'in-process: no ffmpeg ⇒ no_ffmpeg; the helper not built ⇒ helper_missing (its words); not Windows ⇒ sound_unsupported (a Mac\'s sound is its screen source\'s)', { r1, r2, r3 });
   // THE SENDER IS PINNED: a datagram from another socket on this box never reaches the track
   let sock = null; const wrapped = { createSocket: (t) => { sock = dgram.createSocket(t); return sock; } };
   const got = [];
@@ -231,7 +231,7 @@ console.log('§3 refusals by name');
   await new Promise((res) => stray.send(fake, sock.address().port, '127.0.0.1', res));
   await until(() => cap.stats().stray >= 1, 3000);   // r999's law: the stray's count is waited for, bounded (it was a fixed 300 ms sleep)
   const st = cap.stats(); cap.stop('test'); stray.close();
-  ok(rs.ok && st.stray === 1 && !got.some((p) => p.payload.length === 4 && p.payload[0] === 0xfc && p.payload[1] === 1), 'THE SENDER IS PINNED: ffmpeg\'s first datagram names its port + SSRC; a stray datagram from another socket of this box is dropped and counted, never sent', { stray: st.stray });
+  ok(gateOf(rs.ok) && st.stray === 1 && !got.some((p) => p.payload.length === 4 && p.payload[0] === 0xfc && p.payload[1] === 1), 'THE SENDER IS PINNED: ffmpeg\'s first datagram names its port + SSRC; a stray datagram from another socket of this box is dropped and counted, never sent', { stray: st.stray });
 }
 
 console.log('§4 THE MAC ROAD (in-process, the fake screen helper): capturesAudio on the session\'s own SCStream');
@@ -250,19 +250,19 @@ console.log('§4 THE MAC ROAD (in-process, the fake screen helper): capturesAudi
   const link = { control: (m) => link.on && link.on(m) };
   const viaHost = [(p, onPush) => { link.on = onPush; return host.offer({ ...p, sid: 'mac1', sourceKind: 'screen', sourceId: null }, link).then((r) => { host.replied('mac1'); return r; }); }, (off, sdp) => host.answer({ sid: off.sid, answer: { sdp } })];
   const M = await soundStream(...viaHost);
-  ok(M.off.ok && M.off.audio === true && /a=sendonly/.test(sectionOf(M.off.offer.sdp, 'audio')) && msidOf(sectionOf(M.off.offer.sdp, 'audio')) === SND.SOUND.streamId && M.connected && await until(() => M.vrtp.length > 5, 6000), 'a Mac\'s screen source carries `audio` ⇒ its offer has the sound track (the sound factory says it cannot — the SOURCE\'s own road), the picture plays');
+  ok(gateOf(M.off.ok) && M.off.audio === true && gateOf(/a=sendonly/.test(sectionOf(M.off.offer.sdp, 'audio'))) && msidOf(sectionOf(M.off.offer.sdp, 'audio')) === SND.SOUND.streamId && gateOf(M.connected) && verdictOf(await until(() => M.vrtp.length > 5, 6000)), 'a Mac\'s screen source carries `audio` ⇒ its offer has the sound track (the sound factory says it cannot — the SOURCE\'s own road), the picture plays');
   await sleep(600);
   const ctl = () => helperLog(logM).filter((l) => l.ctl).map((l) => l.ctl);
   ok(M.rtp.length === 0 && !ctl().includes('audio on'), 'OFF: the helper was never told `audio on`; no packet');
   const on = await host.audio({ sid: 'mac1', on: true });
-  ok(on.ok && ctl().includes('audio on') && await until(() => M.rtp.length >= 20, 4000), 'the press ⇒ `audio on` on THIS session\'s helper (the same SCStream: no second capture); its packets reach the stand-in', { on, ctl: ctl() });
+  ok(gateOf(on.ok) && gateOf(ctl().includes('audio on')) && verdictOf(await until(() => M.rtp.length >= 20, 4000)), 'the press ⇒ `audio on` on THIS session\'s helper (the same SCStream: no second capture); its packets reach the stand-in', { on, ctl: ctl() });
   const firstIdx = PK.findIndex((p) => p.equals(M.rtp[0].payload));
-  ok(firstIdx >= 0 && M.rtp.slice(0, 15).every((r, k) => r.payload.equals(PK[(firstIdx + k) % PK.length])), 'the helper\'s Opus packets arrive byte for byte, in order (FLV audio tags → SP.flvReader → the track)');
+  ok(firstIdx >= 0 && verdictOf(M.rtp.slice(0, 15).every((r, k) => r.payload.equals(PK[(firstIdx + k) % PK.length]))), 'the helper\'s Opus packets arrive byte for byte, in order (FLV audio tags → SP.flvReader → the track)');
   const st = host.stats({ sid: 'mac1' }).stats.audio;
   ok(st.state === 'live' && st.road === 'sck' && st.packets >= 20 && st.relaunched === false, 'the numbers: live on the SCK road', st);
   const off = await host.audio({ sid: 'mac1', on: false });
   const n0 = M.rtp.length; await sleep(500);
-  ok(off.ok && ctl().includes('audio off') && M.rtp.length - n0 <= 3, '`audio off` ⇒ the helper stops encoding, no more packets', { off, more: M.rtp.length - n0 });
+  ok(gateOf(off.ok) && gateOf(ctl().includes('audio off')) && M.rtp.length - n0 <= 3, '`audio off` ⇒ the helper stops encoding, no more packets', { off, more: M.rtp.length - n0 });
   // THE WAY BACK: the helper refuses the LIVE switch (macOS' updateConfiguration said no) ⇒ the same capture again with --audio
   FM.set({ audioRefuse: true });
   host.stop('mac1', 'test');
@@ -273,8 +273,8 @@ console.log('§4 THE MAC ROAD (in-process, the fake screen helper): capturesAudi
   const on2 = await host.audio({ sid: 'mac1', on: true });
   const argvs = helperLog(logM).filter((l) => l.argv && l.argv.includes('capture')).slice(caps0).map((l) => l.argv);
   const vBefore = M2.vrtp.length;
-  ok(on2.ok && argvs.length === 2 && !argvs[0].includes('--audio') && argvs[1].includes('--audio') && await until(() => M2.rtp.length >= 15, 4000), 'THE WAY BACK: a live switch the helper refused ⇒ the SAME session\'s capture started again with --audio — the sound arrives', { on2, argvs });
-  ok(await until(() => M2.vrtp.length > vBefore + 20, 4000) && host.stats({ sid: 'mac1' }).stats.audio.relaunched === true, 'and the picture plays on (its new helper\'s pictures reach the stand-in); the numbers say relaunched');
+  ok(gateOf(on2.ok) && argvs.length === 2 && !argvs[0].includes('--audio') && gateOf(argvs[1].includes('--audio')) && verdictOf(await until(() => M2.rtp.length >= 15, 4000)), 'THE WAY BACK: a live switch the helper refused ⇒ the SAME session\'s capture started again with --audio — the sound arrives', { on2, argvs });
+  ok(gateOf(await until(() => M2.vrtp.length > vBefore + 20, 4000)) && host.stats({ sid: 'mac1' }).stats.audio.relaunched === true, 'and the picture plays on (its new helper\'s pictures reach the stand-in); the numbers say relaunched');
   host.stop('mac1', 'test');
   // ASKED BEFORE THE PICTURE STARTED (a remembered 「声音」 turns on at the answer, before ICE connects): told to the helper when it starts
   FM.set({ audioRefuse: false });
@@ -282,7 +282,7 @@ console.log('§4 THE MAC ROAD (in-process, the fake screen helper): capturesAudi
   let early = null;
   const M3 = await soundStream((p, onPush) => viaHost[0](p, onPush).then((r) => { early = host.audio({ sid: 'mac1', on: true }); return r; }), viaHost[1]);
   const e3 = await early;
-  ok(e3 && e3.ok === true && await until(() => M3.rtp.length >= 15, 6000), 'a sound asked BEFORE the picture started (the page\'s remembered 「声音」 at its answer) waits for the helper, then plays — never a refusal', e3);
+  ok(gateOf(e3) && e3.ok === true && verdictOf(await until(() => M3.rtp.length >= 15, 6000)), 'a sound asked BEFORE the picture started (the page\'s remembered 「声音」 at its answer) waits for the helper, then plays — never a refusal', e3);
   host.stop('mac1', 'test');
 }
 
@@ -297,12 +297,12 @@ console.log('§5 THE CAPABILITY GATE');
   const send0 = O.dm._request.bind(O.dm);
   O.dm._request = (msg) => { sent.push(msg); return send0(msg); };
   const e1 = await O.dm.streamAudio('x', { on: true }).then(() => null, (x) => x);
-  ok(e1 && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) — NO request went to it');
+  ok(gateOf(e1) && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) — NO request went to it');
   const s = await O.dm.streamOffer({ sourceKind: 'fake', sourceId: FIXTURE, audio: true });
-  ok(s.ok && sent.length === 1 && sent[0].op === 'stream-offer' && !('audio' in sent[0]) && !/m=audio/.test(s.offer.sdp), 'its stream is offered WITHOUT asking `audio` (the hub never sends it to an older agent) — no m=audio, the picture as before');
+  ok(gateOf(s.ok) && sent.length === 1 && sent[0].op === 'stream-offer' && !('audio' in sent[0]) && !/m=audio/.test(s.offer.sdp), 'its stream is offered WITHOUT asking `audio` (the hub never sends it to an older agent) — no m=audio, the picture as before');
   await O.dm.streamStop(s.sid);
   const raw = await send0({ op: 'stream-audio', sid: s.sid, on: true, timeoutMs: 1500 }).then((r) => ({ answered: r }), (x) => ({ error: String(x && x.message) }));
-  ok(!raw.answered && /time(?:d)? ?out/i.test(raw.error || ''), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);
+  ok(!raw.answered && verdictOf(/time(?:d)? ?out/i.test(raw.error || '')), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);
   O.dm.stop(); endDaemonsOf(rootOf(homeOld));
 }
 
@@ -312,7 +312,7 @@ console.log('§6 THE HUB (src/server/desktop-webrtc.js over this daemon)');
   const wr = DW.create({ access, log: { log() { }, warn() { } }, relay: false, udpLeg: false, sweepMs: 60000 });
   closers.push(() => wr.shutdown());
   const r = await wr.start('win-a', { audio: true });
-  ok(r.take === true && r.audio === true && /m=audio/.test(r.offer.sdp), 'start({audio}) ⇒ the agent offered the sound\'s track (the answer says audio: true)', { take: r.take, audio: r.audio });
+  ok(r.take === true && r.audio === true && verdictOf(/m=audio/.test(r.offer.sdp)), 'start({audio}) ⇒ the agent offered the sound\'s track (the answer says audio: true)', { take: r.take, audio: r.audio });
   const pc = standIn(), rtp = [];
   pc.onTrack.subscribe((t) => { if (t.kind === 'audio') t.onReceiveRtp.subscribe(() => rtp.push(1)); });
   await pc.setRemoteDescription(r.offer);
@@ -323,13 +323,13 @@ console.log('§6 THE HUB (src/server/desktop-webrtc.js over this daemon)');
   await until(() => pc.connectionState === 'connected', 10000);
   const nRuns = FK.loopbacks().length;
   const on = await wr.sound(r.key, true);
-  ok(on.ok === true && on.on === true && await until(() => rtp.length > 20, 6000) && FK.loopbacks().length === nRuns + 1, 'sound(key, true) ⇒ the agent\'s stream-audio: one capture, the packets flow', on);
+  ok(on.ok === true && on.on === true && gateOf(await until(() => rtp.length > 20, 6000)) && FK.loopbacks().length === nRuns + 1, 'sound(key, true) ⇒ the agent\'s stream-audio: one capture, the packets flow', on);
   const off = await wr.sound(r.key, false);
-  ok(off.ok === true && off.on === false && await until(() => FK.loopbackEnded(nRuns + 1), 4000), 'sound(key, false) ⇒ it ends on the machine');
+  ok(off.ok === true && off.on === false && verdictOf(await until(() => FK.loopbackEnded(nRuns + 1), 4000)), 'sound(key, false) ⇒ it ends on the machine');
   await wr.stop(r.key, 'closed');
   const gone = await wr.sound(r.key, true).then(() => null, (e) => e);
-  ok(gone && gone.code === 'not_found', 'a stopped stream ⇒ not_found by name');
+  ok(gateOf(gone) && gone.code === 'not_found', 'a stopped stream ⇒ not_found by name');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

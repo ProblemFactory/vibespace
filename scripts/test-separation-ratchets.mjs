@@ -23,7 +23,7 @@ import * as R from './separation-ratchets.mjs';
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const QUIET = process.argv.includes('--quiet');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 1500) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 1500) : '')); } };
 const DAY0 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/separation-day0.json'), 'utf8'));
 
 const hub = R.hubFiles(REPO);
@@ -61,14 +61,14 @@ for (const [id, rel, add, form] of PLANTS) {
   const c = R.COUNTERS.find((x) => x.id === id);
   const { h, line } = plantIn(rel, add), got = R.count(c, h);
   const at = (got.files.get(rel) || []).map((s) => s.line);
-  ok(got.total === counts[id].total + 1 && at.includes(line), `② ${id} — ${form}: ${counts[id].total} → ${got.total}, the new site at ${rel}:${line}`, { total: got.total, lines: at.slice(-3) });
+  ok(got.total === counts[id].total + 1 && verdictOf(at.includes(line)), `② ${id} — ${form}: ${counts[id].total} → ${got.total}, the new site at ${rel}:${line}`, { total: got.total, lines: at.slice(-3) });
 }
 { // a message type, planted at the switch's top level with a brace inside a string inside it
   const c = R.COUNTERS.find((x) => x.id === 'message-cases'), h = copy(), t = h.get('src/ws-handler.js');
   const at = t.indexOf('switch (data.type) {') + 'switch (data.type) {'.length, line = t.slice(0, at).split('\n').length + 1;
   h.set('src/ws-handler.js', t.slice(0, at) + "\n        case 'zz-planted': { const zzT = '}}{'; break; }" + t.slice(at));
   const got = R.count(c, h);
-  ok(got.total === counts['message-cases'].total + 1 && got.files.get('src/ws-handler.js').some((s) => s.line === line), `② message-cases — a type at the switch's top level (a brace in a string inside it): ${counts['message-cases'].total} → ${got.total}, at src/ws-handler.js:${line}`, got.total);
+  ok(got.total === counts['message-cases'].total + 1 && verdictOf(got.files.get('src/ws-handler.js').some((s) => s.line === line)), `② message-cases — a type at the switch's top level (a brace in a string inside it): ${counts['message-cases'].total} → ${got.total}, at src/ws-handler.js:${line}`, got.total);
 }
 console.log('\n② ZERO-MOVE controls — every skip the counters claim');
 const ZERO = [
@@ -91,19 +91,19 @@ console.log('\n③ THE REPORT names each new site by file and line');
 const self = R.snapshotOf(counts);
 {
   const rSelf = R.report(counts, self);
-  ok(rSelf.counters.length === 5 && rSelf.counters.every((c) => c.grew.length === 0 && c.now === c.day0), '③ this tree against a snapshot of itself: every counter +0, no file named');
+  ok(rSelf.counters.length === 5 && verdictOf(rSelf.counters.every((c) => c.grew.length === 0 && c.now === c.day0)), '③ this tree against a snapshot of itself: every counter +0, no file named');
   const { h, line } = plantIn('src/server/apps-engine.js', "function zzPlanted(bcast) { bcast({ type: 'zz' }); return activeSessions.size; }");
   const cP = Object.fromEntries(R.COUNTERS.map((c) => [c.id, R.count(c, h)]));
   const rP = R.report(cP, self), text = R.printReport(rP, 'a snapshot of this tree');
   const g = (id) => (rP.counters.find((c) => c.id === id).grew[0] || {});
-  ok(g('session-map').file === 'src/server/apps-engine.js' && g('session-map').sites.length === 1 && g('session-map').sites[0].line === line && g('broadcast-to-all').sites[0].line === line && text.includes(`src/server/apps-engine.js:${line}  function zzPlanted(bcast)`) && /session-map — .*: \d+ \(day 0 \d+, \+1\)/.test(text),
+  ok(g('session-map').file === 'src/server/apps-engine.js' && g('session-map').sites.length === 1 && g('session-map').sites[0].line === line && g('broadcast-to-all').sites[0].line === line && gateOf(text.includes(`src/server/apps-engine.js:${line}  function zzPlanted(bcast)`)) && verdictOf(/session-map — .*: \d+ \(day 0 \d+, \+1\)/.test(text)),
     `③ a site planted in an in-memory copy appears in the report by FILE AND LINE (src/server/apps-engine.js:${line}, in two counters) and its counter says +1`, text.split('\n').filter((l) => /zzPlanted|\+1\)/.test(l)));
   const h2 = copy(); h2.set('src/server/apps-engine.js', ''); const c2 = Object.fromEntries(R.COUNTERS.map((c) => [c.id, R.count(c, h2)]));
   const r2 = R.report(c2, self);
-  ok(r2.counters.every((c) => c.grew.length === 0) && r2.counters.find((c) => c.id === 'session-map').shrank >= 1, '③ a file that only SHRANK names nothing (counted as «fewer»)');
+  ok(gateOf(r2.counters.every((c) => c.grew.length === 0)) && r2.counters.find((c) => c.id === 'session-map').shrank >= 1, '③ a file that only SHRANK names nothing (counted as «fewer»)');
   const moved = (() => { const h3 = copy(); const t = h3.get('server.js'); h3.set('server.js', '\n\n\n' + t); return h3; })();
   const r3 = R.report(Object.fromEntries(R.COUNTERS.map((c) => [c.id, R.count(c, moved)])), self);
-  ok(r3.counters.every((c) => c.grew.length === 0), '③ a file whose lines only MOVED (three lines added above) names nothing — a site is its line\'s text, not its number');
+  ok(verdictOf(r3.counters.every((c) => c.grew.length === 0)), '③ a file whose lines only MOVED (three lines added above) names nothing — a site is its line\'s text, not its number');
 }
 
 { // THE MUST — a file that had A and B at day 0 and now has A and A (B deleted, a second A added): the new copy is NAMED
@@ -122,14 +122,14 @@ const self = R.snapshotOf(counts);
   // a hub file the parser fails on is NAMED — never a silent zero
   const h = copy(); h.set('src/server/zz-broken.js', 'const = ;\nsession.x = 1;\n');
   const cB = Object.fromEntries(R.COUNTERS.map((c) => [c.id, R.count(c, h)])), rB = R.report(cB, self), tB = R.printReport(rB, 'a snapshot of this tree');
-  ok(rB.unread.includes('src/server/zz-broken.js') && /NOT READ by the parser — counted as nothing, named here: .*src\/server\/zz-broken\.js/.test(tB), '③ a hub file the parser fails on is NAMED in the unread list and by the report — never a silent zero', rB.unread);
+  ok(gateOf(rB.unread.includes('src/server/zz-broken.js')) && verdictOf(/NOT READ by the parser — counted as nothing, named here: .*src\/server\/zz-broken\.js/.test(tB)), '③ a hub file the parser fails on is NAMED in the unread list and by the report — never a silent zero', rB.unread);
   R.unread.length = 0;   // the planted broken file only
-  ok(/an EDITED line reads as a new site; removed sites are not listed/.test(tB), '③ the report\'s head says it: an edited line reads as a new site; removed sites are not listed');
+  ok(verdictOf(/an EDITED line reads as a new site; removed sites are not listed/.test(tB)), '③ the report\'s head says it: an edited line reads as a new site; removed sites are not listed');
 }
 
 console.log('\n④ the day-0 snapshot is whole');
-ok(DAY0.release === '2.369.406 (eacbf64df)' && R.COUNTERS.every((c) => { const d = DAY0.counters[c.id]; return d && d.total === Object.values(d.files).reduce((a, s) => a + s.length, 0); }) && Object.keys(DAY0.counters).length === 5,
+ok(DAY0.release === '2.369.406 (eacbf64df)' && gateOf(R.COUNTERS.every((c) => { const d = DAY0.counters[c.id]; return d && d.total === Object.values(d.files).reduce((a, s) => a + s.length, 0); })) && Object.keys(DAY0.counters).length === 5,
   `④ scripts/separation-day0.json: the release named; per counter its total = the sum of its per-file fingerprints (${R.COUNTERS.map((c) => DAY0.counters[c.id].total).join(' / ')})`);
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

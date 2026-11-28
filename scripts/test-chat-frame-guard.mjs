@@ -32,7 +32,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // THE WAITS ARE ON EFFECTS (lane fast-tier-ratchet): each leg waits for the thing it then asserts (the sidecar written, the line
 // forwarded, the failure event, the debounced persist) — ≤ 5 s, polled every 25 ms — never a fixed sleep that assumed it had
@@ -50,9 +50,9 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
   ok(JSON.parse(ad.formatChatInput(good, 'm1', { origin: 'auto-resume' }).stdinPayload).webui_origin === 'auto-resume' && JSON.parse(ad.formatChatInput('typed', 'm4').stdinPayload).webui_msg_id === 'm4', 'a frame VibeSpace typed names its origin; a typed text frame names its msgId');
   const shred = '{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"data":"' + 'A'.repeat(600 * 1024) + '{"type":"user","message":{}}';
   let threw = null; try { ad.formatChatInput(shred, 'm2'); } catch (e) { threw = e.message; }
-  ok(/corrupted in transit/.test(threw || ''), 'shredded 600KB frame THROWS instead of poisoning', threw);
+  ok(verdictOf(/corrupted in transit/.test(threw || '')), 'shredded 600KB frame THROWS instead of poisoning', threw);
   const small = '{"broken json but small';
-  ok(ad.formatChatInput(small, 'm3').stdinPayload.includes('"text"'), 'small non-JSON text still wraps normally');
+  ok(verdictOf(ad.formatChatInput(small, 'm3').stdinPayload.includes('"text"')), 'small non-JSON text still wraps normally');
 }
 
 // ── 2. wrapper frame-file bypass (real chat-wrapper against a cat child) ──
@@ -121,26 +121,26 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
   w.stdin.write(torn + '\n' + tail + '\n');
   await until(() => (rcptText().match(/"_stdin_nack"/g) || []).length >= 2 && (wout.match(/"subtype":"informational"/g) || []).length >= 2);
   const nacks = rcptText().split('\n').filter((l) => /"_stdin_nack"/.test(l)).map((l) => JSON.parse(l));
-  ok(capLines().length === n0 && nacks.length === 2 && nacks.every((x) => x.reason === 'torn' && x.bytes > 0) && (wout.match(/"_stdin_nack"/g) || []).length === 2,
+  ok(capLines().length === n0 && nacks.length === 2 && gateOf(nacks.every((x) => x.reason === 'torn' && x.bytes > 0)) && (wout.match(/"_stdin_nack"/g) || []).length === 2,
     `a TORN line — the first half (starts with «{») AND the tail of the other frame (mid-JSON, ends with «}») — is refused with _stdin_nack (stdout + its receipts file), NEVER sent to Claude as a user message (${capLines().length - n0} new child line(s), ${nacks.length} nack(s))`);
   const warns = wout.split('\n').filter((l) => /"subtype":"informational"/.test(l)).map((l) => JSON.parse(l.slice(l.indexOf('{'))));
-  ok(warns.length === 2 && warns.every((x) => x.type === 'system' && x.level === 'warning' && /did not reach Claude/.test(x.content) && /send it again/.test(x.content)) && !/half a fr/.test(warns.map((x) => x.content).join('')),
+  ok(warns.length === 2 && gateOf(warns.every((x) => x.type === 'system' && x.level === 'warning' && /did not reach Claude/.test(x.content) && /send it again/.test(x.content))) && !/half a fr/.test(warns.map((x) => x.content).join('')),
     'both senders are TOLD: each torn line leaves a warning the chat renders (a system/informational record — the normalizer\'s own notice road), never the payload');
   w.stdin.write('plain words typed into a raw dtach attach\n');
   await until(() => capLines().length >= n0 + 1);
-  ok(capLines().length === n0 + 1 && /"text":"plain words typed into a raw dtach attach"/.test(capLines()[n0]), 'a line with NO JSON in it is still taken as typed text (the raw-attach door is unchanged)');
+  ok(capLines().length === n0 + 1 && verdictOf(/"text":"plain words typed into a raw dtach attach"/.test(capLines()[n0])), 'a line with NO JSON in it is still taken as typed text (the raw-attach door is unchanged)');
   const rf = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'from the person\'s CLI' }] }, webui_msg_id: 'vs-cli-77', webui_receipt: true };
   w.stdin.write(JSON.stringify(rf) + '\n');
   // the wait names everything the leg asserts — the wrapper writes the receipts file BEFORE the stdout ack, so a starved test
   // that waited on the file alone asserted the ack before its pipe was read (the .363 CI mirror's red, one core: ~1 in 10)
   await until(() => capLines().length >= n0 + 2 && /"msg_id":"vs-cli-77"/.test(rcptText()) && /"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-77"/.test(wout));
   const fwd = capLines()[n0 + 1] || '';
-  ok(/"msg_id":"vs-cli-77"/.test(rcptText()) && /"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-77"/.test(wout) && /from the person's CLI/.test(fwd) && !/webui_receipt/.test(fwd) && /"webui_msg_id":"vs-cli-77"/.test(fwd),
+  ok(gateOf(/"msg_id":"vs-cli-77"/.test(rcptText())) && gateOf(/"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-77"/.test(wout)) && gateOf(/from the person's CLI/.test(fwd)) && !/webui_receipt/.test(fwd) && verdictOf(/"webui_msg_id":"vs-cli-77"/.test(fwd)),
     `a RECEIPT: the ack names the frame (msg_id) on stdout AND in the receipts file; Claude gets the frame without the receipt key (${fwd.slice(0, 120)})`);
   w.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'from the web' }] }, webui_msg_id: 'web-8' }) + '\n');
   await until(() => /"msg_id":"web-8"/.test(wout));
   await sleep(100);   // a persist that would carry it (the receipt road's is 50 ms)
-  ok(/"type":"_stdin_ack"[^\n]*"msg_id":"web-8"/.test(wout) && !rcptText().split('\n').some((l) => /web-8/.test(l)), 'a frame that asks for no receipt is acked by id on stdout only (no receipts-file line either) — the replay road — gains no ack record)');
+  ok(gateOf(/"type":"_stdin_ack"[^\n]*"msg_id":"web-8"/.test(wout)) && !rcptText().split('\n').some((l) => /web-8/.test(l)), 'a frame that asks for no receipt is acked by id on stdout only (no receipts-file line either) — the replay road — gains no ack record)');
   try { ok(JSON.parse(fs.readFileSync(meta, 'utf8')).caps.receipts === true, 'the wrapper advertises caps.receipts (the CLI reads it before it asks for one: an older wrapper is said, never waited on)'); } catch (e) { ok(false, 'the wrapper advertises caps.receipts', e.message); }
   // the wrapper ends (SIGTERM: its handler flushes the pending buffer write) — what it leaves is what a restart replays
   const ended = new Promise((r) => w.once('exit', r));
@@ -232,13 +232,13 @@ setInterval(() => {}, 1e3);
   // ordering race guarded in the wrapper); live adoption is pinned by test-codex-p2-wrapper
   ok(readMeta()?.activeTurnId === null && readMeta()?.streaming === false, `turn adopted then released on turn/completed (no stale active turn): ${readMeta()?.activeTurnId}`);
   const bufText = fs.existsSync(buf) ? fs.readFileSync(buf, 'utf8') : '';
-  ok(bufText.includes('"webui_msg_id":"m-frame-1"') && bufText.includes('"input_image"'), 'the user message is recorded in the wrapper buffer with its msgId (history survives a restart)');
+  ok(gateOf(bufText.includes('"webui_msg_id":"m-frame-1"')) && verdictOf(bufText.includes('"input_image"')), 'the user message is recorded in the wrapper buffer with its msgId (history survives a restart)');
   ok(failures().length === 0, 'no failure event for the good frame');
   // stdin ACK (design-harness-plugins §1 P2 "stdin ack", pulled in because it
   // now guards frame delivery): the server's broken-pty detector re-sends the
   // line after 5s without an ack — a re-sent pointer finds its file already
   // consumed. The wrapper must ack on stdout the moment a line arrives.
-  ok(/"type":"_stdin_ack"/.test(out), 'codex wrapper emits _stdin_ack on stdout for a received stdin line (no 5s re-send of a consumed pointer)');
+  ok(verdictOf(/"type":"_stdin_ack"/.test(out)), 'codex wrapper emits _stdin_ack on stdout for a received stdin line (no 5s re-send of a consumed pointer)');
   ok(!bufText.includes('_stdin_ack'), 'the ack is stdout-only, never recorded into the history buffer');
 
   // shredded (concatenated) frame file → dropped, LOUD, unlinked, no turn
@@ -248,21 +248,21 @@ setInterval(() => {}, 1e3);
   await until(() => failures().length >= 1 && !fs.existsSync(bad));
   ok(turns().length === 1, 'shredded codex frame file DROPPED (no new turn/start)');
   ok(!fs.existsSync(bad), 'shredded codex frame file still unlinked');
-  ok(failures().length === 1 && /frame file/.test(failures()[0]) && /send it again/.test(failures()[0]), `shredded frame → task_failed event the user can see (${JSON.stringify(failures()[0])})`);
+  ok(failures().length === 1 && gateOf(/frame file/.test(failures()[0])) && verdictOf(/send it again/.test(failures()[0])), `shredded frame → task_failed event the user can see (${JSON.stringify(failures()[0])})`);
   // missing file → LOUD
   w.stdin.write(JSON.stringify({ type: '_frame_file', path: path.join(dir, 'never-written.json') }) + '\n');
   await until(() => failures().length >= 2);
-  ok(failures().length === 2 && /read failed/.test(failures()[1]), 'missing frame file → task_failed with the reason');
+  ok(failures().length === 2 && verdictOf(/read failed/.test(failures()[1])), 'missing frame file → task_failed with the reason');
   // nested pointer inside a frame file → refused (no recursion / arbitrary reads)
   const nest = path.join(dir, 'nest.json');
   fs.writeFileSync(nest, JSON.stringify({ type: '_frame_file', path: '/etc/hostname' }));
   w.stdin.write(JSON.stringify({ type: '_frame_file', path: nest }) + '\n');
   await until(() => failures().length >= 3);
-  ok(failures().length === 3 && /nested/.test(failures()[2]) && turns().length === 1, 'nested _frame_file pointer refused (loud, no turn)');
+  ok(failures().length === 3 && gateOf(/nested/.test(failures()[2])) && turns().length === 1, 'nested _frame_file pointer refused (loud, no turn)');
   // unparseable RAW stdin line (the shredded-in-transit shape) → LOUD, wrapper alive
   w.stdin.write('{"type":"chat-input","text":"' + 'B'.repeat(300) + '\n');
   await until(() => failures().length >= 4);
-  ok(failures().length === 4 && /corrupted in transit/.test(failures()[3]) && /send it again/.test(failures()[3]), `unparseable stdin line → task_failed (was a silent continue): ${JSON.stringify(failures()[3].slice(0, 80))}`);
+  ok(failures().length === 4 && gateOf(/corrupted in transit/.test(failures()[3])) && verdictOf(/send it again/.test(failures()[3])), `unparseable stdin line → task_failed (was a silent continue): ${JSON.stringify(failures()[3].slice(0, 80))}`);
   ok(!/BBBB/.test(failures()[3]) && !/BBBB/.test(out), 'the rejection quotes at most a short prefix (never the payload)');
   ok(w.exitCode === null, 'wrapper survives every rejection');
   // …and a normal small line still works afterwards (the stream is not poisoned)
@@ -279,7 +279,7 @@ setInterval(() => {}, 1e3);
   await until(() => fs.existsSync(cxRcpt) && /"msg_id":"vs-cli-cx"/.test(fs.readFileSync(cxRcpt, 'utf8')) && /"_stdin_nack"/.test(fs.readFileSync(cxRcpt, 'utf8')), 3000);
   const cxR = fs.existsSync(cxRcpt) ? fs.readFileSync(cxRcpt, 'utf8') : '';
   const cxBuf = fs.existsSync(buf) ? fs.readFileSync(buf, 'utf8') : '';
-  ok(/"type":"_stdin_nack"[^\n]*"reason":"torn"/.test(cxR) && /"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-cx"/.test(cxR) && !/_stdin_ack|_stdin_nack/.test(cxBuf) && /"msg_id":"m-2"/.test(out) && t3.length === 3 && !JSON.stringify(t3[2]).includes('webui_receipt'),
+  ok(gateOf(/"type":"_stdin_nack"[^\n]*"reason":"torn"/.test(cxR)) && gateOf(/"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-cx"/.test(cxR)) && !/_stdin_ack|_stdin_nack/.test(cxBuf) && gateOf(/"msg_id":"m-2"/.test(out)) && t3.length === 3 && !JSON.stringify(t3[2]).includes('webui_receipt'),
     'codex: the torn raw line left a _stdin_nack in the receipts file beside its task_failed; an ack names its frame (stdout), a receipt lands in the receipts file — the replay buffer holds neither; the app-server never sees the receipt key');
   w.kill('SIGKILL');
   fs.rmSync(dir, { recursive: true, force: true });
@@ -303,10 +303,10 @@ setInterval(() => {}, 1e3);
   process.env.HOME = HOME0;
   ok(r.replaced === 1 && r.lines === 3, `rescue stubbed exactly the monster (${JSON.stringify({ replaced: r.replaced, lines: r.lines })})`);
   ok(r.sizeBefore > 3 * 1024 * 1024 && r.sizeAfter < 4096, 'file shrank to sane size');
-  ok(fs.existsSync(r.backup) && fs.statSync(r.backup).size === r.sizeBefore, 'byte-preserved backup exists');
+  ok(gateOf(fs.existsSync(r.backup)) && fs.statSync(r.backup).size === r.sizeBefore, 'byte-preserved backup exists');
   const lines = fs.readFileSync(fp, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   ok(lines.length === 3 && lines[1].uuid === 'u2' && lines[1].parentUuid === 'u1', 'chain + order + count untouched');
-  ok(/rescued/.test(lines[1].message.content[0].text), 'stub carries the rescue note');
+  ok(verdictOf(/rescued/.test(lines[1].message.content[0].text)), 'stub carries the rescue note');
   ok(lines[2].parentUuid === 'u2', 'child still parents onto the stubbed uuid');
   // idempotent second pass
   process.env.HOME = home;
@@ -345,21 +345,21 @@ setInterval(() => {}, 1e3);
   // (design-user-inbox-reply D1.1: ONE sender shared with the For-you reply
   // route) — the gate lives there now, verbatim; the ws case is a thin caller.
   const ws = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');
-  ok(/sendUserInput\(data\.sessionId, data\.text/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')), 'the ws chat-input case sends through THE sender (the gate below is the only one)');
-  ok(ws.includes('wrapperCaps(BUFFERS_DIR, sessionId, session.socketPath)'), 'chat-input gate reads capability through wrapperCaps (sidecar + collision-aware resolver)');
+  ok(verdictOf(/sendUserInput\(data\.sessionId, data\.text/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'))), 'the ws chat-input case sends through THE sender (the gate below is the only one)');
+  ok(verdictOf(ws.includes('wrapperCaps(BUFFERS_DIR, sessionId, session.socketPath)')), 'chat-input gate reads capability through wrapperCaps (sidecar + collision-aware resolver)');
   ok(!/readSessionMeta\([^)]*\)\?\.caps/.test(ws), 'NEGATIVE: the gate no longer consults data/session-meta for caps (the 2.361.1 wrong-file read)');
-  ok(/session\._wrapperFrameFile !== true\)/.test(ws) && /if \(session\._wrapperFrameFile === true\) \{/.test(ws), 'only a POSITIVE verdict is cached; pointer line only to capability-advertising wrappers');
-  ok(/1024 \* 1024\)/.test(ws) && ws.includes('it was NOT sent') && ws.includes('Terminate + Resume') && ws.includes('wait a moment'), 'oversized + incapable → VISIBLE refusal with the evidenced reason (old wrapper vs still-starting)');
-  ok(ws.includes('chat-input REFUSED'), 'every refusal leaves a server-side journal line (the 2.364.1 forensics gap: nothing in the journal)');
+  ok(gateOf(/session\._wrapperFrameFile !== true\)/.test(ws)) && verdictOf(/if \(session\._wrapperFrameFile === true\) \{/.test(ws)), 'only a POSITIVE verdict is cached; pointer line only to capability-advertising wrappers');
+  ok(gateOf(/1024 \* 1024\)/.test(ws)) && gateOf(ws.includes('it was NOT sent')) && gateOf(ws.includes('Terminate + Resume')) && verdictOf(ws.includes('wait a moment')), 'oversized + incapable → VISIBLE refusal with the evidenced reason (old wrapper vs still-starting)');
+  ok(verdictOf(ws.includes('chat-input REFUSED')), 'every refusal leaves a server-side journal line (the 2.364.1 forensics gap: nothing in the journal)');
   const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  ok(sv.includes("'chat-frames'") && sv.includes('48 * 3600 * 1000'), 'orphaned chat-frames swept age-based (old wrappers never unlink)');
+  ok(gateOf(sv.includes("'chat-frames'")) && verdictOf(sv.includes('48 * 3600 * 1000')), 'orphaned chat-frames swept age-based (old wrappers never unlink)');
   // lane human-cli r4 → r5: a wrapper killed past its exit handler leaves <id>.receipts — THE ONE LIST of a wrapper's files
   // (src/server/wrapper-files.js WRAPPER_FILE_KINDS) is what the age sweep's pattern AND every end path read (r4 hand-added
   // .receipts to two end paths and missed boot-restore's retireDuplicate)
   const wfSrc = fs.readFileSync(path.join(REPO, 'src/server/wrapper-files.js'), 'utf8');
   const WF = require(path.join(REPO, 'src/server/wrapper-files.js'));
   const kinds = WF.WRAPPER_FILE_KINDS || [];
-  ok(kinds.includes('receipts') && !!WF.AGED_WRAPPER_FILE && kinds.every((k) => WF.AGED_WRAPPER_FILE.test(`sess-1-2.${k}`)) && !WF.AGED_WRAPPER_FILE.test('sess-1-2.bufx'),
+  ok(gateOf(kinds.includes('receipts')) && !!WF.AGED_WRAPPER_FILE && gateOf(kinds.every((k) => WF.AGED_WRAPPER_FILE.test(`sess-1-2.${k}`))) && !WF.AGED_WRAPPER_FILE.test('sess-1-2.bufx'),
     `the age sweep's pattern is THE ONE LIST's — every kind matches, <id>.receipts among them (${kinds.join(', ') || 'no list'} · ${WF.AGED_WRAPPER_FILE})`);
   ok(!/\/\^\(\.\+\)\\\.\(buf\|/.test(sv) && !/AGED_WRAPPER_FILE = \//.test(wfSrc), 'no sweep spells a pattern of its own (server.js reads the list\'s; wrapper-files builds it from the list)');
   const endPaths = [['src/ws-handler.js', 'data.sessionId'], ['src/server/session-stdout.js', 'id'], ['src/server/boot-restore.js', 'id']];
@@ -391,14 +391,14 @@ setInterval(() => {}, 1e3);
   // rest. A backend-id exclusion is exactly what kept the shredding class open
   // for codex while its wrapper had no _frame_file verb.
   ok(!ws.includes("session.backend !== 'codex'") && !/stdinPayload\.length > 64 \* 1024[^\n]*session\.backend/.test(ws), "NEGATIVE: the chat-input bypass carries no backend-id exclusion (codex is gated by its wrapper's caps like everyone else)");
-  ok(/stdinPayload\.length > 64 \* 1024 && !session\.host && \(session\.socketPath \|\| session\.agentdSession\)\) \{/.test(ws), 'bypass condition = size + local transport only (a local dtach socket, or a local R6 pipe — whose socketPath is null since B-b675); capability decides pointer-vs-raw-vs-refuse');
+  ok(verdictOf(/stdinPayload\.length > 64 \* 1024 && !session\.host && \(session\.socketPath \|\| session\.agentdSession\)\) \{/.test(ws)), 'bypass condition = size + local transport only (a local dtach socket, or a local R6 pipe — whose socketPath is null since B-b675); capability decides pointer-vs-raw-vs-refuse');
   // the codex wrapper side of the contract
   const cw = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
   // the caps object GROWS (threadScoped joined it in B-7473) — pin the two the
   // bypass gates on, not the literal object
-  ok(/caps: \{[^}]*peerMessage: true[^}]*\}/.test(cw) && /caps: \{[^}]*frameFile: true[^}]*\}/.test(cw), 'codex-chat-wrapper advertises caps.frameFile (+ peerMessage) in its boot meta');
-  ok(/if \(msg\.type === '_frame_file'\) \{ msg = loadFrameFile\(msg\);/.test(cw), 'codex-chat-wrapper resolves _frame_file pointers on the stdin path (before the ready gate)');
-  ok(/if \(!msg \|\| typeof msg !== 'object'\) \{ rejectStdinLine\(line\); continue; \}/.test(cw) && !/const msg = safeJsonParse\(line\);\n\s*if \(!msg\) continue;/.test(cw), 'NEGATIVE: an unparseable stdin line is no longer a silent continue');
+  ok(gateOf(/caps: \{[^}]*peerMessage: true[^}]*\}/.test(cw)) && verdictOf(/caps: \{[^}]*frameFile: true[^}]*\}/.test(cw)), 'codex-chat-wrapper advertises caps.frameFile (+ peerMessage) in its boot meta');
+  ok(verdictOf(/if \(msg\.type === '_frame_file'\) \{ msg = loadFrameFile\(msg\);/.test(cw)), 'codex-chat-wrapper resolves _frame_file pointers on the stdin path (before the ready gate)');
+  ok(gateOf(/if \(!msg \|\| typeof msg !== 'object'\) \{ rejectStdinLine\(line\); continue; \}/.test(cw)) && !/const msg = safeJsonParse\(line\);\n\s*if \(!msg\) continue;/.test(cw), 'NEGATIVE: an unparseable stdin line is no longer a silent continue');
   // the ack has a consumer in EVERY stdout consumer module (S5: src/server/stdout/<protocol>.js, one per declared protocol)
   // lane human-cli r2: a torn line's `_stdin_nack` proves the pipe too (and is no record of anyone's) — consumed beside the ack
   const ACK_SRC = "if \\(msg\\.type === '_stdin_ack' \\|\\| msg\\.type === '_stdin_nack'\\) \\{ session\\._stdinAckReceived = true; continue; \\}";
@@ -415,8 +415,8 @@ setInterval(() => {}, 1e3);
 {
   const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   const ui = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');
-  ok((ws.match(/code: 'input-rejected'/g) || []).length === 1 && /r\.code === 'input_rejected' \|\| r\.code === 'too_large'/.test(ws) && /code: 'input_rejected'/.test(ui) && /code: 'too_large'/.test(ui), "both chat-input refusals (the sender's input_rejected + too_large) reach the socket as code:input-rejected");
-  ok(/code: 'input-rejected',[^\n]*message:/.test(ws.replace(/\n\s*/g, ' ')), 'refusals carry the text in the message field the client reads');
+  ok((ws.match(/code: 'input-rejected'/g) || []).length === 1 && gateOf(/r\.code === 'input_rejected' \|\| r\.code === 'too_large'/.test(ws)) && gateOf(/code: 'input_rejected'/.test(ui)) && verdictOf(/code: 'too_large'/.test(ui)), "both chat-input refusals (the sender's input_rejected + too_large) reach the socket as code:input-rejected");
+  ok(verdictOf(/code: 'input-rejected',[^\n]*message:/.test(ws.replace(/\n\s*/g, ' '))), 'refusals carry the text in the message field the client reads');
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   // The rule is now an EXPLICIT set of scoped codes rather than a single
   // literal (2026-09-06: "any coded error is scoped" would have swallowed
@@ -424,12 +424,12 @@ setInterval(() => {}, 1e3);
   // drives both meanings functionally). Order is asserted INSIDE the handler:
   // position in the file is meaningless for class methods.
   const scopedSet = /const SCOPED_REFUSAL_CODES = new Set\(\[([\s\S]*?)\]\);/.exec(cv)?.[1] || '';
-  ok(/'input-rejected'/.test(scopedSet), 'chat-view renders coded input refusals in-chat (no read-only flip)');
+  ok(verdictOf(/'input-rejected'/.test(scopedSet)), 'chat-view renders coded input refusals in-chat (no read-only flip)');
   const errBody = /_onSessionError\(msg\) \{([\s\S]*?)\n  \}/.exec(cv)?.[1] || '';
   ok(!!errBody && errBody.indexOf('isScopedRefusal(msg)') >= 0 && errBody.indexOf('isScopedRefusal(msg)') < errBody.indexOf('_tryViewOnlyRescue'), 'refusal branch runs BEFORE the attach-failure rescue');
   const ir = fs.readFileSync(path.join(REPO, 'src/lib/incident-recorder.js'), 'utf8');
-  ok(ir.includes('msg.message || msg.error'), 'incident ring captures error-field texts (the msg:"" forensic gap)');
+  ok(verdictOf(ir.includes('msg.message || msg.error')), 'incident ring captures error-field texts (the msg:"" forensic gap)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

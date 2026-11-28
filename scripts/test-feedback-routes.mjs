@@ -34,7 +34,7 @@ const { SyncStore } = require(path.join(REPO, 'src/sync-store.js'));
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 
 const dir = scratchDir('feedback-routes');
 const dataDir = path.join(dir, 'data');
@@ -75,14 +75,14 @@ try {
   {
     const r = await call('POST', '/api/agent/feedback', { bearer: A, body: { text: 'vibespace-task backlog-add has no --group hint when I am in two groups', about: 'vibespace-task', kind: 'cli', session: { id: 'cid-beta', name: 'spoof' }, group: { id: 'T-9', name: 'other' }, harness: 'codex', instance: { name: 'evil' } } });
     const rep = r.body && r.body.report;
-    ok(r.status === 200 && r.body.ok && !r.body.duplicate && /^fb-[0-9a-f]{10}$/.test(rep.id) && r.body.chars === 70, `a vsst_ bearer files a report (${r.status}, ${rep && rep.id}, chars ${r.body && r.body.chars})`, r.body);
+    ok(r.status === 200 && gateOf(r.body.ok) && !r.body.duplicate && gateOf(/^fb-[0-9a-f]{10}$/.test(rep.id)) && r.body.chars === 70, `a vsst_ bearer files a report (${r.status}, ${rep && rep.id}, chars ${r.body && r.body.chars})`, r.body);
     ok(rep.session.id === 'cid-alpha' && rep.session.name === 'lane alpha' && rep.group.id === 'T-1' && rep.group.name === 'VibeSpace 车道' && rep.harness === 'claude' && rep.instance.name === 'box-1' && rep.instance.version === '2.369.301', 'session / group / harness / instance are the TOKEN\'s: the body\'s session, group, harness and instance were ignored', rep);
     ok(rep.kind === 'cli' && rep.about === 'vibespace-task' && rep.status === 'open' && rep.count === 1 && rep.at === clock, 'kind / about from the body, open, ×1, at = the server clock');
     const none = await call('POST', '/api/agent/feedback', { body: { text: 'x' }, headers: { cookie: 'vs_token=deadbeef', ...SAME } });
-    ok(none.status === 401 && /missing session token/.test(none.body.error), `no bearer — the owner's cookie on the agent route ⇒ 401 by name (${none.body && none.body.error})`);
+    ok(none.status === 401 && verdictOf(/missing session token/.test(none.body.error)), `no bearer — the owner's cookie on the agent route ⇒ 401 by name (${none.body && none.body.error})`);
     const bad = await call('POST', '/api/agent/feedback', { bearer: 'vsst_' + 'z'.repeat(40), body: { text: 'x' } });
     const badJob = await call('POST', '/api/agent/feedback', { bearer: 'jbt_' + 'z'.repeat(40), body: { text: 'x' } });
-    ok(bad.status === 401 && /unknown session token/.test(bad.body.error) && badJob.status === 401 && /unknown job token/.test(badJob.body.error), 'an unknown session / job token ⇒ 401');
+    ok(bad.status === 401 && gateOf(/unknown session token/.test(bad.body.error)) && badJob.status === 401 && verdictOf(/unknown job token/.test(badJob.body.error)), 'an unknown session / job token ⇒ 401');
     clock += 1000;
     const job = await call('POST', '/api/agent/feedback', { bearer: J, body: { text: 'a watch job cannot say which conversation woke it', kind: 'flow' } });
     ok(job.status === 200 && job.body.report.session.id === 'cid-beta' && job.body.report.session.name === 'lane beta' && job.body.report.harness === 'codex', `a jbt_ job files as its OWNER conversation (live: its name and harness) (${JSON.stringify(job.body.report && job.body.report.session)})`);
@@ -99,7 +99,7 @@ try {
     const first = await call('POST', '/api/agent/feedback', { bearer: A, body: { text: 'The Design window   opens behind the chat on a phone', kind: 'ui' } });
     clock += 3_000;
     const second = await call('POST', '/api/agent/feedback', { bearer: A, body: { text: 'another thing' } });
-    ok(first.status === 200 && second.status === 429 && second.body.code === 'paced' && second.body.retryAfterS === 7 && second.headers.get('retry-after') === '7' && /wait 7 s/.test(second.body.error), `one report / 10 s / session: 3 s later ⇒ 429 paced, Retry-After 7 (${second.body && second.body.error})`);
+    ok(first.status === 200 && second.status === 429 && second.body.code === 'paced' && second.body.retryAfterS === 7 && second.headers.get('retry-after') === '7' && verdictOf(/wait 7 s/.test(second.body.error)), `one report / 10 s / session: 3 s later ⇒ 429 paced, Retry-After 7 (${second.body && second.body.error})`);
     const other = await call('POST', '/api/agent/feedback', { bearer: Bt, body: { text: 'the design window opens behind the chat on a phone ', kind: 'ui' } });
     ok(other.status === 200 && other.body.duplicate === true && other.body.report.id === first.body.report.id && other.body.report.count === 2 && other.body.report.session.id === 'cid-alpha', `ANOTHER session is not held by alpha's pace; its same words (case, spaces) ⇒ duplicate, ×2 on alpha's record (${other.body && other.body.report && other.body.report.count})`);
     clock += 7_000;
@@ -112,7 +112,7 @@ try {
     const b = await call('GET', '/api/agent/feedback/mine', { bearer: Bt });
     const ta = a.body.reports.map((r) => r.text), tb = b.body.reports.map((r) => r.text);
     ok(a.status === 200 && ta.length === 3 && ta[0] === 'another thing' && !ta.some((t) => /watch job/.test(t)), `alpha's own three, newest first (${ta.join(' | ')})`);
-    ok(tb.length === 2 && tb.some((t) => /watch job/.test(t)) && tb.some((t) => /Design window/.test(t)) && !tb.some((t) => /backlog-add/.test(t)), `beta's: its job's report + the one it REPEATED; never alpha's own (${tb.join(' | ')})`);
+    ok(tb.length === 2 && gateOf(tb.some((t) => /watch job/.test(t))) && gateOf(tb.some((t) => /Design window/.test(t))) && !tb.some((t) => /backlog-add/.test(t)), `beta's: its job's report + the one it REPEATED; never alpha's own (${tb.join(' | ')})`);
     ok(!a.body.reports.some((r) => 'reporters' in r), 'the public rows (no reporter list)');
     const noTok = await call('GET', '/api/agent/feedback/mine', { headers: { cookie: 'vs_token=x' } });
     ok(noTok.status === 401, '/mine without a bearer ⇒ 401');
@@ -123,11 +123,11 @@ try {
   {
     const l = await call('GET', '/api/feedback', { headers: { cookie: 'vs_token=x' } });
     const ats = l.body.reports.map((r) => r.lastAt);
-    ok(l.status === 200 && l.body.reports.length === 5 && ats.every((x, i) => i === 0 || ats[i - 1] >= x) && l.body.open === 5 && l.body.dropped === 0, `GET /api/feedback: 5 reports newest first, open 5, dropped 0`, l.body);
+    ok(l.status === 200 && l.body.reports.length === 5 && gateOf(ats.every((x, i) => i === 0 || ats[i - 1] >= x)) && l.body.open === 5 && l.body.dropped === 0, `GET /api/feedback: 5 reports newest first, open 5, dropped 0`, l.body);
     target = l.body.reports.find((r) => /backlog-add/.test(r.text));
     const agentGet = await call('GET', '/api/feedback', { bearer: A });
     const agentPatch = await call('PATCH', `/api/feedback/${target.id}`, { bearer: A, body: { status: 'handled' } });
-    ok(agentGet.status === 403 && agentGet.body.code === 'agent_forbidden' && agentPatch.status === 403 && agentPatch.body.code === 'agent_forbidden' && /vibespace-feedback list/.test(agentGet.body.error), 'an agent bearer on the owner\'s list / PATCH ⇒ 403 by name (it is pointed at vibespace-feedback list)');
+    ok(agentGet.status === 403 && agentGet.body.code === 'agent_forbidden' && agentPatch.status === 403 && agentPatch.body.code === 'agent_forbidden' && verdictOf(/vibespace-feedback list/.test(agentGet.body.error)), 'an agent bearer on the owner\'s list / PATCH ⇒ 403 by name (it is pointed at vibespace-feedback list)');
     const xs = await call('PATCH', `/api/feedback/${target.id}`, { body: { status: 'handled' }, headers: { cookie: 'vs_token=x', origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' } });
     ok(xs.status === 403 && xs.body.error === 'cross-site' && store.list().reports.find((r) => r.id === target.id).status === 'open', 'a CROSS-SITE PATCH ⇒ 403 cross-site from the auth layer; the record stays open');
     sent.length = 0;
@@ -151,7 +151,7 @@ try {
     const ws = read('src/ws-handler.js');
     const a = ws.indexOf("        case 'state-set': {"), b = ws.indexOf("        case 'state-resync': {");
     const CASE = a > 0 && b > a ? ws.slice(a, b) : '';
-    ok(/store\.clientWrites !== false/.test(CASE) && /store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASE) && /const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASE), 'src/ws-handler.js: the state-set case cut verbatim (it reads clientWrites; the value is data.value off the drafts belt — lane stop-refills-composer)');
+    ok(gateOf(/store\.clientWrites !== false/.test(CASE)) && gateOf(/store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASE)) && verdictOf(/const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASE)), 'src/ws-handler.js: the state-set case cut verbatim (it reads clientWrites; the value is data.value off the drafts belt — lane stop-refills-composer)');
     const run = (stores) => new Function('getSyncStore', 'activeSessions', `return function handle(data, ws) { switch (data.type) {\n${CASE}\n} };`)((n) => stores[n], new Map());
     const before = JSON.stringify(store.sync.getSnapshot());
     run({ feedback: store.sync })({ type: 'state-set', store: 'feedback', key: target.id, value: { ...snap.data[target.id], text: 'forged', status: 'open' } }, {});
@@ -167,7 +167,7 @@ try {
   {
     const file = path.join(dataDir, 'feedback.json');
     const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
-    ok(disk.v === 1 && disk.records.length === 5 && disk.records.some((r) => r.count === 2 && r.reporters.length === 2) && disk.syncVersion === store.sync.version, `data/feedback.json holds the 5 records (reporters too) and the mirror version ${disk.syncVersion}`);
+    ok(disk.v === 1 && disk.records.length === 5 && gateOf(disk.records.some((r) => r.count === 2 && r.reporters.length === 2)) && disk.syncVersion === store.sync.version, `data/feedback.json holds the 5 records (reporters too) and the mirror version ${disk.syncVersion}`);
     ok(!fs.readdirSync(dataDir).some((f) => /\.tmp/.test(f)), 'no tmp file left beside it (tmp + rename)');
     const again = FS.create({ dataDir, now: () => clock });
     ok(again.list().reports.length === 5 && again.sync.version === store.sync.version && JSON.stringify(again.sync.getSnapshot().data) === JSON.stringify(store.sync.getSnapshot().data), 'a new store over the same dir: every row, the same mirror version (a reconnecting client sees no rollback)');
@@ -176,7 +176,7 @@ try {
     const torn = FS.create({ dataDir, now: () => clock });
     ok(torn.list().reports.length === 0, 'an unreadable file ⇒ an empty ring (the server boots)');
     const W = read('src/server/mounts-plugins-wiring.js'), S = read('server.js');
-    ok(/syncStores\.feedback = feedback\.sync/.test(W) && /registerFeedbackRoutes\(app, \{/.test(W) && /auth, wss, WS_OPEN, syncStores,/.test(S), 'the wiring: server.js hands its SyncStore table to the mounts-plugins wiring, which registers the mirror and the routes');
+    ok(gateOf(/syncStores\.feedback = feedback\.sync/.test(W)) && gateOf(/registerFeedbackRoutes\(app, \{/.test(W)) && verdictOf(/auth, wss, WS_OPEN, syncStores,/.test(S)), 'the wiring: server.js hands its SyncStore table to the mounts-plugins wiring, which registers the mirror and the routes');
   }
 
   console.log('— ⑦ the CLI (data/bin/vibespace-feedback as a child, against this server)');
@@ -191,26 +191,26 @@ try {
     const DOC = 'the "docs" topic list in vibespace-docs is cut on a narrow terminal';
     const sentR = await cli([DOC, '--about', 'vibespace-docs', '--kind', 'docs']);
     const made = store.list().reports[0];
-    ok(sentR.code === 0 && /sent to the maintainers \(fb-[0-9a-f]{10}\)/.test(sentR.out) && sentR.out.includes(`sent: ${DOC.length} characters`) && made.about === 'vibespace-docs' && made.kind === 'docs' && made.session.name === 'lane alpha' && store.list().reports.length === n0 + 1, `vibespace-feedback "…" --about --kind ⇒ filed, "sent: ${DOC.length} characters" (${sentR.out.trim().split('\n').join(' / ')})`, sentR);
+    ok(sentR.code === 0 && gateOf(/sent to the maintainers \(fb-[0-9a-f]{10}\)/.test(sentR.out)) && gateOf(sentR.out.includes(`sent: ${DOC.length} characters`)) && made.about === 'vibespace-docs' && made.kind === 'docs' && made.session.name === 'lane alpha' && store.list().reports.length === n0 + 1, `vibespace-feedback "…" --about --kind ⇒ filed, "sent: ${DOC.length} characters" (${sentR.out.trim().split('\n').join(' / ')})`, sentR);
     clock += 60_000;
     const stray = await cli(['it broke', 'when', 'quoted']);
-    ok(stray.code === 2 && /the report is ONE argument — 2 more words followed it/.test(stray.err) && /nothing was sent/.test(stray.err) && store.list().reports.length === n0 + 1, `a stray word ⇒ exit 2 by name, nothing sent (${stray.err.trim().slice(0, 120)})`);
+    ok(stray.code === 2 && gateOf(/the report is ONE argument — 2 more words followed it/.test(stray.err)) && gateOf(/nothing was sent/.test(stray.err)) && store.list().reports.length === n0 + 1, `a stray word ⇒ exit 2 by name, nothing sent (${stray.err.trim().slice(0, 120)})`);
     const viaStdin = await cli(['--text', '-', '--about', 'vibespace-msg'], { input: 'a quoted "word" and a $(subshell) kept\n' });
     ok(viaStdin.code === 0 && store.list().reports[0].text === 'a quoted "word" and a $(subshell) kept', '--text - (stdin) carries quotes intact (one trailing newline trimmed)');
     clock += 1000;
     const paced = await cli(['too soon']);
-    ok(paced.code === 1 && /wait 9 s/.test(paced.err), `paced ⇒ exit 1 with the server's sentence (${paced.err.trim()})`);
+    ok(paced.code === 1 && verdictOf(/wait 9 s/.test(paced.err)), `paced ⇒ exit 1 with the server's sentence (${paced.err.trim()})`);
     const dupR = await cli(['the "docs" topic list in vibespace-docs is cut on a narrow terminal', '--about', 'vibespace-docs'], { token: Bt });
-    ok(dupR.code === 0 && /already reported \(fb-[0-9a-f]{10}\) — counted again: ×2/.test(dupR.out), `another session's same words ⇒ "already reported … ×2" (${dupR.out.trim().split('\n')[0]})`);
+    ok(dupR.code === 0 && verdictOf(/already reported \(fb-[0-9a-f]{10}\) — counted again: ×2/.test(dupR.out)), `another session's same words ⇒ "already reported … ×2" (${dupR.out.trim().split('\n')[0]})`);
     const list = await cli(['list']);
-    ok(list.code === 0 && /\[docs · vibespace-docs\] open ×2/.test(list.out) && /a quoted "word"/.test(list.out) && !/watch job/.test(list.out), 'list prints its own reports (kind · about, status, ×count, the text) — never another session\'s');
+    ok(list.code === 0 && gateOf(/\[docs · vibespace-docs\] open ×2/.test(list.out)) && gateOf(/a quoted "word"/.test(list.out)) && !/watch job/.test(list.out), 'list prints its own reports (kind · about, status, ×count, the text) — never another session\'s');
     const usage = await cli([]);
-    ok(usage.code === 0 && /^usage — tell the maintainers what felt wrong/.test(usage.out) && /vibespace-feedback "what felt wrong, and where" \[--about <tool\|flow>\] \[--kind cli\|flow\|ui\|docs\|other\]/.test(usage.out) && /your reports:/.test(usage.out), 'no arguments ⇒ the copy-ready usage + its reports');
+    ok(usage.code === 0 && gateOf(/^usage — tell the maintainers what felt wrong/.test(usage.out)) && gateOf(/vibespace-feedback "what felt wrong, and where" \[--about <tool\|flow>\] \[--kind cli\|flow\|ui\|docs\|other\]/.test(usage.out)) && verdictOf(/your reports:/.test(usage.out)), 'no arguments ⇒ the copy-ready usage + its reports');
     const bad = await cli(['x', '--kind', 'bug']);
-    ok(bad.code === 2 && /--kind is one of cli \| flow \| ui \| docs \| other/.test(bad.err), `a refusal the server names ⇒ exit 2 with its sentence (${bad.err.trim()})`);
+    ok(bad.code === 2 && verdictOf(/--kind is one of cli \| flow \| ui \| docs \| other/.test(bad.err)), `a refusal the server names ⇒ exit 2 with its sentence (${bad.err.trim()})`);
   }
 } finally {
   srv.close();
 }
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

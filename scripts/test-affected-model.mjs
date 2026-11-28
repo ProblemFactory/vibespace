@@ -25,7 +25,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PASSPORT = ['ONBOARDED', 'SOURCE'].join('_');
 const GIT_ENV = gitEnvFrom(process.env);
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 const tmpDirs = [];
 const mktmp = (tag) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `vs-affected-${tag}-`)); tmpDirs.push(d); return d; };
 const git = (root, args, env = GIT_ENV) => {
@@ -83,38 +83,38 @@ console.log('\n§1 the diff readers');
   ok(M.codeLines(CSS, { js: false }).slice(5, 7).join() === 'false,false', 'codeLines (CSS): both lines of a block comment are comment');
 
   const c1 = change('src/lib/i18n-zh.js', DICT, edit(DICT, '"你好"', '"您好"'));
-  ok(c1.rule === 'i18n-table' && c1.attributable && c1.keys.join() === 'Hello' && c1.values.sort().join() === '你好,您好', 'a dictionary value edit: one key, both values');
+  ok(c1.rule === 'i18n-table' && gateOf(c1.attributable) && c1.keys.join() === 'Hello' && c1.values.sort().join() === '你好,您好', 'a dictionary value edit: one key, both values');
   const c2 = change('src/lib/i18n-zh.js', DICT, edit(DICT, '  // a comment\n', '  // a reworded comment\n  "New key": "新键",\n'));
-  ok(c2.attributable && c2.keys.join() === 'New key', 'a comment line is no change; an added entry is its key');
+  ok(gateOf(c2.attributable) && c2.keys.join() === 'New key', 'a comment line is no change; an added entry is its key');
   const c3 = change('src/lib/i18n-zh.js', DICT, edit(DICT, 'export default {', 'const extra = 1;\nexport default {'));
-  ok(!c3.attributable && /not a dictionary entry/.test(c3.offending[0]), 'CONTROL: a code line in the dictionary file is not attributable (the old rule)');
+  ok(!c3.attributable && verdictOf(/not a dictionary entry/.test(c3.offending[0])), 'CONTROL: a code line in the dictionary file is not attributable (the old rule)');
   // B-cc5e (lane bl-tests-e): an entry ending in a `// …` comment (1178 rows per dictionary on 2.369.407) IS an entry — the one
   // parser saw none of them, so an edit of one fell to the broad old rule; now it is attributable to its key
   const c4 = change('src/lib/i18n-zh.js', DICT, edit(DICT, '"Bye": "再见",', '"Bye": "再会", // lane x — a note after the entry'));
-  ok(c4.attributable && c4.keys.join() === 'Bye' && c4.values.sort().join() === '再会,再见', 'a value edit on a row with a trailing comment: attributable to its key (B-cc5e)', c4);
+  ok(gateOf(c4.attributable) && c4.keys.join() === 'Bye' && c4.values.sort().join() === '再会,再见', 'a value edit on a row with a trailing comment: attributable to its key (B-cc5e)', c4);
 
   const s1 = change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, "t('The first {n} rows')", "t('The first {n} rows shown')"));
-  ok(s1.rule === 'settings-text' && s1.attributable && s1.keys.join() === 'a.one' && s1.words.includes('The first {n} rows shown'), 'a description edit: attributable to its row, the old and new words');
+  ok(s1.rule === 'settings-text' && gateOf(s1.attributable) && s1.keys.join() === 'a.one' && verdictOf(s1.words.includes('The first {n} rows shown')), 'a description edit: attributable to its row, the old and new words');
   const s2 = change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, "label: t('One')", "label: t('Only one')"));
-  ok(s2.attributable && s2.keys.join() === 'a.one', 'a label edit on the line that also holds type + default: equal once the words are masked ⇒ words only');
+  ok(gateOf(s2.attributable) && s2.keys.join() === 'a.one', 'a label edit on the line that also holds type + default: equal once the words are masked ⇒ words only');
   const s3 = change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, "label: t('Two')", "label: t('Second')"));
-  ok(s3.attributable && s3.keys.join() === 'a.two', 'a one-line row\'s label edit: its key');
+  ok(gateOf(s3.attributable) && s3.keys.join() === 'a.two', 'a one-line row\'s label edit: its key');
   const s4 = change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, 'default: true', 'default: false'));
-  ok(!s4.attributable && /'a\.one': more than display words/.test(s4.offending[0]), 'CONTROL: a DEFAULT edit is not attributable (it reaches every reader)');
+  ok(!s4.attributable && verdictOf(/'a\.one': more than display words/.test(s4.offending[0])), 'CONTROL: a DEFAULT edit is not attributable (it reaches every reader)');
   const s5 = change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, '};\nexport', "  'a.three': { type: 'boolean', default: true, label: t('Three') },\n};\nexport"));
   ok(!s5.attributable, 'CONTROL: a NEW row is not attributable (code may already read the key it declares)');
   const s6 = change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, 'const X = 1;', 'const X = 2;'));
-  ok(!s6.attributable && /outside every row/.test(s6.offending[0]), 'CONTROL: an edit outside SETTINGS_SCHEMA\'s rows is not attributable (the brief\'s second control)');
+  ok(!s6.attributable && verdictOf(/outside every row/.test(s6.offending[0])), 'CONTROL: an edit outside SETTINGS_SCHEMA\'s rows is not attributable (the brief\'s second control)');
 
   const k1 = change('public/style.css', CSS, edit(CSS, '.w-chip { color: red; }', '.w-chip { color: green; }'));
-  ok(k1.rule === 'css-selectors' && k1.attributable && k1.tokens.join() === 'w-chip', 'a declaration edit: the rule\'s class');
+  ok(k1.rule === 'css-selectors' && gateOf(k1.attributable) && k1.tokens.join() === 'w-chip', 'a declaration edit: the rule\'s class');
   const k2 = change('public/style.css', CSS, edit(CSS, '.w-alt { margin: 0; }', '.w-alt { margin: 1px; }'));
-  ok(k2.attributable && k2.tokens.sort().join() === 'w-alt,w-box,w-chip' && k2.selectors.map((x) => x.required.join('+')).sort().join() === 'w-alt,w-box+w-chip',
+  ok(gateOf(k2.attributable) && k2.tokens.sort().join() === 'w-alt,w-box,w-chip' && k2.selectors.map((x) => x.required.join('+')).sort().join() === 'w-alt,w-box+w-chip',
     'a two-line selector list: every selector, each with the names a page must draw for it');
   const k3 = change('public/style.css', CSS, edit(CSS, '@media (max-width: 600px)', '@media (max-width: 700px)'));
-  ok(k3.attributable && k3.tokens.sort().join() === 'w-alt,w-chip', 'an @media prelude edit: every rule inside it');
+  ok(gateOf(k3.attributable) && k3.tokens.sort().join() === 'w-alt,w-chip', 'an @media prelude edit: every rule inside it');
   const k4 = change('public/style.css', CSS, edit(CSS, '/* a comment', '/* a reworded comment'));
-  ok(k4.attributable && !k4.tokens.length, 'a comment edit: attributable, no names');
+  ok(gateOf(k4.attributable) && !k4.tokens.length, 'a comment edit: attributable, no names');
   for (const [tag, from, to] of [[':root', '--x: 1', '--x: 2'], ['button', 'border: 0', 'border: 1px'], ['@keyframes', 'opacity: 0', 'opacity: 0.5']]) {
     const k = change('public/style.css', CSS, edit(CSS, from, to));
     ok(!k.attributable, `CONTROL: a ${tag} edit is not attributable (${k.offending[0] || 'attributed!'})`);
@@ -123,7 +123,7 @@ console.log('\n§1 the diff readers');
   ok(st[0].all.join() === 'w-off,w-field' && st[0].required.join() === 'w-field' && st[0].anchor.join() === 'w-field' && st[1].all.join() === 'a,i',
     'selectorTokens: a :not() name is no requirement; an attribute value is no name');
   const re = M.tokenRe('recording');
-  ok(["el.classList.add('recording')", "b.className = 'x recording'", '.recording {', "'recording'"].every((t) => re.test(t)) && !re.test('the recording started') && M.tokenRe('voice-btn').test('a voice-btn here'),
+  ok(gateOf(["el.classList.add('recording')", "b.className = 'x recording'", '.recording {', "'recording'"].every((t) => re.test(t))) && !re.test('the recording started') && verdictOf(M.tokenRe('voice-btn').test('a voice-btn here')),
     'tokenRe: a plain word counts only where code spells a class; a hyphenated name anywhere');
 }
 
@@ -164,43 +164,43 @@ console.log('\n§2 the rules (stub suites)');
   const sel = (ch, env = { LANG: 'C.UTF-8' }, model = M) => model.ruleSelect({ change: ch, suites, closureOf, textOf, productFiles, env });
 
   const zh = sel(change('src/lib/i18n-zh.js', DICT, edit(DICT, '"季度报告"', '"季报"')));
-  ok(zh.attributable && names(zh.picks) === 'test-channels-i18n,test-reader,test-zh',
+  ok(gateOf(zh.attributable) && names(zh.picks) === 'test-channels-i18n,test-reader,test-zh',
     `a zh entry: the zh page, the file's own reader, the i18n census — not the English boot, not the English suite naming the key, not the suite that only loads ci.mjs (${names(zh.picks)})`);
-  ok(/renders in zh/.test(zh.picks.get('test-zh')) && /opens src\/lib\/i18n-zh\.js itself/.test(zh.picks.get('test-reader')), 'each pick says why');
+  ok(gateOf(/renders in zh/.test(zh.picks.get('test-zh'))) && verdictOf(/opens src\/lib\/i18n-zh\.js itself/.test(zh.picks.get('test-reader'))), 'each pick says why');
   const nobody = sel(change('src/lib/i18n-zh.js', DICT, edit(DICT, '"再见"', '"拜拜"')));
   ok(names(nobody.picks) === names(zh.picks), 'an entry NO suite names: the same census / reader / zh-page set — never an English page');
   const ja = sel(change('src/lib/i18n-ja.js', DICT, edit(DICT, '"你好"', '"こんにちは"')));
-  ok(!ja.picks.has('test-zh') && !ja.picks.has('test-reader') && ja.picks.has('test-channels-i18n'), 'a ja entry: a zh page and a zh-table reader are not its readers');
+  ok(!ja.picks.has('test-zh') && !ja.picks.has('test-reader') && verdictOf(ja.picks.has('test-channels-i18n')), 'a ja entry: a zh page and a zh-table reader are not its readers');
   const zhRunner = sel(change('src/lib/i18n-zh.js', DICT, edit(DICT, '"你好"', '"您好"')), { LANG: 'zh_CN.UTF-8' });
-  ok(!zhRunner.attributable && /locale is zh_CN/.test(zhRunner.why), 'CONTROL: on a zh RUNNER every page reads the dictionary ⇒ not attributable (the old rule)');
+  ok(!zhRunner.attributable && verdictOf(/locale is zh_CN/.test(zhRunner.why)), 'CONTROL: on a zh RUNNER every page reads the dictionary ⇒ not attributable (the old rule)');
   ok(!sel(change('src/lib/i18n-zh.js', DICT, edit(DICT, '"你好"', '"您好"')), { LANGUAGE: 'ja:en', LANG: 'C.UTF-8' }).attributable, 'CONTROL: LANGUAGE wins over LANG (ja:en ⇒ not attributable)');
   // the self filter, by a mutant copy of the module without it
   const mdir = mktmp('mutant');
   fs.copyFileSync(path.join(REPO, 'scripts/i18n-extract.mjs'), path.join(mdir, 'i18n-extract.mjs'));
   const src = fs.readFileSync(path.join(REPO, 'scripts/affected-model.mjs'), 'utf-8');
   const filt = 'return { scripts: c.scripts.filter((f) => f !== SELF), loads: c.loads.filter((f) => f !== SELF) };';
-  ok(src.includes(filt), 'CONTROL: the self filter line is in the module');
+  ok(verdictOf(src.includes(filt)), 'CONTROL: the self filter line is in the module');
   fs.writeFileSync(path.join(mdir, 'affected-model.mjs'), src.replace(filt, 'return c;'));
   const MUT = await import(pathToFileURL(path.join(mdir, 'affected-model.mjs')).href);
-  ok(sel(change('src/lib/i18n-zh.js', DICT, edit(DICT, '"你好"', '"您好"')), undefined, MUT).picks.has('test-self'),
+  ok(verdictOf(sel(change('src/lib/i18n-zh.js', DICT, edit(DICT, '"你好"', '"您好"')), undefined, MUT).picks.has('test-self')),
     'CONTROL (mutant): without the self filter a suite that only loads ci.mjs reads as a zh page — the module names every language');
 
   const css = sel(change('public/style.css', CSS, edit(CSS, '.w-alt { margin: 0; }', '.w-alt { margin: 1px; }')));
-  ok(css.attributable && names(css.picks) === 'test-loads,test-modname,test-pixel,test-widget',
+  ok(gateOf(css.attributable) && names(css.picks) === 'test-loads,test-modname,test-pixel,test-widget',
     `.w-box > .w-chip keyed by .w-box (one client module draws it, two draw .w-chip): the suite naming it, loading / naming its module, the pixel suite — not the suite naming only .w-chip (${names(css.picks)})`);
-  ok(!css.picks.has('test-chip') && /loads src\/lib\/widget\.js, which draws \.w-box/.test(css.picks.get('test-loads') || ''), 'a server module that prints the class is no drawer (src/server/x.js)');
+  ok(!css.picks.has('test-chip') && verdictOf(/loads src\/lib\/widget\.js, which draws \.w-box/.test(css.picks.get('test-loads') || '')), 'a server module that prints the class is no drawer (src/server/x.js)');
   const chip = sel(change('public/style.css', CSS, edit(CSS, '.w-chip { color: red; }', '.w-chip { color: green; }')));
-  ok(chip.picks.has('test-chip') && chip.picks.has('test-widget'), '.w-chip alone: every suite naming .w-chip');
+  ok(gateOf(chip.picks.has('test-chip')) && verdictOf(chip.picks.has('test-widget')), '.w-chip alone: every suite naming .w-chip');
   T.set('public/index.html', '<div class="w-box"><span class="w-chip"></span></div>');
   const every = sel(change('public/style.css', CSS, edit(CSS, '.w-alt { margin: 0; }', '.w-alt { margin: 1px; }')));
-  ok(!every.attributable && /public\/index\.html draws every name of '\.w-box > \.w-chip'/.test(every.why), 'CONTROL: a rule whose every name the page shell draws styles every page ⇒ not attributable');
+  ok(!every.attributable && verdictOf(/public\/index\.html draws every name of '\.w-box > \.w-chip'/.test(every.why)), 'CONTROL: a rule whose every name the page shell draws styles every page ⇒ not attributable');
   T.set('public/index.html', '<div id="shell"></div>');
 
   const set = sel(change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, "t('The first {n} rows')", "t('The first {n} rows shown')")));
-  ok(set.attributable && names(set.picks) === 'test-drawer,test-schema,test-window',
+  ok(gateOf(set.attributable) && names(set.picks) === 'test-drawer,test-schema,test-window',
     `a description edit: the in-process loader, the Settings window's suite, the suite naming a module that draws schema rows — nothing else (${names(set.picks)})`);
   T.set('scripts/test-names-key.mjs', "patch({ 'a.one': false });");
-  ok(sel(change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, "t('The first {n} rows')", "t('The first {n} rows shown')"))).picks.has('test-names-key'), 'a suite naming the row\'s key is a pick');
+  ok(verdictOf(sel(change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, "t('The first {n} rows')", "t('The first {n} rows shown')"))).picks.has('test-names-key')), 'a suite naming the row\'s key is a pick');
   ok(!sel(change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, 'default: true', 'default: false'))).attributable, 'CONTROL: a default edit ⇒ not attributable (the old rule)');
 }
 
@@ -236,21 +236,21 @@ console.log('\n§3 the wiring (ci.mjs affectedSuites, real git)');
   const a1 = run(`${c0}..${c1}`);
   ok(sel(a1) === 'test-zh', `a zh ENTRY edit selects the zh page only — the English boots and the in-process importer drop (${sel(a1)})`);
   const r1 = a1.rules.find((r) => r.file === 'src/lib/i18n-zh.js');
-  ok(r1 && r1.attributable && r1.old === 5 && r1.now === 1 && r1.dropped.length === 4 && /◇ src\/lib\/i18n-zh\.js — i18n-table: .*⇒ 1 of the 5 suites the old rule selects \(dropped 4, added 0\)/.test(a1.summary),
+  ok(gateOf(r1) && gateOf(r1.attributable) && r1.old === 5 && r1.now === 1 && r1.dropped.length === 4 && verdictOf(/◇ src\/lib\/i18n-zh\.js — i18n-table: .*⇒ 1 of the 5 suites the old rule selects \(dropped 4, added 0\)/.test(a1.summary)),
     'the summary says the rule, the old rule\'s count, the drop and that it added nothing');
-  ok(!/dropped: /.test(a1.summary) && /dropped: .*test-en/.test(run(`${c0}..${c1}`, { why: true }).summary), '`why` lists the dropped names (and only then)');
+  ok(!/dropped: /.test(a1.summary) && verdictOf(/dropped: .*test-en/.test(run(`${c0}..${c1}`, { why: true }).summary)), '`why` lists the dropped names (and only then)');
   ok(sel(run(`${c0}..${c1}`, { env: { LANG: 'zh_CN.UTF-8' } })) === 'test-en,test-import,test-widget,test-window,test-zh', 'CONTROL: on a zh runner the same edit is the old rule (all 5)');
-  ok(sel(run(c1)) === 'test-en,test-import,test-widget,test-window,test-zh' && /lone-sha range/.test(run(c1).summary), 'CONTROL: a lone-sha range has no single base ⇒ the old rule, said');
+  ok(sel(run(c1)) === 'test-en,test-import,test-widget,test-window,test-zh' && verdictOf(/lone-sha range/.test(run(c1).summary)), 'CONTROL: a lone-sha range has no single base ⇒ the old rule, said');
 
   w('src/lib/i18n-zh.js', 'const extra = 1;\n' + edit(DICT, '"你好"', '"您好"'));
   const c2 = commitAll('a code line in the dictionary');
-  ok(sel(run(`${c1}..${c2}`)) === 'test-en,test-import,test-widget,test-window,test-zh' && /the OLD rule \(5 suites\) — not a dictionary entry/.test(run(`${c1}..${c2}`).summary),
+  ok(sel(run(`${c1}..${c2}`)) === 'test-en,test-import,test-widget,test-window,test-zh' && verdictOf(/the OLD rule \(5 suites\) — not a dictionary entry/.test(run(`${c1}..${c2}`).summary)),
     'CONTROL: a code line in the dictionary ⇒ the old rule (all 5), and the summary says why');
   // lane affected-static-reach: the old rule's fallback then meets the reach rule — a shared table is read only on a page
   w('scripts/test-srv.mjs', "spawn(process.execPath, ['server.js']);\nawait fetch('/api/sessions');\n");
   const SS = [...S, { name: 'test-srv' }];
   ok(sel(affectedSuites({ range: `${c1}..${c2}`, suites: SS, root: repo, env: { LANG: 'C.UTF-8' } })) === 'test-en,test-import,test-widget,test-window,test-zh'
-    && sel(affectedSuites({ range: `${c1}..${c2}`, suites: SS, root: repo, env: { LANG: 'C.UTF-8' }, reach: false })).includes('test-srv'),
+    && verdictOf(sel(affectedSuites({ range: `${c1}..${c2}`, suites: SS, root: repo, env: { LANG: 'C.UTF-8' }, reach: false })).includes('test-srv')),
     'a server-only booting suite (no browser) is dropped for a dictionary fallback — the old rule (reach: false) selects it');
   fs.rmSync(path.join(repo, 'scripts/test-srv.mjs'));
 
@@ -273,7 +273,7 @@ console.log('\n§3 the wiring (ci.mjs affectedSuites, real git)');
   const bare = mktmp('bare');
   fs.cpSync(repo, bare, { recursive: true, filter: (src) => !src.includes(`${path.sep}.git`) });
   const ub = affectedSuites({ range: `${c2}..${c3}`, suites: S, root: bare, gitRoot: repo, env: { LANG: 'C.UTF-8' } });
-  ok(sel(ub) === 'test-en,test-widget,test-window,test-zh' && /tracked sources could not be listed/.test(ub.summary), 'CONTROL: a tree whose tracked sources git cannot list knows no drawer ⇒ the old rule, said');
+  ok(sel(ub) === 'test-en,test-widget,test-window,test-zh' && verdictOf(/tracked sources could not be listed/.test(ub.summary)), 'CONTROL: a tree whose tracked sources git cannot list knows no drawer ⇒ the old rule, said');
   w('public/style.css', edit(CSS, 'button { border: 0; }', 'button { border: 1px; }'));
   const c4 = commitAll('a button rule');
   ok(sel(run(`${c3}..${c4}`)) === 'test-en,test-widget,test-window,test-zh', 'CONTROL: a global selector (button) ⇒ the old rule: every suite that boots the page');
@@ -296,7 +296,7 @@ console.log('\n§3 the wiring (ci.mjs affectedSuites, real git)');
   const ciSrc = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
   // `, host` (lane ci-aidev-desktop-batch): --list-affected also takes the --host cut
   // `, tier: …, rules: …` (主开发 2026-11-17, the rule behind each selection): --tier=fast and --rules ride the same call
-  ok(/listAffected\(\{ range: rangeArg \|\| null, shard, dir, why: !!arg\('why'\)(?:, host(?:, tier: [^,]+, rules: !!arg\('rules'\))?)? \}\)/.test(ciSrc) && /affectedSuites\(\{ range, suites: all, root: runRoot, gitRoot: repo, why \}\)/.test(ciSrc),
+  ok(gateOf(/listAffected\(\{ range: rangeArg \|\| null, shard, dir, why: !!arg\('why'\)(?:, host(?:, tier: [^,]+, rules: !!arg\('rules'\))?)? \}\)/.test(ciSrc)) && verdictOf(/affectedSuites\(\{ range, suites: all, root: runRoot, gitRoot: repo, why \}\)/.test(ciSrc)),
     'WIRING: --why reaches --list-affected and the heavy gate\'s selection');
 }
 
@@ -309,12 +309,12 @@ console.log('\n§4 the census (the real table)');
   const isProduct = (p) => p === 'server.js' || p.startsWith('src/') || p.startsWith('public/') || p.startsWith('data/bin/');
   const unreachable = heavy.filter((s) => { const { files, prefixes } = inputs.get(s.name); return !s.always && !(s.reads && s.reads.length) && ![...files, ...prefixes].some(isProduct); });
   ok(heavy.length > 200 && !unreachable.length, `every one of the ${heavy.length} heavy suites is reachable — always:, a reads: list or a product input (${unreachable.map((s) => s.name).join(', ') || 'none unreachable'})`);
-  ok(heavy.every((s) => inputs.get(s.name).files.has(`scripts/${s.name}.mjs`)), 'every heavy suite is selected by its own file');
+  ok(verdictOf(heavy.every((s) => inputs.get(s.name).files.has(`scripts/${s.name}.mjs`))), 'every heavy suite is selected by its own file');
   for (const f of Object.keys(M.MODELED)) {
     const reach = heavy.filter((s) => { if (s.always) return false; const { files, prefixes } = inputs.get(s.name); return files.has(f) || [...prefixes].some((p) => f.startsWith(p)); }).map((s) => s.name).sort();
     const fb = affectedSuites({ range: 'nope..nope', suites: heavy, root: REPO, changed: [f], memo, env: { LANG: 'C.UTF-8' }, reach: false });
     const got = fb.selected.filter((s) => !s.always).map((s) => s.name).sort();
-    ok(reach.length > 100 && got.join() === reach.join() && /the OLD rule/.test(fb.summary), `${f}: an edit the rule cannot attribute (here: no diff) keeps the old reach exactly (${got.length} = ${reach.length}; reach: false)`);
+    ok(reach.length > 100 && got.join() === reach.join() && verdictOf(/the OLD rule/.test(fb.summary)), `${f}: an edit the rule cannot attribute (here: no diff) keeps the old reach exactly (${got.length} = ${reach.length}; reach: false)`);
     // …and the static reach (lane affected-static-reach) then keeps exactly the suites that drive a browser or load the table themselves
     const rc = reachContext({ suites: heavy, root: REPO, memo });
     const want = reach.filter((n) => { const s = heavy.find((x) => x.name === n); return rc.own(s, f) || rc.suite(s).browser; });
@@ -323,10 +323,10 @@ console.log('\n§4 the census (the real table)');
   }
   const full = listAffected({ dir: mktmp('markers') }).names.sort();
   ok(full.join() === heavy.map((s) => s.name).sort().join(), `the FULL heavy tier is the table (${full.length} suites) — the rules touch only the affected selection`);
-  ok(Object.keys(M.KEPT).includes('server.js') && Object.keys(M.KEPT).includes('scripts/ci.mjs') && !M.MODELED['server.js'] && !M.MODELED['scripts/ci.mjs'], 'server.js and scripts/ci.mjs keep the old rule (KEPT, said in the summary)');
+  ok(gateOf(Object.keys(M.KEPT).includes('server.js')) && gateOf(Object.keys(M.KEPT).includes('scripts/ci.mjs')) && !M.MODELED['server.js'] && !M.MODELED['scripts/ci.mjs'], 'server.js and scripts/ci.mjs keep the old rule (KEPT, said in the summary)');
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 }
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

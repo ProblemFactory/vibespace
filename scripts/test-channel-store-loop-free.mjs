@@ -39,7 +39,7 @@ const P = require(path.join(REPO, 'src/store-pace.js'));
 const STALL = require(path.join(REPO, 'scripts/fixtures/fs-stall.cjs'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -132,12 +132,12 @@ console.log('(b) a slow writer: paced resolves at once, durable only on disk, «
   // b1 — PACED: resolves after the change in memory; its bytes are not on disk yet
   await st.adapters.update((a) => { a.adapters[0].lastPass = { at: 1 }; }, { paced: true });
   const b1Disk = (readJson(st.adaptersFile).adapters[0] || {}).lastPass;
-  ok(st.adapters.live().adapters[0].lastPass && st.adapters.live().adapters[0].lastPass.at === 1 && !b1Disk && w.pending(st.adaptersFile), '(b1) a PACED stamp resolves after the change in memory — its bytes not on disk when it resolves (the writer still owes them)', { disk: b1Disk });
+  ok(gateOf(st.adapters.live().adapters[0].lastPass) && st.adapters.live().adapters[0].lastPass.at === 1 && !b1Disk && verdictOf(w.pending(st.adaptersFile)), '(b1) a PACED stamp resolves after the change in memory — its bytes not on disk when it resolves (the writer still owes them)', { disk: b1Disk });
   // b2 + b3 — DURABLE behind a write that outlasts durable()'s bound (×7): «queued» is still owed, never a rejection
   let rejected = null; const t0 = performance.now();
   try { await st.adapters.update((a) => { a.adapters[0].label = 'durable'; }); } catch (e) { rejected = (e && e.code) || String(e); }
   const waited = Math.round(performance.now() - t0), b2Disk = hasRec(st.adaptersFile, 'acct', 'label', 'durable');
-  ok(rejected === null && b2Disk, `(b2) a DURABLE act resolves only when its bytes are on disk — the file holds it at the resolve (waited ${waited} ms)`, { rejected, b2Disk });
+  ok(rejected === null && verdictOf(b2Disk), `(b2) a DURABLE act resolves only when its bytes are on disk — the file holds it at the resolve (waited ${waited} ms)`, { rejected, b2Disk });
   ok(rejected === null && waited >= DURABLE_MS, `(b3) «queued» at the writer's bound (${DURABLE_MS} ms) is STILL OWED: the promise waited on (${waited} ms) and resolved — never a rejection`, { rejected, waited });
   unhold('adapters.json');
   // b4 — a FAILED write rejects with its code (a durable act); a PACED one resolves (memory holds it; the writer retries)
@@ -231,7 +231,7 @@ console.log('(d) a synchronous flush behind a flying write: it waits — measure
   st.stamps.set('acct/c1', { lastPollAt: 100 });
   t0 = performance.now(); const d2 = st.stamps.flush(); const d2Ms = Math.round(performance.now() - t0);
   const stillFlying = !!(w.stats().find((x) => x.file === st.adaptersFile) || {}).inflight;
-  ok(d2 === false && stillFlying && d2Ms >= BOUND, `(d2) a flush behind a write that outlasts the writer's synchronous bound returns AT the bound (${d2Ms} ms ≥ ${BOUND} ms, the write still in flight) — not written, kept, retried; THIS is what can still hold the loop: up to the bound (a third of the stop grace)`, { d2, d2Ms, stillFlying });
+  ok(d2 === false && gateOf(stillFlying) && d2Ms >= BOUND, `(d2) a flush behind a write that outlasts the writer's synchronous bound returns AT the bound (${d2Ms} ms ≥ ${BOUND} ms, the write still in flight) — not written, kept, retried; THIS is what can still hold the loop: up to the bound (a third of the stop grace)`, { d2, d2Ms, stillFlying });
   unhold('adapters.json');
   for (let k = 0; k < 600 && (w.pending(st.adaptersFile) || w.pending(st.stamps.file)); k++) await sleep(10);
   // d3: THE JOURNAL'S FOLD — the side file's own write in flight (held past the bound), a stamp set meanwhile: when that
@@ -246,7 +246,7 @@ console.log('(d) a synchronous flush behind a flying write: it waits — measure
   const onDisk = readJson(st.stamps.file), journal = (() => { try { return fs.readFileSync(st.stamps.log, 'utf8'); } catch { return ''; } })();
   const reborn = CS.createChannelStore({ dir: path.join(ROOT, 'd'), log: quiet, writer: SW.create({ log: quiet, workerPath: STAND }) });   // the store a kill leaves (no close)
   const seen = (reborn.stamps.get('acct/c1') || {}).lastPollAt;
-  ok(d3 === false && JSON.stringify(onDisk).includes('200') && journal.includes('201') && seen === 201, `(d3) the side file landed holding 200 while 201 was set after its bytes were made: the journal keeps 201 (cure r1: folded DOWN to the stamps set since the bytes were made — never emptied of them) — the store a kill leaves reads ${seen}`, { d3, journal: journal.slice(-120), seen });
+  ok(d3 === false && gateOf(JSON.stringify(onDisk).includes('200')) && gateOf(journal.includes('201')) && seen === 201, `(d3) the side file landed holding 200 while 201 was set after its bytes were made: the journal keeps 201 (cure r1: folded DOWN to the stamps set since the bytes were made — never emptied of them) — the store a kill leaves reads ${seen}`, { d3, journal: journal.slice(-120), seen });
   w.stop();
 }
 
@@ -262,10 +262,10 @@ console.log('(e) close() writes every moved file through the writer; (f) the key
   st.peopleWrite('acct-e', { self: 'me', people: {} });
   st.close();
   const after = ((readJson(st.adaptersFile) || {}).adapters || [])[0] || {};
-  ok(!before.lastPass && after.lastPass && after.lastPass.at === 31 && !!readJson(path.join(dir, 'acct-e', 'people.json')), '(e) close() writes every moved file through the writer: a paced stamp and a new account\'s people owed at close are on disk after it', { before: before.lastPass || null, after: after.lastPass || null });
+  ok(!before.lastPass && gateOf(after.lastPass) && after.lastPass.at === 31 && !!readJson(path.join(dir, 'acct-e', 'people.json')), '(e) close() writes every moved file through the writer: a paced stamp and a new account\'s people owed at close are on disk after it', { before: before.lastPass || null, after: after.lastPass || null });
   w.stop();
   const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-  ok(/const accountsHold = \(\) => \{\n\s+const chan = path\.join\(dataDir, 'channels'\);\n\s+if \(holdsCiphertext\(\{ values: \[store\.adapters\.live\(\)\], files: \[path\.join\(chan, 'adapters\.json'\)\]/.test(eng) && /secretBox\(path\.join\(dataDir, KEY_FILE\), \{ hasCiphertext: accountsHold \}\)/.test(eng), '(f) the key-mint check (holdsCiphertext, in accountsHold — B-f276) reads the store\'s LIVE records before adapters.json — the file may lag a token sealed in memory a moment ago');
+  ok(gateOf(/const accountsHold = \(\) => \{\n\s+const chan = path\.join\(dataDir, 'channels'\);\n\s+if \(holdsCiphertext\(\{ values: \[store\.adapters\.live\(\)\], files: \[path\.join\(chan, 'adapters\.json'\)\]/.test(eng)) && verdictOf(/secretBox\(path\.join\(dataDir, KEY_FILE\), \{ hasCiphertext: accountsHold \}\)/.test(eng)), '(f) the key-mint check (holdsCiphertext, in accountsHold — B-f276) reads the store\'s LIVE records before adapters.json — the file may lag a token sealed in memory a moment ago');
 }
 
 
@@ -289,8 +289,8 @@ console.log('(g) the dispatch ledger is an ACT — rank 0 and durable() asked at
     return { disp: c.filter((x) => x.f === 'dispatch-ledger.json'), pace: c.filter((x) => x.f === 'wake-pace.json') };
   };
   const g = legOf(CS, 'moved');
-  ok(g.disp.some((x) => x.k === 'dirty' && x.name === 'channels-dispatch.write' && x.rank === 0) && g.disp.some((x) => x.k === 'durable')
-    && g.pace.some((x) => x.k === 'dirty' && x.name === 'channels-wake-pace.write' && x.rank === undefined) && !g.pace.some((x) => x.k === 'durable'),
+  ok(gateOf(g.disp.some((x) => x.k === 'dirty' && x.name === 'channels-dispatch.write' && x.rank === 0)) && gateOf(g.disp.some((x) => x.k === 'durable'))
+    && gateOf(g.pace.some((x) => x.k === 'dirty' && x.name === 'channels-wake-pace.write' && x.rank === undefined)) && !g.pace.some((x) => x.k === 'durable'),
     '(g) a dispatch set hands the ledger as channels-dispatch.write, rank 0, and asks durable() (urgent); a wake-pace set is paced — no rank, no durable()', g);
   const csSrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
   const aD = '    if (!closed) W().durable(dispatchFile).catch(() => { });';
@@ -298,7 +298,7 @@ console.log('(g) the dispatch ledger is an ACT — rank 0 and durable() asked at
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const NoUrgent = mutantCopies('loop-free-g', REPO).load('src/channel-store.js', editAnchor(csSrc, aD, '   ', "src/channel-store.js"), 'no-urgent');
   const r = legOf(NoUrgent, 'red');
-  ok(!r.disp.some((x) => x.k === 'durable') && r.disp.some((x) => x.k === 'dirty'), '(g) CONTROL: the durable() line removed ⇒ the ledger waits for the pace (no durable() asked) — the check above would be red', r);
+  ok(!r.disp.some((x) => x.k === 'durable') && verdictOf(r.disp.some((x) => x.k === 'dirty')), '(g) CONTROL: the durable() line removed ⇒ the ledger waits for the pace (no durable() asked) — the check above would be red', r);
   // (g) the HAND-OFF's rank: the ledger handed without `act: true` carries no rank 0 in its dirty() (while the store is open the
   // durable() that follows raises it in the writer anyway — this control pins the hand-off's own word, the exit order's belt)
   const NoRank = mutantCopies('loop-free-g-rank', REPO).load('src/channel-store.js', editAnchor(csSrc, "owe(dispatchFile, { name: 'channels-dispatch.write', act: true,", "owe(dispatchFile, { name: 'channels-dispatch.write',", "src/channel-store.js"), 'no-rank');
@@ -328,4 +328,4 @@ console.log('(g) the dispatch ledger is an ACT — rank 0 and durable() asked at
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

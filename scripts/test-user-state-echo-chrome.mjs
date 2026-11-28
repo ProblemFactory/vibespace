@@ -29,7 +29,7 @@ const root = mintRoot('ueo-chrome'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const fakeHome = path.join(root, 'home');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -93,13 +93,13 @@ try {
   for (let i = 0; i < 40; i++) { after = await userState(); if (keys.slice(0, 3).every((k) => after.archivedSessions.includes(k)) && after.starredSessions.includes(keys[3]) && after.customNames[keys[4]] === 'closed at once') break; await sleep(250); }
   await sleep(1000);
   after = await userState();
-  check('acts made and the tab closed AT ONCE: the hub received every one (three archives, a star, a rename)', keys.slice(0, 3).every((k) => after.archivedSessions.includes(k)) && after.starredSessions.includes(keys[3]) && after.customNames[keys[4]] === 'closed at once', { archived: after.archivedSessions, starred: after.starredSessions, names: after.customNames });
+  check('acts made and the tab closed AT ONCE: the hub received every one (three archives, a star, a rename)', gateOf(keys.slice(0, 3).every((k) => after.archivedSessions.includes(k))) && gateOf(after.starredSessions.includes(keys[3])) && after.customNames[keys[4]] === 'closed at once', { archived: after.archivedSessions, starred: after.starredSessions, names: after.customNames });
   // each once, by the hub's record (the write count is printed — four is a lawful arrival order; more than five is not)
   let rows = [];
   for (let i = 0; i < 20; i++) { rows = actFacts(made.unconf); if (onceEach(rows, made.page)) break; await sleep(250); }   // (the store writer lands the file a moment after the answer)
   const writes = UO.revOf(after) - UO.revOf(before);
   check(`…each once, by the hub's own record: each of the five acts' slots names this page and THAT act's batch (${writes} write(s) — a request a later one overtook writes nothing)`,
-    made.unconf.length === 5 && onceEach(rows, made.page) && writes >= 1 && writes <= 5, { writes, page: made.page, rows });
+    made.unconf.length === 5 && gateOf(onceEach(rows, made.page)) && writes >= 1 && writes <= 5, { writes, page: made.page, rows });
   try { p.ws.close(); } catch {}
   // THE SECOND REQUEST HELD — built, never waited for by load: the five acts again on a page whose SECOND request (b1 + b2) is held
   // inside the browser (CDP Fetch, the request stage) while the page's other requests go on. Every act is on the hub, each ONCE by
@@ -134,7 +134,7 @@ try {
     let rowsMid = [];
     for (let i = 0; i < 20; i++) { rowsMid = actFacts(made3.unconf); if (onceEach(rowsMid, made3.page)) break; await sleep(250); }   // (a belt: the file is written before the state the GET serves)
     check(`the SECOND request HELD in the browser (its two batches, not finished) while the page's other requests went on: every one of the five acts on the hub, each ONCE by the hub's own record (${writes4} write(s), ${paused} request(s) paused — the count follows the order they ARRIVE in, never judged)`,
-      !!heldId && heldIsB1B2() && !heldDone && all5(mid) && made3.unconf.length === 5 && onceEach(rowsMid, made3.page), { held: !!heldId, heldIds, first2: made3.unconf.slice(0, 2).map((o) => o.batch), heldDone, paused, writes4, rev: [UO.revOf(before3), UO.revOf(mid)], rows: rowsMid });
+      !!heldId && gateOf(heldIsB1B2()) && !heldDone && gateOf(all5(mid)) && made3.unconf.length === 5 && verdictOf(onceEach(rowsMid, made3.page)), { held: !!heldId, heldIds, first2: made3.unconf.slice(0, 2).map((o) => o.batch), heldDone, paused, writes4, rev: [UO.revOf(before3), UO.revOf(mid)], rows: rowsMid });
     // a later act of the same page on the held request's first slot: un-archive the first conversation (b6, its own request)
     const made6 = await r.evl(`(() => { const sb = app.sidebar; sb.toggleArchive(${JSON.stringify(keys3[0])}); return sb.__userSync.unconfirmed(); })()`);
     let mid6 = null;
@@ -151,7 +151,7 @@ try {
     const want = [...made3.unconf.slice(1), ...act6];   // acts 2–5, and act 6 now owns the first conversation's slot
     for (let i = 0; i < 20; i++) { rows3 = actFacts(want); if (onceEach(rows3, made3.page)) break; await sleep(250); }
     check(`…the held request let go AFTER a later act of the page undid its first: HELD by its batch ids — it wrote nothing (${UO.revOf(end3) - UO.revOf(mid6)} writes), the un-archive stands on the hub and on the screen (${seen.length} looks, archived again in ${seen.filter(Boolean).length})`,
-      heldIsB1B2() && !mid6.archivedSessions.includes(keys3[0]) && heldDone === 'Network.loadingFinished' && !end3.archivedSessions.includes(keys3[0]) && UO.revOf(end3) === UO.revOf(mid6) && seen.length > 0 && !seen.some(Boolean) && onceEach(rows3, made3.page) && act6.length === 1,
+      gateOf(heldIsB1B2()) && !mid6.archivedSessions.includes(keys3[0]) && heldDone === 'Network.loadingFinished' && !end3.archivedSessions.includes(keys3[0]) && UO.revOf(end3) === UO.revOf(mid6) && seen.length > 0 && !seen.some(Boolean) && gateOf(onceEach(rows3, made3.page)) && act6.length === 1,
       { heldDone, archived0: end3.archivedSessions.includes(keys3[0]), revs: [UO.revOf(mid6), UO.revOf(end3)], seenArchived: seen.filter(Boolean).length, rows3 });
     try { await r.cdp('Fetch.disable'); } catch {}
     await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${r.id}`);
@@ -173,4 +173,4 @@ try {
   failed++; console.error('  ✗ threw:', e.stack || e.message);
 }
 console.log(failed ? `\n${failed} FAILED` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

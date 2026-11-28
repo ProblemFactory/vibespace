@@ -21,7 +21,7 @@ const TBS = require('../src/browser-tabs.js');
 const K = require('../src/server/browser-keeper.js');
 const F = require('../src/browser-facts.js');
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.UTC(2026, 9, 5, 16, 34, 0);
 
@@ -45,13 +45,13 @@ function table(V) {
   return r;
 }
 const tb = table(BS);
-ok(tb.answering, 'an answer ⇒ answering');
-ok(tb.oneMiss, 'one miss ⇒ missing (since = that ask, lastAnswerAt kept, asks 1)');
-ok(tb.twoUnder60, 'two misses under 60 s ⇒ still missing (busy ≠ hung)');
-ok(tb.hung, '≥ 60 s across ≥ 2 asks while the pid lives ⇒ unresponsive {since, asks}');
-ok(tb.oneAskNever, 'a single ask, however late, is never the verdict (≥ 2 asks)');
-ok(tb.clears, 'an answer clears it (cleared, since null, lastAnswerAt = now)');
-ok(tb.goneIsClosed, 'pid gone ⇒ closed (the closed path says it), never unresponsive');
+ok(verdictOf(tb.answering), 'an answer ⇒ answering');
+ok(verdictOf(tb.oneMiss), 'one miss ⇒ missing (since = that ask, lastAnswerAt kept, asks 1)');
+ok(verdictOf(tb.twoUnder60), 'two misses under 60 s ⇒ still missing (busy ≠ hung)');
+ok(verdictOf(tb.hung), '≥ 60 s across ≥ 2 asks while the pid lives ⇒ unresponsive {since, asks}');
+ok(verdictOf(tb.oneAskNever), 'a single ask, however late, is never the verdict (≥ 2 asks)');
+ok(verdictOf(tb.clears), 'an answer clears it (cleared, since null, lastAnswerAt = now)');
+ok(verdictOf(tb.goneIsClosed), 'pid gone ⇒ closed (the closed path says it), never unresponsive');
 ok(BS.UNRESPONSIVE_AFTER_MS === 60000 && BS.UNRESPONSIVE_MIN_ASKS === 2 && BS.ANSWER_ASK_MS === 3000, 'the numbers: 60 s, 2 asks, a 3 s ask');
 
 // ═══ ② THE WORDS ═══
@@ -59,20 +59,20 @@ console.log('— ② the refusal words + the UI words');
 const fact = { label: 'jarvis-work', since: T0, now: T0 + 87 * 60000, tabs: null };
 const before = TBS.tabRefusalText('tabs_unreadable', { agent: true });
 const after = TBS.tabRefusalText('tabs_unreadable', { agent: true, unresponsive: fact });
-ok(/run the command again/.test(before), 'before the verdict (busy ≠ hung) the agent still reads tabs_unreadable\'s "run the command again"');
-ok(/has not answered since 16:34 UTC \(87 min\)/.test(after) && /hung, not busy/.test(after) && /vibespace-browser restart/.test(after) && /Restart in the Browser panel/.test(after) && !/run the command again/.test(after), 'after it: the FACT (since 16:34, 87 min) + the recipe (restart / the user\'s Restart), never "try again"', after);
-ok(TBS.TAB_REFUSALS.includes('browser_unresponsive') && TBS.tabRefusalText('browser_unresponsive', { agent: true, unresponsive: fact }) === after, 'browser_unresponsive is a closed-set refusal with the same words');
+ok(verdictOf(/run the command again/.test(before)), 'before the verdict (busy ≠ hung) the agent still reads tabs_unreadable\'s "run the command again"');
+ok(gateOf(/has not answered since 16:34 UTC \(87 min\)/.test(after)) && gateOf(/hung, not busy/.test(after)) && gateOf(/vibespace-browser restart/.test(after)) && gateOf(/Restart in the Browser panel/.test(after)) && !/run the command again/.test(after), 'after it: the FACT (since 16:34, 87 min) + the recipe (restart / the user\'s Restart), never "try again"', after);
+ok(gateOf(TBS.TAB_REFUSALS.includes('browser_unresponsive')) && TBS.tabRefusalText('browser_unresponsive', { agent: true, unresponsive: fact }) === after, 'browser_unresponsive is a closed-set refusal with the same words');
 const routes = fs.readFileSync(new URL('../src/routes/browser.js', import.meta.url), 'utf8');
-ok(/browser_unresponsive: 503, browser_answering: 409/.test(routes), 'the route STATUS names both codes');
+ok(verdictOf(/browser_unresponsive: 503, browser_answering: 409/.test(routes)), 'the route STATUS names both codes');
 const uw = BS.unresponsiveWords({ since: T0, label: 'jarvis-work', clock: '16:34' });
 ok(uw.state === 'Not answering since 16:34' && uw.banner === 'jarvis-work has not answered since 16:34' && uw.action === 'Restart', 'the row\'s state word + the live banner + its Restart (en)', uw);
 const zh = fs.readFileSync(new URL('../src/lib/i18n-zh.js', import.meta.url), 'utf8'), ja = fs.readFileSync(new URL('../src/lib/i18n-ja.js', import.meta.url), 'utf8');
 const keys = ['Not answering since {clock}', 'browser not answering', '{label} has not answered since {clock}', 'The browser is not answering — Restart it from the Browser panel', 'Restart the browser that stopped answering — logins stay in the profile, its tabs are re-opened'];
-ok(keys.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')), 'every UI sentence has a zh and a ja entry');
+ok(verdictOf(keys.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))), 'every UI sentence has a zh and a ja entry');
 const sw = BS.stuckWords({ state: 'unresponsive', why: 'browser', since: T0, label: 'jarvis-work', clock: '16:34' });
 ok(sw.chip === 'browser not answering' && sw.line === uw.banner && sw.action === 'Restart', 'the chip / live banner (stuckWords) say the BROWSER, not "page not responding"');
 const n = BS.unresponsiveNotice({ label: 'jarvis-work', since: T0, now: T0 + 87 * 60000 });
-ok(/not answered since 16:34 UTC/.test(n.text) && /87 min/.test(n.detail) && /resolves itself/.test(n.detail), 'the For-you item\'s words (since, minutes, self-resolving)');
+ok(gateOf(/not answered since 16:34 UTC/.test(n.text)) && gateOf(/87 min/.test(n.detail)) && verdictOf(/resolves itself/.test(n.detail)), 'the For-you item\'s words (since, minutes, self-resolving)');
 
 // ═══ ③ THE ADMISSION TABLE ═══
 console.log('— ③ who may restart');
@@ -86,10 +86,10 @@ function admission(V) {
   };
 }
 const ad = admission(BS);
-ok(ad.user, 'the user: always');
-ok(ad.agentHung, 'an agent while the verdict stands: admitted');
-ok(ad.agentAnswering, 'an agent while it answers: refused browser_answering');
-ok(ad.agentDriven, 'an agent while a human drives: refused take_over_first');
+ok(verdictOf(ad.user), 'the user: always');
+ok(verdictOf(ad.agentHung), 'an agent while the verdict stands: admitted');
+ok(verdictOf(ad.agentAnswering), 'an agent while it answers: refused browser_answering');
+ok(verdictOf(ad.agentDriven), 'an agent while a human drives: refused take_over_first');
 // lane browser-daemon-survives-update: THE PAGE VERDICT (pageAnswerVerdict) + the admission rows that read it
 {
   const A = { targetId: 'A1A1A1A1A1A1A1A1', url: 'https://mail.example/inbox' }, Bp = { targetId: 'B2B2B2B2B2B2B2B2', url: 'https://docs.example/d/1' };
@@ -102,7 +102,7 @@ ok(ad.agentDriven, 'an agent while a human drives: refused take_over_first');
     oneAnswered: pv(true, [{ ...A, answered: true }, { ...Bp, answered: false }]).state === 'answering',
     bound: pv(true, [{ ...A, answered: false }], { boundMs: 400 }).boundMs === 400 && BS.pageAnswerVerdict({ list: true, pages: [] }).boundMs === BS.PAGE_ANSWER_MS,
   };
-  ok(Object.values(rows).every(Boolean) && BS.PAGE_ANSWER_MS === 5000, 'the page verdict table: unasked / the list unanswered ⇒ hung / no page ⇒ answering / no page\'s renderer answered (its history did) ⇒ hung / one answered ⇒ answering; the bound (5 s) rides the verdict', rows);
+  ok(gateOf(Object.values(rows).every(Boolean)) && BS.PAGE_ANSWER_MS === 5000, 'the page verdict table: unasked / the list unanswered ⇒ hung / no page ⇒ answering / no page\'s renderer answered (its history did) ⇒ hung / one answered ⇒ answering; the bound (5 s) rides the verdict', rows);
   const hung = pv(true, [{ ...A, answered: false }, { ...Bp, answered: false }]), some = pv(true, [{ ...A, answered: true }, { ...Bp, answered: false }]), all = pv(true, [{ ...A, answered: true }, { ...Bp, answered: true }]);
   const ag = (o) => BS.restartAdmission({ by: 'agent', label: 'jarvis-work', ...o });
   const t = {
@@ -116,9 +116,9 @@ ok(ad.agentDriven, 'an agent while a human drives: refused take_over_first');
     humanFirst: ag({ pages: hung, humanDriving: true }).code === 'take_over_first',
     browserVerdictFirst: ag({ unresponsive: { since: T0, asks: 3 }, pages: all }).why === 'browser',
   };
-  ok(Object.values(t).every(Boolean), 'the admission rows: no page answers (or no list) ⇒ admitted — WHATEVER the endpoint said; a page that answers ⇒ refused; every page answers but the agent\'s last commands timed out through the driver ⇒ admitted (driver); a dialog ⇒ held, refused; a person driving first; the keeper\'s own verdict first', t);
+  ok(verdictOf(Object.values(t).every(Boolean)), 'the admission rows: no page answers (or no list) ⇒ admitted — WHATEVER the endpoint said; a page that answers ⇒ refused; every page answers but the agent\'s last commands timed out through the driver ⇒ admitted (driver); a dialog ⇒ held, refused; a person driving first; the keeper\'s own verdict first', t);
   const w = ag({ pages: some }).error;
-  ok(/1 of 2 pages answered within 5 s \(A1A1A1A1 "https:\/\/mail\.example\/inbox"\); 1 did not \(B2B2B2B2 "https:\/\/docs\.example\/d\/1"\) — close a tab that does not answer: `vibespace-browser tab close <tab>`/.test(w), 'the refusal NAMES what answered and what did not, and the door for the one that did not', w);
+  ok(verdictOf(/1 of 2 pages answered within 5 s \(A1A1A1A1 "https:\/\/mail\.example\/inbox"\); 1 did not \(B2B2B2B2 "https:\/\/docs\.example\/d\/1"\) — close a tab that does not answer: `vibespace-browser tab close <tab>`/.test(w)), 'the refusal NAMES what answered and what did not, and the door for the one that did not', w);
 }
 
 // ═══ ④ THE REAL KEEPER ON ITS REAL TICK over a browser that accepts and never answers ═══
@@ -176,28 +176,28 @@ const p = keeper.createProfile({ label: 'jarvis-work' }, { owner: { kind: 'insta
 try { keeper.updateProfile?.(p.id, {}); } catch { }
 await keeper.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
 let attachedB = true; try { await keeper.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' }); } catch (e) { attachedB = false; }
-ok(attachedB, 'a second conversation holds the shared browser (the restart below has another holder to tell)');
-ok(keeper.browserOf(p.id) && keeper.browserOf(p.id).state === 'ready' && /:\d+\//.test(String(keeper.browserOf(p.id).cdpUrl || '')), 'the fake browser is ready, its CDP url on the hung loopback port', keeper.browserOf(p.id) && keeper.browserOf(p.id).state);
+ok(verdictOf(attachedB), 'a second conversation holds the shared browser (the restart below has another holder to tell)');
+ok(gateOf(keeper.browserOf(p.id)) && keeper.browserOf(p.id).state === 'ready' && verdictOf(/:\d+\//.test(String(keeper.browserOf(p.id).cdpUrl || ''))), 'the fake browser is ready, its CDP url on the hung loopback port', keeper.browserOf(p.id) && keeper.browserOf(p.id).state);
 // the tick asks on its own; the injected clock moves 31 s between asks (each real ask times out after the gate's 250 ms)
 const t0 = clock; let rounds = 0;
 while (!keeper.browserOf(p.id).unresponsive && rounds < 12) { await sleep(450); clock += 31000; rounds++; }
 const u = keeper.browserOf(p.id).unresponsive;
-ok(u && u.since >= t0 && u.asks >= 2 && clock - u.since >= 60000, 'the REAL tick judged it: rec.unresponsive {since, asks ≥ 2} after ≥ 60 s of unanswered asks', { u, rounds });
-ok(lines.some((l) => /not answering since \d\d:\d\d \(asks \d+, pid \d+ alive\) — browser_unresponsive; Restart offered/.test(l)), 'the journal line at the verdict', lines.filter((l) => /answer/.test(l)));
+ok(gateOf(u) && u.since >= t0 && u.asks >= 2 && clock - u.since >= 60000, 'the REAL tick judged it: rec.unresponsive {since, asks ≥ 2} after ≥ 60 s of unanswered asks', { u, rounds });
+ok(verdictOf(lines.some((l) => /not answering since \d\d:\d\d \(asks \d+, pid \d+ alive\) — browser_unresponsive; Restart offered/.test(l))), 'the journal line at the verdict', lines.filter((l) => /answer/.test(l)));
 await sleep(450); clock += 31000; await sleep(450);
 // lane browser-stderr-pipe: the verdict asked /proc WHY (once per run) — a Chrome blocked on its unread log pipe is NAMED
-ok(probed.length === 1 && Number.isInteger(probed[0]) && keeper.browserOf(p.id).unresponsive.cause === 'stderr-pipe-full', 'the keeper names the cause: rec.unresponsive.cause = stderr-pipe-full (one /proc probe per run)', { probed, u: keeper.browserOf(p.id).unresponsive });
-ok(lines.some((l) => /stderr-pipe-full — Chrome pid \d+ is blocked writing its log into pipe:\[351497172\] that nothing reads/.test(l)), 'the journal line names it (the incident bundle reads the journal)');
-ok(todos.length === 1 && todos[0].action && todos[0].action.type === 'browser-restart' && todos[0].action.profileId === p.id && todos[0].origin === 'browser' && /has not answered since/.test(todos[0].text), 'ONE For-you item per (profile, since) — origin browser, its Restart act — not one per tick', todos.map((x) => x.text));
+ok(probed.length === 1 && gateOf(Number.isInteger(probed[0])) && keeper.browserOf(p.id).unresponsive.cause === 'stderr-pipe-full', 'the keeper names the cause: rec.unresponsive.cause = stderr-pipe-full (one /proc probe per run)', { probed, u: keeper.browserOf(p.id).unresponsive });
+ok(verdictOf(lines.some((l) => /stderr-pipe-full — Chrome pid \d+ is blocked writing its log into pipe:\[351497172\] that nothing reads/.test(l))), 'the journal line names it (the incident bundle reads the journal)');
+ok(todos.length === 1 && gateOf(todos[0].action) && todos[0].action.type === 'browser-restart' && todos[0].action.profileId === p.id && todos[0].origin === 'browser' && verdictOf(/has not answered since/.test(todos[0].text)), 'ONE For-you item per (profile, since) — origin browser, its Restart act — not one per tick', todos.map((x) => x.text));
 let ref = null; try { await keeper.agentTabAct({ browserKey: KEY_A, handle: '', argv: ['list'] }); } catch (e) { ref = e; }
-ok(ref && ref.code === 'browser_unresponsive' && /has not answered since/.test(ref.message) && /vibespace-browser restart/.test(ref.message), 'the agent\'s `tab list` is refused browser_unresponsive with the fact + the recipe (never "run the command again")', ref && { code: ref.code, m: ref.message });
+ok(gateOf(ref) && ref.code === 'browser_unresponsive' && gateOf(/has not answered since/.test(ref.message)) && verdictOf(/vibespace-browser restart/.test(ref.message)), 'the agent\'s `tab list` is refused browser_unresponsive with the fact + the recipe (never "run the command again")', ref && { code: ref.code, m: ref.message });
 hung = false; // the relaunched browser answers
 const r = await keeper.restartProfile(p.id, { by: 'agent', browserKey: KEY_A, sessionName: 'Research' });
-ok(r && keeper.browserOf(p.id).state === 'ready' && !keeper.browserOf(p.id).unresponsive, 'an agent\'s restart while the verdict stands: stopped + started again, the fact cleared');
-ok(statuses.some((s) => s.id === todos[0].id && s.st === 'done'), 'the For-you item resolved itself at the restart');
-ok(attachedB ? relaunch.length === 1 && relaunch[0].browserKey === KEY_B && relaunch[0].outcome === 'restarted' && /restarted by the conversation "Research" because it had not answered since/.test(relaunch[0].text) : relaunch.length === 0, 'the OTHER holder is told by one card (the restarting conversation is not)', relaunch.map((e) => ({ k: e.browserKey, t: e.text })));
+ok(gateOf(r) && keeper.browserOf(p.id).state === 'ready' && !keeper.browserOf(p.id).unresponsive, 'an agent\'s restart while the verdict stands: stopped + started again, the fact cleared');
+ok(verdictOf(statuses.some((s) => s.id === todos[0].id && s.st === 'done')), 'the For-you item resolved itself at the restart');
+ok(attachedB ? relaunch.length === 1 && relaunch[0].browserKey === KEY_B && relaunch[0].outcome === 'restarted' && verdictOf(/restarted by the conversation "Research" because it had not answered since/.test(relaunch[0].text)) : relaunch.length === 0, 'the OTHER holder is told by one card (the restarting conversation is not)', relaunch.map((e) => ({ k: e.browserKey, t: e.text })));
 let ra = null; try { await keeper.restartProfile(p.id, { by: 'agent', browserKey: KEY_A }); } catch (e) { ra = e; }
-ok(ra && ra.code === 'browser_answering', 'an agent restart of a browser that answers is refused browser_answering', ra && ra.code);
+ok(gateOf(ra) && ra.code === 'browser_answering', 'an agent restart of a browser that answers is refused browser_answering', ra && ra.code);
 await sleep(600);
 ok(!keeper.browserOf(p.id).unresponsive && todos.length === 1, 'answering: no verdict, no second item');
 
@@ -213,9 +213,9 @@ function mutant(name, from, to) {
   const f = path.join(MUT, name + '.js'); fs.writeFileSync(f, bsSrc.replace(from, to)); return require(f);
 }
 const noVerdict = mutant('no-verdict', "return { state: hung ? 'unresponsive' : 'missing'", "return { state: false ? 'unresponsive' : 'missing'");
-ok(noVerdict && table(noVerdict).hung === false && table(noVerdict).oneMiss === true, 'control: with no verdict the table\'s "≥ 60 s ⇒ unresponsive" row goes red (every refusal stays "run the command again")');
+ok(gateOf(noVerdict) && table(noVerdict).hung === false && table(noVerdict).oneMiss === true, 'control: with no verdict the table\'s "≥ 60 s ⇒ unresponsive" row goes red (every refusal stays "run the command again")');
 const ungated = mutant('ungated', "  if (by === 'user') return { ok: true };", "  return { ok: true };");
-ok(ungated && admission(ungated).agentAnswering === false && admission(ungated).agentDriven === false, 'control: an ungated agent restart turns the "answering ⇒ refused" and "a human drives ⇒ refused" rows red');
+ok(gateOf(ungated) && admission(ungated).agentAnswering === false && admission(ungated).agentDriven === false, 'control: an ungated agent restart turns the "answering ⇒ refused" and "a human drives ⇒ refused" rows red');
 
 // ═══ ⑥ mirror-green-220: A CLOSED-AGAIN BROWSER INSIDE ITS RELAUNCH LOOP IS NEVER JUDGED UNRESPONSIVE ═══
 // The .220 Actions mirror (heavy 3/4, twice): B-47f9's slow closer — a chrome that closes after every relaunch, 4 min apart on
@@ -324,7 +324,7 @@ if (kSrc.includes(G_FROM)) {
   fs.writeFileSync(mf, kSrc.replace(G_FROM, G_TO).replace(/require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => 'require(' + JSON.stringify(path.resolve(SRV, rel)) + ')'));
   const cm = await closerLeg(require(mf), 'unguarded', 4);   // the cure's kill (every chrome the daemon runs)
   sayLeft(cm); if (cm.skips) console.log(`  SKIP (named, counted): ⑥ CONTROL ${cm.skips} of ${cm.skips + cm.judged} ticks — the browser was not closed before the tick; the control ticked the other ${cm.judged}`);
-  ok(!cm.threw && cm.verdicts > 0 && cm.notices.length >= 1 && /has not answered since/.test(cm.notices[0]), `⑥ CONTROL: a keeper copy without the guard judges the closing-again browser unresponsive (${cm.verdicts} verdict ticks) and files "${cm.notices && cm.notices[0]}" — the leg above can go red`, cm);
+  ok(!cm.threw && cm.verdicts > 0 && cm.notices.length >= 1 && verdictOf(/has not answered since/.test(cm.notices[0])), `⑥ CONTROL: a keeper copy without the guard judges the closing-again browser unresponsive (${cm.verdicts} verdict ticks) and files "${cm.notices && cm.notices[0]}" — the leg above can go red`, cm);
 } else ok(false, '⑥ CONTROL: the guarded verdict call was not found in src/server/browser-keeper.js');
 
 // ═══ ⑦ lane browser-daemon-survives-update: THE REAL KEEPER — a restart judges the page's answers ═══
@@ -368,24 +368,24 @@ console.log('— ⑦ a restart judges the page\'s answers (a stub browser: its e
   }
   const [A1, B2] = PAGES.map((x) => x.id);
   const silent = await pagesLeg(K, 'silent');
-  ok(!silent.threw && !silent.judged && silent.restarted && silent.state1 === 'ready' && silent.pid1 !== silent.pid0 && silent.lines.some((l) => /restarted by the conversation "Research" — none of its 2 page\(s\) answered within 0\.4 s/.test(l)),
+  ok(!silent.threw && !silent.judged && gateOf(silent.restarted) && silent.state1 === 'ready' && silent.pid1 !== silent.pid0 && verdictOf(silent.lines.some((l) => /restarted by the conversation "Research" — none of its 2 page\(s\) answered within 0\.4 s/.test(l))),
     `⑦ the endpoint answers, NO page does: the tick never judged it (its /json/version answers) — the agent's restart is ADMITTED on the pages' answers, the browser started again (daemon ${silent.pid0} → ${silent.pid1}, ${silent.ms} ms), the journal says why`, silent);
   const one = await pagesLeg(K, 'one', { answer: [A1] });
-  ok(!one.threw && one.refused && one.refused.code === 'browser_answering' && /1 of 2 pages answered within 0\.4 s \(A1A1A1A1 "https:\/\/mail\.example\/inbox"\); 1 did not \(B2B2B2B2 "https:\/\/docs\.example\/d\/1"\)/.test(one.refused.message) && one.pid1 === one.pid0 && one.lines.some((l) => /restart refused browser_answering \(its pages: pages, 1 answered, 1 did not\)/.test(l)),
+  ok(!one.threw && gateOf(one.refused) && one.refused.code === 'browser_answering' && gateOf(/1 of 2 pages answered within 0\.4 s \(A1A1A1A1 "https:\/\/mail\.example\/inbox"\); 1 did not \(B2B2B2B2 "https:\/\/docs\.example\/d\/1"\)/.test(one.refused.message)) && one.pid1 === one.pid0 && verdictOf(one.lines.some((l) => /restart refused browser_answering \(its pages: pages, 1 answered, 1 did not\)/.test(l))),
     '⑦ one page answers: refused browser_answering NAMING what answered and what did not (+ the tab-close door), nothing restarted, the journal says it', one);
   const drv = await pagesLeg(K, 'driver', { answer: [A1, B2], stuck: { state: 'unresponsive', why: 'timeouts', count: 3, since: Date.now() - 90000 } });
-  ok(!drv.threw && drv.restarted && drv.lines.some((l) => /every page answered, but the agent's last commands timed out through the browser driver/.test(l)), '⑦ every page answers but the agent\'s last 3 commands timed out through the driver (the dialog watch\'s fact): ADMITTED — the page answers, its helper does not', drv);
+  ok(!drv.threw && gateOf(drv.restarted) && verdictOf(drv.lines.some((l) => /every page answered, but the agent's last commands timed out through the browser driver/.test(l))), '⑦ every page answers but the agent\'s last 3 commands timed out through the driver (the dialog watch\'s fact): ADMITTED — the page answers, its helper does not', drv);
   const dlg = await pagesLeg(K, 'dialog', { stuck: { state: 'dialog', since: Date.now() } });
-  ok(!dlg.threw && dlg.refused && dlg.refused.code === 'browser_answering' && /a page dialog holds your tab: it is held, not hung/.test(dlg.refused.message) && /dialog accept/.test(dlg.refused.message), '⑦ a page dialog holds the tab (no page answers its renderer): held, not hung — refused with its own door, the dialog kept', dlg);
+  ok(!dlg.threw && gateOf(dlg.refused) && dlg.refused.code === 'browser_answering' && gateOf(/a page dialog holds your tab: it is held, not hung/.test(dlg.refused.message)) && verdictOf(/dialog accept/.test(dlg.refused.message)), '⑦ a page dialog holds the tab (no page answers its renderer): held, not hung — refused with its own door, the dialog kept', dlg);
   const fine = await pagesLeg(K, 'all', { answer: [A1, B2] });
-  ok(!fine.threw && fine.refused && /2 of 2 pages answered/.test(fine.refused.message), '⑦ every page answers: refused browser_answering (2 of 2 named)', fine.refused);
+  ok(!fine.threw && gateOf(fine.refused) && verdictOf(/2 of 2 pages answered/.test(fine.refused.message)), '⑦ every page answers: refused browser_answering (2 of 2 named)', fine.refused);
   // CONTROL — the pre-fix restart (a keeper copy that judges the keeper's own endpoint verdict alone): the incident's refusal
   const R_FROM = '        pages = BS.pageAnswerVerdict(await askPages(rec));\n';
   if (kSrc.includes(R_FROM)) {
     const mf = path.join(MUT, 'keeper-endpoint-only.js');
     fs.writeFileSync(mf, kSrc.replace(R_FROM, '').replace(/require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => 'require(' + JSON.stringify(path.resolve(SRV, rel)) + ')'));
     const ctl = await pagesLeg(require(mf), 'pre-fix');
-    ok(!ctl.threw && ctl.refused && ctl.refused.code === 'browser_answering' && ctl.pid1 === ctl.pid0, `⑦ CONTROL: the pre-fix keeper (no page asked) refuses the same hung pages browser_answering — "${ctl.refused && ctl.refused.message}" — the leg above can go red`, ctl);
+    ok(!ctl.threw && gateOf(ctl.refused) && ctl.refused.code === 'browser_answering' && ctl.pid1 === ctl.pid0, `⑦ CONTROL: the pre-fix keeper (no page asked) refuses the same hung pages browser_answering — "${ctl.refused && ctl.refused.message}" — the leg above can go red`, ctl);
   } else ok(false, '⑦ CONTROL: the page ask was not found in src/server/browser-keeper.js');
   for (const x of socks) { try { x.terminate(); } catch { } }
   await new Promise((r) => stub.close(r));
@@ -393,4 +393,4 @@ console.log('— ⑦ a restart judges the page\'s answers (a stub browser: its e
 
 console.log(`\n${fail ? '✗' : '✓'} test-browser-unresponsive: ${pass} passed, ${fail} failed`);
 keeper.shutdown(); keeper = null;
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

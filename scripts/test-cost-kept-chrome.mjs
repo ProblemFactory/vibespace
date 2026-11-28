@@ -36,7 +36,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the stub CLI: the 2.1.312 cost records, one turn per user frame ──────────────
@@ -164,47 +164,47 @@ try {
   console.log('— ① one conversation, two processes (the stub writes the CLI\'s running totals)');
   const sid = await create('cost-kept');
   check('a chat session is created (the stub behind the real chat-wrapper)', !!sid);
-  check('the chat window attaches', await attach(sid, 'cost kept'));
+  check('the chat window attaches', verdictOf(await attach(sid, 'cost kept')));
   turn(sid, 'T1 COST=1.00');
-  check('process A, turn 1: the chip reads $1.00', await figureIs(sid, '1.00'), await figure(sid));
+  check('process A, turn 1: the chip reads $1.00', verdictOf(await figureIs(sid, '1.00')), await figure(sid));
   turn(sid, 'T2 COST=1.50');
-  check('process A, turn 2: $2.50 — its running total replaces the figure, never adds ($3.50)', await figureIs(sid, '2.50'), await figure(sid));
+  check('process A, turn 2: $2.50 — its running total replaces the figure, never adds ($3.50)', verdictOf(await figureIs(sid, '2.50')), await figure(sid));
   turn(sid, 'T3 NEWPROC- COST=1.25');
-  check('process B starts again at its own share: A\'s last + B\'s = $3.75', await figureIs(sid, '3.75'), await figure(sid));
+  check('process B starts again at its own share: A\'s last + B\'s = $3.75', verdictOf(await figureIs(sid, '3.75')), await figure(sid));
   turn(sid, 'T4 COST=0.70');
-  check('process B, turn 2: $2.50 + $1.95 = $4.45', await figureIs(sid, '4.45'), await figure(sid));
+  check('process B, turn 2: $2.50 + $1.95 = $4.45', verdictOf(await figureIs(sid, '4.45')), await figure(sid));
   turn(sid, 'T5 BIG- COST=0');
-  check('a 650 KB answer (no cost of its own) leaves $4.45', await figureIs(sid, '4.45', 30000) && await waitFor(`!!(${VIEW(sid)})?._messageList?.textContent?.includes('ok T5')`, 30000), await figure(sid));
+  check('a 650 KB answer (no cost of its own) leaves $4.45', gateOf(await figureIs(sid, '4.45', 30000)) && verdictOf(await waitFor(`!!(${VIEW(sid)})?._messageList?.textContent?.includes('ok T5')`, 30000)), await figure(sid));
 
   console.log('— ② the wrapper\'s 500 KB ring drops process A from the buffer; the kept fact holds it');
   let rs = []; for (let i = 0; i < 40; i++) { rs = bufferResults(); if (rs.length && !rs.some((r) => r.total_cost_usd === 2.5 || r.total_cost_usd === 1)) break; await sleep(250); }
-  check('the buffer file no longer holds process A\'s results (the trim is real); B\'s last is there', rs.length > 0 && !rs.some((r) => r.total_cost_usd === 2.5 || r.total_cost_usd === 1) && rs.some((r) => r.total_cost_usd === 1.95), rs.map((r) => [r.result_index, r.total_cost_usd]));
+  check('the buffer file no longer holds process A\'s results (the trim is real); B\'s last is there', rs.length > 0 && !rs.some((r) => r.total_cost_usd === 2.5 || r.total_cost_usd === 1) && verdictOf(rs.some((r) => r.total_cost_usd === 1.95)), rs.map((r) => [r.result_index, r.total_cost_usd]));
   let kept = []; for (let i = 0; i < 40; i++) { kept = keptFacts(); if (kept.some((k) => k.done === 2.5 && k.last === 1.95)) break; await sleep(250); }
-  check('the conversation\'s meta keeps the fold: {done 2.50, last 1.95} with its last result\'s key', kept.some((k) => k.done === 2.5 && k.last === 1.95 && typeof k.key === 'string'), kept);
+  check('the conversation\'s meta keeps the fold: {done 2.50, last 1.95} with its last result\'s key', verdictOf(kept.some((k) => k.done === 2.5 && k.last === 1.95 && typeof k.key === 'string')), kept);
 
   console.log('— ③ THE HUB RESTARTS (the CLI lives on in dtach); the page attaches again');
   try { srv.kill('SIGKILL'); } catch {}
   await new Promise((r) => { if (srv.exitCode !== null || srv.signalCode) return r(); srv.once('exit', r); });
   startServer();
-  check('the restarted server answers', await waitServer());
+  check('the restarted server answers', verdictOf(await waitServer()));
   try { liveWs.terminate(); } catch {}
   await openWs();
   await cdp('Page.reload', {});
   await waitApp(); await sleep(500);
   if (!(await waitFor(`!!(${VIEW(sid)})?._messageList`, 8000))) await attach(sid, 'cost kept');
-  check('THE FIRST ATTACH AFTER THE BOOT: the chip reads $4.45 — not the buffer\'s $1.95, not the double count $6.40', await figureIs(sid, '4.45', 20000), await figure(sid));
+  check('THE FIRST ATTACH AFTER THE BOOT: the chip reads $4.45 — not the buffer\'s $1.95, not the double count $6.40', verdictOf(await figureIs(sid, '4.45', 20000)), await figure(sid));
   await cdp('Page.reload', {});
   await waitApp(); await sleep(500);
   if (!(await waitFor(`!!(${VIEW(sid)})?._messageList`, 8000))) await attach(sid, 'cost kept');
-  check('a SECOND attach: still $4.45', await figureIs(sid, '4.45', 20000), await figure(sid));
+  check('a SECOND attach: still $4.45', verdictOf(await figureIs(sid, '4.45', 20000)), await figure(sid));
   await evalJs('app.ws.ws.close(); true');
   await sleep(1500);
-  check('a RECONNECT (the page\'s socket dropped): still $4.45', await waitFor('app.ws?.ws?.readyState === 1', 20000) && await figureIs(sid, '4.45', 20000), await figure(sid));
+  check('a RECONNECT (the page\'s socket dropped): still $4.45', gateOf(await waitFor('app.ws?.ws?.readyState === 1', 20000)) && verdictOf(await figureIs(sid, '4.45', 20000)), await figure(sid));
   turn(sid, 'T6 COST=0.30');
-  check('a live turn after the restart: process B $2.25 ⇒ $2.50 + $2.25 = $4.75', await figureIs(sid, '4.75', 20000), await figure(sid));
+  check('a live turn after the restart: process B $2.25 ⇒ $2.50 + $2.25 = $4.75', verdictOf(await figureIs(sid, '4.75', 20000)), await figure(sid));
   check('zero page errors', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('  ✗ the suite threw: ' + (e && e.stack || e));
 }
 console.log(failed ? `\n${failed} FAILED, ${passed} passed` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

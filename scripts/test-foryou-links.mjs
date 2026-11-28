@@ -22,7 +22,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const F = await import(path.join(REPO, 'src/lib/foryou-links.js'));
 const fileImports = (src, dir = 'src/lib') => src.replace(/(\b(?:from|import)\s+')(\.\.?\/[^']+)(')/g, (x, a, p, z) => a + 'file://' + path.join(REPO, dir, p) + z); // r10 (F2): every relative import → the file it names
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -52,10 +52,10 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   ok(links('report.md Node.js e.g. and/or en/zh/ja 10.0.0.0/8 v2.369.245 TCP/IP').length === 0, 'prose is not over-linked: a bare filename outside a code span, Node.js, e.g., and/or, en/zh/ja, a CIDR, a version, TCP/IP stay words');
   const x = '<img src=x onerror=alert(1)> "/tmp/a/<b>.md" `<script>`';
   const h = F.linkedHtml(x);
-  ok(!/<img|<script|<b>/.test(h) && h.includes('&lt;img src=x onerror=alert(1)&gt;'), 'XSS: an <img onerror> / <script> / a tag inside a path stays TEXT (every segment escaped)', h);
+  ok(!/<img|<script|<b>/.test(h) && verdictOf(h.includes('&lt;img src=x onerror=alert(1)&gt;')), 'XSS: an <img onerror> / <script> / a tag inside a path stays TEXT (every segment escaped)', h);
   const s = 'a `docs/x.md` b /p/pgabcdefghij https://q.test/a?b=1&c=2), c ~/n.md: d (docs/y.md) ops@x.io';
   ok(F.segmentText(s).map((g) => g.s).join('') === s, 'the segments join back to the words EXACTLY (nothing added, nothing dropped)');
-  ok(/data-ref="https:\/\/q\.test\/a\?b=1&amp;c=2"/.test(F.linkedHtml(s)), 'a link\'s ref rides its attribute escaped');
+  ok(verdictOf(/data-ref="https:\/\/q\.test\/a\?b=1&amp;c=2"/.test(F.linkedHtml(s))), 'a link\'s ref rides its attribute escaped');
 }
 
 // lane artifacts-by-intent r7 (T6): A CUT TOKEN IS NO LINK IN THE TRAY EITHER — the store keeps an ask's words to 500 / 8 000
@@ -66,7 +66,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const clipT = typeof RT.clip === 'function' ? RT.clip : (x, cap) => x.slice(0, cap); // an older tree: the store's plain slice
   const P10 = 'pg' + '7'.repeat(10), keptQ = clipT('x'.repeat(483) + ' /p/' + P10 + '7 more', 500), keptD = clipT('y'.repeat(7983) + ' /p/' + P10 + '7 more', 8000), keptU = clipT('z'.repeat(460) + ' https://vs.example.com/p/' + P10 + '7 more', 500), whole = 'x'.repeat(484) + ' /p/pg' + '8'.repeat(10);
   const seen = { q: links(keptQ), d: links(keptD), u: links(keptU), whole: links(whole), words: F.segmentText(keptQ).map((g) => g.s).join('') === keptQ };
-  ok(keptQ.endsWith('/p/' + P10 + '…') && !seen.q.length && !seen.d.length && !seen.u.length && J(seen.whole) === J(['page:/p/pg8888888888']) && seen.words,
+  ok(gateOf(keptQ.endsWith('/p/' + P10 + '…')) && !seen.q.length && !seen.d.length && !seen.u.length && J(seen.whole) === J(['page:/p/pg8888888888']) && verdictOf(seen.words),
     'a page token the store\'s cut went through (pg + 10 kept, the mark after it — the question at 500, the detail at 8 000, a URL form) ⇒ no link, drawn as its words; a whole link ending at the cap ⇒ a link', seen);
   const FY1 = read('src/lib/foryou-links.js'), ONE = '  return uncutLinks(src, segmentWords(src, has), whole ? FIELD_CAPS : null, has);';   // B-3f50: the whole-field road passes the caps; lane setting-doors pick 1 (on .402): the schema test rides both passes
   // r10 (F2): A CONTROL COPY RESOLVES EVERY RELATIVE IMPORT OF THE MODULE IT COPIES — a data: URL copy resolves no relative
@@ -95,7 +95,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const PROBE = "return '0' + open.reverse().join('');"; // r9's digit — since the .399 follow-up, the continuation's head (the closers follow it)
   const r8seg = FY1.includes(PROBE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(PROBE, "return 'x' + open.reverse().join('');")))).segmentText : null;
   ok(typeof r8seg === 'function', 'CONTROL needle present: the segmenter\'s digit probe (r9) — a tree without it has nothing to patch');
-  if (r8seg) { const s8 = sweep(r8seg, TOKS.slice(6)); ok(s8.through.length === 2 && s8.through.every((x) => /main\.py:(120:)?… ⇒ /.test(x)), 'CONTROL r8\'s probe (a letter) ⇒ the two cuts right after a \':\' of main.py:120:4 still a link to the file, its line or its column dropped — RED', s8.through); }
+  if (r8seg) { const s8 = sweep(r8seg, TOKS.slice(6)); ok(s8.through.length === 2 && verdictOf(s8.through.every((x) => /main\.py:(120:)?… ⇒ /.test(x))), 'CONTROL r8\'s probe (a letter) ⇒ the two cuts right after a \':\' of main.py:120:4 still a link to the file, its line or its column dropped — RED', s8.through); }
   // r10 (n5): a RELATIVE path's `:line` — the relative grammar never takes it (path-linkify: an uncut «plan.md:42» is no link),
   // so a cut right after its ':' still read the file: the digit probe's text reads no link there at all. A link only the cut made
   // (the continued words read none at its place, no space before the mark) is the cut token too
@@ -105,7 +105,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const CUTMADE = ' || cutMade(a, at)';
   const r9seg = FY1.includes(CUTMADE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(CUTMADE, '')))).segmentText : null;
   ok(typeof r9seg === 'function', 'CONTROL needle present: a link only the cut made (r10) — a tree without it has nothing to patch');
-  if (r9seg) { const s9 = sweep(r9seg, RELT); ok(s9.through.length === 2 && s9.through.every((x) => /(plan\.md|main\.py):… ⇒ (docs\/guide\/plan\.md|src\/app\/main\.py)$/.test(x)), 'CONTROL r9\'s rule (the probe\'s links only) ⇒ «docs/guide/plan.md:…» and «src/app/main.py:…» still link the file, the line dropped — RED', s9.through); }
+  if (r9seg) { const s9 = sweep(r9seg, RELT); ok(s9.through.length === 2 && verdictOf(s9.through.every((x) => /(plan\.md|main\.py):… ⇒ (docs\/guide\/plan\.md|src\/app\/main\.py)$/.test(x))), 'CONTROL r9\'s rule (the probe\'s links only) ⇒ «docs/guide/plan.md:…» and «src/app/main.py:…» still link the file, the line dropped — RED', s9.through); }
   // .399 follow-up (the acceptance of 93c6e9132): THE MERGED GRAMMAR'S OWN TOKENS — a URL through each full-width pair
   // (FW_PAIRS: a balanced pair rides inside a URL) and a path through a [vault:…] mark (a whole mark rides inside a path):
   // the store's cut at every position from the pair's / the mark's opening on ⇒ every link the cut text draws is one the
@@ -119,9 +119,9 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const CONT = 'const c = continuation(src, e);', MASKED = "if (g.t !== 'link' && g.t !== 'masked') continue;";
   const r10cont = FY1.includes(CONT) && FY1.includes(MASKED) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(CONT, "const c = '0';").replace(MASKED, "if (g.t !== 'link') continue;")))).segmentText : null;
   ok(typeof r10cont === 'function', 'CONTROL needle present: the continuation closes what the cut left open (.399 follow-up) — a tree without it has nothing to patch');
-  if (r10cont) { const c11 = sweep11(r10cont); ok(c11.created.some((x) => /⇒ url:https:\/\/ja\.wikipedia\.org\/wiki\/$/.test(x)) && c11.created.some((x) => /⇒ path:\/srv\/app\/\[vault$/.test(x)), 'CONTROL r10\'s probe (a digit only, a masked segment not counted) ⇒ the cut makes a link to the parent page «…/wiki/» and to «/srv/app/[vault» — RED', c11.created.slice(0, 4)); }
+  if (r10cont) { const c11 = sweep11(r10cont); ok(gateOf(c11.created.some((x) => /⇒ url:https:\/\/ja\.wikipedia\.org\/wiki\/$/.test(x))) && verdictOf(c11.created.some((x) => /⇒ path:\/srv\/app\/\[vault$/.test(x))), 'CONTROL r10\'s probe (a digit only, a masked segment not counted) ⇒ the cut makes a link to the parent page «…/wiki/» and to «/srv/app/[vault» — RED', c11.created.slice(0, 4)); }
   const R7N = 18; // r7's word run over the first six tokens' 150 positions
-  if (r7seg) { const sw7 = sweep(r7seg, TOKS.slice(0, 6)); ok(sw7.through.length === R7N && sw7.through.some((x) => /⇒ https:\/\/docs\.example$/.test(x)), 'CONTROL r7\'s rule (the page id\'s word run before the mark) ⇒ ' + R7N + ' of 150 cut positions still a link — «https://docs.example.…» a link to ANOTHER host, «…/guide/» a parent — RED', { n: sw7.through.length, first: sw7.through.slice(0, 4) }); }
+  if (r7seg) { const sw7 = sweep(r7seg, TOKS.slice(0, 6)); ok(sw7.through.length === R7N && verdictOf(sw7.through.some((x) => /⇒ https:\/\/docs\.example$/.test(x))), 'CONTROL r7\'s rule (the page id\'s word run before the mark) ⇒ ' + R7N + ' of 150 cut positions still a link — «https://docs.example.…» a link to ANOTHER host, «…/guide/» a parent — RED', { n: sw7.through.length, first: sw7.through.slice(0, 4) }); }
 }
 
 console.log('§2 RESOLUTION — against the ASKING conversation\'s cwd + home on ITS host');
@@ -149,7 +149,7 @@ const { runOp } = require(path.join(REPO, 'src/safe-fs-worker.js'));
 const AR = read('src/agent-routes.js');
 const hm = /const handoverItems = (\(b\) => [^\n]+);/.exec(AR);
 const handoverItems = hm ? (0, eval)(hm[1]) : null; // THE hand-over's argument shape, extracted verbatim (never a copy of its own)
-ok(typeof handoverItems === 'function' && /handoverItems: \(b\) => handoverItems\(b\)/.test(AR), 'the route reads vibespace-msg\'s hand-over argument shape (handoverItems, handed in by setupAgentRoutes)');
+ok(typeof handoverItems === 'function' && verdictOf(/handoverItems: \(b\) => handoverItems\(b\)/.test(AR)), 'the route reads vibespace-msg\'s hand-over argument shape (handoverItems, handed in by setupAgentRoutes)');
 const REPOX = path.join(TMP, 'repo');
 fs.mkdirSync(path.join(REPOX, 'docs'), { recursive: true });
 fs.writeFileSync(path.join(REPOX, 'report.md'), '# report\n');
@@ -182,11 +182,11 @@ const S = await serve(path.join(REPO, 'src/agent-routes/status.js'));
   const r = await S.ask({ text: 'Review the dry run?', artifacts: [path.join(REPOX, 'report.md'), path.join(REPOX, 'design-dir'), '/p/pgaaaaaaaaaa'] });
   const it = r.j.item || {};
   ok(r.status === 200 && J((it.artifacts || []).map((a) => a.kind)) === J(['file', 'design', 'page']), 'a readable file, a design folder (design.json), a published page ⇒ filed with three attachments', r.j);
-  ok(it.artifacts && it.artifacts[0].path === path.join(REPOX, 'report.md') && it.artifacts[0].name === 'report.md' && it.artifacts[0].host === '' && it.artifacts[2].name === 'Live page' && it.artifacts[2].url === '/p/pgaaaaaaaaaa', 'each row: kind, host, path | page, name (a page\'s own name), url');
+  ok(gateOf(it.artifacts) && it.artifacts[0].path === path.join(REPOX, 'report.md') && it.artifacts[0].name === 'report.md' && it.artifacts[0].host === '' && it.artifacts[2].name === 'Live page' && it.artifacts[2].url === '/p/pgaaaaaaaaaa', 'each row: kind, host, path | page, name (a page\'s own name), url');
   ok(it.cwd === REPOX && !it.hostId, 'the store stamps the asker\'s cwd (and no host: this box)');
   const rows = sessL._artifacts;
-  ok(rows[':' + path.join(REPOX, 'report.md')] && rows[':' + path.join(REPOX, 'report.md')].lastOp === 'present' && rows[':' + path.join(REPOX, 'design-dir')].kind === 'design' && rows[':/p/pgaaaaaaaaaa'] && rows[':/p/pgaaaaaaaaaa'].presented, 'THE ONE WRITER: the registry folded a `present` op per attachment — the conversation\'s Artifacts list shows them', Object.keys(rows));
-  ok(!/_artifacts/.test(read('src/agent-routes/status.js')) && /presentAsk\(s, item\.artifacts, \{ id: item\.id, said: \[item\.text, item\.detail\] \}\)/.test(read('src/agent-routes/status.js')), 'the route never writes the rows itself — presentAsk (artifact-registry.js) does');
+  ok(gateOf(rows[':' + path.join(REPOX, 'report.md')]) && rows[':' + path.join(REPOX, 'report.md')].lastOp === 'present' && rows[':' + path.join(REPOX, 'design-dir')].kind === 'design' && gateOf(rows[':/p/pgaaaaaaaaaa']) && verdictOf(rows[':/p/pgaaaaaaaaaa'].presented), 'THE ONE WRITER: the registry folded a `present` op per attachment — the conversation\'s Artifacts list shows them', Object.keys(rows));
+  ok(!/_artifacts/.test(read('src/agent-routes/status.js')) && verdictOf(/presentAsk\(s, item\.artifacts, \{ id: item\.id, said: \[item\.text, item\.detail\] \}\)/.test(read('src/agent-routes/status.js'))), 'the route never writes the rows itself — presentAsk (artifact-registry.js) does');
   const n0 = S.count();
   const cases = [
     ['a missing file', [path.join(REPOX, 'missing.md')], 'missing', /no such file on this machine — check the path/],
@@ -201,15 +201,15 @@ const S = await serve(path.join(REPO, 'src/agent-routes/status.js'));
   for (const [what, arts, why, re] of cases) {
     const b = await S.ask({ text: 'Q ' + what, artifacts: arts });
     const lines = b.j.refused || [];
-    ok(b.status === 422 && b.j.code === 'bad-artifact' && lines.length === 1 && lines[0].why === why && re.test(lines[0].error) && /^nothing was filed/.test(b.j.error) && S.count() === n0, `${what} ⇒ the WHOLE ask refused (422), the line names it and the fix, NOTHING filed`, b.j);
+    ok(b.status === 422 && b.j.code === 'bad-artifact' && lines.length === 1 && lines[0].why === why && gateOf(re.test(lines[0].error)) && gateOf(/^nothing was filed/.test(b.j.error)) && S.count() === n0, `${what} ⇒ the WHOLE ask refused (422), the line names it and the fix, NOTHING filed`, b.j);
   }
   if (rootRead) ok(true, 'an unreadable file: SKIPPED — this account reads a 000 file (root)');
   const two = await S.ask({ text: 'Q two bad', artifacts: [path.join(REPOX, 'missing.md'), '/p/pgbbbbbbbbbb'] });
   ok(two.status === 422 && (two.j.refused || []).length === 2, 'ONE LINE PER bad attachment');
   const rem = await S.ask({ text: 'Q remote', artifacts: ['/remote/ok.md'] }, 'R');
-  ok(rem.status === 200 && remoteCalls.includes('h1:/remote/ok.md') && !localCalls.includes('/remote/ok.md') && rem.j.item.artifacts[0].host === 'h1' && rem.j.item.hostId === 'h1' && rem.j.item.cwd === '/remote', 'a REMOTE asker\'s path is probed on ITS host (RemoteFs info), never by a local stat; the chip carries the host', { remoteCalls, localCalls });
+  ok(rem.status === 200 && gateOf(remoteCalls.includes('h1:/remote/ok.md')) && !localCalls.includes('/remote/ok.md') && rem.j.item.artifacts[0].host === 'h1' && rem.j.item.hostId === 'h1' && rem.j.item.cwd === '/remote', 'a REMOTE asker\'s path is probed on ITS host (RemoteFs info), never by a local stat; the chip carries the host', { remoteCalls, localCalls });
   const remBad = await S.ask({ text: 'Q remote gone', artifacts: ['/remote/gone.md'] }, 'R');
-  ok(remBad.status === 422 && /no such file on h1/.test(remBad.j.refused[0].error) && !localCalls.includes('/remote/gone.md'), 'a remote file that is not there is refused naming THAT host');
+  ok(remBad.status === 422 && gateOf(/no such file on h1/.test(remBad.j.refused[0].error)) && !localCalls.includes('/remote/gone.md'), 'a remote file that is not there is refused naming THAT host');
   const plain = await S.ask({ text: 'Q no attachments' });
   ok(plain.status === 200 && !plain.j.item.artifacts && plain.j.item.cwd === REPOX, 'an ask without --artifact files as before (+ the cwd its words resolve against)');
   // CONTROL: the old file-without-them behaviour — a patched route that files the item WITHOUT the refused ones
@@ -231,18 +231,18 @@ console.log('§4 THE CLI — vibespace-ask --artifact against that route');
   const n0 = S.count();
   const bad = await cli(['Please review', '--artifact', 'report.md', 'missing.md', 'plain-dir']);
   const errs = bad.stderr.trim().split('\n');
-  ok(bad.status === 2 && errs.length === 3 && /missing\.md: no such file/.test(errs[0]) && /plain-dir: a folder without design\.json/.test(errs[1]) && errs[2] === 'nothing was filed — fix the attachment and run vibespace-ask again' && S.count() === n0, 'two bad attachments ⇒ exit 2, one line each (absolute against the shell\'s cwd), the last line says nothing was filed', { status: bad.status, errs });
+  ok(bad.status === 2 && errs.length === 3 && gateOf(/missing\.md: no such file/.test(errs[0])) && gateOf(/plain-dir: a folder without design\.json/.test(errs[1])) && errs[2] === 'nothing was filed — fix the attachment and run vibespace-ask again' && S.count() === n0, 'two bad attachments ⇒ exit 2, one line each (absolute against the shell\'s cwd), the last line says nothing was filed', { status: bad.status, errs });
   const good = await cli(['Please review', '--artifact', 'report.md', 'design-dir', '/p/pgaaaaaaaaaa', '--urgency', 'high']);
-  ok(good.status === 0 && /attached: .*\/report\.md \(file\)/.test(good.stdout) && /attached: \/p\/pgaaaaaaaaaa \(page\)/.test(good.stdout) && S.count() === n0 + 1, 'fixed ⇒ filed ONCE: every path after the flag until the next flag, each attachment echoed', good.stdout);
+  ok(good.status === 0 && gateOf(/attached: .*\/report\.md \(file\)/.test(good.stdout)) && gateOf(/attached: \/p\/pgaaaaaaaaaa \(page\)/.test(good.stdout)) && S.count() === n0 + 1, 'fixed ⇒ filed ONCE: every path after the flag until the next flag, each attachment echoed', good.stdout);
   const first = await cli(['--artifact', 'report.md', 'Is this right?']);
   const it = S.todos.snapshot().open.find((i) => i.text === 'Is this right?');
-  ok(first.status === 0 && it && it.artifacts && it.artifacts.length === 1 && it.artifacts[0].path === path.join(REPOX, 'report.md'), 'the flag BEFORE the question takes one path (vibespace-msg\'s rule) — the rest is the question', first.stderr || first.stdout);
+  ok(first.status === 0 && gateOf(it) && gateOf(it.artifacts) && it.artifacts.length === 1 && it.artifacts[0].path === path.join(REPOX, 'report.md'), 'the flag BEFORE the question takes one path (vibespace-msg\'s rule) — the rest is the question', first.stderr || first.stdout);
   // lane cli-one-text-arg (the owner 2026-10-14): the question is ONE argument — the same words loose are REFUSED by name
   // (they used to be joined, which hid a quote that closed early), nothing filed
   const nLoose = S.count();
   const loose = await cli(['--artifact', 'report.md', 'Is', 'this', 'right?']);
-  ok(loose.status === 2 && /the question is ONE argument — 2 more words followed it \("this", …\)/.test(loose.stderr) && /nothing was filed/.test(loose.stderr) && S.count() === nLoose, 'lane cli-one-text-arg: the question in loose words is refused by name (exit 2), nothing filed', loose.stderr || loose.stdout);
-  ok(/--artifact <path\|\/p\/id>…/.test((await cli(['--help'])).stdout), 'the usage names --artifact');
+  ok(loose.status === 2 && gateOf(/the question is ONE argument — 2 more words followed it \("this", …\)/.test(loose.stderr)) && gateOf(/nothing was filed/.test(loose.stderr)) && S.count() === nLoose, 'lane cli-one-text-arg: the question in loose words is refused by name (exit 2), nothing filed', loose.stderr || loose.stdout);
+  ok(verdictOf(/--artifact <path\|\/p\/id>…/.test((await cli(['--help'])).stdout)), 'the usage names --artifact');
 }
 S.srv.close();
 
@@ -253,32 +253,32 @@ console.log('§5 CENSUSES — one grammar · escaped words · the one artifact d
   const acorn = require(path.join(REPO, 'node_modules/acorn'));
   const pathRegexes = (src) => { const out = []; for (const tk of acorn.tokenizer(src, { ecmaVersion: 'latest', sourceType: 'module' })) if (tk.type.label === 'regexp') { const re = new RegExp(tk.value.pattern, tk.value.flags.replace('g', '')); if (SAMPLES.some((s) => { const m = re.exec(s); return m && m[0] === s; })) out.push('/' + tk.value.pattern + '/'); } return out; };
   const oneGrammar = (fy) => /import \{ pathRe, cleanPath, looksRelPath, relCandidates \} from '\.\.\/path-linkify\.js';/.test(fy) && pathRegexes(fy).length === 0;
-  ok(oneGrammar(FY), 'ONE GRAMMAR: foryou-links.js reads where a path ends / a relative rule / the candidates from src/path-linkify.js, and holds no regex of its own that matches a whole path', pathRegexes(FY));
-  ok(/looksRelPath, relCandidates \} from '\.\.\/path-linkify\.js'/.test(CR) && /if \(looksRelPath\(txt\)\)/.test(CR) && /const cands = relCandidates\(rel, cwd\);/.test(CR), 'the chat reads the SAME relative rule and candidates (moved, not copied)');
+  ok(verdictOf(oneGrammar(FY)), 'ONE GRAMMAR: foryou-links.js reads where a path ends / a relative rule / the candidates from src/path-linkify.js, and holds no regex of its own that matches a whole path', pathRegexes(FY));
+  ok(gateOf(/looksRelPath, relCandidates \} from '\.\.\/path-linkify\.js'/.test(CR)) && gateOf(/if \(looksRelPath\(txt\)\)/.test(CR)) && verdictOf(/const cands = relCandidates\(rel, cwd\);/.test(CR)), 'the chat reads the SAME relative rule and candidates (moved, not copied)');
   const SIG = String.raw`[\p{L}\p{N}_@%+=.\-][^\s<>"'` + '`' + String.raw`|]*$`; // a first letter of any script (lane agy-links-file-url)
   const holders = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.posix.join(d, e.name); if (e.isDirectory()) walk(rel); else if (/\.(m?js)$/.test(e.name) && read(rel).includes(SIG)) holders.push(rel); } };
   walk('src');
-  ok(J(holders) === J(['src/path-linkify.js']) && PL.includes(SIG), 'the relative rule\'s own pattern lives in ONE file under src/', holders);
+  ok(J(holders) === J(['src/path-linkify.js']) && verdictOf(PL.includes(SIG)), 'the relative rule\'s own pattern lives in ONE file under src/', holders);
   const mutFy = FY.replace('const CODE_RE', 'const MY_PATH = /(?:~|\\.\\.?)?\\/[^\\s]+/g;\nconst CODE_RE');
   ok(mutFy !== FY && !oneGrammar(mutFy), 'CONTROL: a patched copy with its own path regex ⇒ the one-grammar census is RED', pathRegexes(mutFy));
   // escaped words: the tray draws its words / detail through linkedHtml (every segment escaped); the window links TEXT nodes
   const ROW = read('src/lib/user-todos-row.js'), IW = read('src/lib/inbox-window.js');
   // lane foryou-honest (P1-2): ONE renderer — the row's words and detail AND the window's pane draw wordsHtml (= linkedHtml, escaped)
   const wordsEscaped = (row) => /export const wordsHtml = \(text, \{ whole = false \} = \{\}\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, tr\), whole, has: isSettingKey, draw: fyDraw \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words, \{ whole: wordsWhole \}\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail, \{ whole: detailWhole \}\)\}<\/div>/.test(row) && /a\.textContent = g\.s;/.test(row) && !/\.innerHTML = g\./.test(row);
-  ok(wordsEscaped(ROW), 'NO innerHTML OF RAW TEXT: the tray\'s words and detail go through linkedHtml (escaped); the window\'s links are nodes with textContent');
-  ok(/function wordsInto\(el, src, whole = false\) \{\s*el\.innerHTML = wordsHtml\(src, \{ whole \}\);\s*\}/.test(IW) && /wordsInto\(c\.title, v\.title, fieldWhole\(it, 'text', v\.title\)\);/.test(IW) && /else wordsInto\(c\.detail, v\.detail, fieldWhole\(it, 'detail', v\.detail\)\);/.test(IW) && /if \(plain\) linkifyInto\(c\.detail\);/.test(IW) && /c\.arts\.replaceChildren\(\.\.\.askChipEls\(it, t\)\)/.test(IW) && !/\bmdInto\(|from 'marked'/.test(IW),
+  ok(verdictOf(wordsEscaped(ROW)), 'NO innerHTML OF RAW TEXT: the tray\'s words and detail go through linkedHtml (escaped); the window\'s links are nodes with textContent');
+  ok(gateOf(/function wordsInto\(el, src, whole = false\) \{\s*el\.innerHTML = wordsHtml\(src, \{ whole \}\);\s*\}/.test(IW)) && gateOf(/wordsInto\(c\.title, v\.title, fieldWhole\(it, 'text', v\.title\)\);/.test(IW)) && gateOf(/else wordsInto\(c\.detail, v\.detail, fieldWhole\(it, 'detail', v\.detail\)\);/.test(IW)) && gateOf(/if \(plain\) linkifyInto\(c\.detail\);/.test(IW)) && gateOf(/c\.arts\.replaceChildren\(\.\.\.askChipEls\(it, t\)\)/.test(IW)) && !/\bmdInto\(|from 'marked'/.test(IW),
     'the For-you window: its words drawn by THE tray\'s renderer (wordsHtml — one renderer over both doors, never markdown: lane foryou-honest), a command\'s verbatim <pre> linked as text nodes, its chips as nodes');
   ok(!wordsEscaped(ROW.replace("linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), whole, has: isSettingKey, draw: fyDraw })", 'String(text)')), 'CONTROL: the words written raw into the row HTML ⇒ the census is RED');
   const rawHtml = (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY).replace('export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g), whole = false, has = null, draw = null } = {})', 'export function linkedHtml(text, { escape = (s) => s, note = (g) => maskedLinkNote(g), whole = false, has = null, draw = null } = {})')))).linkedHtml('<img src=x onerror=alert(1)>');
-  ok(/<img/.test(rawHtml), 'CONTROL: a linkedHtml without its escape lets <img onerror> through — the §1 XSS leg is RED on it');
+  ok(verdictOf(/<img/.test(rawHtml)), 'CONTROL: a linkedHtml without its escape lets <img onerror> through — the §1 XSS leg is RED on it');
   // the one artifact door: a chip opens through openArtifactRow (artifacts-window.js) — never its own opener
   const ACT = read('src/lib/user-todos-actions.js');
   const body = (src) => { const i = src.indexOf('const openArtifact = async (item, k) => {'); const j = src.indexOf('\n  };', i); return i < 0 ? '' : src.slice(i, j); };
   const oneDoor = (src) => { const b = body(src); return /openArtifactRow\(app, /.test(b) && /await import\('\.\/artifacts-window\.js'\)/.test(b) && !/app\.(openFile|openDesign|openBrowser|openFileExplorer)\b|window\.open\(/.test(b); };
-  ok(oneDoor(ACT), 'THE ONE DOOR: a chip opens through openArtifactRow (the chat view\'s _openArtifact when this client shows the conversation, else the row\'s own facts)');
-  ok(/export function openArtifactRow\(app, sessionId, b(?:, \{ pressed = false \} = \{\})?\)/.test(read('src/lib/artifacts-window.js')) && /model\.openArtifact\(it, Number\(fy\.dataset\.ai\)\)/.test(read('src/lib/user-todos-panel.js')) && /model\.openArtifact\(it, Number\(fy\.dataset\.ai\)\)/.test(IW), 'the tray AND the window press a chip into model.openArtifact');
+  ok(verdictOf(oneDoor(ACT)), 'THE ONE DOOR: a chip opens through openArtifactRow (the chat view\'s _openArtifact when this client shows the conversation, else the row\'s own facts)');
+  ok(gateOf(/export function openArtifactRow\(app, sessionId, b(?:, \{ pressed = false \} = \{\})?\)/.test(read('src/lib/artifacts-window.js'))) && gateOf(/model\.openArtifact\(it, Number\(fy\.dataset\.ai\)\)/.test(read('src/lib/user-todos-panel.js'))) && verdictOf(/model\.openArtifact\(it, Number\(fy\.dataset\.ai\)\)/.test(IW)), 'the tray AND the window press a chip into model.openArtifact');
   ok(!oneDoor(ACT.replace("openArtifactRow(app, (s && s.webuiId) || '', row);", 'app.openFile(row.path, row.name, { host: row.host });')), 'CONTROL: a chip that opens its file by itself ⇒ the one-door census is RED');
-  ok(/'\{name\} is gone — nothing at \{path\} any more'/.test(body(ACT)) && /'\{name\} is no longer published'/.test(body(ACT)), 'the open-time re-check speaks: a gone file / an unpublished page is a toast that says so, never silent');
+  ok(gateOf(/'\{name\} is gone — nothing at \{path\} any more'/.test(body(ACT))) && verdictOf(/'\{name\} is no longer published'/.test(body(ACT))), 'the open-time re-check speaks: a gone file / an unpublished page is a toast that says so, never silent');
 }
 
 // B-3f50 (the artifacts-by-intent lane's «Known in 2.369.400» pick): (a) A «…» THE WRITER PUT AT A LINE'S END IS ITS OWN WORDS — the
@@ -299,7 +299,7 @@ console.log('\nB-3f50 a line-end «…» of the writer\'s own keeps its link; a 
     'B-3f50 (a): on the agent\'s own WHOLE stored field a link it ends with «…» at a LINE\'s end stays a link (the store never cuts inside a field); any other text keeps the conservative reading (a producer may cut a line — the memory note\'s command at 120)', { whole: lk(own, { whole: true }), other: lk(own) });
   ok(J(lk(ownEnd, { whole: true })) === J(['https://docs.example.com/wiki/Setup']) && lk(ownEnd).length === 0,
     'B-3f50 (a): the same «…» at the END of a short whole field (41 chars, no cap) stays a link; a text node that is not a whole field keeps the conservative reading (words)', { whole: lk(ownEnd, { whole: true }), node: lk(ownEnd) });
-  ok(cutQ.length === 500 && lk(cutQ, { whole: true }).length === 0 && lk(cutQ).length === 0 && /href|data-fy/.test(F.linkedHtml(own, { whole: true })) && !/data-fy/.test(F.linkedHtml(cutQ, { whole: true })),
+  ok(cutQ.length === 500 && lk(cutQ, { whole: true }).length === 0 && lk(cutQ).length === 0 && gateOf(/href|data-fy/.test(F.linkedHtml(own, { whole: true }))) && !/data-fy/.test(F.linkedHtml(cutQ, { whole: true })),
     'B-3f50 (a): a field the store cut at its cap (500) through the URL: no link on either road — the cut token is its words', { len: cutQ.length });
   ok(J(RT.cutRuns(own)) !== J([]) && RT.uncut(own) !== own, 'B-3f50 (a): a COMPOSED text\'s reader (presentAsk\'s words, a reply\'s quote — cutRuns\' defaults) still reads every line-end mark as a cut (conservative there)');
   let base = ''; try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/lib/foryou-links.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
@@ -308,13 +308,13 @@ console.log('\nB-3f50 a line-end «…» of the writer\'s own keeps its link; a 
     ok(B.segmentText(own).filter((g) => g.t === 'link').length === 0 && lk(own, { whole: true }).length === 1, 'B-3f50 RED control: the release b06f36e90\'s tray drew the writer\'s own line-end «…» link as words (the row\'s complaint) — the whole-field road now keeps it');
   } else console.log('  · SKIP: the release b06f36e90 is not in this clone');
   const ROWB = read('src/lib/user-todos-row.js');
-  ok(/const wordsWhole = !card && !run && fieldWhole\(i, 'text', words\);/.test(ROWB) && /const detailWhole = fieldWhole\(i, 'detail', detail\);/.test(ROWB)
-    && /^import \{ fieldWhole \} from '\.\.\/inbox-origin\.js';/m.test(ROWB),   // B-76dc: the rule moved into PURE inbox-origin fieldWhole (its own table below)
+  ok(gateOf(/const wordsWhole = !card && !run && fieldWhole\(i, 'text', words\);/.test(ROWB)) && gateOf(/const detailWhole = fieldWhole\(i, 'detail', detail\);/.test(ROWB))
+    && verdictOf(/^import \{ fieldWhole \} from '\.\.\/inbox-origin\.js';/m.test(ROWB)),   // B-76dc: the rule moved into PURE inbox-origin fieldWhole (its own table below)
     'B-3f50 (a): the row reads a field WHOLE only when it draws the agent\'s own stored text / detail — never a template the page filled (a takeover request\'s «{words}» cut at 300), a card, a run headline or a line list; and (batch 47\'s cure) only an AGENT\'S OWN ASK (isAsk: via \'ask\') — a producer\'s item keeps the conservative reading');
   const FY = read('src/lib/foryou-links.js');
   const CM = "const cutMade = (a, z) => !still.has(a) && ends.some((e) => e >= z && !/\\s/.test(src.slice(z, e)));";
   const MASKED = "if (g.t !== 'link' && g.t !== 'masked') continue;";
-  ok(FY.includes(CM) && FY.includes(MASKED), 'B-3f50 (b) needles exist (cutMade, the masked clause)');
+  ok(gateOf(FY.includes(CM)) && verdictOf(FY.includes(MASKED)), 'B-3f50 (b) needles exist (cutMade, the masked clause)');
   const noCM = FY.replace(CM, 'const cutMade = () => false;');
   const A = await import('data:text/javascript,' + encodeURIComponent(fileImports(noCM)));
   const M = await import('data:text/javascript,' + encodeURIComponent(fileImports(noCM.replace(MASKED, MASKED + " if (g.t === 'masked') continue;"))));
@@ -361,7 +361,7 @@ console.log('\nB-76dc every surface asks fieldWhole; the ask filer cuts nothing 
     every: [row, iw].every((src) => [...src.matchAll(/wordsHtml\(([^)]*)\)/g)].filter((m) => /\b(words|detail|src)\b/.test(m[1])).every((m) => /whole/.test(m[1]))),
   });
   const sv = surfaces(ROWS, IWS, VPB);
-  ok(Object.values(sv).every(Boolean), 'B-76dc: the tray row, the vault paste row, the For-you window\'s pane and the paste dialog each draw an item\'s stored field with fieldWhole\'s answer — no wordsHtml of an item\'s words without `whole`', sv);
+  ok(verdictOf(Object.values(sv).every(Boolean)), 'B-76dc: the tray row, the vault paste row, the For-you window\'s pane and the paste dialog each draw an item\'s stored field with fieldWhole\'s answer — no wordsHtml of an item\'s words without `whole`', sv);
   ok(!Object.values(surfaces(ROWS, IWS.replace("wordsInto(c.detail, v.detail, fieldWhole(it, 'detail', v.detail))", 'wordsInto(c.detail, v.detail)').replace('el.innerHTML = wordsHtml(src, { whole });', 'el.innerHTML = wordsHtml(src);'), VPB)).every(Boolean)   // stale-pins: kept (the train tip's shape, planted)
     && !Object.values(surfaces(ROWS.replace("wordsHtml(detail || '', { whole: fieldWhole(i, 'detail', detail) })", "wordsHtml(detail || '')"), IWS, VPB)).every(Boolean)   // stale-pins: kept (the train tip's shape, planted)
     && !Object.values(surfaces(ROWS, IWS, VPB.replace(", whole: fieldWhole(item, 'detail', detail) })", ' })'))).every(Boolean), 'B-76dc RED controls: the train tip\'s pane, its vault paste row, its paste dialog (no whole) are each refused');   // stale-pins: kept (the train tip's shapes, planted)
@@ -413,19 +413,19 @@ console.log('\nbatch 47 cure: a producer\'s cut is a cut — only an agent\'s ow
   const kept = (item) => RT.clip(String(item.text).trim(), UT.TEXT_MAX);   // the store's own cut (src/user-todos.js add)
   /** THE ROW's reading (src/lib/user-todos-row.js partsOf): whole only for the agent's own ask */
   const tray = (item, field) => lk(field === 'detail' ? item.detail : kept(item), { whole: OR.isAsk(item) });
-  ok(/text = clip\(rawText, TEXT_MAX\);/.test(read('src/user-todos.js')) && BT.confirmationTarget({ params: { url: URL400 } }).length === 300, 'setup: the store keeps a field to TEXT_MAX through clip; the card\'s target line is cut at 300 with its mark (the producer chain this leg drives)');
+  ok(gateOf(/text = clip\(rawText, TEXT_MAX\);/.test(read('src/user-todos.js'))) && BT.confirmationTarget({ params: { url: URL400 } }).length === 300, 'setup: the store keeps a field to TEXT_MAX through clip; the card\'s target line is cut at 300 with its mark (the producer chain this leg drives)');
   // (1) THE MUST'S SCENE through the real chain: a confirmed navigate to a 395-char URL
   const c400 = cardOf({ url: URL400 }), long = c400 && fileFrom(HB, c400), cutTok = URL400.slice(0, 299);
-  ok(!!long && OR.isAsk(long) === false && kept(long).endsWith(cutTok + '…') && kept(long).length < UT.TEXT_MAX && tray(long, 'text').length === 0 && tray(long, 'detail').length === 0,
+  ok(!!long && OR.isAsk(long) === false && gateOf(kept(long).endsWith(cutTok + '…')) && kept(long).length < UT.TEXT_MAX && tray(long, 'text').length === 0 && tray(long, 'detail').length === 0,
     'MUST: a confirmed navigate to a 395-char URL: the card cut it at 300 — the item\'s words and its detail draw the cut address as PLAIN WORDS (a producer\'s item: a «…» ending the text / a line is a cut), never a link to a wrong page', { text: long && kept(long), links: long && [tray(long, 'text'), tray(long, 'detail')] });
   const c158 = cardOf({ url: URL158 }, 'payment'), whole = c158 && fileFrom(HB, c158);
   ok(!!whole && whole.text === `The agent's browser is waiting for you to confirm "navigate" [payment] on ${URL158}` && J(tray(whole, 'text')) === J([URL158]) && J(tray(whole, 'detail')) === J([URL158]),
     '…a 158-char URL the card kept whole: the item carries it whole (the hand-back no longer cuts at 119), its category before it — the WHOLE address is the link, in the words and the detail', whole && whole.text);
   const cScript = cardOf({ script: 'fetch("' + URL400 + '")' }), scr = cScript && fileFrom(HB, cScript);
-  ok(!!scr && kept(scr).endsWith('…') && tray(scr, 'text').every((l) => URL400.startsWith(l) === false || l === URL400), '…a script cut at 200 through a URL: no truncated address is a link', scr && tray(scr, 'text'));
+  ok(!!scr && gateOf(kept(scr).endsWith('…')) && verdictOf(tray(scr, 'text').every((l) => URL400.startsWith(l) === false || l === URL400)), '…a script cut at 200 through a URL: no truncated address is a link', scr && tray(scr, 'text'));
   // (2) THE AGENT'S OWN ASK keeps B-3f50: its whole field's line-end «…» of its own stays its link
   const ask = { origin: 'agent', via: 'ask', text: 'see https://docs.example.com/wiki/Setup…', detail: null };
-  ok(OR.isAsk(ask) && J(tray(ask, 'text')) === J(['https://docs.example.com/wiki/Setup']), 'an AGENT\'S OWN ASK (via \'ask\'): its whole stored field is still read as its words — a «…» it wrote at the end keeps its link (B-3f50)');
+  ok(gateOf(OR.isAsk(ask)) && J(tray(ask, 'text')) === J(['https://docs.example.com/wiki/Setup']), 'an AGENT\'S OWN ASK (via \'ask\'): its whole stored field is still read as its words — a «…» it wrote at the end keeps its link (B-3f50)');
   // RED CONTROLS: the tip before the cure (2f241bf12) — the producer's own 119 cut AND the row reading any plain-words item whole
   const { mutantCopies, copiesCensus } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
   const SRC_HB = read('src/server/browser-handback.js');
@@ -435,13 +435,13 @@ console.log('\nbatch 47 cure: a producer\'s cut is a cut — only an agent\'s ow
   const MH = mutantCopies('foryou-links-handback', REPO);
   const old = fileFrom(MH.load('src/server/browser-handback.js', editAnchor(editAnchor(SRC_HB, NOW_T, OLD_T, "src/server/browser-handback.js"), NOW_D, OLD_D, "src/server/browser-handback.js"), 'own-cut'), cardOf({ url: URL158 })), oldWords = old && kept(old);   // no category: the must's scene
   const oldLinks = oldWords ? lk(oldWords, { whole: true }) : [];
-  ok(!!oldWords && oldWords.endsWith(URL158.slice(0, 119) + '…') && J(oldLinks) === J([URL158.slice(0, 119)]),
+  ok(!!oldWords && gateOf(oldWords.endsWith(URL158.slice(0, 119) + '…')) && J(oldLinks) === J([URL158.slice(0, 119)]),
     'RED CONTROL (the must\'s exact text): the producer\'s own cut at 119 read by the B-3f50 row (whole) — «…on https://shop.example.com/checkout/confirm?order=a1b2…» draws the TRUNCATED address as a link', { text: oldWords, links: oldLinks });
   ok(J(lk(kept(long), { whole: true })) === J([cutTok]), 'RED CONTROL: the cure\'s own producer read by the B-3f50 row (whole for every plain-words item) — the 300-cut address IS a link: the row\'s isAsk gate is what the MUST leg needs', lk(kept(long), { whole: true }));
   const oldDetail = fileFrom(MH.load('src/server/browser-handback.js', editAnchor(SRC_HB, NOW_D, OLD_D, "src/server/browser-handback.js"), 'old-detail'), c400);
   ok(!!oldDetail && J(lk(oldDetail.detail, { whole: false })) === J([cutTok]), 'RED CONTROL: the old detail («What it acts on: <target>. Open…») — the cut mark sits before «.», no reading counts it, the cut address is linked on every road', oldDetail && lk(oldDetail.detail, { whole: false }));
-  for (const row of copiesCensus(MH.files, MH.dir, REPO, { label: 'batch 47 cure ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MH.files, MH.dir, REPO, { label: 'batch 47 cure ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

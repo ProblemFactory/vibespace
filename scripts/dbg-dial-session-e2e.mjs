@@ -20,7 +20,7 @@ const PORT = 3991;
 const DEVROOT = '/tmp/vs-dial-e2e-dev';
 const DEVHOME = '/tmp/vs-dial-e2e-devhome';   // the "device home" (exists on device)
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // clean slate — but KEEP data/bin (the built agentd/attach bundles live there)
@@ -69,7 +69,7 @@ const POST = (url, body) => J(url, { method: 'POST', headers: { 'Content-Type': 
 try {
   // ── pair a device (mints dial + host tokens on the host record) ──
   const pair = await POST('/api/agentd/dial-pair', { deviceId: 'e2e-mac' });
-  check('dial-pair mints tokens', pair.dialToken?.startsWith('vsdt_') && pair.hostToken?.startsWith('vsht_'), JSON.stringify(pair));
+  check('dial-pair mints tokens', gateOf(pair.dialToken?.startsWith('vsdt_')) && verdictOf(pair.hostToken?.startsWith('vsht_')), JSON.stringify(pair));
 
   // ── boot a REAL daemon that dials in, HOME set to the device home ──
   fs.mkdirSync(path.join(DEVROOT, 'state'), { recursive: true, mode: 0o700 });
@@ -88,7 +88,7 @@ try {
     if (h?.online) { online = true; hostId = h.id; break; }
     await sleep(400);
   }
-  check('device dials in ONLINE', online);
+  check('device dials in ONLINE', verdictOf(online));
 
   // ── device home API (RemoteFs.home dial fast path) ──
   const homeInfo = await J(`/api/home?host=${hostId}`).catch(() => ({}));
@@ -135,7 +135,7 @@ try {
       if (msgs.some((m) => JSON.stringify(m).includes('PONG from the device'))) { pong = true; break; }
       await sleep(300);
     }
-    check('claude stream-json bytes RELAYED to the client (chat not blank)', pong,
+    check('claude stream-json bytes RELAYED to the client (chat not blank)', verdictOf(pong),
       'last msgs: ' + JSON.stringify(msgs.slice(-3)).slice(0, 300));
 
     // the buffer file on disk must carry bytes (OFFSET_MODE relay proof)
@@ -146,7 +146,7 @@ try {
 
     // the fake claude ran in the FALLBACK cwd (device HOME), not the bad path
     check('session ran in the device HOME fallback (cwd honored/repaired)',
-      msgs.some((m) => JSON.stringify(m).includes(DEVHOME)) || pong,
+      verdictOf(msgs.some((m) => JSON.stringify(m).includes(DEVHOME))) || verdictOf(pong),
       'expected cwd ' + DEVHOME);
   }
 
@@ -169,7 +169,7 @@ try {
       if (msgs.some((m) => JSON.stringify(m).includes('PONG from the device @ ' + DEVHOME))) { inHome = true; break; }
       await sleep(300);
     }
-    check('empty-cwd session ran in the DEVICE home', inHome,
+    check('empty-cwd session ran in the DEVICE home', verdictOf(inHome),
       'wanted PONG @ ' + DEVHOME);
   }
 
@@ -196,7 +196,7 @@ try {
       if (termBuf.includes('TERM-READY')) break;
       await sleep(300);
     }
-    check('device TUI got a REAL pty (tty=true) and ran in the device cwd', /TERM-READY tty=true/.test(termBuf) && termBuf.includes('cwd=' + DEVHOME), termBuf.slice(0, 200));
+    check('device TUI got a REAL pty (tty=true) and ran in the device cwd', gateOf(/TERM-READY tty=true/.test(termBuf)) && verdictOf(termBuf.includes('cwd=' + DEVHOME)), termBuf.slice(0, 200));
     // keystroke echo proves the input path (xterm→dtach→pty-wrapper→attach→device pty)
     ws.send(JSON.stringify({ type: 'input', sessionId: sid3, data: 'hi\r' }));
     let echoed = false;
@@ -205,7 +205,7 @@ try {
       if (termBuf.includes('ECHO:hi')) { echoed = true; break; }
       await sleep(300);
     }
-    check('terminal input relayed device-side (keystroke echo)', echoed, termBuf.slice(-200));
+    check('terminal input relayed device-side (keystroke echo)', verdictOf(echoed), termBuf.slice(-200));
     // resize propagates to the device pty
     ws.send(JSON.stringify({ type: 'resize', sessionId: sid3, cols: 100, rows: 40 }));
     let resized = false;
@@ -214,7 +214,7 @@ try {
       if (/RESIZED 100x40/.test(termBuf)) { resized = true; break; }
       await sleep(300);
     }
-    check('terminal resize propagates to the device pty (SIGWINCH)', resized, termBuf.slice(-200));
+    check('terminal resize propagates to the device pty (SIGWINCH)', verdictOf(resized), termBuf.slice(-200));
     check('daemon still alive after terminal session', daemon.exitCode === null);
   }
 
@@ -226,9 +226,9 @@ try {
     s.listen(0, '127.0.0.1', () => res(s.address().port));
   });
   const detected = await J(`/api/hosts/${hostId}/ports`).catch(() => ({}));
-  check('detect lists the device listening port', Array.isArray(detected.ports) && detected.ports.some((p) => p.port === echoPort), JSON.stringify((detected.ports || []).slice(0, 5)));
+  check('detect lists the device listening port', gateOf(Array.isArray(detected.ports)) && verdictOf(detected.ports.some((p) => p.port === echoPort)), JSON.stringify((detected.ports || []).slice(0, 5)));
   const fwd = await POST(`/api/hosts/${hostId}/port-forward`, { port: echoPort, label: 'svc' });
-  check('port-forward binds a local port with a URL', fwd.active && fwd.localPort > 0 && fwd.url?.includes(String(fwd.localPort)), JSON.stringify(fwd));
+  check('port-forward binds a local port with a URL', gateOf(fwd.active) && fwd.localPort > 0 && verdictOf(fwd.url?.includes(String(fwd.localPort))), JSON.stringify(fwd));
   if (fwd.localPort) {
     const rt = await new Promise((res, rej) => {
       const c = net.connect(fwd.localPort, '127.0.0.1', () => c.write('hey'));
@@ -238,7 +238,7 @@ try {
     check('bytes round-trip through the forward to the device service', rt === 'svc:hey', String(rt));
   }
   const pfList = await J('/api/port-forwards').catch(() => ({}));
-  check('/api/port-forwards lists the active forward', (pfList.forwards || []).some((r) => r.id === fwd.id && r.active), JSON.stringify(pfList));
+  check('/api/port-forwards lists the active forward', verdictOf((pfList.forwards || []).some((r) => r.id === fwd.id && r.active)), JSON.stringify(pfList));
   // ── PUBLIC exposure via frp (B-0b60) — only if the relay env is present ──
   if (process.env.VIBESPACE_FRPS_ADDR && process.env.VIBESPACE_FRPS_TOKEN) {
     const echoPort2 = await new Promise((res) => {
@@ -247,7 +247,7 @@ try {
     });
     const f2 = await POST(`/api/hosts/${hostId}/port-forward`, { port: echoPort2 });
     const pub = await POST(`/api/port-forward/${encodeURIComponent(f2.id)}/publish`, {});
-    check('publish returns a public URL', /^http:\/\/.+:\d+\/$/.test(pub.publicUrl || ''), JSON.stringify(pub));
+    check('publish returns a public URL', verdictOf(/^http:\/\/.+:\d+\/$/.test(pub.publicUrl || '')), JSON.stringify(pub));
     if (pub.publicUrl) {
       const m = pub.publicUrl.match(/^http:\/\/([^:]+):(\d+)/);
       let rt = '';
@@ -255,7 +255,7 @@ try {
         rt = await new Promise((res) => { const c = net.connect(Number(m[2]), m[1], () => c.write('yo')); let b = ''; c.on('data', (d) => { b += d; if (b.includes('pub:yo')) { c.end(); res(b); } }); c.on('error', () => res('')); setTimeout(() => { try { c.destroy(); } catch {} res(b); }, 2500); });
         if (!rt.includes('pub:yo')) await sleep(700);
       }
-      check('published forward round-trips over the PUBLIC internet', rt.includes('pub:yo'), JSON.stringify(rt));
+      check('published forward round-trips over the PUBLIC internet', verdictOf(rt.includes('pub:yo')), JSON.stringify(rt));
     }
     await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(f2.id)}/publish`, { method: 'DELETE' });
     await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(f2.id)}`, { method: 'DELETE' });
@@ -295,4 +295,4 @@ if (failed) {
   } catch {}
 }
 console.log(failed ? `\n${failed} FAILED` : '\nDIAL SESSION E2E PASSED');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

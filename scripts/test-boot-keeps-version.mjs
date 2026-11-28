@@ -19,7 +19,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VNC_ENV = await vncEnv();
 const PORT = await freePort();
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.error(`  ✗ ${n}${e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.error(`  ✗ ${n}${e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = scratch('boot-keeps-version'); // per-process (scripts/scratch.mjs)
 fs.rmSync(BASE, { recursive: true, force: true }); fs.mkdirSync(BASE, { recursive: true });
@@ -63,10 +63,10 @@ srv = spawn(process.execPath, ['server.js'], { cwd: WORK, env, stdio: ['ignore',
 let bootLog = ''; srv.stdout.on('data', (d) => { bootLog += d; }); srv.stderr.on('data', (d) => { bootLog += d; });
 let up = false; const t0 = Date.now();
 for (let i = 0; i < 240 && !up; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); up = true; } catch { await sleep(250); } }
-ok('the server boots and answers', up, bootLog.slice(-1500));
+ok('the server boots and answers', verdictOf(up), bootLog.slice(-1500));
 const bootCalls = fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').split('\n').filter(Boolean) : [];
 const updating = bootCalls.filter((l) => /^git (?:pull|fetch|checkout|merge|reset)\b|^npm /.test(l));
-ok(`the boot spawned NO update child — ${bootCalls.length} git / npm call(s) in its first ${Math.round((Date.now() - t0) / 1000)} s, none a pull / fetch / checkout / npm (each named)`, up && updating.length === 0 && !/\[auto-update\]|git pull/.test(bootLog), { bootCalls, log: bootLog.split('\n').filter((l) => /auto-update|git pull/.test(l)) });
+ok(`the boot spawned NO update child — ${bootCalls.length} git / npm call(s) in its first ${Math.round((Date.now() - t0) / 1000)} s, none a pull / fetch / checkout / npm (each named)`, gateOf(up) && updating.length === 0 && !/\[auto-update\]|git pull/.test(bootLog), { bootCalls, log: bootLog.split('\n').filter((l) => /auto-update|git pull/.test(l)) });
 const headAfter = git(WORK, 'rev-parse', 'HEAD');
 const vAfter = JSON.parse(fs.readFileSync(path.join(WORK, 'package.json'), 'utf8')).version;
 ok('the version after the boot is the version before (HEAD unchanged, package.json unchanged)', headAfter === headBefore && vAfter === version, { headBefore, headAfter, version, vAfter });
@@ -118,7 +118,7 @@ let up2 = false; const t2 = Date.now();
 for (let i = 0; i < 240 && !up2; i++) { try { await fetch(`http://127.0.0.1:${PORT2}/api/home`); up2 = true; } catch { await sleep(250); } }
 const w2 = up2 ? await watchBoot(PORT2, CLOCK2) : { watchedMs: 0, timers: 0, longest: { kind: '-', ms: 0 } };
 const calls2 = fs.existsSync(LOG2) ? fs.readFileSync(LOG2, 'utf8').split('\n').filter(Boolean) : [];
-ok(`a boot from that root spawned NO git, npm or systemctl at all — ${calls2.length} call(s), watched ${w2.covered ? 'past the LONGEST timer the boot armed' : 'for 30 s (capped: a timer over 25 min is NOT watched — named)'} (${w2.longest.ms} ms, a ${w2.longest.kind}; ${w2.timers} timers over 1 s armed in its first 15 s, each run 50× sooner — watched ${Math.round(w2.watchedMs / 1000)} s)`, up2 && w2.timers > 0 && calls2.length === 0 && !/\[auto-update\]|git pull/.test(log2), { up2, calls2, w2, log: log2.split('\n').filter((l) => /auto-update|git pull|Error/.test(l)).slice(0, 8) });
+ok(`a boot from that root spawned NO git, npm or systemctl at all — ${calls2.length} call(s), watched ${w2.covered ? 'past the LONGEST timer the boot armed' : 'for 30 s (capped: a timer over 25 min is NOT watched — named)'} (${w2.longest.ms} ms, a ${w2.longest.kind}; ${w2.timers} timers over 1 s armed in its first 15 s, each run 50× sooner — watched ${Math.round(w2.watchedMs / 1000)} s)`, gateOf(up2) && w2.timers > 0 && calls2.length === 0 && !/\[auto-update\]|git pull/.test(log2), { up2, calls2, w2, log: log2.split('\n').filter((l) => /auto-update|git pull|Error/.test(l)).slice(0, 8) });
 const v2 = up2 ? await (await fetch(`http://127.0.0.1:${PORT2}/api/version?fresh=1`)).json() : null;
 ok(`…its version is the one it had (HEAD unchanged) and the «a newer version exists» notice still tells (version ${version}, latest ${newer})`, git(WORK2, 'rev-parse', 'HEAD') === head2 && !!v2 && v2.version === version && v2.latest === newer, v2);
 srv2.kill('SIGTERM');
@@ -133,9 +133,9 @@ let up3 = false;
 for (let i = 0; i < 240 && !up3; i++) { try { await fetch(`http://127.0.0.1:${PORT3}/api/home`); up3 = true; } catch { await sleep(250); } }
 const w3 = up3 ? await watchBoot(PORT3, CLOCK3) : { watchedMs: 0, timers: 0, longest: { kind: '-', ms: 0 } };
 const calls3 = fs.existsSync(LOG3) ? fs.readFileSync(LOG3, 'utf8').split('\n').filter(Boolean) : [];
-ok(`CONTROL: the panel's plant (update.sh spawned 20 s after the boot) is SEEN by the same watch — ${calls3.length} stand-in call(s) (e.g. ${JSON.stringify(calls3[0] || '')}), none a real program`, up3 && calls3.some((l) => /^git /.test(l)), { up3, calls3: calls3.slice(0, 6), w3 });
+ok(`CONTROL: the panel's plant (update.sh spawned 20 s after the boot) is SEEN by the same watch — ${calls3.length} stand-in call(s) (e.g. ${JSON.stringify(calls3[0] || '')}), none a real program`, gateOf(up3) && verdictOf(calls3.some((l) => /^git /.test(l))), { up3, calls3: calls3.slice(0, 6), w3 });
 srv3.kill('SIGTERM');
 await new Promise((r) => { const t = setTimeout(r, 5000); srv3.once('exit', () => { clearTimeout(t); r(); }); });
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

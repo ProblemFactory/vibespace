@@ -32,7 +32,7 @@ const T0 = process.hrtime.bigint();
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let passed = 0, failed = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; console.log('  ✓ ' + name); return; }
   failed++;
   let d = ''; try { d = detail === undefined ? '' : ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700); } catch { d = ' — ' + String(detail); }
@@ -119,7 +119,7 @@ for (const j of judged) {
 }
 const seen = new Set(judged.map((j) => j.want));
 ok(`every kind is exercised by a real shape — the person's (${PERSON_WHYS.join(', ')}) and nobody's (${OTHER_WHYS.join(', ')})`,
-  [...PERSON_WHYS, ...OTHER_WHYS].every((w) => seen.has(w)), [...PERSON_WHYS, ...OTHER_WHYS].filter((w) => !seen.has(w)));
+  verdictOf([...PERSON_WHYS, ...OTHER_WHYS].every((w) => seen.has(w))), [...PERSON_WHYS, ...OTHER_WHYS].filter((w) => !seen.has(w)));
 // the turn map the attach slab sends (message-window turnMap → turnPreviewOf): `other` exactly on the rows nobody typed
 const turns = mm.turnMap().filter((e) => e.role === 'user');
 const turnRows = turns.map((e) => { const j = judged.find((x) => x.rec === mm.messages[e.startIdx]); return { name: j ? j.name : null, want: j ? j.want : null, other: e.other || null, preview: e.preview, note: e.note || null }; });
@@ -140,8 +140,8 @@ const crossMo = disagree(slabMo, scanMo, RECS, idOfMo);
 ok(`THE BUILDERS AGREE (claude): the attach slab's turnMap and the huge-session scan give every one of the ${RECS.length} records the same turn — verdict, preview, note, compact — or both none`, crossMo.length === 0, crossMo);
 const twin = (id) => { const i = RECS.findIndex((r) => r.uuid === id); return [faceOf(slabMo[i]), faceOf(scanMo[i])]; };
 const personIn = (id) => twin(id).every((f) => f !== 'no turn' && JSON.parse(f).other === null);
-ok('a TYPED message that opens with the task tag (block-list content — the shape VibeSpace\'s own sends have) is the person\'s in both builders', personIn('mo-typed-tasktag'), twin('mo-typed-tasktag'));
-ok('a TYPED paste of the compaction summary\'s head is the person\'s in both builders — their words, never «Context compacted»', personIn('mo-typed-compactpaste') && JSON.parse(twin('mo-typed-compactpaste')[0]).preview.startsWith('This session is being continued'), twin('mo-typed-compactpaste'));
+ok('a TYPED message that opens with the task tag (block-list content — the shape VibeSpace\'s own sends have) is the person\'s in both builders', verdictOf(personIn('mo-typed-tasktag')), twin('mo-typed-tasktag'));
+ok('a TYPED paste of the compaction summary\'s head is the person\'s in both builders — their words, never «Context compacted»', gateOf(personIn('mo-typed-compactpaste')) && verdictOf(JSON.parse(twin('mo-typed-compactpaste')[0]).preview.startsWith('This session is being continued')), twin('mo-typed-compactpaste'));
 const noTurn = RECS.filter((r) => expectOf(r.uuid) === 'noturn').map((r) => r.uuid);
 const turned = noTurn.filter((id) => twin(id).some((f) => f !== 'no turn'));
 ok(`the companion lines («[Image source: …]», a skill's body, «Caveat:») and the safety stop's nudge have no turn of their own in either builder (${noTurn.join(', ')})`, noTurn.length === 4 && turned.length === 0, turned.map((id) => [id, ...twin(id)]));
@@ -163,41 +163,41 @@ for (const [text, what] of looksLike) ok(`a TYPED message shaped like ${what} st
 // the interrupt kind reads the CLI's own two markers, letter for letter (permission-outcome's census: the binary's user-message markers)
 const PO_ROWS = require(path.join(REPO, 'src/permission-outcome.js')).PERMISSION_OUTCOME_ROWS.filter((r) => r.id === 'Jw' || r.id === 'Ud');
 const said = (text) => ({ role: 'user', content: [{ type: 'text', text }] });
-ok('the interrupt kind is the CLI\'s two markers — permission-outcome\'s census rows Jw / Ud, letter for letter', PO_ROWS.length === 2 && PO_ROWS.every((r) => personRow(said(r.text)).why === 'interrupt'), PO_ROWS.map((r) => [r.id, personRow(said(r.text)).why]));
+ok('the interrupt kind is the CLI\'s two markers — permission-outcome\'s census rows Jw / Ud, letter for letter', PO_ROWS.length === 2 && verdictOf(PO_ROWS.every((r) => personRow(said(r.text)).why === 'interrupt')), PO_ROWS.map((r) => [r.id, personRow(said(r.text)).why]));
 ok('…and nothing broader: a sentence that only resembles them, or quotes one mid-text, stays the person\'s', personRow(said('[Request interrupted by the user]')).why === 'typed' && personRow(said('I saw [Request interrupted by user] earlier')).why === 'typed');
 ok('an empty / missing record never throws (nothing to fold)', personRow(null).person === true && AN.turnPreviewOf({ role: 'user', content: [] }) === null);
 
 console.log('§2 THE READERS — the renderer and the list ask the verdict; every builder stamps it; nobody keeps a copy');
 {
   const cr = read('src/lib/chat-renderers.js');
-  ok('chat-renderers imports personRow from the PURE module', /^import \{ personRow \} from '\.\.\/assistant-note\.js';/m.test(cr));
-  ok('renderUserMsg asks it ONCE and draws the notification card / the command bubble by its word', /const origin = personRow\(msg\);\n\s*const isNotification = origin\.why === 'notification' \|\| origin\.why === 'command';/.test(cr));
-  ok('…and the For-you answer card by its word', /const inboxReply = origin\.why === 'tray-answer' \? parseInboxReply\(rawText\) : null;/.test(cr));
+  ok('chat-renderers imports personRow from the PURE module', verdictOf(/^import \{ personRow \} from '\.\.\/assistant-note\.js';/m.test(cr)));
+  ok('renderUserMsg asks it ONCE and draws the notification card / the command bubble by its word', verdictOf(/const origin = personRow\(msg\);\n\s*const isNotification = origin\.why === 'notification' \|\| origin\.why === 'command';/.test(cr)));
+  ok('…and the For-you answer card by its word', verdictOf(/const inboxReply = origin\.why === 'tray-answer' \? parseInboxReply\(rawText\) : null;/.test(cr)));
   ok('the renderer keeps no copy of the notification shapes (they moved into personRow)', !/command-name\|local-command\|task-notification\|system-reminder/.test(cr) && !/A session-scoped Stop hook is now active\/\.test/.test(cr));
   const an = read('src/assistant-note.js');
   ok('personRow holds them, once', (an.match(/command-name\|local-command\|task-notification\|system-reminder/g) || []).length === 1);
   const mmap = read('src/lib/chat-minimap.js');
   const toc = mmap.slice(mmap.indexOf('  _showToc() {'), mmap.indexOf('  dispose() {'));
-  ok('the list folds by the stamp: listed = the person\'s rows unless the chip is on, the chip counts the rest', /const folded = turns\.filter\(\(tt\) => tt\.other\)\.length;/.test(toc) && /const listed = showOther \? turns : turns\.filter\(\(tt\) => !tt\.other\);/.test(toc) && /for \(const turn of listed\)/.test(toc));
-  ok('the placeholder counts what is listed', /filter\.placeholder = t\('Filter \{n\} messages…', \{ n: listed\.length \}\);/.test(toc));
+  ok('the list folds by the stamp: listed = the person\'s rows unless the chip is on, the chip counts the rest', gateOf(/const folded = turns\.filter\(\(tt\) => tt\.other\)\.length;/.test(toc)) && gateOf(/const listed = showOther \? turns : turns\.filter\(\(tt\) => !tt\.other\);/.test(toc)) && verdictOf(/for \(const turn of listed\)/.test(toc)));
+  ok('the placeholder counts what is listed', verdictOf(/filter\.placeholder = t\('Filter \{n\} messages…', \{ n: listed\.length \}\);/.test(toc)));
   ok('the chip says the count in the device\'s words (two t() keys), is a pressed-state button, and is absent when nothing is folded',
-    /t\('System & other sources ×\{n\} · Show', \{ n: folded \}\)/.test(toc) && /t\('System & other sources ×\{n\} · Hide', \{ n: folded \}\)/.test(toc) && /chip\.setAttribute\('aria-pressed', String\(showOther\)\);/.test(toc) && /if \(folded\) pop\.appendChild\(chip\);/.test(toc));
-  ok('a list with nothing the person typed says so and points at the chip — never «No matches»', /empty\.textContent = !q && !showOther && folded \? t\('Nothing you typed here — the button above lists the rest'\) : t\('No matches'\);/.test(toc));
-  ok('the chip\'s state is per device (localStorage), default folded', /const readShowOther = \(\) => \{ try \{ return localStorage\.getItem\(SHOW_OTHER_KEY\) === '1'; \} catch \{ return false; \} \};/.test(mmap) && /writeShowOther\(showOther\);/.test(toc));
-  ok('the strip and the drag label keep every turn (B-40f8): nothing outside the list reads the stamp', (mmap.match(/\.other\b/g) || []).length === (toc.match(/\.other\b/g) || []).length + 1 && /other: turn\.other \};/.test(mmap));
+    gateOf(/t\('System & other sources ×\{n\} · Show', \{ n: folded \}\)/.test(toc)) && gateOf(/t\('System & other sources ×\{n\} · Hide', \{ n: folded \}\)/.test(toc)) && gateOf(/chip\.setAttribute\('aria-pressed', String\(showOther\)\);/.test(toc)) && verdictOf(/if \(folded\) pop\.appendChild\(chip\);/.test(toc)));
+  ok('a list with nothing the person typed says so and points at the chip — never «No matches»', verdictOf(/empty\.textContent = !q && !showOther && folded \? t\('Nothing you typed here — the button above lists the rest'\) : t\('No matches'\);/.test(toc)));
+  ok('the chip\'s state is per device (localStorage), default folded', gateOf(/const readShowOther = \(\) => \{ try \{ return localStorage\.getItem\(SHOW_OTHER_KEY\) === '1'; \} catch \{ return false; \} \};/.test(mmap)) && verdictOf(/writeShowOther\(showOther\);/.test(toc)));
+  ok('the strip and the drag label keep every turn (B-40f8): nothing outside the list reads the stamp', (mmap.match(/\.other\b/g) || []).length === (toc.match(/\.other\b/g) || []).length + 1 && verdictOf(/other: turn\.other \};/.test(mmap)));
   for (const [f, re, what] of [
     ['src/message-window.js', /if \(m\.role === 'user'\) Object\.assign\(entry, turnPreviewOf\(m\)\);/, 'the attach slab\'s turnMap'],
     ['src/adapters/codex.js', /\.\.\.\(p\.other \? \{ other: p\.other \} : \{\}\)/, 'the huge-session scan'],
     ['src/lib/chat-view.js', /role: 'user', \.\.\.turnPreviewOf\(msg\) \};/, 'the live append'],
     ['src/lib/chat-view.js', /role: 'user', \.\.\.turnPreviewOf\(m\) \}, this\._total\)/, 'the catch-up after missed messages'],
-  ]) ok(`${what} stamps the verdict (${f})`, re.test(read(f)));
+  ]) ok(`${what} stamps the verdict (${f})`, verdictOf(re.test(read(f))));
   // r2, LAW A′: the scan asks the normalizers' own functions — no ladder of its own
   const cxs = read('src/adapters/codex.js');
   const cu = fnBody(cxs, 'function _claudeUserTurn(rec, line) {');
   ok('the huge-session scan asks the claude normalizer\'s ONE function (message-manager userRecordOf) and keeps no ladder of its own — no origin, promptSource or task-tag test in _claudeUserTurn',
-    /const u = userRecordOf\(rec\);/.test(cu) && /if \(u\.companion \|\| u\.nudge\) return null;/.test(cu) && /if \(u\.peer\) applyPeerOrigin\(msg, u\.peer\.po, u\.peer\.said\);/.test(cu) && !/task-notification|promptSource|_fromWebui|origin\?\.kind|originKind ===/.test(cu));
+    gateOf(/const u = userRecordOf\(rec\);/.test(cu)) && gateOf(/if \(u\.companion \|\| u\.nudge\) return null;/.test(cu)) && gateOf(/if \(u\.peer\) applyPeerOrigin\(msg, u\.peer\.po, u\.peer\.said\);/.test(cu)) && !/task-notification|promptSource|_fromWebui|origin\?\.kind|originKind ===/.test(cu));
   const xu = fnBody(cxs, 'function _codexUserTurn(rec, line) {');
-  ok('…and the codex normalizer\'s (codex-message-manager userItemOf) for a codex item — never the wrapper\'s marker alone', /const u = userItemOf\(rec\.payload[,)]/.test(xu) && !/webui_peer|webui_origin/.test(xu));
+  ok('…and the codex normalizer\'s (codex-message-manager userItemOf) for a codex item — never the wrapper\'s marker alone', gateOf(/const u = userItemOf\(rec\.payload[,)]/.test(xu)) && !/webui_peer|webui_origin/.test(xu));
   const mms = read('src/message-manager.js');
   const pu = mms.slice(mms.indexOf('  _processUser(raw, emit) {'), mms.indexOf('  _processAssistant(raw, emit) {'));
   ok('the claude normalizer writes its stamps from that function, once: _processUser keeps no companion, task-tag, nudge or typed test of its own',
@@ -208,7 +208,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
     (ru.match(/userItemOf\(item[,)]/g) || []).length === 1 && !/peerRecordOf\(|webui_origin/.test(ru) && (cms.match(/(?<!function )peerRecordOf\(item, content[,)]/g) || []).length === 1);
   for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) {
     const s = read(f);
-    ok(`${path.basename(f)} words both chip states and the empty list`, /"System & other sources ×\{n\} · Show": "[^"]*×\{n\}[^"]*"/.test(s) && /"System & other sources ×\{n\} · Hide": "[^"]*×\{n\}[^"]*"/.test(s) && /"Nothing you typed here — the button above lists the rest": "[^"]+"/.test(s));
+    ok(`${path.basename(f)} words both chip states and the empty list`, gateOf(/"System & other sources ×\{n\} · Show": "[^"]*×\{n\}[^"]*"/.test(s)) && gateOf(/"System & other sources ×\{n\} · Hide": "[^"]*×\{n\}[^"]*"/.test(s)) && verdictOf(/"Nothing you typed here — the button above lists the rest": "[^"]+"/.test(s)));
   }
 }
 
@@ -224,7 +224,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
   const CUT = ["    if (origin.why === 'compact') return this._renderNotificationMsg(rawText, { label: t('Context compacted'), detail: rawText.trim() });\n",
     "    if (origin.why === 'interrupt') return this._renderNotificationMsg(rawText, { label: t('Turn stopped'), detail: INTERRUPT_ONLY_RE.test(rawText.trim()) ? '' : rawText.trim() }); // the marker says THAT a stop happened, never who pressed it (a stop the product sends writes the same marker); the result row says «Interrupted»\n",
     "      if (msg.originKind === 'wakeup') return this._renderNotificationMsg(rawText, { label: t('Scheduled wake-up'), detail: rawText.trim() });\n"];
-  ok('…the control\'s anchors are in chat-renderers.js once each', CUT.every((c) => CRS.split(c).length === 2));
+  ok('…the control\'s anchors are in chat-renderers.js once each', verdictOf(CUT.every((c) => CRS.split(c).length === 2)));
   const CR1 = await import(pathToFileURL(MUTC.write('src/lib/chat-renderers.js', editAnchor(CUT.reduce((x, c) => editAnchor(x, c, '', "src/lib/chat-renderers.js"), CRS), "from 'marked';", `from ${JSON.stringify(import.meta.resolve('marked'))};`, "src/lib/chat-renderers.js"), 'no3d90', { esm: true })).href);
   const doc0 = globalThis.document;
   globalThis.document = { createElement: () => ({ className: '', innerHTML: '', title: '', classList: { add() { }, toggle() { } }, querySelector: () => null, appendChild() { }, setAttribute() { } }), addEventListener() { }, removeEventListener() { } };
@@ -236,9 +236,9 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
   });
   try {
     const got = drawAll(CR0);
-    for (const g of got) ok(`B-3d90: ${g.uuid} is drawn as its system card, never a «You» bubble`, g.card, g);
+    for (const g of got) ok(`B-3d90: ${g.uuid} is drawn as its system card, never a «You» bubble`, verdictOf(g.card), g);
     const pre = drawAll(CR1);
-    ok(`CONTROL (the three branches removed): none of the ${pre.length} records gets its card — the legs go RED`, pre.every((g) => !g.card), pre);
+    ok(`CONTROL (the three branches removed): none of the ${pre.length} records gets its card — the legs go RED`, verdictOf(pre.every((g) => !g.card)), pre);
   } finally { globalThis.document = doc0; }
   ok('B-3d90 (3): a record naming its wakeup is never typed; a «system» record with NO origin (unmeasured) keeps today\'s answer — typed, never «not by you» on a reading', byUuid.get('mo-notification-wakeup')?.originKind === 'wakeup' && !byUuid.get('mo-notification-wakeup')?.typed && byUuid.get('mo-typed-sysprompt')?.typed === true && !byUuid.get('mo-typed-sysprompt')?.originKind);
 }
@@ -269,7 +269,7 @@ console.log('§3 MUTANTS — each kind taken out of a copy (in memory) reddens e
     const names = red.map((j) => j.name);
     const exact = red.length > 0 && red.every((j) => owns.includes(j.want));
     if (applied && exact) killed.add(kind);
-    ok(`mutant «${kind} missing»: RED on exactly its rows (${names.join(', ') || 'none'})`, applied && exact, { applied, red: red.map((j) => [j.name, j.want, X.personRow(j.rec).why]) });
+    ok(`mutant «${kind} missing»: RED on exactly its rows (${names.join(', ') || 'none'})`, gateOf(applied) && verdictOf(exact), { applied, red: red.map((j) => [j.name, j.want, X.personRow(j.rec).why]) });
   }
   ok(`every kind has a mutant that dies (${killed.size}/${PERSON_WHYS.length + OTHER_WHYS.length - 1} — 'typed' is the fall-through)`, killed.size === PERSON_WHYS.length + OTHER_WHYS.length - 1);
   // the turn stamp itself: a turnPreviewOf that forgets `other` lists every row as the person's
@@ -347,9 +347,9 @@ console.log('§4 THE CENSUS — every role === \'user\' site in src/lib/ reads t
   const stale = ROWS.filter(([f, needle]) => !hits.some((h) => h.rel === f && h.line.includes(needle)));
   ok('no row names a site that is gone', stale.length === 0, stale.map((r) => r[0] + ' ' + r[1]));
   for (const [f, needle, why] of ROWS) {
-    if (why === true) ok(`${f} «${needle.slice(0, 60)}» reads the verdict`, !!READS[f + '|' + needle] && READS[f + '|' + needle](read(f)));
+    if (why === true) ok(`${f} «${needle.slice(0, 60)}» reads the verdict`, !!READS[f + '|' + needle] && verdictOf(READS[f + '|' + needle](read(f))));
   }
-  ok('every named site says its reason in words (no empty or one-word reasons)', ROWS.every(([, , why]) => why === true || (typeof why === 'string' && why.split(' ').length >= 6)));
+  ok('every named site says its reason in words (no empty or one-word reasons)', verdictOf(ROWS.every(([, , why]) => why === true || (typeof why === 'string' && why.split(' ').length >= 6))));
 }
 
 console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpace sent, matched by digest + window — no match is today\'s answer');
@@ -384,13 +384,13 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   for (let i = 0; i < SR.PER_CONV_MAX + 5; i++) st.note({ conv: 'conv-a', text: `the secret word ${i}`, kind: 'typed', at: T0 + i });
   const last = writes[writes.length - 1];
   ok(`bound 3: the store keeps the ${SR.PER_CONV_MAX} newest sends of a conversation, each change ONE store-writer dirty(), and its bytes hold no words`,
-    st.rowsFor('conv-a').length === SR.PER_CONV_MAX && st.rowsFor('conv-a')[0].at === T0 + 5 && writes.length === SR.PER_CONV_MAX + 5 && writes.every((w) => w.name === SR.STORE_NAME) && !last.bytes.includes('secret') && JSON.parse(last.bytes).v === 1);
+    st.rowsFor('conv-a').length === SR.PER_CONV_MAX && st.rowsFor('conv-a')[0].at === T0 + 5 && writes.length === SR.PER_CONV_MAX + 5 && gateOf(writes.every((w) => w.name === SR.STORE_NAME)) && !last.bytes.includes('secret') && JSON.parse(last.bytes).v === 1);
   for (let c = 0; c < SR.CONV_MAX + 2; c++) st.note({ conv: `conv-${c}`, text: 'hello there', kind: 'typed', at: T0 + 1000 + c });
   ok(`…and the ${SR.CONV_MAX} conversations whose last send is newest (the oldest leaves)`, st.rowsFor('conv-0') === null && !!st.rowsFor(`conv-${SR.CONV_MAX + 1}`));
   const n0 = writes.length;
   const bad = SR.create({ dataDir: '/sent-record-suite', writer: fakeWriter, readFile: () => { throw Object.assign(new Error('unreadable'), { code: 'EIO' }); } });
   bad.note({ conv: 'conv-b', text: 'hello there', kind: 'typed' });
-  ok('a record file that could not be read is never written over in that run', writes.length === n0 && bad.isUnread());
+  ok('a record file that could not be read is never written over in that run', writes.length === n0 && verdictOf(bad.isUnread()));
   // the batch's readers: a send re-encodes ONE conversation (the store's bytes are those of one JSON.stringify of the whole);
   // a file that was read but is not a record is kept beside it and a fresh record starts
   const encScene = (M) => {
@@ -402,7 +402,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
     return { delta: (s.encodes ? s.encodes() : 0) - e0, same: ew[ew.length - 1] === JSON.stringify({ v: 1, byConv: Object.fromEntries(order.map((c) => [c, s.rowsFor(c)])) }) };
   };
   const es = encScene(SR);
-  ok('…a send re-encodes ONE conversation, and the store\'s bytes are the same as one JSON.stringify of the whole', es.delta === 1 && es.same, es);
+  ok('…a send re-encodes ONE conversation, and the store\'s bytes are the same as one JSON.stringify of the whole', es.delta === 1 && verdictOf(es.same), es);
   const healScene = (M) => {
     const bw = [], s = M.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => { const bytes = o.produce(); if (o.onWritten) o.onWritten(true, null); bw.push({ f, bytes, again: o.produce() }); } }, readFile: () => '{"v":1,"byConv":{ broken', now: () => T0 });
     s.note({ conv: 'conv-h', text: 'hello there', kind: 'typed', at: T0 });
@@ -410,7 +410,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   };
   const hs = healScene(SR);
   ok('…a file that was read but is not a record is kept beside it (sent-record.json.bad, through the store writer) and a fresh record starts',
-    hs.unread === false && hs.files.join() === 'sent-record.json.bad,sent-record.json' && hs.kept === '{"v":1,"byConv":{ broken' && Array.isArray(hs.fresh) && hs.fresh.length === 1, hs);
+    hs.unread === false && hs.files.join() === 'sent-record.json.bad,sent-record.json' && hs.kept === '{"v":1,"byConv":{ broken' && gateOf(Array.isArray(hs.fresh)) && hs.fresh.length === 1, hs);
   ok('…and the damaged text is not held once it is written (the readers\' small thing: dropped in onWritten)', hs.held === '', hs);
   // THE NORMALIZERS with the hub's source: claude (userRecordOf) and codex (userItemOf)
   SP.setSource((conv) => (conv === 'cv-a' ? [SP.rowOf(CONT, 'auto-resume', T0), SP.rowOf('fix the login page', 'typed', T0)] : null));
@@ -429,7 +429,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
     const q = CMod.userItemOf(item(CONT), { conv: 'th-1', at: T0 + 20000 });
     const p0 = CMod.userItemOf(item(frame), null);
     ok('codex, a rollout read: a peer frame the person TYPED through VibeSpace stays the person\'s, VibeSpace\'s continue is VibeSpace\'s (B-9a2e); with no record the frame is a peer as today',
-      p && p.peer === false && !p.stamps.originKind && q && q.stamps.originKind === 'auto-resume' && p0 && p0.peer === true, { p, q, p0 });
+      gateOf(p) && p.peer === false && !p.stamps.originKind && gateOf(q) && q.stamps.originKind === 'auto-resume' && gateOf(p0) && p0.peer === true, { p, q, p0 });
     // the batch's readers: a NOTICE VibeSpace sent through the rpc road (the frame's kind 'notification') is recorded 'notice'
     // — a codex rebuild draws VibeSpace's card, never «another session»; a peer's frame stays a peer's
     SP.setSource((conv) => (conv === 'th-n' ? [SP.rowOf(NOTICE, 'notice', T0), SP.rowOf(frame, 'peer', T0)] : null));
@@ -501,10 +501,10 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
         return { before, afterFail, after: bw.slice() };
       };
       const bf = badFirst(SR);
-      ok('B-a09e: the record is not written over the damaged file while its copy is owed (a failed copy holds it); the copy landing lets it through', bf.before.join() === 'sent-record.json.bad' && bf.afterFail.join() === 'sent-record.json.bad' && bf.after.includes('sent-record.json'), bf);
+      ok('B-a09e: the record is not written over the damaged file while its copy is owed (a failed copy holds it); the copy landing lets it through', bf.before.join() === 'sent-record.json.bad' && bf.afterFail.join() === 'sent-record.json.bad' && verdictOf(bf.after.includes('sent-record.json')), bf);
       const noHold = cut(SRS, "    if (badOwed) { persistHeld = true; return; }   // B-a09e: the damaged file's copy first\n", '', 'src/server/sent-record.js', 'nohold');
       const bfx = noHold && badFirst(noHold);
-      ok('CONTROL (a copy without the hold): the record is queued over the damaged file before its copy landed — the leg goes RED', !!bfx && bfx.before.includes('sent-record.json'), bfx);
+      ok('CONTROL (a copy without the hold): the record is queued over the damaged file before its copy landed — the leg goes RED', !!bfx && verdictOf(bfx.before.includes('sent-record.json')), bfx);
       SP.setSource((conv) => (conv === 'th-h' ? [SP.rowOf(POSE2, 'peer', T0)] : null));
       const noRoute = cut(CMS, ": (recorded || inferred.via);", ": inferred.via;", 'src/codex-message-manager.js', 'noroute');
       const nr = noRoute && noRoute.userItemOf({ type: 'message', role: 'user', content: [{ type: 'input_text', text: POSE2 }] }, { conv: 'th-h', at: T0 + 20000 });
@@ -538,7 +538,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
     fs.writeFileSync(fpc, JSON.stringify({ timestamp: new Date(T0 + 20000).toISOString(), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: CONT }] } }) + '\n');
     const cPlain = CX.scanJsonlUserTurns(fpc, 'codex'), cHanded = CX.scanJsonlUserTurns(fpc, 'codex', [SP.rowOf(CONT, 'auto-resume', T0)]);
     ok('B-9a2e\'s headline: a codex huge-session list, its rollout scanned with the conversation\'s rows, lists the continue as VibeSpace\'s; without them as the person\'s (today)', cPlain.length === 1 && !cPlain[0].other && cHanded.length === 1 && cHanded[0].other === 'auto-resume', { cPlain, cHanded });
-    ok('bound 4: the transcript worker hands the rows through (payload.sent), never a store', /scanJsonlUserTurns\(payload\.fp, payload\.backend, payload\.sent \|\| null\)/.test(read('src/transcript-worker.js')) && !/sent-record/.test(read('src/transcript-worker.js')) && !/sent-record/.test(read('src/search-index-worker.js')) && !/sent-record/.test(read('src/transcript-service.js')));
+    ok('bound 4: the transcript worker hands the rows through (payload.sent), never a store', gateOf(/scanJsonlUserTurns\(payload\.fp, payload\.backend, payload\.sent \|\| null\)/.test(read('src/transcript-worker.js'))) && !/sent-record/.test(read('src/transcript-worker.js')) && !/sent-record/.test(read('src/search-index-worker.js')) && !/sent-record/.test(read('src/transcript-service.js')));
     const writers = [];
     const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) { const n = (read(rel).match(/(?:\bSENT|require\('\.\/sent-record\.js'\))\.note(?:For)?\(/g) || []).length; if (n) writers.push(`${rel}:${n}`); } } };
     walk('src');
@@ -547,7 +547,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   // the send doors (bound 2): only VibeSpace's own — the typed door, the auto-resume continue, the rpc-queue road's peer frame
   const ui = read('src/server/user-input.js'), ar = read('src/server/auto-resume.js'), cd = read('src/server/conversation-deliver.js');
   ok('bound 2: the three send doors note their own sends (typed / dispatch / a group hand-over\'s peer frame at the typed door — B-02a3 at the 2.369.412 restack, auto-resume, peer) — and nothing else writes the record',
-    /SENT\.noteFor\(session, \{ text: wordsOfFrame\(text\), kind: handing \? 'peer' : human \? 'typed' : 'dispatch' \}\);/.test(ui) && /noteFor\(s2, \{ text, kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /noteFor\(rpc\.s, \{ text, kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));   // B-9a2e part 2: through the session (its id may be adopted later); the id reports move a session's own rows and keep links (§5c) — no other door notes a send
+    gateOf(/SENT\.noteFor\(session, \{ text: wordsOfFrame\(text\), kind: handing \? 'peer' : human \? 'typed' : 'dispatch' \}\);/.test(ui)) && gateOf(/noteFor\(s2, \{ text, kind: 'auto-resume' \}\); return sent; \}/.test(ar)) && verdictOf(/noteFor\(rpc\.s, \{ text, kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd)));   // B-9a2e part 2: through the session (its id may be adopted later); the id reports move a session's own rows and keep links (§5c) — no other door notes a send
   // B-9a2e — THE TWO REMAINDERS (主开发 r1119; the 11-17 cure's own read left them). PART 1: a stopped conversation read ON ITS
   // PAIRED MACHINE — the device has no record, so the hub hands each transcript op {id: rows} through THE ONE HELPER
   // (sent-provenance sentFor) behind the device's 'sent-rows' capability; the device holds them as that op's own table (holdFor, in the op's async scope).
@@ -627,7 +627,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
         JSON.stringify(gAsks) === '["th-kid3","th-kid3+th-near+th-parent"]', gAsks);
       const fSeen = [];
       const fl = await viaDevice(TS, ['transcript-op', 'sent-rows'], { conv: 'th-kid4', consults: ['th-parent'], seen: fSeen, failSecond: true });
-      ok('…a second ask that fails leaves the FIRST answer (never the legacy fetch for it)', fSeen.length === 2 && Array.isArray(fl.turns) && fl.turns.length === 1, { asks: fSeen.length, turns: fl.turns });
+      ok('…a second ask that fails leaves the FIRST answer (never the legacy fetch for it)', fSeen.length === 2 && gateOf(Array.isArray(fl.turns)) && fl.turns.length === 1, { asks: fSeen.length, turns: fl.turns });
       const bSeen = [];
       await viaDevice(TS, ['transcript-op', 'sent-rows'], { conv: 'th-kid5', consults: ['th-p0', 'th-p1', 'th-p2', 'th-p3', 'th-p4', 'th-p5'], seen: bSeen });
       ok('…the one more ask hands at most four of the named ids (its bound)', bSeen.length === 2 && bSeen[1].sent.length === 5 && bSeen[1].sent[0] === 'th-kid5', bSeen.map((x) => x.sent));
@@ -662,9 +662,9 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
       JSON.stringify(linked) === '["th-y","th-live","th-x","th-w"]' && JSON.stringify(unlinkedBad) === '[]' && JSON.stringify(SP.idsFor('th-y', ['th-live'])) === '["th-y","th-live"]', { linked, unlinkedBad });
     const AG = read('src/agentd/agentd.js');
     ok('…the real device does what the stand-in does: its capabilities name \'sent-rows\' (after peer-post-wait — the list\'s head and its last twelve stay as the suites pin them), its transcript-op holds msg.params.sent as the op\'s own table and runs the read inside the op\'s async scope (the shared module\'s getter), and its ack names that table\'s unhanded ids',
-      /'peer-post-wait' \/\*[^*]*\*\/, 'sent-rows' \/\* B-9a2e[^*]*\*\/, 'stream-offer',/.test(AG) && /const held = require\('\.\.\/sent-provenance\.js'\)\.holdFor\(msg\.params\?\.sent\);\n {12}let result;\n {12}await sentScope\(\)\.run\(held, async \(\) => \{\n {14}if \(m === 'page'\)/.test(AG)
-      && /else throw new Error\('unknown transcript method: ' \+ m\);\n {12}\}\);\n {12}const unhanded = msg\.params && msg\.params\.sent \? \[\.\.\.held\.unhanded\] : \[\];\n/.test(AG)
-      && /sending: buf\.length, \.\.\.\(unhanded\.length \? \{ unhanded \} : \{\}\) \}\);/.test(AG) && /setScope\(\(\) => _sentScope\.getStore\(\)\)/.test(AG));
+      gateOf(/'peer-post-wait' \/\*[^*]*\*\/, 'sent-rows' \/\* B-9a2e[^*]*\*\/, 'stream-offer',/.test(AG)) && gateOf(/const held = require\('\.\.\/sent-provenance\.js'\)\.holdFor\(msg\.params\?\.sent\);\n {12}let result;\n {12}await sentScope\(\)\.run\(held, async \(\) => \{\n {14}if \(m === 'page'\)/.test(AG))
+      && gateOf(/else throw new Error\('unknown transcript method: ' \+ m\);\n {12}\}\);\n {12}const unhanded = msg\.params && msg\.params\.sent \? \[\.\.\.held\.unhanded\] : \[\];\n/.test(AG))
+      && gateOf(/sending: buf\.length, \.\.\.\(unhanded\.length \? \{ unhanded \} : \{\}\) \}\);/.test(AG)) && verdictOf(/setScope\(\(\) => _sentScope\.getStore\(\)\)/.test(AG)));
   }
   // B-9a2e PART 2 — A SESSION'S OWN SENDS FOLLOW ITS ID: the rows a session noted BEFORE its first id report move to the id it
   // reports (a send before any id is held, then filed); a later report moves nothing (a mid-life fork's earlier sends stay with the
@@ -791,7 +791,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
     };
     const CE = read('src/server/stdout/codex-events.js');
     const CEup = CE.replace("          if (nextThreadId) require('../sent-record.js').adoptFor(session);", '').replace('          if (nextThreadId && session.backendSessionId !== nextThreadId) {', "          if (nextThreadId) require('../sent-record.js').adoptFor(session);\n          if (nextThreadId && session.backendSessionId !== nextThreadId) {");
-    ok(`…every road reports AFTER it set the id (${ROADS.length} roads); CONTROL: codex-events with its report moved above the assignment is caught`, ROADS.every((f) => afterSet(read(f))) && CEup !== CE && !afterSet(CEup), ROADS.filter((f) => !afterSet(read(f))));
+    ok(`…every road reports AFTER it set the id (${ROADS.length} roads); CONTROL: codex-events with its report moved above the assignment is caught`, gateOf(ROADS.every((f) => afterSet(read(f)))) && CEup !== CE && !afterSet(CEup), ROADS.filter((f) => !afterSet(read(f))));
     // the boot's registrations (a census): every restored session boot-restore registers is marked at once
     const BR = read('src/server/boot-restore.js');
     const regs = (BR.match(/activeSessions\.set\(id, session\);/g) || []).length;
@@ -812,4 +812,4 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
 const ms = Number(process.hrtime.bigint() - T0) / 1e6;
 console.log(`  (${ms.toFixed(0)} ms)`);
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

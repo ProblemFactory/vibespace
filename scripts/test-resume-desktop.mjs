@@ -9,7 +9,7 @@
 import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path'; import { createRequire } from 'node:module';
 const src = fs.readFileSync(new URL('../src/lib/session-lifecycle.js', import.meta.url), 'utf8');
-let pass=0, fail=0; const ok=(c,n,e)=>{if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
+let pass=0, fail=0; const ok=(c,n,e)=>{ if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
 
 // (1) _snapshotWinBounds is a small pure method — extract + run it against a mock.
 const m = src.match(/_snapshotWinBounds\(win\)\s*\{([\s\S]*?)\n {2}\},/);
@@ -20,7 +20,7 @@ const bodyFn = new Function('win', 'carriedGeometry', m[1] + '\n').bind(null);
 const snapOf = (win) => bodyFn(win, carriedGeometry);
 const snap = snapOf({ _desktopId: 'desk-home-1', gridBounds: { left: 0.1, top: 0.2, width: 0.3, height: 0.4 }, isMaximized: false });
 ok(snap.desktopId === 'desk-home-1', 'snapshot CARRIES the window’s home desktop id (the dropped field)');
-ok(snap.gridBounds && Math.abs(snap.gridBounds.left - 0.1) < 1e-9, 'geometry still captured alongside');
+ok(gateOf(snap.gridBounds) && Math.abs(snap.gridBounds.left - 0.1) < 1e-9, 'geometry still captured alongside');
 const snapNone = snapOf({ gridBounds: null });
 ok(snapNone.desktopId === null, 'a window with no desktop tag snapshots desktopId:null (no crash)');
 
@@ -61,4 +61,4 @@ ok(byDesk['desk-active']?.[0] === 's4', 'the one session already on the active d
 ok(Object.keys(byDesk).length === 3, 'sessions spread back across their 3 home desktops — NOT collapsed into 1 (the incident)');
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail?1:0);
+process.exit(fail?1:0); import { gateOf } from './lib/check.mjs';

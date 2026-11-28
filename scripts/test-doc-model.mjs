@@ -17,7 +17,7 @@ import { judgeInChild } from './work-meter.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '')); } };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -52,8 +52,8 @@ const LOSSLESS = {
 const unedited = (src) => { const ld = MD.loadDoc(src); const r = MD.saveDoc(src, ld, ld.doc); return r.ok && r.text === src; };
 for (const [name, src] of Object.entries(LOSSLESS)) {
   const v = MD.docFidelity(src);
-  ok(v.ok, `lossless: ${name} ⇒ the rendered editor`, v);
-  ok(unedited(src), `lossless: ${name} ⇒ an unedited save writes it byte-identical (block patching)`);
+  ok(verdictOf(v.ok), `lossless: ${name} ⇒ the rendered editor`, v);
+  ok(verdictOf(unedited(src)), `lossless: ${name} ⇒ an unedited save writes it byte-identical (block patching)`);
 }
 // lane doc-editor-wheel: what opened RAW before (a table, HTML, a footnote, front matter, a setext heading, escapes, a
 // hard break, a 4-space nest, lazy numbering) opens RICH on the wheel — untouched blocks keep their bytes; raw HTML and
@@ -73,8 +73,8 @@ const RAW = {
 };
 for (const [name, [kind, src]] of Object.entries(RAW)) {
   const v = MD.docFidelity(src), ld = MD.loadDoc(src);
-  ok(v.ok && unedited(src), `rich now: ${name} ⇒ the rendered editor, an unedited save byte-identical`, v);
-  if (kind) ok(ld.nodes.some((n) => n.type.name === 'rawBlock'), `${name} rides as a raw block (carried as written, read-only)`);
+  ok(gateOf(v.ok) && verdictOf(unedited(src)), `rich now: ${name} ⇒ the rendered editor, an unedited save byte-identical`, v);
+  if (kind) ok(verdictOf(ld.nodes.some((n) => n.type.name === 'rawBlock')), `${name} rides as a raw block (carried as written, read-only)`);
 }
 ok(MD.docFidelity('# t\r\n\r\ntext\r\n').code === 'crlf', 'CRLF line ends ⇒ raw (crlf)');
 ok(M.rawReasons('x'.repeat(M.LIMITS.source + 1))[0] === 'too_big', 'a file past 1 MiB opens raw (too_big)');
@@ -98,11 +98,11 @@ ok(M.saveText('a', 'x\n') === 'a\n' && M.saveText('a\n\n', 'x\n') === 'a\n' && M
 // ── §3 the comments message ──
 console.log('§3 the comments message');
 const cv = M.commentsBatches('/w/docs/BRIEF.md', [{ quote: 'the  rendered\nview', note: 'say more' }, { quote: '', note: 'add a summary' }, { quote: 'x', note: '   ' }]);
-ok(cv.ok && cv.count === 2 && cv.batches.length === 1 && cv.batches[0].text === '[Doc comments] /w/docs/BRIEF.md\n① "the rendered view" — say more\n② add a summary', 'the exact message: header + circled rows, quotes one line, an empty note dropped', cv);
+ok(gateOf(cv.ok) && cv.count === 2 && cv.batches.length === 1 && cv.batches[0].text === '[Doc comments] /w/docs/BRIEF.md\n① "the rendered view" — say more\n② add a summary', 'the exact message: header + circled rows, quotes one line, an empty note dropped', cv);
 const long = M.commentsBatches('/a.md', [{ quote: 'q'.repeat(500), note: 'n' }]);
-ok(long.ok && long.batches[0].text.includes('"' + 'q'.repeat(199) + '…"'), 'a quote is bounded at 200 chars (199 + …)');
+ok(gateOf(long.ok) && verdictOf(long.batches[0].text.includes('"' + 'q'.repeat(199) + '…"')), 'a quote is bounded at 200 chars (199 + …)');
 const edge = M.commentsBatches('/a.md', Array.from({ length: 20 }, (_, i) => ({ quote: 'q' + i, note: 'n'.repeat(150) })));
-ok(edge.ok && edge.batches.length === 1 && M.utf8Len(edge.batches[0].text) <= 4096 && edge.batches[0].text.split('\n').length === 21 && edge.batches[0].text.includes('⑳'), '20 notes under 4 KB ⇒ ONE message ①…⑳, no (k/n)', edge.batches.map((b) => M.utf8Len(b.text)));
+ok(gateOf(edge.ok) && edge.batches.length === 1 && M.utf8Len(edge.batches[0].text) <= 4096 && edge.batches[0].text.split('\n').length === 21 && verdictOf(edge.batches[0].text.includes('⑳')), '20 notes under 4 KB ⇒ ONE message ①…⑳, no (k/n)', edge.batches.map((b) => M.utf8Len(b.text)));
 ok(M.commentsBatches('/a.txt', [{ note: 'n' }]).code === 'bad_path' && M.commentsBatches('a.md', [{ note: 'n' }]).code === 'bad_path' && M.commentsBatches('/a.md', []).code === 'empty', 'a non-markdown / relative path, no notes ⇒ refused by name');
 // HOT FIX 2.369.257 (owner: 18 comments refused "longer than 4 KB — send some of them first"): the bound is per MESSAGE
 const C = (n) => String.fromCodePoint(0x245f + n);
@@ -110,18 +110,18 @@ const rowsOf = (r) => r.batches.flatMap((b) => b.text.split('\n').slice(1));
 const EIGHTEEN = Array.from({ length: 18 }, (_, i) => ({ quote: '引'.repeat(200), note: `第${i + 1}条 ` + '注'.repeat(60) }));
 const e18 = M.commentsBatches('/w/docs/设计.md', EIGHTEEN);
 const n18 = e18.ok ? e18.batches.length : 0;
-ok(e18.ok && n18 >= 3 && e18.count === 18 && e18.clipped === 0, `18 CJK comments with 200-char quotes ⇒ ${n18} messages (≥ 3), none refused`, e18.code);
-ok(e18.ok && e18.batches.every((b) => M.utf8Len(b.text) <= 4096 && b.text.split('\n').length - 1 <= 20), 'every message ≤ 4096 bytes UTF-8 and ≤ 20 rows', e18.ok && e18.batches.map((b) => M.utf8Len(b.text)));
-ok(e18.ok && e18.batches.every((b, k) => b.text.split('\n')[0] === `[Doc comments] /w/docs/设计.md (${k + 1}/${n18})`), 'each heading names its place: (k/n)');
-ok(e18.ok && rowsOf(e18).length === 18 && rowsOf(e18).every((r, i) => r === `${C(i + 1)} "${'引'.repeat(200)}" — 第${i + 1}条 ${'注'.repeat(60)}`), 'the rows across the messages = the input, in order, numbered ①…⑱ continuously');
-ok(e18.ok && e18.batches[0].from === 1 && e18.batches.every((b, k) => b.to - b.from + 1 === b.count && (k === 0 || b.from === e18.batches[k - 1].to + 1)) && e18.batches.at(-1).to === 18, 'from/to cover 1…18 with no gap', e18.ok && e18.batches.map((b) => [b.from, b.to]));
+ok(gateOf(e18.ok) && n18 >= 3 && e18.count === 18 && e18.clipped === 0, `18 CJK comments with 200-char quotes ⇒ ${n18} messages (≥ 3), none refused`, e18.code);
+ok(gateOf(e18.ok) && verdictOf(e18.batches.every((b) => M.utf8Len(b.text) <= 4096 && b.text.split('\n').length - 1 <= 20)), 'every message ≤ 4096 bytes UTF-8 and ≤ 20 rows', e18.ok && e18.batches.map((b) => M.utf8Len(b.text)));
+ok(gateOf(e18.ok) && verdictOf(e18.batches.every((b, k) => b.text.split('\n')[0] === `[Doc comments] /w/docs/设计.md (${k + 1}/${n18})`)), 'each heading names its place: (k/n)');
+ok(gateOf(e18.ok) && rowsOf(e18).length === 18 && verdictOf(rowsOf(e18).every((r, i) => r === `${C(i + 1)} "${'引'.repeat(200)}" — 第${i + 1}条 ${'注'.repeat(60)}`)), 'the rows across the messages = the input, in order, numbered ①…⑱ continuously');
+ok(gateOf(e18.ok) && e18.batches[0].from === 1 && gateOf(e18.batches.every((b, k) => b.to - b.from + 1 === b.count && (k === 0 || b.from === e18.batches[k - 1].to + 1))) && e18.batches.at(-1).to === 18, 'from/to cover 1…18 with no gap', e18.ok && e18.batches.map((b) => [b.from, b.to]));
 const s21 = M.commentsBatches('/a.md', Array.from({ length: 21 }, (_, i) => ({ note: 'n' + i })));
-ok(s21.ok && s21.batches.map((b) => b.count).join() === '20,1' && s21.batches[1].text === '[Doc comments] /a.md (2/2)\n(21) n20', '21 short notes ⇒ 2 messages by the row cap; the 21st keeps its number', s21.ok && s21.batches.map((b) => b.text.slice(-30)));
+ok(gateOf(s21.ok) && s21.batches.map((b) => b.count).join() === '20,1' && s21.batches[1].text === '[Doc comments] /a.md (2/2)\n(21) n20', '21 short notes ⇒ 2 messages by the row cap; the 21st keeps its number', s21.ok && s21.batches.map((b) => b.text.slice(-30)));
 const big = M.commentsBatches('/a.md', Array.from({ length: 5 }, () => ({ quote: 'q'.repeat(200), note: '注'.repeat(1000) })));
-ok(big.ok && big.batches.length === 5 && big.clipped === 0 && big.batches.every((b) => M.utf8Len(b.text) <= 4096), '5 notes of 1000 CJK chars ⇒ 5 messages, each whole', big.ok && big.batches.map((b) => M.utf8Len(b.text)));
+ok(gateOf(big.ok) && big.batches.length === 5 && big.clipped === 0 && verdictOf(big.batches.every((b) => M.utf8Len(b.text) <= 4096)), '5 notes of 1000 CJK chars ⇒ 5 messages, each whole', big.ok && big.batches.map((b) => M.utf8Len(b.text)));
 const giantPath = '/' + '路'.repeat(390) + '.md';
 const giant = M.commentsBatches(giantPath, [{ quote: '引'.repeat(200), note: '注'.repeat(1000) }, { note: 'after' }]);
-ok(giant.ok && giant.clipped === 1 && giant.batches.every((b) => M.utf8Len(b.text) <= 4096) && /注…/.test(giant.batches[0].text) && M.utf8Len(giant.batches[0].text) > 4000 && rowsOf(giant).at(-1) === '② after', 'one comment bigger than a message ⇒ its note clipped with … to fit (counted), never refused; the next keeps ②', giant.ok && giant.batches.map((b) => M.utf8Len(b.text)));
+ok(gateOf(giant.ok) && giant.clipped === 1 && gateOf(giant.batches.every((b) => M.utf8Len(b.text) <= 4096)) && gateOf(/注…/.test(giant.batches[0].text)) && M.utf8Len(giant.batches[0].text) > 4000 && rowsOf(giant).at(-1) === '② after', 'one comment bigger than a message ⇒ its note clipped with … to fit (counted), never refused; the next keeps ②', giant.ok && giant.batches.map((b) => M.utf8Len(b.text)));
 ok(M.commentsBatches('/a.md', Array.from({ length: 201 }, () => ({ note: 'n' }))).code === 'too_many' && M.commentsBatches('/a.md', Array.from({ length: 200 }, () => ({ note: 'n' }))).batches.length === 10, 'the per-SEND sanity cap is 200 (201 ⇒ too_many; 200 ⇒ 10 messages)');
 
 // ── §3b the strip's record (lane doc-comments-synced — the owner's eighteen comments were in another computer's browser) ──
@@ -161,7 +161,7 @@ console.log('§3b the strip\'s record: commentRows bounds it, mergeComments fold
   for (const [name, raw, want] of RAW) { const got = M.commentRows([row('r', 'x', { line: 9, raw })])[0].raw || null; ok(JSON.stringify(got) === JSON.stringify(want), `commentRows keeps a raw-block comment's anchor: ${name}`, got); }
   ok(JSON.stringify(M.commentRows([row('r', 'x', { line: 9, raw: { pos: 41, line: 9, kind: 'html' } })])[0]) === JSON.stringify({ id: 'r', quote: '', line: 9, raw: { pos: 41, line: 9, kind: 'html' }, note: 'x' }), 'a raw-block row keeps the window\'s own key order {id, quote, line, raw, note}');
   const mig = M.mergeComments([], [row('l', 'from a 2.369.258 browser', { line: 9, raw: { pos: 41, line: 9, kind: 'html' } })]);
-  ok(mig.length === 1 && mig[0].raw && mig[0].raw.kind === 'html', 'the one-time migration carries a 2.369.258 browser\'s raw-block comment WITH its anchor', mig);
+  ok(mig.length === 1 && gateOf(mig[0].raw) && mig[0].raw.kind === 'html', 'the one-time migration carries a 2.369.258 browser\'s raw-block comment WITH its anchor', mig);
 }
 
 // ── §4 the edit summary ──
@@ -183,7 +183,7 @@ const bs = M.editSummary(...rewrite(3000));
 // "fast" is judged by WORK (lane mirror-flake-hardening: `< 2000 ms` judged the machine): past the LCS budget the count
 // is a multiset — the work meter (scripts/work-meter.mjs, in a child) reads ×2 work for ×2 lines (an LCS reads ×4)
 const gRw = judgeInChild({ module: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'doc-model.js'), run: '(M, x) => M.editSummary(x[0], x[1])', mk: "(n) => [Array.from({ length: n }, (_, i) => 'l' + i).join('\\n'), Array.from({ length: n }, (_, i) => (i % 2 ? 'm' : 'l') + i).join('\\n')]", n: 3000, kind: 'linear' });
-ok(bs.startsWith('+1500 −1500 lines') && gRw.ok === true, `a 3000-line rewrite past the LCS budget counts by multiset — linear in WORK: ×${gRw.r && gRw.r.toFixed(2)} from 3000 to 6000 lines (≤ ${gRw.bound})`, JSON.stringify(gRw).slice(0, 300));
+ok(gateOf(bs.startsWith('+1500 −1500 lines')) && gRw.ok === true, `a 3000-line rewrite past the LCS budget counts by multiset — linear in WORK: ×${gRw.r && gRw.r.toFixed(2)} from 3000 to 6000 lines (≤ ${gRw.bound})`, JSON.stringify(gRw).slice(0, 300));
 
 // ── §5 the conflict table ──
 console.log('§5 the conflict table');
@@ -214,17 +214,17 @@ const { addressableId } = require('../src/claude-lock-capture.js');
   const w = world();
   ok(addressableId(w.activeSessions.get('w1')) === 'conv-1', 'fixture: the chat session addresses conversation conv-1');
   const r = w.doc.comments({ path: '/w/BRIEF.md', from: 'w1', items: [{ quote: 'q', note: 'n' }] });
-  ok(r.ok && r.delivered === 'sent' && w.rec.sent.length === 1 && w.rec.sent[0].sid === 'w1' && w.rec.sent[0].opts.origin === 'doc-comment' && w.rec.sent[0].text === '[Doc comments] /w/BRIEF.md\n① "q" — n', 'a live chat: ONE message down THE typing sender as the user\'s own', r);
+  ok(gateOf(r.ok) && r.delivered === 'sent' && w.rec.sent.length === 1 && w.rec.sent[0].sid === 'w1' && w.rec.sent[0].opts.origin === 'doc-comment' && w.rec.sent[0].text === '[Doc comments] /w/BRIEF.md\n① "q" — n', 'a live chat: ONE message down THE typing sender as the user\'s own', r);
   ok(w.doc.comments({ path: '/w/BRIEF.md', from: '', items: [{ note: 'n' }] }).code === 'no_owner' && w.doc.comments({ path: '/w/BRIEF.md', from: 'gone', items: [{ note: 'n' }] }).code === 'no_owner', 'no registry row and no live `from` chat ⇒ no_owner by name (never a silent drop)');
   const w2 = world({ sendOk: false });
   const r2 = w2.doc.comments({ path: '/w/BRIEF.md', from: 'w1', items: [{ note: 'later' }] });
-  ok(r2.ok && r2.delivered === 'stashed' && w2.rec.stashed[0].cid === 'conv-1' && w2.rec.stashed[0].source === 'doc-comment' && w2.rec.stashed[0].kind === 'peer' && w2.rec.stashed[0].fromName === DE.DOC_COMMENT_FROM && w2.rec.stashed[0].text.endsWith('① later'), 'no live process ⇒ the durable stash under the conversation (source doc-comment)', w2.rec.stashed);
+  ok(gateOf(r2.ok) && r2.delivered === 'stashed' && w2.rec.stashed[0].cid === 'conv-1' && w2.rec.stashed[0].source === 'doc-comment' && w2.rec.stashed[0].kind === 'peer' && w2.rec.stashed[0].fromName === DE.DOC_COMMENT_FROM && verdictOf(w2.rec.stashed[0].text.endsWith('① later')), 'no live process ⇒ the durable stash under the conversation (source doc-comment)', w2.rec.stashed);
   const w3 = world({ registry: ({ path: p }) => (p === '/w/BRIEF.md' ? { sessionId: 'w1', conversationId: 'conv-1' } : null) });
   ok(w3.doc.ownerOf({ path: '/w/BRIEF.md', from: 'other' }).via === 'registry' && w3.doc.comments({ path: '/w/BRIEF.md', from: '', items: [{ note: 'n' }] }).delivered === 'sent', 'the registry\'s owner wins over the window\'s `from` (and needs none)');
   const e = w.doc.edited({ path: '/w/BRIEF.md', from: 'w1', summary: '+1 −0 lines;\nsections: Goals' });
-  ok(e.ok && e.delivered === 'stashed' && w.rec.note.sessionId === 'w1' && w.rec.note.summary === '+1 −0 lines; sections: Goals' && w.rec.sent.length === 1, 'a save ⇒ noteEdit({sessionId, host, path, summary}) — never a typed turn', w.rec.note);
+  ok(gateOf(e.ok) && e.delivered === 'stashed' && w.rec.note.sessionId === 'w1' && w.rec.note.summary === '+1 −0 lines; sections: Goals' && w.rec.sent.length === 1, 'a save ⇒ noteEdit({sessionId, host, path, summary}) — never a typed turn', w.rec.note);
   const st = w.rec.stashed.at(-1);
-  ok(st && st.source === 'doc-edit' && st.kind === 'peer' && st.fromName === AR.DOC_EDIT_FROM && st.cid === 'conv-1' && st.text.startsWith('[Doc edit] /w/BRIEF.md: +1 −0 lines; sections: Goals') && w.rec.stashed.length === 1, 'the registry\'s note = ONE stash entry `[Doc edit] <path>: <summary>` (a free next-turn note)', st);
+  ok(gateOf(st) && st.source === 'doc-edit' && st.kind === 'peer' && st.fromName === AR.DOC_EDIT_FROM && st.cid === 'conv-1' && gateOf(st.text.startsWith('[Doc edit] /w/BRIEF.md: +1 −0 lines; sections: Goals')) && w.rec.stashed.length === 1, 'the registry\'s note = ONE stash entry `[Doc edit] <path>: <summary>` (a free next-turn note)', st);
   // a registry-owned row: the save is the registry's user touch (by: user, edits+1) and carries the same ONE note
   const AF = require('../src/artifacts.js');
   const wr = world();
@@ -233,8 +233,8 @@ const { addressableId } = require('../src/claude-lock-capture.js');
   const real = DE.create({ activeSessions: wr.activeSessions, getDeliver: () => null, sendUserInput: null, artifacts: AR, now: () => 7 });
   const er = real.edited({ path: '/w/BRIEF.md', from: '', summary: '+2 −1 lines; sections: Intro' });
   const row = wr.activeSessions.get('w1')._artifacts[':/w/BRIEF.md'];
-  ok(real.ownerOf({ path: '/w/BRIEF.md' }).via === 'registry' && er.ok && er.row === true && row && row.by === 'user' && row.edits === 1 && row.writes === 1 && wr.rec.stashed.length === 1 && wr.rec.stashed[0].text.startsWith('[Doc edit] /w/BRIEF.md: +2 −1 lines; sections: Intro'), 'the registry owns the row ⇒ touch: by user, edits+1, ONE note (no `from` needed)', [er, row, wr.rec.stashed]);
-  ok(real.edited({ path: '/w/other.md', from: 'w1', summary: 's' }).ok && wr.rec.stashed.length === 2, 'a `from`-owned file (no row) ⇒ the note alone');
+  ok(real.ownerOf({ path: '/w/BRIEF.md' }).via === 'registry' && gateOf(er.ok) && er.row === true && gateOf(row) && row.by === 'user' && row.edits === 1 && row.writes === 1 && wr.rec.stashed.length === 1 && verdictOf(wr.rec.stashed[0].text.startsWith('[Doc edit] /w/BRIEF.md: +2 −1 lines; sections: Intro')), 'the registry owns the row ⇒ touch: by user, edits+1, ONE note (no `from` needed)', [er, row, wr.rec.stashed]);
+  ok(gateOf(real.edited({ path: '/w/other.md', from: 'w1', summary: 's' }).ok) && wr.rec.stashed.length === 2, 'a `from`-owned file (no row) ⇒ the note alone');
   // B-b0e3 — THE TWO-WRITER CHECK, over the REAL registry: conversations A (w1, the OLDER write) and B (w2, the newer) both hold
   // /w/PLAN.md. A window opened from A's card speaks to A, never to the newest holder; no `from` (or a `from` holding nothing) ⇒ the
   // newest, as before. On the release the newest alone decided: A never heard a comment made in ITS window.
@@ -302,7 +302,7 @@ const { addressableId } = require('../src/claude-lock-capture.js');
     const o3 = R3 ? R3.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }) : null;
     console.log('    RED copy answered: ' + JSON.stringify(o3 && [o3.sessionId, o3.conversationId, o3.via]));
     ok(!!o3 && o3.conversationId !== 'conv-1' && o3.sessionId === 'w2', 'RED CONTROL: an engine without the held check sends a stopped A\'s window to the live holder B', o3);
-    for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: 'B-b0e3 ' })) ok(r.pass, r.name, r.detail);
+    for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: 'B-b0e3 ' })) ok(verdictOf(r.pass), r.name, r.detail);
   }
   ok(w.doc.edited({ path: '/w/x.txt', from: 'w1', summary: 's' }).code === 'bad_path' && w.doc.edited({ path: '/w/a.md', from: 'w1', summary: ' ' }).code === 'bad_summary' && w.doc.edited({ path: '/w/a.md', from: '', summary: 's' }).code === 'no_owner', 'the edit note refuses a non-markdown path, an empty summary, no owner — by name');
   // the routes: an agent bearer is refused on every one
@@ -310,47 +310,47 @@ const { addressableId } = require('../src/claude-lock-capture.js');
   require('../src/routes/doc.js').registerDocRoutes(app, { doc: w.doc });
   const call = (k, req) => { let out = { status: 200 }; const res = { status(s) { out.status = s; return res; }, json(b) { out.body = b; return res; } }; routes[k]({ headers: {}, query: {}, body: {}, ...req }, res); return out; };
   ok(Object.keys(routes).sort().join() === 'GET /api/doc/owner,POST /api/doc/comments,POST /api/doc/edited', 'three owner routes', Object.keys(routes));
-  ok(Object.keys(routes).every((k) => { const o = call(k, { headers: { authorization: 'Bearer vsst_x' } }); return o.status === 403 && o.body.code === 'agent_forbidden'; }), 'an agent\'s vsst_ bearer ⇒ 403 agent_forbidden on every route (a comment / an edit is the user\'s act)');
+  ok(verdictOf(Object.keys(routes).every((k) => { const o = call(k, { headers: { authorization: 'Bearer vsst_x' } }); return o.status === 403 && o.body.code === 'agent_forbidden'; })), 'an agent\'s vsst_ bearer ⇒ 403 agent_forbidden on every route (a comment / an edit is the user\'s act)');
   const own = call('GET /api/doc/owner', { query: { path: '/w/BRIEF.md', from: 'w1' } });
   const c409 = call('POST /api/doc/comments', { body: { path: '/w/BRIEF.md', items: [{ note: 'n' }] } });
-  ok(own.body.owner && own.body.owner.via === 'from' && c409.status === 409 && c409.body.code === 'no_owner', 'owner read; no_owner ⇒ 409 with its code', [own.body, c409]);
+  ok(gateOf(own.body.owner) && own.body.owner.via === 'from' && c409.status === 409 && c409.body.code === 'no_owner', 'owner read; no_owner ⇒ 409 with its code', [own.body, c409]);
 }
 
 // ── §7 wiring pins ──
 console.log('§7 wiring pins');
 const ui = read('src/lib/doc-window-ui.js'), dmd = read('src/lib/doc-markdown.js'), door = read('src/lib/doc-window.js'), eng = read('src/server/doc-engine.js');
 ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(ui + dmd), 'the window writes no HTML strings — the view is ProseMirror\'s DOM, every word textContent');
-ok(/const src = safeImageSrc\(node\.attrs\.src\);\n\s+if \(src\) img\.src = /.test(ui) && /renderHTML\(\{ HTMLAttributes: a \}\) \{ const href = safeHref\(a\.href\);/.test(dmd), 'images are set via .src after safeImageSrc; a link\'s href is re-validated at every render (safeHref)');
+ok(gateOf(/const src = safeImageSrc\(node\.attrs\.src\);\n\s+if \(src\) img\.src = /.test(ui)) && verdictOf(/renderHTML\(\{ HTMLAttributes: a \}\) \{ const href = safeHref\(a\.href\);/.test(dmd)), 'images are set via .src after safeImageSrc; a link\'s href is re-validated at every render (safeHref)');
 const HREF = [['https://a.b/c', true], ['mailto:x@y', true], ['docs/x.md', true], ['#top', true], ['javascript:alert(1)', false], ['JAVASCRIPT:x', false], ['data:text/html,x', false], ['vbscript:x', false], ['java\nscript:x', false]];
-ok(HREF.every(([h, w]) => !!MD.safeHref(h) === w), 'safeHref: http(s) / mailto / relative / #fragment only', HREF.filter(([h, w]) => !!MD.safeHref(h) !== w));
+ok(verdictOf(HREF.every(([h, w]) => !!MD.safeHref(h) === w)), 'safeHref: http(s) / mailto / relative / #fragment only', HREF.filter(([h, w]) => !!MD.safeHref(h) !== w));
 const IMG = [['https://a/x.png', true], ['img/x.png', true], ['data:image/png;base64,AA', true], ['data:image/svg+xml,<svg>', false], ['javascript:x', false], ['file:///etc/passwd', false]];
-ok(IMG.every(([h, w]) => !!MD.safeImageSrc(h) === w), 'safeImageSrc: http(s), a raster data:image, a relative path (served by /api/file/raw)', IMG.filter(([h, w]) => !!MD.safeImageSrc(h) !== w));
-ok(/body: JSON\.stringify\(\{ path, content: text, host: host \|\| undefined \}\)/.test(ui) && (ui.match(/fetch\('\/api\/file\/write'/g) || []).length === 1, 'a save writes THIS window\'s path only, through the existing /api/file/write route (one call site)');
-ok(/if \(M\.saveVerdict\(\{ disk, base: S\.base, confirmed: S\.confirmed \}\) === 'ask'\)/.test(ui) && /const v = M\.conflictVerdict\(\{ disk, base: S\.base, dirty: S\.dirty, kept: S\.kept \}\);/.test(ui), 'the window asks the model\'s conflict + save verdicts (never its own copy)');
-ok(/const timer = host \? 0 : setInterval\(check, POLL_MS\);/.test(ui) && /const POLL_MS = 2000;/.test(ui) && /window\.addEventListener\('focus', check, \{ signal \}\);/.test(ui) && /onFileChanged\(\(d\) => \{ if \(sameFile\(d, \{ host: host \|\| null, path \}\)\) check\(\); \}, \{ signal \}\);/.test(ui), 'live: a 2 s poll on this machine only, refocus + the file-changed relay everywhere — all on the window\'s signal');
+ok(verdictOf(IMG.every(([h, w]) => !!MD.safeImageSrc(h) === w)), 'safeImageSrc: http(s), a raster data:image, a relative path (served by /api/file/raw)', IMG.filter(([h, w]) => !!MD.safeImageSrc(h) !== w));
+ok(gateOf(/body: JSON\.stringify\(\{ path, content: text, host: host \|\| undefined \}\)/.test(ui)) && (ui.match(/fetch\('\/api\/file\/write'/g) || []).length === 1, 'a save writes THIS window\'s path only, through the existing /api/file/write route (one call site)');
+ok(gateOf(/if \(M\.saveVerdict\(\{ disk, base: S\.base, confirmed: S\.confirmed \}\) === 'ask'\)/.test(ui)) && verdictOf(/const v = M\.conflictVerdict\(\{ disk, base: S\.base, dirty: S\.dirty, kept: S\.kept \}\);/.test(ui)), 'the window asks the model\'s conflict + save verdicts (never its own copy)');
+ok(gateOf(/const timer = host \? 0 : setInterval\(check, POLL_MS\);/.test(ui)) && gateOf(/const POLL_MS = 2000;/.test(ui)) && gateOf(/window\.addEventListener\('focus', check, \{ signal \}\);/.test(ui)) && verdictOf(/onFileChanged\(\(d\) => \{ if \(sameFile\(d, \{ host: host \|\| null, path \}\)\) check\(\); \}, \{ signal \}\);/.test(ui)), 'live: a 2 s poll on this machine only, refocus + the file-changed relay everywhere — all on the window\'s signal');
 {
   const acorn = require('acorn'); const loose = [];
   (function walk(n) { if (!n || typeof n.type !== 'string') return; if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.property.name === 'addEventListener') { const obj = ui.slice(n.callee.object.start, n.callee.object.end); const third = n.arguments[2] ? ui.slice(n.arguments[2].start, n.arguments[2].end) : ''; if (!/\bsignal\b/.test(third) && !/^(b|x|cancel|add|signal)$/.test(obj)) loose.push(obj + '.addEventListener(' + ui.slice(n.arguments[0].start, n.arguments[0].end)); } for (const k in n) { const v = n[k]; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v.type === 'string') walk(v); } })(acorn.parse(ui, { ecmaVersion: 'latest', sourceType: 'module' }));
   ok(loose.length === 0, 'every window-level listener rides the window\'s AbortController signal (only the transient popover / note / strip-row buttons, which die with their elements, and the abort hook itself go without)', loose);
 }
-ok(/draftKey = 'doc:' \+ draftId/.test(ui) && /saveDraft\('doc', draftId, comments\.length \? comments\.slice\(\) : ''\)/.test(ui) && /let comments = M\.commentRows\(loadDraft\('doc', draftId\)\);/.test(ui) && /sync\?\.on\('drafts', draftKey, onRecord\);/.test(ui) && /saveDraft, loadDraft, getStateSync, isPhone:/.test(door), 'lane doc-comments-synced: the strip\'s record is the server\'s drafts SyncStore row doc:<host>\\u0001<path> through the composer\'s draft door (handed over by the door), bounded by commentRows, live through the StateSync listener');
-ok((ui.match(/localStorage\.(get|set|remove)Item\(oldKey/g) || []).length === 3 && /const merged = M\.mergeComments\(comments, local\);/.test(ui) && /if \(!sync \|\| !\(await sync\.init\('drafts'\)\) \|\| signal\.aborted\) return;/.test(ui), 'the browser\'s old copy is read ONCE after the store\'s snapshot (a loading store is never taken for an empty one), merged by the model, removed (only rows past the cap stay) — never written with the strip');
-ok(/drop\(batch\);/.test(ui) && /drop\(batch\.slice\(0, r\.sent\)\);/.test(ui) && /const drop = \(rows\) => \{ const gone = new Set\(rows\.map\(\(c\) => c\.id\)\); comments = comments\.filter\(\(c\) => !gone\.has\(c\.id\)\); saveComments\(true\);/.test(ui), 'Send all removes the rows IT sent (by id — another client\'s row added meanwhile stays) and writes at once; a part-way send removes only what went out');
-ok(/const lines = v\.batches\.map\(\(b\) => agentText\(b\.text, \{ kind: 'block', max: M\.LIMITS\.messageBytes \}\)\);/.test(eng), 'each comments message goes through THE belt (peer-text toAgentText) before the sender or the stash');
-ok(!/from '(prosemirror|markdown-it|@tiptap)/.test(door) && /import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(door), 'the door (main bundle) imports no editor module — the editor is the lazy public/doc-editor.js');
+ok(gateOf(/draftKey = 'doc:' \+ draftId/.test(ui)) && gateOf(/saveDraft\('doc', draftId, comments\.length \? comments\.slice\(\) : ''\)/.test(ui)) && gateOf(/let comments = M\.commentRows\(loadDraft\('doc', draftId\)\);/.test(ui)) && gateOf(/sync\?\.on\('drafts', draftKey, onRecord\);/.test(ui)) && verdictOf(/saveDraft, loadDraft, getStateSync, isPhone:/.test(door)), 'lane doc-comments-synced: the strip\'s record is the server\'s drafts SyncStore row doc:<host>\\u0001<path> through the composer\'s draft door (handed over by the door), bounded by commentRows, live through the StateSync listener');
+ok((ui.match(/localStorage\.(get|set|remove)Item\(oldKey/g) || []).length === 3 && gateOf(/const merged = M\.mergeComments\(comments, local\);/.test(ui)) && verdictOf(/if \(!sync \|\| !\(await sync\.init\('drafts'\)\) \|\| signal\.aborted\) return;/.test(ui)), 'the browser\'s old copy is read ONCE after the store\'s snapshot (a loading store is never taken for an empty one), merged by the model, removed (only rows past the cap stay) — never written with the strip');
+ok(gateOf(/drop\(batch\);/.test(ui)) && gateOf(/drop\(batch\.slice\(0, r\.sent\)\);/.test(ui)) && verdictOf(/const drop = \(rows\) => \{ const gone = new Set\(rows\.map\(\(c\) => c\.id\)\); comments = comments\.filter\(\(c\) => !gone\.has\(c\.id\)\); saveComments\(true\);/.test(ui)), 'Send all removes the rows IT sent (by id — another client\'s row added meanwhile stays) and writes at once; a part-way send removes only what went out');
+ok(verdictOf(/const lines = v\.batches\.map\(\(b\) => agentText\(b\.text, \{ kind: 'block', max: M\.LIMITS\.messageBytes \}\)\);/.test(eng)), 'each comments message goes through THE belt (peer-text toAgentText) before the sender or the stash');
+ok(!/from '(prosemirror|markdown-it|@tiptap)/.test(door) && verdictOf(/import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(door)), 'the door (main bundle) imports no editor module — the editor is the lazy public/doc-editor.js');
 const pkg = JSON.parse(read('package.json'));
 const PINS = ['@tiptap/core', '@tiptap/extension-image', '@tiptap/extension-link', '@tiptap/extension-list', '@tiptap/extension-table', '@tiptap/markdown', '@tiptap/pm', '@tiptap/starter-kit']; // lane doc-editor-wheel
-ok(PINS.every((p) => /^\d+\.\d+\.\d+$/.test(pkg.dependencies[p] || '')), 'the editor packages are pinned EXACT', PINS.map((p) => p + '@' + pkg.dependencies[p]));
-ok(/esbuild src\/doc-editor-entry\.js --bundle --outfile=public\/doc-editor\.js --format=esm/.test(pkg.scripts['build:bundles']) && /^public\/doc-editor\.js$/m.test(read('.gitignore')), 'npm run build makes public/doc-editor.js (gitignored build output)');
+ok(verdictOf(PINS.every((p) => /^\d+\.\d+\.\d+$/.test(pkg.dependencies[p] || ''))), 'the editor packages are pinned EXACT', PINS.map((p) => p + '@' + pkg.dependencies[p]));
+ok(gateOf(/esbuild src\/doc-editor-entry\.js --bundle --outfile=public\/doc-editor\.js --format=esm/.test(pkg.scripts['build:bundles'])) && verdictOf(/^public\/doc-editor\.js$/m.test(read('.gitignore'))), 'npm run build makes public/doc-editor.js (gitignored build output)');
 
 { // HOT FIX 2.369.257: many messages, in order, through the same door; a failure part-way names what went out
   const want = M.commentsBatches('/w/BRIEF.md', EIGHTEEN).batches.map((b) => b.text);
   const w = world();
   const r = w.doc.comments({ path: '/w/BRIEF.md', from: 'w1', items: EIGHTEEN });
-  ok(r.ok && r.delivered === 'sent' && r.messages === want.length && want.length >= 3 && r.sent === 18 && r.count === 18 && w.rec.sent.map((x) => x.text).join('\u0000') === want.join('\u0000') && w.rec.sent.every((x) => x.sid === 'w1' && x.opts.origin === 'doc-comment'), `18 comments ⇒ ${want.length} calls on THE typing sender, in order`, r);
+  ok(gateOf(r.ok) && r.delivered === 'sent' && r.messages === want.length && want.length >= 3 && r.sent === 18 && r.count === 18 && w.rec.sent.map((x) => x.text).join('\u0000') === want.join('\u0000') && verdictOf(w.rec.sent.every((x) => x.sid === 'w1' && x.opts.origin === 'doc-comment')), `18 comments ⇒ ${want.length} calls on THE typing sender, in order`, r);
   const w2 = world({ sendOk: false });
   const r2 = w2.doc.comments({ path: '/w/BRIEF.md', from: 'w1', items: EIGHTEEN });
-  ok(r2.ok && r2.delivered === 'stashed' && r2.messages === want.length && w2.rec.sent.length === 1 && w2.rec.stashed.map((x) => x.text).join('\u0000') === want.join('\u0000') && w2.rec.stashed.every((x) => x.cid === 'conv-1' && x.source === 'doc-comment'), `no live process ⇒ ${want.length} stash rows, in order`, w2.rec.stashed.length);
+  ok(gateOf(r2.ok) && r2.delivered === 'stashed' && r2.messages === want.length && w2.rec.sent.length === 1 && w2.rec.stashed.map((x) => x.text).join('\u0000') === want.join('\u0000') && verdictOf(w2.rec.stashed.every((x) => x.cid === 'conv-1' && x.source === 'doc-comment')), `no live process ⇒ ${want.length} stash rows, in order`, w2.rec.stashed.length);
   const w3 = world({ sendOk: (n) => n !== 2 });
   const r3 = w3.doc.comments({ path: '/w/BRIEF.md', from: 'w1', items: EIGHTEEN });
   const first = M.commentsBatches('/w/BRIEF.md', EIGHTEEN).batches[0].count;
@@ -375,11 +375,11 @@ const RULES = [
   ['the save ask removed (a silent overwrite)', "return disk && disk > base && !(confirmed && confirmed >= disk) ? 'ask' : 'write';", "return 'write';", (X) => X.saveVerdict({ disk: 11, base: 10 }) === 'write'],
 ];
 for (const [name, from, to, red] of RULES) {
-  ok(msrc.includes(from), `control target present: ${name}`);
+  ok(verdictOf(msrc.includes(from)), `control target present: ${name}`);
   const X = MUT.load('src/doc-model.js', editAnchor(msrc, from, to, "src/doc-model.js"), name.slice(0, 12));
-  ok(red(X), `CONTROL: ${name} ⇒ its table goes red`);
+  ok(verdictOf(red(X)), `CONTROL: ${name} ⇒ its table goes red`);
 }
-for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: RULES.length })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: RULES.length })) ok(verdictOf(c.pass), c.name, c.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

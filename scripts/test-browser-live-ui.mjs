@@ -54,7 +54,7 @@ const { WebSocket, WebSocketServer } = require('ws');
 const L = await import('../src/lib/live-bar-layout.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = await pred(); if (v) return v; } catch { } await sleep(every); } try { return await pred(); } catch { return null; } };
@@ -262,7 +262,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 200), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 200)), 'the worktree server booted', journal.slice(-800))) return;
   const j = async (method, p, body, headers = {}) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   await j('PATCH', '/api/settings', { 'browser.autoBindLiveView': false }); // the suite binds / unbinds by hand
 
@@ -274,7 +274,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   procs.add({ kill: () => { try { wsMain.close(); } catch { } } });
   const create = async (reqId, sessionName) => { wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: ROOT, cols: 80, rows: 24, reqId, sessionName })); return until(() => msgs.find((m) => m.type === 'created' && m.reqId === reqId), 20000); };
   const c1 = await create('r1', SESSION_NAME), c2 = await create('r2', 'no-browser');
-  if (!ok(c1 && c1.sessionId && c2 && c2.sessionId, 'two chat sessions were created (one will browse, one never does)', journal.slice(-600))) return;
+  if (!ok(gateOf(c1) && gateOf(c1.sessionId) && gateOf(c2) && verdictOf(c2.sessionId), 'two chat sessions were created (one will browse, one never does)', journal.slice(-600))) return;
   const S1 = c1.sessionId, S2 = c2.sessionId;
   await sleep(1500);
   // THE OWNER'S PATH: the agent starts its browser with `vibespace-browser open <url>` from inside the session —
@@ -410,7 +410,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   // classes too (a worded button's width may not come from another file's parent rule) — a control that removes the bar
   // rules must remove these as well, or control (b) could no longer turn red (a new guard layer peeled out of the old one)
   const OWN = ['.file-tool-btn.browser-live-mode-btn { color: var(--text); border-color: var(--border); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }', '.file-tool-btn.browser-live-handback { color: var(--text); border-color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }'];
-  ok(RULES.every((r) => real.includes(r)) && DRULES.every((r) => real.includes(r)) && OWN.every((r) => real.includes(r)), 'the bar rules the controls remove are in public/style.css verbatim (the anchors exist — the two own-class size rules too)');
+  ok(gateOf(RULES.every((r) => real.includes(r))) && gateOf(DRULES.every((r) => real.includes(r))) && verdictOf(OWN.every((r) => real.includes(r))), 'the bar rules the controls remove are in public/style.css verbatim (the anchors exist — the two own-class size rules too)');
   const writeCss = (tag, text) => { const f = path.join(MUT.dir, `style-${tag}-${process.pid}.css`); fs.writeFileSync(f, text); MUT.files.push(f); return f; };
   const fNeutral = writeCss('neutral', real), fPre = writeCss('prefix', [...RULES, ...OWN].reduce((x, r) => x.replace(r, ''), real)), fNo = writeCss('nowrap', real.replace(RULES[0], '')), fDeskPre = writeCss('desk-prefix', [...DRULES, ...OWN].reduce((x, r) => x.replace(r, ''), real));
   /** Loads a patched copy IN PLACE of /style.css (same cascade position: viewers.css still after it). */
@@ -421,9 +421,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     let menuChecked = false;
     for (const lang of LANGS) {
       await load(lang, 'dark');
-      if (!ok(await openChat(S1, SESSION_NAME), `${lang}: the browsing session's chat window is open`)) continue;
+      if (!ok(verdictOf(await openChat(S1, SESSION_NAME)), `${lang}: the browsing session's chat window is open`)) continue;
       await evaluate(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(S1)} })`);
-      if (!ok(await liveUp(), `${lang}: the live view drew a frame of the ephemeral browser`, journal.slice(-600))) continue;
+      if (!ok(verdictOf(await liveUp()), `${lang}: the live view drew a frame of the ephemeral browser`, journal.slice(-600))) continue;
       for (const theme of THEMES) {
         await setTheme(theme);
         for (const bound of [false, true]) {
@@ -454,7 +454,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
                   const rows = drawn.filter((x) => x.startsWith('item: ')).map((x) => x.slice(6));
                   const tabsRow = r.v.overflow.includes('tabs') ? rows.find((x) => x.includes(`(${mode === 'takeover' ? 3 : 1})`)) : true;
                   const menuIs = (d) => d.length === want.length && d.length >= 1 && same(d, want) && want.every((w) => !/^caption: (<no element|\s*$)/.test(w));
-                  ok(menuIs(drawn) && !!tabsRow, `${name}: the ⋯ menu lists exactly the ${want.length} folded row(s), captions with their words and items, in order (${drawn.join(' · ')}) — the pane rows with their live counts`, { drawn, want, overflow: r.v.overflow });
+                  ok(gateOf(menuIs(drawn)) && !!tabsRow, `${name}: the ⋯ menu lists exactly the ${want.length} folded row(s), captions with their words and items, in order (${drawn.join(' · ')}) — the pane rows with their live counts`, { drawn, want, overflow: r.v.overflow });
                   if (want.some((w) => w.startsWith('caption: '))) ok(!menuIs(drawn.filter((x) => !x.startsWith('caption: '))), `${name} CONTROL: the same drawn menu with its captions cut fails that judge — a caption is read with its words, never dropped from the pin`);
                   menuChecked = true;
                 }
@@ -470,14 +470,14 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     }
     ok(tally.live.n === LANGS.length * THEMES.length * 2 * 2 * WIDTHS.length, `① ${tally.live.n} live-view states measured (3 languages × 2 themes × free/bound × Watch/Take over × 3 widths)`);
     ok(tally.live.bad.length === 0, `① every live-view state: no overlap, no wrapped label, every button's words fit, nothing outside the bar, no undefined/null/NaN/[object (${tally.live.bad.length} bad of ${tally.live.n})`, tally.live.bad.slice(0, 6).join('\n    '));
-    ok(menuChecked, '① the ⋯ menu was opened on a folded bar (the check above ran)');
+    ok(verdictOf(menuChecked), '① the ⋯ menu was opened on a folded bar (the check above ran)');
 
     // ═══ ② two profiles: the switcher strip + the backend chip ═══
     console.log('— ② two profiles attached: the strip and the backend chip');
     {
       const wr = await j('POST', '/api/browser/profiles', { label: 'Work' }), pr = await j('POST', '/api/browser/profiles', { label: 'Personal account' });
       const work = wr.json && wr.json.profile, pers = pr.json && pr.json.profile;
-      if (ok(work && pers, 'two browser profiles created', JSON.stringify([wr, pr]).slice(0, 300))) {
+      if (ok(gateOf(work) && verdictOf(pers), 'two browser profiles created', JSON.stringify([wr, pr]).slice(0, 300))) {
         fs.writeFileSync(path.join(AB_STATE, 'ports.json'), JSON.stringify({ '*': upE.port, ['vs-' + work.id]: upW.port, ['vs-' + pers.id]: upP.port }));
         const a1 = await j('POST', '/api/browser/attach', { sessionId: S1, profile: 'Work' }), a2 = await j('POST', '/api/browser/attach', { sessionId: S1, profile: 'Personal account' });
         await j('POST', '/api/browser/pin', { sessionId: S1, profile: 'Work' });
@@ -487,7 +487,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
           await load(lang, 'dark');
           await openChat(S1, SESSION_NAME);
           await evaluate(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(S1)} })`);
-          if (!ok(await liveUp(), `${lang}: the profile live view drew a frame`)) continue;
+          if (!ok(verdictOf(await liveUp()), `${lang}: the profile live view drew a frame`)) continue;
           await until(() => evaluate(`(${LIVE})._browserLive.el().querySelectorAll('.browser-live-strip-tab').length === 2`), 8000);
           for (const mode of ['watch', 'takeover']) {
             await setMode(mode);
@@ -514,7 +514,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
           await load('en', 'dark');
           await openChat(S1, SESSION_NAME);
           await evaluate(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(S1)} })`);
-          ok(await liveUp(), '②b the profile live view drew a frame');
+          ok(verdictOf(await liveUp()), '②b the profile live view drew a frame');
           await placeFree(1400);
           const pid = await until(() => evaluate(`(() => { const s = (${LIVE})._browserLive.state(); return s.target && s.target.profileId ? s.target.profileId : null; })()`), 8000);
           const look = () => evaluate(`(() => { const Lv = (${LIVE})._browserLive; Lv.layoutBar(); const e = Lv.el(); const vis = (x) => !!x && getComputedStyle(x).display !== 'none'; const b = e.querySelector('.browser-live-bar .browser-live-backend'), l = e.querySelector('.browser-live-bar .browser-live-backend-label'); const rows = [...e.querySelectorAll('.browser-live-blocked-row')].filter(vis).map((r) => ({ text: r.querySelector('.browser-live-blocked-text').textContent, btns: [...r.querySelectorAll('button')].map((x) => x.textContent) })); const s = Lv.state(); return { button: vis(b), label: vis(l), tag: l ? l.tagName : null, labelFocusable: l ? l.tabIndex >= 0 : null, words: s.backend, isButton: s.backendIsButton, banner: s.blockedShown && vis(e.querySelector('.browser-live-blocked')), rows }; })()`);
@@ -522,14 +522,14 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
           ok(!!pid && !!x1 && x1.tag === 'SPAN' && !x1.labelFocusable && x1.words === 'Chromium' && x1.isButton === false, `②b W1 (this build — no in-place switch target is shipped): the bar names the browser "${x1 && x1.words}" as a plain label, not focusable`, JSON.stringify({ pid, x1 }));
           const claimed = await j('POST', '/api/agent/browser/blocked', { url: 'https://shop.example/checkout', why: 'captcha', evidence: 'a press-and-hold check', profile: pid }, { Authorization: 'Bearer ' + token });
           const nxt = String(claimed.json && claimed.json.next);
-          ok(claimed.status === 200 && /^no switch can be offered \(this version of VibeSpace offers no one-click switch of browser\)/.test(nxt) && /Do not work around it/.test(nxt), `②b the agent's claim is recorded and its \`next\` says nothing can be offered and why — never a workaround (a tier-2 claim is one proposal that offers nothing, lane engine-spi-egress L3) (${claimed.status})`, JSON.stringify(claimed.json).slice(0, 400));
+          ok(claimed.status === 200 && gateOf(/^no switch can be offered \(this version of VibeSpace offers no one-click switch of browser\)/.test(nxt)) && verdictOf(/Do not work around it/.test(nxt)), `②b the agent's claim is recorded and its \`next\` says nothing can be offered and why — never a workaround (a tier-2 claim is one proposal that offers nothing, lane engine-spi-egress L3) (${claimed.status})`, JSON.stringify(claimed.json).slice(0, 400));
           const b1 = await until(async () => { const x = await look(); return x.banner && x.rows.length ? x : null; }, 8000);
           ok(!!b1 && b1.rows.length === 1 && b1.rows[0].text === 'Your agent reports shop.example blocked it: “captcha”. Take over to get past the check yourself.' && JSON.stringify(b1.rows[0].btns) === JSON.stringify(['Details', 'Dismiss']), `②b W1: the banner says who claimed it and the way out (take over) beside Details and Dismiss (${JSON.stringify(b1 && b1.rows)})`);
           const cls0 = await evaluate(`[...(${LIVE})._browserLive.el().querySelectorAll('.browser-live-blocked-row button')].map((b) => b.className)`);
-          ok(cls0.length === 2 && cls0.every((c) => /\bmounts-btn\b/.test(c) && !/file-tool-btn/.test(c)), `②b W1: every banner button the house text button, never a 24 px icon box (${JSON.stringify(cls0)})`);
+          ok(cls0.length === 2 && verdictOf(cls0.every((c) => /\bmounts-btn\b/.test(c) && !/file-tool-btn/.test(c))), `②b W1: every banner button the house text button, never a 24 px icon box (${JSON.stringify(cls0)})`);
           const fold = (open) => evaluate(`(async () => { const e = (${LIVE})._browserLive.el(); const b = [...e.querySelectorAll('.browser-live-blocked-row button')].find((x) => x.textContent === ${JSON.stringify(open ? 'Details' : 'Hide details')}); if (!b) return null; b.click(); await new Promise((r) => requestAnimationFrame(() => r())); const d = e.querySelector('.browser-live-blocked-detail'); return { shown: !!d && !d.hidden && d.getBoundingClientRect().height > 0, text: d ? d.textContent : null, label: b.textContent }; })()`);
           const f1 = await fold(true);
-          ok(!!f1 && f1.shown && f1.text === 'a press-and-hold check' && f1.label === 'Hide details', `②b Details opens the agent's evidence under the banner (${JSON.stringify(f1)})`);
+          ok(!!f1 && gateOf(f1.shown) && f1.text === 'a press-and-hold check' && f1.label === 'Hide details', `②b Details opens the agent's evidence under the banner (${JSON.stringify(f1)})`);
           // the cap popover (the verifier's MAJOR 3): its background is a real colour, never transparent over the bar
           const pop = await evaluate(`(async () => { const e = (${LIVE})._browserLive.el(); const c = e.querySelector('.browser-live-strip-cap'); if (!c) return null; c.click(); await new Promise((r) => setTimeout(r, 80)); const p = document.querySelector('.browser-live-cap-pop'); if (!p) return { none: true }; const bg = getComputedStyle(p).backgroundColor; const probe = document.createElement('div'); probe.style.background = 'var(--bg-dialog)'; document.body.appendChild(probe); const want = getComputedStyle(probe).backgroundColor; probe.remove(); p.remove(); return { bg, want }; })()`);
           ok(!!pop && !pop.none && pop.bg === pop.want && !/rgba\(0, 0, 0, 0\)|transparent/.test(pop.bg), `②b the browser-cap popover is painted with the dialog colour, never transparent (${JSON.stringify(pop)})`);
@@ -539,18 +539,18 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
           const W2_ID = 'fixture-browser';
           await evaluate(`(() => { const d = window.app._browserProfiles; const msg = { type: 'browser-profiles-updated', ...d, backends: { ...(d.backends || {}), [${JSON.stringify(pid)}]: { id: 'chromium', major: 151, plan: null, choices: [${JSON.stringify(W2_ID)}] } } }; ${relayBroadcastJs(`msg`, "window.app.ws.globalHandlers")} return true; })()`);
           const x2 = await until(async () => { const x = await look(); return x.button && !x.label && x.rows.length && x.rows[0].btns.length === 3 ? x : null; }, 4000);
-          ok(!!x2 && x2.words === 'Chromium' && x2.isButton === true && /^Switch to .+…$/.test(x2.rows[0].btns[0]) && x2.rows[0].btns[1] === 'Hide details' && x2.rows[0].btns[2] === 'Dismiss' && x2.rows[0].text === 'Your agent reports shop.example blocked it: “captcha”.', `②b W2 (another browser named, by a broadcast): the name is a BUTTON and the banner offers the switch beside Details (still open across the rebuild) and Dismiss (${JSON.stringify(x2 && x2.rows)})`);
+          ok(!!x2 && x2.words === 'Chromium' && x2.isButton === true && gateOf(/^Switch to .+…$/.test(x2.rows[0].btns[0])) && x2.rows[0].btns[1] === 'Hide details' && x2.rows[0].btns[2] === 'Dismiss' && x2.rows[0].text === 'Your agent reports shop.example blocked it: “captcha”.', `②b W2 (another browser named, by a broadcast): the name is a BUTTON and the banner offers the switch beside Details (still open across the rebuild) and Dismiss (${JSON.stringify(x2 && x2.rows)})`);
           await evaluate(`(${LIVE})._browserLive.el().querySelector('.browser-live-bar .browser-live-backend').click()`);
           const d1 = await dialogOf();
           ok(!!d1 && d1.now === "Your agent's browser: Chromium" && d1.notice === null && d1.cards === 0 && typeof d1.empty === 'string' && d1.empty.length > 0 && d1.build === "The automatic choice — usually the newest Chrome the browser driver installed" && !d1.iconBtn, '②b the name button opens the switch dialog on the REAL view: the now line, no card (nothing to switch to on this server) but its empty line — and lane browser-admin 2a\'s Chrome build line ("The automatic choice — usually the newest Chrome the browser driver installed", Change build…; verify r2 G5)', JSON.stringify(d1));
-          ok(await closeD(), '②b the dialog\'s Close closes it');
+          ok(verdictOf(await closeD()), '②b the dialog\'s Close closes it');
           await evaluate(`[...(${LIVE})._browserLive.el().querySelectorAll('.browser-live-blocked-row button')].find((b) => /^Switch to /.test(b.textContent)).click()`);
           const d2 = await dialogOf();
           ok(!!d2 && d2.notice === null && d2.cards === 0 && typeof d2.empty === 'string', '②b the banner\'s "Switch to …" opens the same dialog on the real view', JSON.stringify(d2));
           await closeD();
           await evaluate(`[...(${LIVE})._browserLive.el().querySelectorAll('.browser-live-blocked-row button')].find((b) => b.textContent === 'Dismiss').click()`);
           const gone = await until(async () => { const x = await look(); return !x.banner && !x.rows.length && x.label && !x.button ? x : null; }, 8000);
-          ok(!!gone && gone.label && !gone.button, '②b Dismiss removes the claim for real (the broadcast drops the row) — and the real digest puts the plain label back', JSON.stringify(gone));
+          ok(!!gone && gateOf(gone.label) && !gone.button, '②b Dismiss removes the claim for real (the broadcast drops the row) — and the real digest puts the plain label back', JSON.stringify(gone));
           await evaluate(`(() => { for (const id of [...window.app.wm.windows.keys()]) { try { window.app.wm.closeWindow(id); } catch {} } return 1; })()`);
         }
       }
@@ -569,38 +569,38 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       const closeMenus = () => evaluate(`document.querySelectorAll('.context-menu,.taskbar-context-menu').forEach((m) => m.remove())`);
       const p1 = await place(S1, 40), m1 = await rightClick(p1);
       if (m1) await shot(path.join(SHOTS, 'menu-zh-chat-window-with-browser.png'), await evaluate(`(() => { const r = document.querySelector('.taskbar-context-menu').getBoundingClientRect(); return { x: r.left - 10, y: r.top - 10, width: r.width + 20, height: r.height + 20 }; })()`));
-      ok(Array.isArray(m1) && m1.includes(ROW), `the chat window of a session that HAS a browser (${JSON.stringify(facts)}) offers "${ROW}" on its title-bar menu`, JSON.stringify(m1));
+      ok(gateOf(Array.isArray(m1)) && verdictOf(m1.includes(ROW)), `the chat window of a session that HAS a browser (${JSON.stringify(facts)}) offers "${ROW}" on its title-bar menu`, JSON.stringify(m1));
       await closeMenus();
       const p2 = await place(S2, 1000), m2 = await rightClick(p2);
-      ok(Array.isArray(m2) && m2.length > 3 && !m2.includes(ROW), 'the chat window of a session that never used a browser does not', JSON.stringify(m2));
+      ok(gateOf(Array.isArray(m2)) && m2.length > 3 && !m2.includes(ROW), 'the chat window of a session that never used a browser does not', JSON.stringify(m2));
       await closeMenus();
       const liveCount = () => evaluate(`[...window.app.wm.windows.values()].filter((w) => w.type === 'browser-live').length`);
       const clickRow = async () => { const m = await rightClick(await place(S1, 40)); if (!m || !m.includes(ROW)) return false; await evaluate(`(() => { const el = [...document.querySelector('.taskbar-context-menu').children].find((e) => (e.textContent || '').trim() === ${JSON.stringify(ROW)}); el.click(); return true; })()`); await sleep(400); return true; };
       const pairState = () => evaluate(`(() => { const l = ${LIVE}; const c = ${CHAT}; if (!l || !c) return null; const ch = l._tabChain; return { bound: l._browserLive.isBound(), pair: ch && ch.split ? ch.split.pair : null, chat: c.id, live: l.id, frames: l._browserLive.state().frames }; })()`);
-      ok(await liveCount() === 0 && await clickRow(), 'no live view open; the row is clicked');
+      ok(await liveCount() === 0 && verdictOf(await clickRow()), 'no live view open; the row is clicked');
       const b1 = await until(async () => { const s = await pairState(); return s && s.bound && s.frames >= 1 ? s : null; }, 15000);
-      ok(!!b1 && same(b1.pair, [b1.chat, b1.live]), 'the row opens the live view BOUND beside the chat window (the split pair [chat, live]) and it draws', JSON.stringify(b1));
+      ok(!!b1 && verdictOf(same(b1.pair, [b1.chat, b1.live])), 'the row opens the live view BOUND beside the chat window (the split pair [chat, live]) and it draws', JSON.stringify(b1));
       if (b1) await shot(path.join(SHOTS, 'menu-zh-opened-bound.png'), await evaluate(`(() => { const c = ${CHAT}; const host = window.app.wm.windows.get(c._tabChain.tabs[0]); const r = host.element.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: Math.min(r.height, 200) }; })()`));
       await clickRow();
-      ok(await liveCount() === 1 && (await pairState())?.bound, 'again ⇒ still ONE live window, still bound (open-or-focus — never a second viewer)');
+      ok(await liveCount() === 1 && verdictOf((await pairState())?.bound), 'again ⇒ still ONE live window, still bound (open-or-focus — never a second viewer)');
       await evaluate(`(() => { const l = ${LIVE}; window.app.wm.unbindSplit(l._tabChain); window.app.wm._detachFromChain(l._tabChain, l.id); return true; })()`);
       await sleep(250);
       ok((await pairState())?.bound === false, 'the live view freed from the chat (a standalone window)');
       await clickRow();
       const b2 = await until(async () => { const s = await pairState(); return s && s.bound ? s : null; }, 5000);
-      ok(!!b2 && same(b2.pair, [b2.chat, b2.live]) && await liveCount() === 1, 'the row on a chat whose live view is elsewhere binds THAT view beside it (never a second one)', JSON.stringify(b2));
+      ok(!!b2 && gateOf(same(b2.pair, [b2.chat, b2.live])) && await liveCount() === 1, 'the row on a chat whose live view is elsewhere binds THAT view beside it (never a second one)', JSON.stringify(b2));
       await evaluate(`document.querySelectorAll('.toast').forEach((t) => t.remove())`);
       // the bound live pane's own menu: ONE word for "back to tabs"
       const tab = await evaluate(`(() => { const c = ${CHAT}; const host = window.app.wm.windows.get(c._tabChain.tabs[0]); const t = host.titleBar.querySelector('.tab-item[data-win-id="' + (${LIVE}).id + '"]'); if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + r.height / 2 }; })()`);
       const m3 = tab ? await rightClick(tab) : null;
       if (m3) await shot(path.join(SHOTS, 'menu-zh-live-tab-bound.png'), await evaluate(`(() => { const r = document.querySelector('.taskbar-context-menu').getBoundingClientRect(); return { x: r.left - 10, y: r.top - 10, width: r.width + 20, height: r.height + 20 }; })()`));
       const unbind = zhDict.Unbind, unsplit = zhDict.Unsplit;
-      ok(Array.isArray(m3) && m3.filter((x) => x === unbind || x === unsplit).length === 1 && m3.includes(unsplit), `a BOUND live pane's menu says "${unsplit}" once (its own "${unbind}" retired — one word for one act)`, JSON.stringify(m3));
+      ok(gateOf(Array.isArray(m3)) && m3.filter((x) => x === unbind || x === unsplit).length === 1 && verdictOf(m3.includes(unsplit)), `a BOUND live pane's menu says "${unsplit}" once (its own "${unbind}" retired — one word for one act)`, JSON.stringify(m3));
       await closeMenus();
       const card = await evaluate(`(() => { const c = [...document.querySelectorAll('.session-item-card')].find((x) => (x.textContent || '').includes(${JSON.stringify(SESSION_NAME)})); if (!c) return false; c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 200 })); return true; })()`);
       await sleep(300);
       const m4 = card ? await evaluate(`(() => { const m = document.querySelector('.context-menu'); return m ? [...m.children].map((e) => (e.textContent || '').trim()).filter(Boolean) : null; })()`) : null;
-      ok(Array.isArray(m4) && m4.includes(ROW), 'the sidebar card keeps its own entry', JSON.stringify(m4));
+      ok(gateOf(Array.isArray(m4)) && verdictOf(m4.includes(ROW)), 'the sidebar card keeps its own entry', JSON.stringify(m4));
       await closeMenus();
     }
 
@@ -661,7 +661,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
             const m = await evaluate(`(${MEASURE.toString()})(${deskBar}, { moreSel: '.desktop-app-more' })`);
             await shot(path.join(SHOTS, 'control-b-desk-prefix-zh-agent-w900.png'), await evaluate(`(() => { const el = ${deskClip}; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`));
             const wraps = m.items.filter((i) => i.flags.wraps).map((i) => i.el + ':' + i.text);
-            ok(wraps.some((w) => /browser-live-mode-btn/.test(w)), `CONTROL (b) on the strip: a patched copy WITHOUT \`.desktop-bar\`'s rules — the Take over button is a 24 px box again and its words wrap (${wraps.join(', ')})`, problemsOf(m).slice(0, 4).join('; '));
+            ok(verdictOf(wraps.some((w) => /browser-live-mode-btn/.test(w))), `CONTROL (b) on the strip: a patched copy WITHOUT \`.desktop-bar\`'s rules — the Take over button is a 24 px box again and its words wrap (${wraps.join(', ')})`, problemsOf(m).slice(0, 4).join('; '));
             await j('POST', '/api/agent/window/detach', { handle: appId }, { Authorization: 'Bearer ' + token });
             deskDone = true;
           }
@@ -708,7 +708,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       await stage('takeover', 600);
       const swapped = await swap(fNeutral);
       const a = await foldRead('control-a-neutral-zh-takeover-w600');
-      ok(swapped && a.probs.length === 0, 'CONTROL (a): the stylesheet swapped for an IDENTICAL copy — the census stays green (the swap itself is neutral)', a.probs.join('; '));
+      ok(gateOf(swapped) && a.probs.length === 0, 'CONTROL (a): the stylesheet swapped for an IDENTICAL copy — the census stays green (the swap itself is neutral)', a.probs.join('; '));
       // (b) the pre-fix bar rules: the owner's picture
       for (const [mode, W] of [['watch', 1400], ['takeover', 600]]) {
         await stage(mode, W); await swap(fPre);
@@ -717,7 +717,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
         // its OWN rule) and the fold hides the labels it displaces (Not recording, the backend chip), so the one label left
         // to wrap is the toggle that never folds — the census must still go red, on the Hand back toggle by name
         const red = mode === 'takeover' ? b.wraps.some((w) => /browser-live-handback/.test(w)) && b.probs.length >= 3 : b.wraps.length >= 2 && b.probs.length >= 3;
-        ok(red, `CONTROL (b): a patched copy WITHOUT the bar rules (nowrap / no-shrink / the (0,2,0) width) — zh ${mode} at ${W} — the census goes RED: vertical wrapping (${b.wraps.slice(0, 4).join(', ')}), ${b.probs.length} problem(s)`, b.probs.slice(0, 5).join('; '));
+        ok(verdictOf(red), `CONTROL (b): a patched copy WITHOUT the bar rules (nowrap / no-shrink / the (0,2,0) width) — zh ${mode} at ${W} — the census goes RED: vertical wrapping (${b.wraps.slice(0, 4).join(', ')}), ${b.probs.length} problem(s)`, b.probs.slice(0, 5).join('; '));
       }
       // (c) the nowrap rule alone removed, the fold's verdict undone (every item unfolded) ⇒ labels wrap; (c') the same under the real sheet ⇒ none
       await stage('takeover', 600); await swap(fNo);
@@ -734,7 +734,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       const Wc = 600 - Math.max(0, Number(slack) || 0) - 60;
       await stage('takeover', Wc);
       const cr = await unfoldRead(`control-c-real-unfolded-zh-takeover-w${Wc}`);
-      ok(cr.wraps.length === 0 && cr.probs.some((p) => /^outside/.test(p) || /^overlap/.test(p) || /^cut/.test(p)), `CONTROL (c'): the SAME unfolded bar under the real stylesheet wraps nothing (the nowrap rule holds every label on one line) — the overflow is what the fold exists for (at ${Wc} px: ${cr.probs.length} outside/overlap problem(s))`, cr.probs.slice(0, 4).join('; '));
+      ok(cr.wraps.length === 0 && verdictOf(cr.probs.some((p) => /^outside/.test(p) || /^overlap/.test(p) || /^cut/.test(p))), `CONTROL (c'): the SAME unfolded bar under the real stylesheet wraps nothing (the nowrap rule holds every label on one line) — the overflow is what the fold exists for (at ${Wc} px: ${cr.probs.length} outside/overlap problem(s))`, cr.probs.slice(0, 4).join('; '));
       if (!deskDone) skip('CONTROL (b) on the strip — no desktop app ran here (④ skipped)');
     }
 
@@ -770,10 +770,10 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       for (const lang of LANGS) {
         const theme = lang === 'ja' ? 'light' : 'dark'; // the ⋯'s borrowed badge colour seen on both themes
         await load(lang, theme); await setTheme(theme);
-        if (!ok(await openChat(S1, SESSION_NAME), `⑥ ${lang}: the browsing session's chat window is open`)) continue;
+        if (!ok(verdictOf(await openChat(S1, SESSION_NAME)), `⑥ ${lang}: the browsing session's chat window is open`)) continue;
         await placeHost(900);
         await evaluate(`window.app.openBrowserLiveBeside(${CHAT}, ${JSON.stringify(S1)})`); // the window menu row's own act
-        if (!ok(await liveUp() && await until(() => evaluate(`(${LIVE})._browserLive.isBound()`), 5000), `⑥ ${lang}: the window menu's act opened the live view BOUND beside the chat and it draws`)) continue;
+        if (!ok(gateOf(await liveUp()) && verdictOf(await until(() => evaluate(`(${LIVE})._browserLive.isBound()`), 5000)), `⑥ ${lang}: the window menu's act opened the live view BOUND beside the chat and it draws`)) continue;
         await evaluate(`document.querySelectorAll('.toast').forEach((t) => t.remove())`);
         await setTabs(upE, 3);
         for (const mode of ['watch', 'takeover']) {
@@ -839,9 +839,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   } catch (e) {
     ok(false, 'the suite ran to its end', (e && (e.stack || e.message)) + '\n' + journal.slice(-1200));
   }
-  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
   console.log(`  artifacts: ${fs.readdirSync(SHOTS).filter((f) => f.endsWith('.png')).length} PNG + JSON in ${SHOTS}`);
 })();
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

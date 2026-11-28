@@ -42,7 +42,7 @@ const require = createRequire(import.meta.url);
 const P = require(path.join(REPO, 'src/store-pace.js'));
 const SW = require(path.join(REPO, 'src/store-writer.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-store-writer-'));
 const MB = 1024 * 1024;
@@ -109,7 +109,7 @@ try {
     const seen = [];
     for (let i = 51; i <= 56; i++) { state = i; w.dirty(f, { produce: () => JSON.stringify({ state }), debounceMs: 0 }); await sleep(120); seen.push(JSON.parse(fs.readFileSync(f, 'utf8')).state); }
     await sleep(700); seen.push(JSON.parse(fs.readFileSync(f, 'utf8')).state);
-    ok(seen.every((v, i) => i === 0 || v >= seen[i - 1]) && seen[seen.length - 1] === 56, `the store's own order: every version on disk is the same or later (${seen.join(', ')})`);
+    ok(gateOf(seen.every((v, i) => i === 0 || v >= seen[i - 1])) && seen[seen.length - 1] === 56, `the store's own order: every version on disk is the same or later (${seen.join(', ')})`);
     w.stop();
   }
   // ── ③ THE PACE, run ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -174,7 +174,7 @@ try {
     fs.mkdirSync(`${f}.tmp-${process.pid}-w`);   // its temp path is a directory: the write fails (EISDIR)
     w.dirty(f, { name: 'fails.write', produce: () => JSON.stringify({ v: 'new' }), debounceMs: 0 });
     await sleep(300);
-    ok(warns.some((l) => l === '[store-write] fails.write not written (EISDIR; attempt 1) — kept in memory, retrying in 1 s') && JSON.parse(fs.readFileSync(f, 'utf8')).v === 'old' && w.pending(f),
+    ok(gateOf(warns.some((l) => l === '[store-write] fails.write not written (EISDIR; attempt 1) — kept in memory, retrying in 1 s')) && JSON.parse(fs.readFileSync(f, 'utf8')).v === 'old' && verdictOf(w.pending(f)),
       'a failed write: said in plain words, the previous WHOLE file intact, the store still owed', warns);
     fs.rmdirSync(`${f}.tmp-${process.pid}-w`);
     await sleep(1300);
@@ -211,9 +211,9 @@ try {
     const t0 = performance.now(), r = w.exitFlush({}), took = performance.now() - t0;
     // round 6 (E1): no bound of ours — the exit waits for the write in flight and then writes the other two, ON THE THREAD
     // (round 3: never on the main thread), however long the storage takes: 1.7 s here, past a third of its 1.5 s grace
-    ok(took >= 1200 && r.all.written.join() === 'a.write,b.write' && !r.all.left.length && fs.existsSync(stuck) && fs.existsSync(a) && fs.existsSync(b),
+    ok(took >= 1200 && r.all.written.join() === 'a.write,b.write' && !r.all.left.length && gateOf(fs.existsSync(stuck)) && gateOf(fs.existsSync(a)) && verdictOf(fs.existsSync(b)),
       `the exit flush waited for the write in flight, then wrote the other two on the thread — ${took.toFixed(0)} ms, past rounds 3–5's bound (a third of the grace, 500 ms here): nothing left`, r.all);
-    ok(warns.some((l) => /^\[store-write\] exit: 2 stores written in \d+ ms \(a\.write, b\.write\)$/.test(l)) && !warns.some((l) => /NOT written|bound/.test(l)), 'ONE journal line names what it wrote — no «NOT written», no bound', warns);
+    ok(gateOf(warns.some((l) => /^\[store-write\] exit: 2 stores written in \d+ ms \(a\.write, b\.write\)$/.test(l))) && !warns.some((l) => /NOT written|bound/.test(l)), 'ONE journal line names what it wrote — no «NOT written», no bound', warns);
     w.stop();
     // forget(): the file's owner unlinks it — its pending write dropped, one in flight settled first
     process.env.VS_SLOW_MS = '400';
@@ -459,43 +459,43 @@ if (mode === 'scene') {
       const grace = sc.grace || 30000;
       const t = await runScene({ ...sc, road: 'stop' }, { killAt: grace, env }), m = await runScene({ ...sc, road: 'stop', side: 'master' }, { killAt: grace, env });
       say(`${what}: the tree ${brief(t)}; master ${brief(m)}`);
-      ok(eq(t, m) && t.code === 0 && t.moved.length === 3 && t.unmoved === (sc.unmoved || 0) && !t.lines.some((l) => /NOT written|bound/.test(l)),
+      ok(gateOf(eq(t, m)) && t.code === 0 && t.moved.length === 3 && t.unmoved === (sc.unmoved || 0) && !t.lines.some((l) => /NOT written|bound/.test(l)),
         `E1: ${what} — EVERY store on disk and code 0, equal to master by the same driver (the tree ${t.ms} ms, master ${m.ms} ms; nothing «NOT written»)`, { t: { ...t, out: t.out.slice(-600) }, m: { ...m, out: '' } });
     }
     // E2 — AFTER A CRASH WITH NO STOP ASKED, THE KEEPER IS THE MANAGER: one full grace from the crash, never sooner
     { const sc = { grace: 9000, unmoved: 3, unmovedMs: 1000, movedMs: 1000 };
       const t = await runScene({ ...sc, road: 'crash' }), m = await runScene({ ...sc, road: 'crash', side: 'master' });
       say(`a slow crash exit (6 s of stores, grace 9 s): the tree ${brief(t)}; master ${brief(m)}`);
-      ok(eq(t, m) && t.code === 1 && t.moved.length === 3 && t.unmoved === 3 && !keeperLines(t).length, `E2: a crash, the exit slow but shorter than the grace (6 s of stores, grace 9 s) FINISHES by itself — every store on disk, code 1, equal to master (the tree ${t.ms} ms, master ${m.ms} ms)`, { t, m: { ...m, out: '' } }); }
+      ok(gateOf(eq(t, m)) && t.code === 1 && t.moved.length === 3 && t.unmoved === 3 && !keeperLines(t).length, `E2: a crash, the exit slow but shorter than the grace (6 s of stores, grace 9 s) FINISHES by itself — every store on disk, code 1, equal to master (the tree ${t.ms} ms, master ${m.ms} ms)`, { t, m: { ...m, out: '' } }); }
     { const t = await runScene({ grace: 3000, road: 'crash', moved: 2, unmoved: 1, hang: true, movedMs: 50 }, { tag: 'crash-hung' });
       const l = keeperLines(t)[0] || '';
       ok(t.sig === 'SIGKILL' && !t.killedByDriver && t.ms >= 3000 && t.ms < 3000 + 1500 && keeperLines(t).length === 1
-        && /^\[store-write\] exit after the crash: 3\.\d s after the crash — the grace a service manager gives a stop \(3\.0 s, stated to this writer\) is spent and no manager ends a crashed process — the writer's stores: written session-meta\.write; still owed session-status\.write; the main thread's own stores: not counted here — the main thread is still in openat on [^ ]*spend-budget\.json\.tmp \(the kernel: \w+\) — the writer's exit keeper ends the process now$/.test(l) && !/signal|shutdown's/.test(l),
+        && gateOf(/^\[store-write\] exit after the crash: 3\.\d s after the crash — the grace a service manager gives a stop \(3\.0 s, stated to this writer\) is spent and no manager ends a crashed process — the writer's stores: written session-meta\.write; still owed session-status\.write; the main thread's own stores: not counted here — the main thread is still in openat on [^ ]*spend-budget\.json\.tmp \(the kernel: \w+\) — the writer's exit keeper ends the process now$/.test(l)) && !/signal|shutdown's/.test(l),
         `E2: a crash, the exit HUNG — ended by the keeper at the crash + the grace (${t.ms} ms after the crash, grace 3 s), never before: «${l.slice(0, 260)}…»`, { sig: t.sig, ms: t.ms, lines: t.lines, out: t.out.slice(-500) }); }
     { const sc = { grace: 9000, road: 'stopThenCrash', crashAfterMs: 3500, unmoved: 10, unmovedMs: 150, movedMs: 150 };
       const t = await runScene(sc, { killAt: 9000 }), m = await runScene({ ...sc, side: 'master' }, { killAt: 9000 });
       say(`a crash 3.5 s after a stop, still writing: the tree ${brief(t)}; master ${brief(m)}`);
-      ok(eq(t, m) && t.code === 1 && t.moved.length === 3 && t.unmoved === 10 && !keeperLines(t).length, `E2: a crash AFTER a stop (3.5 s in — past rounds 3–5's third of the grace), still writing — the keeper ends NOTHING: it finishes, every store on disk, code 1, equal to master (the tree ${t.ms} ms)`, { t, m: { ...m, out: '' } }); }
+      ok(gateOf(eq(t, m)) && t.code === 1 && t.moved.length === 3 && t.unmoved === 10 && !keeperLines(t).length, `E2: a crash AFTER a stop (3.5 s in — past rounds 3–5's third of the grace), still writing — the keeper ends NOTHING: it finishes, every store on disk, code 1, equal to master (the tree ${t.ms} ms)`, { t, m: { ...m, out: '' } }); }
     { const t = await runScene({ grace: 3000, road: 'stopThenCrash', crashAfterMs: 1000, moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { killAt: 3000 + 300, tag: 'stop-crash-hung' });
       const l = keeperLines(t)[0] || '';
-      ok(t.killedByDriver && t.sig === 'SIGKILL' && keeperLines(t).length === 1 && t.lineMs >= 2600 && t.lineMs < 3000 && /^\[store-write\] exit: 2\.\d s after the stop signal \(a crash came 1\.0 s after it\), 0\.3 s before the service manager's grace of 3\.0 s ends — .* — said before the manager's own kill — the keeper ends nothing$/.test(l),
+      ok(gateOf(t.killedByDriver) && t.sig === 'SIGKILL' && keeperLines(t).length === 1 && t.lineMs >= 2600 && t.lineMs < 3000 && verdictOf(/^\[store-write\] exit: 2\.\d s after the stop signal \(a crash came 1\.0 s after it\), 0\.3 s before the service manager's grace of 3\.0 s ends — .* — said before the manager's own kill — the keeper ends nothing$/.test(l)),
         `E2: a crash after a stop, then a hang — the keeper SPOKE at the stop's moment (${t.lineMs} ms, the crash named in its words) and ended nothing: the manager's kill (the driver's, at ${t.ms} ms)`, { lines: t.lines, killed: t.killedByDriver, ms: t.ms, lineMs: t.lineMs }); }
     { const t = await runScene({ grace: 3000, road: 'crash', moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { termAt: 1000, killAt: 1000 + 3000, tag: 'crash-stop-hung' });
-      ok(t.sig === 'SIGKILL' && !t.killedByDriver && t.ms >= 3000 && t.ms < 1000 + 3000 && keeperLines(t).length === 1 && /after the crash/.test(keeperLines(t)[0] || '') && !/sigterm/.test(t.out),
+      ok(t.sig === 'SIGKILL' && !t.killedByDriver && t.ms >= 3000 && t.ms < 1000 + 3000 && keeperLines(t).length === 1 && gateOf(/after the crash/.test(keeperLines(t)[0] || '')) && !/sigterm/.test(t.out),
         `E2: a STOP asked 1 s after a crash, the exit hung — ended at the crash + the grace (${t.ms} ms), before the manager's kill at the stop + the grace (4 s); one line («after the crash»); the stop's handler never ran (the main thread asleep in the kernel)`, { sig: t.sig, ms: t.ms, lines: t.lines, killed: t.killedByDriver }); }
     // A HANG AFTER A STOP: the line at the grace less the slack, the process ALIVE until the manager's kill — and the keeper
     // ASLEEP after its line (E3 b: its CPU ticks one second after the line ≈ 0; round 5's keeper spun a whole core)
     { const t = await runScene({ grace: 3000, road: 'stop', moved: 3, unmoved: 1, unmovedMs: 10, hang: true, movedMs: 50 }, { killAt: 3000 + 1500, cpuAfterLine: true, tag: 'stop-hung' });
       const l = keeperLines(t)[0] || '', dcpu = t.cpu && t.cpu.at100 != null && t.cpu.at1100 != null ? t.cpu.at1100 - t.cpu.at100 : null;
-      ok(t.killedByDriver && t.sig === 'SIGKILL' && keeperLines(t).length === 1 && t.lineMs >= 2600 && t.lineMs < 3000
-        && /^\[store-write\] exit: 2\.\d s after the stop signal, 0\.3 s before the service manager's grace of 3\.0 s ends — the writer's stores: written session-meta\.write; still owed session-status\.write, channels-index\.write; the main thread's own stores: not counted here — the main thread is still in openat on [^ ]*spend-budget\.json\.tmp \(the kernel: \w+\) — said before the manager's own kill — the keeper ends nothing$/.test(l),
+      ok(gateOf(t.killedByDriver) && t.sig === 'SIGKILL' && keeperLines(t).length === 1 && t.lineMs >= 2600 && t.lineMs < 3000
+        && verdictOf(/^\[store-write\] exit: 2\.\d s after the stop signal, 0\.3 s before the service manager's grace of 3\.0 s ends — the writer's stores: written session-meta\.write; still owed session-status\.write, channels-index\.write; the main thread's own stores: not counted here — the main thread is still in openat on [^ ]*spend-budget\.json\.tmp \(the kernel: \w+\) — said before the manager's own kill — the keeper ends nothing$/.test(l)),
         `a hang after a STOP — the keeper SPOKE at the grace less its slack (${t.lineMs} ms) and the process LIVED until the manager's kill (${t.ms} ms); one line`, { lines: t.lines, ms: t.ms, lineMs: t.lineMs, killed: t.killedByDriver });
       ok(dcpu != null && dcpu <= 5, `E3 (b): after its line the keeper SLEEPS — the process's CPU from 0.1 s to 1.1 s after the line: ${dcpu} ticks (round 5: ~100 — a core)`, t.cpu); }
     // round 6's amend (item 3): a hang IN THE WRITER'S THREAD (its exit write asleep in the kernel) — the keeper's line names
     // that write as IN FLIGHT, never «still owed»
     { const t = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hungWriter: true }, { killAt: 3000 + 600, tag: 'stop-hung-writer' });
       const l = keeperLines(t)[0] || '';
-      ok(t.killedByDriver && /^\[store-write\] exit: 2\.\d s after the stop signal, .* — the writer's stores: none written yet; none owed; in flight session-meta\.write; the main thread's own stores: not counted here — the main thread is still in futex/.test(l),
+      ok(gateOf(t.killedByDriver) && verdictOf(/^\[store-write\] exit: 2\.\d s after the stop signal, .* — the writer's stores: none written yet; none owed; in flight session-meta\.write; the main thread's own stores: not counted here — the main thread is still in futex/.test(l)),
         `the writer's THREAD hung on the exit's write — the keeper's line names it IN FLIGHT («${l.slice(l.indexOf('the writer\'s stores'), l.indexOf('the writer\'s stores') + 90)}…»), the manager's kill`, { lines: t.lines, killed: t.killedByDriver }); }
     // round 6's amend (item 5): the install tree hangs IN THE SAME TICK as the boot's bootKeeper() — before the keeper's thread
     // has run a line — then a crash and a hang: the line and the end at the crash + the grace (its code came as text)
@@ -509,17 +509,17 @@ if (mode === 'scene') {
         ch.on('exit', (code, sig) => { clearTimeout(safety); resolve({ code, sig, ms: readyAt == null ? null : Math.round(performance.now() - readyAt), safetyKill: readyAt != null && performance.now() - readyAt >= 11500, line: (buf.match(/\[store-write\] exit after the crash: [\d.]+ s after the crash[^\n]*/) || [''])[0], out: buf.slice(-600) }); });
       });
       for (const n of ['store-exit-keeper.js', 'store-pace.js']) { try { fs.unlinkSync(path.join(INSTB, 'src', n)); fs.renameSync(path.join(INSTB, 'src', n + '.away'), path.join(INSTB, 'src', n)); } catch { } }
-      ok(r.sig === 'SIGKILL' && !r.safetyKill && r.ms >= 3000 && r.ms < 3000 + 2000 && /^\[store-write\] exit after the crash: 3\.\d s after the crash — the grace a service manager gives a stop \(3\.0 s, VIBESPACE_STOP_GRACE_S\) is spent/.test(r.line),
+      ok(r.sig === 'SIGKILL' && !r.safetyKill && r.ms >= 3000 && r.ms < 3000 + 2000 && verdictOf(/^\[store-write\] exit after the crash: 3\.\d s after the crash — the grace a service manager gives a stop \(3\.0 s, VIBESPACE_STOP_GRACE_S\) is spent/.test(r.line)),
         `ITEM 5: the install tree hung in the SAME TICK as bootKeeper() (the keeper's file and store-pace FIFOs before its thread ran), then a crash and a hang — the line «${r.line.slice(0, 120)}…» and the end ${r.ms} ms after the crash`, r); }
     { const t = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, movedMs: 50, keeper: false }, { killAt: 3000 + 900, tag: 'stop-hung-bare' });
-      ok(t.killedByDriver && !keeperLines(t).length, 'the CONTROL with no keeper: the same hang after a stop says nothing until the manager\'s kill (master\'s road)', { lines: t.lines, killed: t.killedByDriver }); }
+      ok(gateOf(t.killedByDriver) && !keeperLines(t).length, 'the CONTROL with no keeper: the same hang after a stop says nothing until the manager\'s kill (master\'s road)', { lines: t.lines, killed: t.killedByDriver }); }
     // THE KEEPER NEEDS NOTHING FROM THE STORAGE WHEN IT IS NEEDED: the install tree (its own file + store-pace as FIFOs from
     // the signal) AND the data directory hanging — after a stop the line still comes; after a crash the process still ends
     { const INST = path.join(ROOT, 'inst'); fs.cpSync(path.join(REPO, 'src'), path.join(INST, 'src'), { recursive: true });
       const back = () => { for (const n of ['store-exit-keeper.js', 'store-pace.js']) { try { fs.unlinkSync(path.join(INST, 'src', n)); fs.renameSync(path.join(INST, 'src', n + '.away'), path.join(INST, 'src', n)); } catch { } } };
       const ih = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, installHang: true, movedMs: 50 }, { killAt: 3000 + 600, env: { VS_SRC: path.join(INST, 'src') }, tag: 'inst-stop' }); back();
       const ihc = await runScene({ grace: 3000, road: 'crash', moved: 1, unmoved: 0, hang: true, installHang: true, movedMs: 50 }, { env: { VS_SRC: path.join(INST, 'src') }, tag: 'inst-crash' }); back();
-      ok(/exit: 2\.\d s after the stop signal/.test(keeperLines(ih)[0] || '') && ih.killedByDriver && ihc.sig === 'SIGKILL' && !ihc.killedByDriver && ihc.ms >= 3000 && /exit after the crash/.test(keeperLines(ihc)[0] || ''),
+      ok(gateOf(/exit: 2\.\d s after the stop signal/.test(keeperLines(ih)[0] || '')) && gateOf(ih.killedByDriver) && ihc.sig === 'SIGKILL' && !ihc.killedByDriver && ihc.ms >= 3000 && verdictOf(/exit after the crash/.test(keeperLines(ihc)[0] || '')),
         `the install tree AND the data directory hanging from the signal — the line still came after the stop (${ih.lineMs} ms; the manager's kill); after the crash the keeper still ENDED it at the grace (${ihc.ms} ms)`, { ih: ih.lines, ihc: { sig: ihc.sig, ms: ihc.ms, lines: ihc.lines } }); }
     // THE MUTANT: a keeper that KILLS after a stop signal (round 4's law) — red by name: it cuts the manager's time short
     { const KM = path.join(ROOT, 'keeper-kills.js');
@@ -541,28 +541,28 @@ if (mode === 'scene') {
       fs.writeFileSync(HOLDK, '1');
       const kNew = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { killAt: 3000 + 15000, env: { VS_KEEPER_PATH: KMH }, tag: 'mutant-kills-held-new', onLine: () => { try { fs.unlinkSync(HOLDK); } catch { } } });
       const oldV = !kOld.killedByDriver && kOld.sig === 'SIGKILL' && kOld.ms < 3000, newV = !kNew.killedByDriver && kNew.sig === 'SIGKILL';
-      ok(kOld.killedByDriver && !oldV && newV, 'PLACED (r4456): the mutant\'s own kill HELD — under the driver\'s old 3.9 s kill the old verdict misses the fault (the driver killed first); the verdict on who killed, the driver\'s kill held late, reads it once the hold is let go at the keeper\'s line', { old: { killed: kOld.killedByDriver, sig: kOld.sig, ms: kOld.ms }, now: { killed: kNew.killedByDriver, sig: kNew.sig, ms: kNew.ms } }); }
+      ok(gateOf(kOld.killedByDriver) && !oldV && verdictOf(newV), 'PLACED (r4456): the mutant\'s own kill HELD — under the driver\'s old 3.9 s kill the old verdict misses the fault (the driver killed first); the verdict on who killed, the driver\'s kill held late, reads it once the hold is let go at the keeper\'s line', { old: { killed: kOld.killedByDriver, sig: kOld.sig, ms: kOld.ms }, now: { killed: kNew.killedByDriver, sig: kNew.sig, ms: kNew.ms } }); }
     // E3 (c): A PROCESS THAT USES THE STORES IS NOT THE SERVER — no keeper thread (the server's boot starts it by name)
     { const dir = path.join(ROOT, 'threads'); fs.mkdirSync(dir);
       const r = spawnSync(process.execPath, [CHILD, dir, 'keeperThreads'], { encoding: 'utf8', timeout: 20000 });
       const m = /threads (\{.*\})/.exec(r.stdout || ''), o = m ? JSON.parse(m[1]) : null;
-      ok(o && o.onDisk && o.before.includes('store-writer-worker.js') && !o.before.some((x) => /^store-exit-keeper\.js/.test(x)) && o.after.filter((x) => /^store-exit-keeper\.js/.test(x)).length === 1,
+      ok(gateOf(o) && gateOf(o.onDisk) && gateOf(o.before.includes('store-writer-worker.js')) && !o.before.some((x) => /^store-exit-keeper\.js/.test(x)) && o.after.filter((x) => /^store-exit-keeper\.js/.test(x)).length === 1,
         `E3 (c): a process that writes a store through storeWriter() starts the writer's thread only (${o ? o.before.join(', ') : '?'}) — no keeper; bootKeeper() (the server's boot) starts ONE`, o || r.stdout + r.stderr); }
     // round 3 (law 2): the crash path's ORDER on a slow storage — rank 0 on disk BEFORE the unmoved stores, nothing left
     { const dir = path.join(ROOT, 'order'); fs.mkdirSync(dir);
       const co = spawnSync(process.execPath, [CHILD, dir, 'crashOrder'], { encoding: 'utf8', timeout: 20000, env: { ...process.env, VS_SLOW_MS: '300' } });
       const om = /order (\{.*\})/.exec(co.stdout || ''), o = om ? JSON.parse(om[1]) : null;
       const at = (n) => (o ? +((o.order.find((x) => x.startsWith(n + '@')) || '').split('@')[1] || NaN) : NaN);
-      ok(o && at('meta') <= at('debt') && at('status') <= at('meta') && at('index') > at('debt') && !o.left.length,
+      ok(gateOf(o) && at('meta') <= at('debt') && at('status') <= at('meta') && at('index') > at('debt') && !o.left.length,
         `law 2: the crash path with a status write in flight (300 ms a write) — rank 0 on disk BEFORE the unmoved stores (status ${at('status')} ms → meta ${at('meta')} ms → the debt at ${at('debt')} ms → the index ${at('index')} ms), nothing left`, o || co.stdout); }
     // ROUND 4 (MUST 1), THE WHOLE MATRIX: a cut at the newline (ENOSPC · a write of 0) × the truncate-back (EIO · ENOSPC ·
     // EPERM · working), a kill before the retry, a new process — the fast suite runs three of the eight pairs
     { const r = spawnSync(process.execPath, [path.join(REPO, 'scripts/test-store-writer-r4.mjs')], { env: { ...process.env, VS_R4_PAIRS: 'all' }, encoding: 'utf8', timeout: 120000 });
-      ok(r.status === 0 && /✓ MUST 1: an append cut AT ITS NEWLINE[^\n]*\(8 pairs\)/.test(r.stdout || ''), 'MUST 1, the whole matrix (2 cuts × 4 truncate outcomes, a kill before the retry, a new process): every pair green — test-store-writer-r4 with VS_R4_PAIRS=all', { status: r.status, tail: String(r.stdout || '').slice(-600) + String(r.stderr || '').slice(-300) }); }
+      ok(r.status === 0 && verdictOf(/✓ MUST 1: an append cut AT ITS NEWLINE[^\n]*\(8 pairs\)/.test(r.stdout || '')), 'MUST 1, the whole matrix (2 cuts × 4 truncate outcomes, a kill before the retry, a new process): every pair green — test-store-writer-r4 with VS_R4_PAIRS=all', { status: r.status, tail: String(r.stdout || '').slice(-600) + String(r.stderr || '').slice(-300) }); }
   }
   // r1718 (a): the generated scripts, each parsed before it ran — and the check's control: row 125's raw newline inside a string
-  ok(['slow-worker.cjs', 'hung-worker.cjs', 'exit-child.cjs', 'keeper-kills.js'].every((n) => generated.includes(n)), `every script this suite generates was PARSED before a thread or a child ran it (${generated.join(', ')})`, generated);
-  ok(/Invalid or unexpected token|Unterminated string/i.test(parseError("const line = 'a" + "\n" + "';", 'control.cjs') || ''), 'CONTROL: a raw newline inside a string (row 125\'s stand-in) does not parse — it is refused BY NAME before anything runs it');
+  ok(verdictOf(['slow-worker.cjs', 'hung-worker.cjs', 'exit-child.cjs', 'keeper-kills.js'].every((n) => generated.includes(n))), `every script this suite generates was PARSED before a thread or a child ran it (${generated.join(', ')})`, generated);
+  ok(verdictOf(/Invalid or unexpected token|Unterminated string/i.test(parseError("const line = 'a" + "\n" + "';", 'control.cjs') || '')), 'CONTROL: a raw newline inside a string (row 125\'s stand-in) does not parse — it is refused BY NAME before anything runs it');
   // ── ④ RED, RUN LAST ─────────────────────────────────────────────────────────────────────────────────────────────────
   // its mutant copy (scripts/mutant-copy.mjs) imports scratch.mjs, which re-homes a suite whose HOME is outside every temp root
   // (a hosted runner's): no leg before this one runs under a home changed half-way
@@ -582,4 +582,4 @@ if (mode === 'scene') {
   fs.rmSync(ROOT, { recursive: true, force: true });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

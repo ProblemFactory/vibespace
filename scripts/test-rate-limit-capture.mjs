@@ -15,12 +15,12 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { parseRateLimitEvent, captureRateLimitEvent, keepOwnIdentity, lanesOf, lanesSnapshot } = require(REPO + '/src/rate-limit-capture.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 // ── parse ──
 // the EXACT shape captured from a real 2.1.226 buffer (5h, allowed, overage)
 const real = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1786332600, rateLimitType: 'five_hour', overageStatus: 'rejected', overageDisabledReason: 'org_level_disabled_until', isUsingOverage: false }, uuid: 'x', session_id: 's' });
-ok(real && real.kind === 'fiveHour' && real.status === 'allowed' && real.resetsAt === 1786332600, 'parses a real captured 5h event');
+ok(gateOf(real) && real.kind === 'fiveHour' && real.status === 'allowed' && real.resetsAt === 1786332600, 'parses a real captured 5h event');
 ok(real.utilization === null, 'no utilization in that sample → null (not fabricated)');
 ok(real.overage.status === 'rejected' && real.overage.inUse === false, 'overage fields carried');
 
@@ -34,7 +34,7 @@ ok(parseRateLimitEvent({ type: 'assistant' }) === null, 'non-event returns null'
 ok(parseRateLimitEvent({ type: 'rate_limit_event' }) === null, 'event with no info returns null');
 // camelCase defensive path (2.227.6 — a future JSONL copy)
 const camel = parseRateLimitEvent({ type: 'rate_limit_event', rateLimitInfo: { status: 'allowed', rate_limit_type: 'five_hour', used_percentage: 42 } });
-ok(camel && camel.kind === 'fiveHour' && camel.utilization === 0.42, 'both key casings accepted');
+ok(gateOf(camel) && camel.kind === 'fiveHour' && camel.utilization === 0.42, 'both key casings accepted');
 
 // ── capture: identity-group cache discipline ──
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rle-'));
@@ -42,19 +42,19 @@ const read = (id) => { try { return JSON.parse(fs.readFileSync(path.join(dir, id
 
 // a utilization reading writes the bucket + bumps fetchedAt (becomes an anchor)
 const r1 = captureRateLimitEvent({ cacheDir: dir, key: 'sub-A', identityIds: ['sub-A'], ev: withU, now: 1000 });
-ok(r1.ok && r1.wroteReading && !r1.dead, 'utilization reading writes + flags a reading');
+ok(gateOf(r1.ok) && gateOf(r1.wroteReading) && !r1.dead, 'utilization reading writes + flags a reading');
 ok(read('sub-A').sevenDay.utilization === 0.63 && read('sub-A').fetchedAt === 1000, 'reading lands + fetchedAt bumped');
 
 // a resetsAt-ONLY event (no utilization, allowed) must NOT promote the file
 const noReading = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', resetsAt: 1786999999 } });
 const r2 = captureRateLimitEvent({ cacheDir: dir, key: 'sub-A', identityIds: ['sub-A'], ev: noReading, now: 5000 });
-ok(r2.ok && !r2.wroteReading, 'resetsAt-only event is not a reading');
+ok(gateOf(r2.ok) && !r2.wroteReading, 'resetsAt-only event is not a reading');
 ok(read('sub-A').sevenDay.resetsAt === 1786999999, 'resetsAt updated in place');
 ok(read('sub-A').fetchedAt === 1000, 'fetchedAt NOT bumped by a non-reading (anti-poison: no false anchor promotion)');
 
 // rejected ⇒ dead bucket, utilization 1, self-expiring reset
 const r3 = captureRateLimitEvent({ cacheDir: dir, key: 'sub-A', identityIds: ['sub-A'], ev: rej, now: 9000 });
-ok(r3.dead && read('sub-A').fiveHour.utilization === 1 && read('sub-A').fiveHour.status === 'limited', 'rejected marks the bucket dead (utilization 1)');
+ok(gateOf(r3.dead) && read('sub-A').fiveHour.utilization === 1 && read('sub-A').fiveHour.status === 'limited', 'rejected marks the bucket dead (utilization 1)');
 
 // identity group: freshest file is the base; siblings marked WITHOUT gaining freshness
 fs.writeFileSync(path.join(dir, 'gid-fresh.json'), JSON.stringify({ fetchedAt: 8000, fiveHour: { utilization: 0.1 } }));
@@ -82,10 +82,10 @@ fs.rmSync(dir, { recursive: true, force: true });
   const ev = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'seven_day_opus', status: 'allowed_warning', utilization: 0.91, resetsAt: Math.floor(Date.now() / 1000) + 86400 } });
   ok(ev.kind === 'scoped' && ev.scopedName === 'opus', '④ seven_day_opus parses as a scoped reading');
   const r = captureRateLimitEvent({ cacheDir: dir, key: 'sub-s1', identityIds: ['sub-s1'], ev });
-  ok(r.ok && r.wroteReading, '④ scoped reading is written (freshest-bump discipline applies)');
+  ok(gateOf(r.ok) && verdictOf(r.wroteReading), '④ scoped reading is written (freshest-bump discipline applies)');
   const cache = JSON.parse(fs.readFileSync(path.join(dir, 'sub-s1.json'), 'utf-8'));
   const s = (cache.scopedWeekly || []).find((x) => x.name === 'opus');
-  ok(s && Math.abs(s.utilization - 0.91) < 1e-9 && s.asOf > 0, '④ scopedWeekly entry carries utilization + asOf', JSON.stringify(s));
+  ok(gateOf(s) && Math.abs(s.utilization - 0.91) < 1e-9 && s.asOf > 0, '④ scopedWeekly entry carries utilization + asOf', JSON.stringify(s));
   const evR = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'seven_day_opus', status: 'rejected' } });
   captureRateLimitEvent({ cacheDir: dir, key: 'sub-s1', identityIds: ['sub-s1'], ev: evR });
   const cache2 = JSON.parse(fs.readFileSync(path.join(dir, 'sub-s1.json'), 'utf-8'));
@@ -108,15 +108,15 @@ fs.rmSync(dir, { recursive: true, force: true });
   fs.writeFileSync(path.join(dir, 'sub-m1.json'), JSON.stringify({ fetchedAt: 1000, sevenDay: { utilization: 0.53, status: 'allowed' } }));
   // shape from the REAL captured buffer record (2026-08-20)
   const ev = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1787328000, rateLimitType: 'seven_day_overage_included', overageStatus: 'rejected', overageDisabledReason: 'org_level_disabled_until', isUsingOverage: false } });
-  ok(ev.kind === 'scoped' && ev.modelCap && ev.status === 'rejected' && ev.windows === null, '⑤ the 2.361.2 record (no unifiedWindows) parses as a rejected MODEL-CAP lane that states no other window');
+  ok(ev.kind === 'scoped' && gateOf(ev.modelCap) && ev.status === 'rejected' && ev.windows === null, '⑤ the 2.361.2 record (no unifiedWindows) parses as a rejected MODEL-CAP lane that states no other window');
   const r = captureRateLimitEvent({ cacheDir: dir, key: 'sub-m1', identityIds: ['sub-m1'], ev, now: 1787194614944 });
-  ok(r.ok && r.dead, '⑤ capture reports dead (caller triggers immediate pool eval)');
+  ok(gateOf(r.ok) && verdictOf(r.dead), '⑤ capture reports dead (caller triggers immediate pool eval)');
   const c = JSON.parse(fs.readFileSync(path.join(dir, 'sub-m1.json'), 'utf-8'));
   const ph = (c.scopedWeekly || []).find((s) => s.name === 'Model cap');
   ok(Math.abs(c.sevenDay.utilization - 0.53) < 1e-9 && c.sevenDay.status === 'allowed', '⑤ the PLAN week is untouched (2.361.2 wrote it dead — the incident)', JSON.stringify(c.sevenDay));
-  ok(ph && ph.utilization === 1 && ph.status === 'limited' && ph.resetsAt === 1787328000, '⑤ …the un-named model cap is marked dead until the EVENT reset (not a 24h guess), under the placeholder', JSON.stringify(c.scopedWeekly));
-  ok((c.limits || []).some((l) => l.limitId === 'model:cap' && l.scope === 'model' && l.family === null) && r.modelCapLane && r.modelCapLane.named === false, '⑤ …as `model:cap` (scope model, family null) — the ladder says nothing named it', JSON.stringify(r.modelCapLane));
-  ok(c.overage && c.overage.disabledReason === 'org_level_disabled_until', '⑤ monthly-spend-cap state (overage fields) lands in the cache');
+  ok(gateOf(ph) && ph.utilization === 1 && ph.status === 'limited' && ph.resetsAt === 1787328000, '⑤ …the un-named model cap is marked dead until the EVENT reset (not a 24h guess), under the placeholder', JSON.stringify(c.scopedWeekly));
+  ok(gateOf((c.limits || []).some((l) => l.limitId === 'model:cap' && l.scope === 'model' && l.family === null)) && gateOf(r.modelCapLane) && r.modelCapLane.named === false, '⑤ …as `model:cap` (scope model, family null) — the ladder says nothing named it', JSON.stringify(r.modelCapLane));
+  ok(gateOf(c.overage) && c.overage.disabledReason === 'org_level_disabled_until', '⑤ monthly-spend-cap state (overage fields) lands in the cache');
   // the warning form: the representative utilization goes to the lane its type names
   const evW = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1787677200, rateLimitType: 'seven_day_overage_included', utilization: 0.77, isUsingOverage: false, surpassedThreshold: 0.75 } });
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-ovg2-'));
@@ -125,13 +125,13 @@ fs.rmSync(dir, { recursive: true, force: true });
   const c2 = JSON.parse(fs.readFileSync(path.join(dir2, 'sub-m2.json'), 'utf-8'));
   ok(Math.abs(c2.sevenDay.utilization - 0.4) < 1e-9 && c2.sevenDay.status !== 'allowed_warning', '⑤ an overage-included WARNING never touches the plan week (2.361.2 wrote its 0.77 there)', JSON.stringify(c2.sevenDay));
   const ph2 = (c2.scopedWeekly || []).find((s) => s.name === 'Model cap');
-  ok(ph2 && Math.abs(ph2.utilization - 0.77) < 1e-9 && ph2.status === 'allowed_warning', '⑤ …the warning and its utilization ride the model-cap lane', JSON.stringify(c2.scopedWeekly));
+  ok(gateOf(ph2) && Math.abs(ph2.utilization - 0.77) < 1e-9 && ph2.status === 'allowed_warning', '⑤ …the warning and its utilization ride the model-cap lane', JSON.stringify(c2.scopedWeekly));
   // the same rejection on an account whose Fable cap shares the reset ⇒ THAT cap
   const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-ovg3-'));
   fs.writeFileSync(path.join(dir3, 'sub-m3.json'), JSON.stringify({ fetchedAt: 1000, sevenDay: { utilization: 0.53, resetsAt: 1787328000 }, scopedWeekly: [{ name: 'Fable', utilization: 0.6, resetsAt: 1787328000 }] }));
   const r3 = captureRateLimitEvent({ cacheDir: dir3, key: 'sub-m3', identityIds: ['sub-m3'], ev, now: 1787194614944 });
   const c3 = JSON.parse(fs.readFileSync(path.join(dir3, 'sub-m3.json'), 'utf-8'));
-  ok(r3.modelCapLane && r3.modelCapLane.named && r3.modelCapLane.limitId === 'model:fable' && (c3.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 1 && !(c3.scopedWeekly || []).some((s) => s.name === 'Model cap') && Math.abs(c3.sevenDay.utilization - 0.53) < 1e-9,
+  ok(gateOf(r3.modelCapLane) && gateOf(r3.modelCapLane.named) && r3.modelCapLane.limitId === 'model:fable' && (c3.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 1 && !(c3.scopedWeekly || []).some((s) => s.name === 'Model cap') && Math.abs(c3.sevenDay.utilization - 0.53) < 1e-9,
     '⑤ …and on an account whose FABLE cap shares the reset, the rejection marks Fable (an existing model limit with the same reset IS the lane), nothing else', JSON.stringify({ lane: r3.modelCapLane, scoped: c3.scopedWeekly, sevenDay: c3.sevenDay }));
   // r2: a model-cap rejection that states NO reset, on an account where nothing names the cap — the
   // dead mark must carry a DEADLINE (it had none: bucketRemaining never rolled it, every family read 0 %)
@@ -142,18 +142,18 @@ fs.rmSync(dir, { recursive: true, force: true });
   const r4 = captureRateLimitEvent({ cacheDir: dir4, key: 'sub-m4', identityIds: ['sub-m4'], ev: ev0, now: NOW0 * 1000 });
   const c4 = JSON.parse(fs.readFileSync(path.join(dir4, 'sub-m4.json'), 'utf-8'));
   const ph4 = (c4.scopedWeekly || []).find((s) => s.name === 'Model cap');
-  ok(r4.dead && ph4 && ph4.utilization === 1 && ph4.resetsAt === NOW0 + 24 * 3600, '⑤ r2: a no-reset rejection marks the placeholder dead with the bounded 24 h guess (the plan lanes\' own ladder) — never a deadline-less 0 %', JSON.stringify(c4.scopedWeekly));
+  ok(gateOf(r4.dead) && gateOf(ph4) && ph4.utilization === 1 && ph4.resetsAt === NOW0 + 24 * 3600, '⑤ r2: a no-reset rejection marks the placeholder dead with the bounded 24 h guess (the plan lanes\' own ladder) — never a deadline-less 0 %', JSON.stringify(c4.scopedWeekly));
   const dir5 = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-ovg5-'));
   fs.writeFileSync(path.join(dir5, 'sub-m5.json'), JSON.stringify({ fetchedAt: 1000, sevenDay: { utilization: 0.53, resetsAt: 1787328000 }, scopedWeekly: [{ name: 'Model cap', utilization: 0.7, resetsAt: 1787300000 }] }));
   captureRateLimitEvent({ cacheDir: dir5, key: 'sub-m5', identityIds: ['sub-m5'], ev: ev0, now: NOW0 * 1000 });
   const ph5 = (JSON.parse(fs.readFileSync(path.join(dir5, 'sub-m5.json'), 'utf-8')).scopedWeekly || []).find((s) => s.name === 'Model cap');
-  ok(ph5 && ph5.utilization === 1 && ph5.resetsAt === 1787300000, '⑤ r2: …the lane\'s own stored FUTURE reset outranks the guess', JSON.stringify(ph5));
+  ok(gateOf(ph5) && ph5.utilization === 1 && ph5.resetsAt === 1787300000, '⑤ r2: …the lane\'s own stored FUTURE reset outranks the guess', JSON.stringify(ph5));
   const evW7 = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'seven_day_overage_included', unifiedWindows: { seven_day: { utilization: 0.5, resetsAt: 1787328000 } } } });
   const dir6 = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-ovg6-'));
   fs.writeFileSync(path.join(dir6, 'sub-m6.json'), JSON.stringify({ fetchedAt: 1000 }));
   captureRateLimitEvent({ cacheDir: dir6, key: 'sub-m6', identityIds: ['sub-m6'], ev: evW7, now: NOW0 * 1000 });
   const ph6 = (JSON.parse(fs.readFileSync(path.join(dir6, 'sub-m6.json'), 'utf-8')).scopedWeekly || []).find((s) => s.name === 'Model cap');
-  ok(ph6 && ph6.utilization === 1 && ph6.resetsAt === 1787328000, '⑤ r2: …and the record\'s own plan weekly reset outranks the guess (every weekly window on an account shares it)', JSON.stringify(ph6));
+  ok(gateOf(ph6) && ph6.utilization === 1 && ph6.resetsAt === 1787328000, '⑤ r2: …and the record\'s own plan weekly reset outranks the guess (every weekly window on an account shares it)', JSON.stringify(ph6));
   {
     const { accountRemaining } = require(REPO + '/src/account-pool-auto.js');
     const { projectCacheForFamily } = require(REPO + '/src/model-family.js');
@@ -185,35 +185,35 @@ fs.rmSync(dir, { recursive: true, force: true });
   // to the resolver (the lag shadow is strictly additional evidence about which
   // credentials produced it), so the pin allows the extra arguments while still
   // requiring the two resolvers and the same rejected/allowed split.
-  ok(/const slot = ev\.status === 'rejected' \? rejectionSlotFor\(session\) : readingSlotFor\(session[^;]*\);/.test(eng), '⑥ rate_limit_event: rejection AND reading both resolve a credential slot (turn-pinned twins)');
-  ok(/const target = guardReadingTarget\(key, win, \{ session/.test(eng) && /if \(!target\) \{[\s\S]{0,400}?\n\s*return;\n\s*\}/.test(eng), '⑥ …and a READING is checked against the target\'s own established window before it is written (guardReadingTarget — the VALUE half; an archived one feeds only the slot\'s witness ring, then returns)');
+  ok(verdictOf(/const slot = ev\.status === 'rejected' \? rejectionSlotFor\(session\) : readingSlotFor\(session[^;]*\);/.test(eng)), '⑥ rate_limit_event: rejection AND reading both resolve a credential slot (turn-pinned twins)');
+  ok(gateOf(/const target = guardReadingTarget\(key, win, \{ session/.test(eng)) && verdictOf(/if \(!target\) \{[\s\S]{0,400}?\n\s*return;\n\s*\}/.test(eng)), '⑥ …and a READING is checked against the target\'s own established window before it is written (guardReadingTarget — the VALUE half; an archived one feeds only the slot\'s witness ring, then returns)');
   // 2026-09-09 r2: a REJECTION is judged too, by its own rule. It cannot go
   // through `guardReadingTarget` (that one judges by the weekly window a
   // reading carries, and a rejection deliberately hands it no `win` at all) —
   // it goes through `wallRecordTarget`, the same two-witness rule the turn-end
   // aggregate asks, at the same moment the number is written. Round 1 guarded
   // only the aggregate and the incident's foreign window still landed.
-  ok(/writeKey = wallRecordTarget\(session, key, ev\);/.test(eng) && /if \(!writeKey\) \{/.test(eng)
-    && /captureRateLimitEvent\(\{ cacheDir: USAGE_CACHE_DIR, key: writeKey,/.test(eng),
+  ok(gateOf(/writeKey = wallRecordTarget\(session, key, ev\);/.test(eng)) && gateOf(/if \(!writeKey\) \{/.test(eng))
+    && verdictOf(/captureRateLimitEvent\(\{ cacheDir: USAGE_CACHE_DIR, key: writeKey,/.test(eng)),
     '⑥ …and a REJECTION is judged at the SAME write, by the wall rule (it carries no window for guardReadingTarget to read)');
-  ok(/const pinKey = slot\.key \|\| readingSlotFor\(session\)\.key \|\| usageCacheKeyFor\(session\)/.test(eng), '⑥ limit-banner marks land on the slot too (same physics, same resolver)');
+  ok(verdictOf(/const pinKey = slot\.key \|\| readingSlotFor\(session\)\.key \|\| usageCacheKeyFor\(session\)/.test(eng)), '⑥ limit-banner marks land on the slot too (same physics, same resolver)');
   // 2026-09-09 r2: the banner's WRITE may follow a re-file a rejection RECORD
   // of the same turn PROVED (it states no time of its own, so leaving it on the
   // refuted member marks two members for one rejection) — but its SIGNAL keeps
   // the pin's key, because demoteWalledAccount resolves `member` (and the
   // identity group every earlier signal is filtered against) from the LAST
   // signal, and moving it drops the pinned member's own wall from the pass.
-  ok(/session\._turnWallRefile;\s*\n\s*if \(refile && refile\.from === key && refile\.to\) \{/.test(eng)
-    && /noteWallSignal\(session, \{ bucket: hit\.kind[^}]*key: pinKey,/.test(eng),
+  ok(gateOf(/session\._turnWallRefile;\s*\n\s*if \(refile && refile\.from === key && refile\.to\) \{/.test(eng))
+    && verdictOf(/noteWallSignal\(session, \{ bucket: hit\.kind[^}]*key: pinKey,/.test(eng)),
     '⑥ …the banner\'s WRITE follows a proven re-file while its SIGNAL keeps the pin (moving the signal drops the pinned member\'s own wall)');
-  ok(/function resolveUsageKey\(session\)[\s\S]{0,900}sessionBillingMember\(session, acct\)\.id/.test(eng), '⑥ VALUES follow the credential slot as well — there is no longer a "reading member" different from the billing member');
+  ok(verdictOf(/function resolveUsageKey\(session\)[\s\S]{0,900}sessionBillingMember\(session, acct\)\.id/.test(eng)), '⑥ VALUES follow the credential slot as well — there is no longer a "reading member" different from the billing member');
   // 2.369.164 (batch 8, B-a5c0) moved the anchor sweep — and with it the
   // same-source rule — out of the engine into usage-estimator's
   // sweepAnchorGroup; the engine now only CALLS it. The invariant is pinned
   // where it lives, and the engine is pinned to hold no inline copy.
   const est = fs2.readFileSync(new URL('../src/usage-estimator.js', import.meta.url), 'utf8');
-  ok(/\(prev\.source \|\| 'unknown'\) === \(cache\.source \|\| 'unknown'\)/.test(est), '⑥ calib pairs are same-source (cross-source offset is attribution, not prediction error — mirrors extractPairs 2.340.0; lives in usage-estimator.sweepAnchorGroup since 2.369.164)');
-  ok(!/\(prev\.source \|\| 'unknown'\) === \(g\.cache\.source \|\| 'unknown'\)/.test(engCode) && /sweepAnchorGroup\(/.test(engCode), '⑥ …and the engine holds no inline copy of the pairing rule — it calls the estimator\'s sweepAnchorGroup (ONE implementation)');
+  ok(verdictOf(/\(prev\.source \|\| 'unknown'\) === \(cache\.source \|\| 'unknown'\)/.test(est)), '⑥ calib pairs are same-source (cross-source offset is attribution, not prediction error — mirrors extractPairs 2.340.0; lives in usage-estimator.sweepAnchorGroup since 2.369.164)');
+  ok(!/\(prev\.source \|\| 'unknown'\) === \(g\.cache\.source \|\| 'unknown'\)/.test(engCode) && verdictOf(/sweepAnchorGroup\(/.test(engCode)), '⑥ …and the engine holds no inline copy of the pairing rule — it calls the estimator\'s sweepAnchorGroup (ONE implementation)');
   const sv = fs2.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   void sv;
   ok(!/^\s*observedOrgFor\(sid\)/m.test(fs2.readFileSync(new URL('../src/server/otel-ingest.js', import.meta.url), 'utf8')), '⑥ the ingest no longer exposes a per-session "observed org" to ask');
@@ -222,7 +222,7 @@ fs.rmSync(dir, { recursive: true, force: true });
   // id, atype 'unknown', outside every quota view: the org-29c4 implied-full
   // crash, 2026-08-24). A cache file with no roster record contributes
   // nothing true.
-  ok(/if \(accountId && !acctRec\) continue;/.test(eng), '⑦ unregistered (deleted) account cache files are excluded from identity groups');
+  ok(verdictOf(/if \(accountId && !acctRec\) continue;/.test(eng)), '⑦ unregistered (deleted) account cache files are excluded from identity groups');
 }
 
 // ⑧ B-2c9b: the wall machine's ground-truth demotion rides THIS write path
@@ -233,11 +233,11 @@ fs.rmSync(dir, { recursive: true, force: true });
   const rd = (id) => JSON.parse(fs.readFileSync(path.join(dir8, id + '.json'), 'utf8'));
   fs.writeFileSync(path.join(dir8, 'sub-W.json'), JSON.stringify({ fetchedAt: 1000, source: 'cli-usage', fiveHour: { utilization: 0.2, resetsAt: 2_000_000_000 } }));
   const wall = captureRateLimitEvent({ cacheDir: dir8, key: 'sub-W', identityIds: ['sub-W'], ev: { kind: 'fiveHour', status: 'rejected', utilization: null, resetsAt: null, overage: {} }, now: 5000, source: 'wall' });
-  ok(wall.ok && wall.dead && wall.wroteReading && rd('sub-W').source === 'wall' && rd('sub-W').fetchedAt === 5000, "⑧ source:'wall' labels the demotion write (a reading: fetchedAt bumped)");
+  ok(gateOf(wall.ok) && gateOf(wall.dead) && gateOf(wall.wroteReading) && rd('sub-W').source === 'wall' && rd('sub-W').fetchedAt === 5000, "⑧ source:'wall' labels the demotion write (a reading: fetchedAt bumped)");
   ok(rd('sub-W').fiveHour.utilization === 1 && rd('sub-W').fiveHour.resetsAt === 2_000_000_000, '⑧ …no signal reset ⇒ the cached FUTURE reset is kept (the wall machine\'s resetsAt ladder: signal > cached > bounded guess)');
   const rd2 = captureRateLimitEvent({ cacheDir: dir8, key: 'sub-W', identityIds: ['sub-W'], ev: rej, now: 6000 });
-  ok(rd2.ok && rd('sub-W').source === 'rate-limit-event', "⑧ the default label stays 'rate-limit-event' for real events");
-  ok(/source: 'wall'/.test(fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8')), '⑧ WIRING: the engine\'s demotion passes source wall through captureRateLimitEvent (no second writer)');
+  ok(gateOf(rd2.ok) && rd('sub-W').source === 'rate-limit-event', "⑧ the default label stays 'rate-limit-event' for real events");
+  ok(verdictOf(/source: 'wall'/.test(fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8'))), '⑧ WIRING: the engine\'s demotion passes source wall through captureRateLimitEvent (no second writer)');
   try { fs.rmSync(dir8, { recursive: true, force: true }); } catch { }
 }
 
@@ -272,7 +272,7 @@ fs.rmSync(dir, { recursive: true, force: true });
   const OWNER_RECORD = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1790535600, rateLimitType: 'seven_day_overage_included', utilization: 0.87, isUsingOverage: false, surpassedThreshold: 0.75, unifiedWindows: { five_hour: { utilization: 0.09, resetsAt: 1790048400 }, seven_day: { utilization: 0.43, resetsAt: 1790535600 }, seven_day_overage_included: { utilization: 0.87, resetsAt: 1790535600 } } }, uuid: 'e2e00000-0000-4000-8000-000000000001', session_id: 'e2e00000-0000-4000-8000-000000000002' };
   const ev = parseRateLimitEvent(OWNER_RECORD);
   ok(ev.kind === 'scoped' && ev.modelCap === true && ev.scopedName === null && Math.abs(ev.utilization - 0.87) < 1e-9 && ev.resetsAt === 1790535600, '⑨ the representative claim is the MODEL-CAP lane (un-named by the type), 0.87, on the weekly reset');
-  ok(ev.windows && Math.abs(ev.windows.fiveHour.utilization - 0.09) < 1e-9 && ev.windows.fiveHour.resetsAt === 1790048400 && Math.abs(ev.windows.sevenDay.utilization - 0.43) < 1e-9 && ev.windows.sevenDay.resetsAt === 1790535600 && Math.abs(ev.windows.modelCap.utilization - 0.87) < 1e-9,
+  ok(gateOf(ev.windows) && Math.abs(ev.windows.fiveHour.utilization - 0.09) < 1e-9 && ev.windows.fiveHour.resetsAt === 1790048400 && Math.abs(ev.windows.sevenDay.utilization - 0.43) < 1e-9 && ev.windows.sevenDay.resetsAt === 1790535600 && Math.abs(ev.windows.modelCap.utilization - 0.87) < 1e-9,
     '⑨ …and `unifiedWindows` yields the three windows: 5h 0.09, plan 7d 0.43, model cap 0.87', JSON.stringify(ev.windows));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-owner-'));
   const KEY = 'sub-fixture-max';
@@ -285,14 +285,14 @@ fs.rmSync(dir, { recursive: true, force: true });
   fs.writeFileSync(path.join(dir, '.window-' + KEY), JSON.stringify({ sevenDay: 1790535540, fiveHour: 1790048340, scoped: { fable: 1790535540 }, at: 1790030899275, source: 'on-demand', verifiedAt: 1790030899275, verifiedBy: 'api-phase' }));
   const r = captureRateLimitEvent({ cacheDir: dir, key: KEY, identityIds: [KEY], ev, now: 1790031750000 });
   const c = JSON.parse(fs.readFileSync(path.join(dir, KEY + '.json'), 'utf-8'));
-  ok(r.ok && r.wroteReading && !r.dead && r.modelCapLane && r.modelCapLane.named && r.modelCapLane.limitId === 'model:fable', "⑨ the sidecar's scoped window (fable, same reset) NAMES the lane: model:fable", JSON.stringify(r.modelCapLane));
-  ok(/established window/.test(r.modelCapLane.why), "⑨ r2: …through the production 60 s delta (the sidecar's minute-precise 1790535540 vs the record's 1790535600) — the jitter the ladder relies on is exercised, not assumed", r.modelCapLane.why);
+  ok(gateOf(r.ok) && gateOf(r.wroteReading) && !r.dead && gateOf(r.modelCapLane) && gateOf(r.modelCapLane.named) && r.modelCapLane.limitId === 'model:fable', "⑨ the sidecar's scoped window (fable, same reset) NAMES the lane: model:fable", JSON.stringify(r.modelCapLane));
+  ok(verdictOf(/established window/.test(r.modelCapLane.why)), "⑨ r2: …through the production 60 s delta (the sidecar's minute-precise 1790535540 vs the record's 1790535600) — the jitter the ladder relies on is exercised, not assumed", r.modelCapLane.why);
   ok(Math.abs(c.sevenDay.utilization - 0.43) < 1e-9 && c.sevenDay.resetsAt === 1790535600 && c.sevenDay.status === 'allowed', "⑨ plan 7d reads 0.43 — the plan week, from unifiedWindows.seven_day, its status from its own number (not the bucket's warning)", JSON.stringify(c.sevenDay));
   ok(Math.abs(c.fiveHour.utilization - 0.09) < 1e-9 && c.fiveHour.resetsAt === 1790048400, '⑨ 5h reads 0.09 from unifiedWindows.five_hour', JSON.stringify(c.fiveHour));
   const fable = (c.scopedWeekly || []).find((s) => s.name === 'Fable');
-  ok(fable && Math.abs(fable.utilization - 0.87) < 1e-9 && fable.status === 'allowed_warning' && fable.resetsAt === 1790535600 && !(c.scopedWeekly || []).some((s) => s.name === 'Model cap'), "⑨ Fable reads 0.87 with the representative's warning — one scoped entry, no placeholder", JSON.stringify(c.scopedWeekly));
+  ok(gateOf(fable) && Math.abs(fable.utilization - 0.87) < 1e-9 && fable.status === 'allowed_warning' && fable.resetsAt === 1790535600 && !(c.scopedWeekly || []).some((s) => s.name === 'Model cap'), "⑨ Fable reads 0.87 with the representative's warning — one scoped entry, no placeholder", JSON.stringify(c.scopedWeekly));
   const plan = (c.limits || []).find((l) => l.limitId === 'plan'), fl = (c.limits || []).find((l) => l.limitId === 'model:fable');
-  ok(plan && plan.windows.find((w) => w.kind === '7d').usedPct === 43 && plan.windows.find((w) => w.kind === '5h').usedPct === 9 && fl && fl.windows[0].usedPct === 87, '⑨ the typed limits agree: plan 7d 43 / 5h 9, model:fable 87', JSON.stringify((c.limits || []).map((l) => [l.limitId, l.windows.map((w) => [w.kind, w.usedPct])])));
+  ok(gateOf(plan) && plan.windows.find((w) => w.kind === '7d').usedPct === 43 && plan.windows.find((w) => w.kind === '5h').usedPct === 9 && gateOf(fl) && fl.windows[0].usedPct === 87, '⑨ the typed limits agree: plan 7d 43 / 5h 9, model:fable 87', JSON.stringify((c.limits || []).map((l) => [l.limitId, l.windows.map((w) => [w.kind, w.usedPct])])));
   ok(JSON.stringify(r.lanes) === JSON.stringify(['scoped:fable', 'fiveHour', 'sevenDay']), '⑨ the capture reports every lane it wrote, the representative first', JSON.stringify(r.lanes));
   // r2 (nit): a NON-representative window keeps the stored status when its number did not move
   const evW = parseRateLimitEvent({ ...OWNER_RECORD, rate_limit_info: { ...OWNER_RECORD.rate_limit_info, rateLimitType: 'seven_day', utilization: 0.84, unifiedWindows: { five_hour: { utilization: 0.09, resetsAt: 1790048400 }, seven_day: { utilization: 0.84, resetsAt: 1790535600 }, seven_day_overage_included: { utilization: 0.87, resetsAt: 1790535600 } } } });
@@ -311,7 +311,7 @@ fs.rmSync(dir, { recursive: true, force: true });
   fs.writeFileSync(path.join(dirP, 'sub-fresh.json'), JSON.stringify({ fetchedAt: 1000, sevenDay: { utilization: 0.1, resetsAt: 1790535600 } }));
   const rP = captureRateLimitEvent({ cacheDir: dirP, key: 'sub-fresh', identityIds: ['sub-fresh'], ev: parseRateLimitEvent(OWNER_RECORD), now: 2000 });
   const cP = JSON.parse(fs.readFileSync(path.join(dirP, 'sub-fresh.json'), 'utf-8'));
-  ok(rP.modelCapLane && !rP.modelCapLane.named && Math.abs(cP.sevenDay.utilization - 0.43) < 1e-9 && (cP.scopedWeekly || []).find((s) => s.name === 'Model cap')?.utilization === 0.87 && (cP.limits || []).some((l) => l.limitId === 'model:cap'),
+  ok(gateOf(rP.modelCapLane) && !rP.modelCapLane.named && Math.abs(cP.sevenDay.utilization - 0.43) < 1e-9 && (cP.scopedWeekly || []).find((s) => s.name === 'Model cap')?.utilization === 0.87 && verdictOf((cP.limits || []).some((l) => l.limitId === 'model:cap')),
     '⑨ CONTROL: with nothing naming the cap, the bucket is the PLACEHOLDER (model:cap) and the plan week still reads 0.43', JSON.stringify({ lane: rP.modelCapLane, sevenDay: cP.sevenDay, scoped: cP.scopedWeekly }));
   // …and the placeholder FOLDS into the named cap the moment a panel names it with the same reset
   const usageWrite = require(REPO + '/src/usage-cache-write.js');
@@ -322,7 +322,7 @@ fs.rmSync(dir, { recursive: true, force: true });
     '⑨ …a later panel naming Fable on the same reset FOLDS the placeholder into it (the newer measurement wins; one entry — never dropped, never the plan)', JSON.stringify({ limits: (cF.limits || []).map((l) => l.limitId), scoped: cF.scopedWeekly }));
   // CONTROL: a seven_day_opus record with unifiedWindows — the named model lane, plus the plan windows, no duplicate
   const evOpus = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1790535600, rateLimitType: 'seven_day_opus', utilization: 0.91, unifiedWindows: { five_hour: { utilization: 0.2, resetsAt: 1790048400 }, seven_day: { utilization: 0.5, resetsAt: 1790535600 }, seven_day_opus: { utilization: 0.91, resetsAt: 1790535600 } } } });
-  ok(evOpus.kind === 'scoped' && evOpus.scopedName === 'opus' && !evOpus.modelCap && evOpus.windows.scoped.opus && Math.abs(evOpus.windows.scoped.opus.utilization - 0.91) < 1e-9, '⑨ CONTROL: seven_day_<model> still names its model; its window rides `windows.scoped`');
+  ok(evOpus.kind === 'scoped' && evOpus.scopedName === 'opus' && !evOpus.modelCap && gateOf(evOpus.windows.scoped.opus) && Math.abs(evOpus.windows.scoped.opus.utilization - 0.91) < 1e-9, '⑨ CONTROL: seven_day_<model> still names its model; its window rides `windows.scoped`');
   const dirO = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-owner-opus-'));
   const rO = captureRateLimitEvent({ cacheDir: dirO, key: 'sub-o', identityIds: ['sub-o'], ev: evOpus, now: 5000 });
   const cO = JSON.parse(fs.readFileSync(path.join(dirO, 'sub-o.json'), 'utf-8'));
@@ -367,11 +367,11 @@ fs.rmSync(dir, { recursive: true, force: true });
     stamps.push({ scopedFetchedAt: c.scopedFetchedAt, asOf: (c.scopedWeekly || []).find((s) => s.name === 'Fable')?.asOf });
     anchors.maybeRecord({ identityKey: 'acct:' + KEY, accountId: KEY, cache: c, costSince: i ? { total: 8, byFamily: { fable: 8, opus: 0, sonnet: 0, other: 0 }, requests: 1 } : null });
   });
-  ok(stamps.every((s, i) => s.scopedFetchedAt === AT[i] && s.asOf === AT[i]), "⑨b every stream write stamps the file-level scopedFetchedAt with the READING's clock (the panel's own rule), equal to the entry's asOf", JSON.stringify(stamps));
+  ok(verdictOf(stamps.every((s, i) => s.scopedFetchedAt === AT[i] && s.asOf === AT[i])), "⑨b every stream write stamps the file-level scopedFetchedAt with the READING's clock (the panel's own rule), equal to the entry's asOf", JSON.stringify(stamps));
   const lines = fs.readFileSync(path.join(dir, 'data', 'usage-anchors', 'anchors-acct_' + KEY + '.ndjson'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
-  ok(lines.length === 3 && lines.every((l, i) => (l.buckets.scopedWeekly || []).find((s) => s.name === 'Fable')?.asOf === AT[i]), '⑨b …so three anchors carry three DIFFERENT scoped asOf stamps', JSON.stringify(lines.map((l) => l.buckets.scopedWeekly)));
+  ok(lines.length === 3 && verdictOf(lines.every((l, i) => (l.buckets.scopedWeekly || []).find((s) => s.name === 'Fable')?.asOf === AT[i])), '⑨b …so three anchors carry three DIFFERENT scoped asOf stamps', JSON.stringify(lines.map((l) => l.buckets.scopedWeekly)));
   const pairs = est.extractPairs(lines);
-  ok(Array.isArray(pairs['scoped:fable']) && pairs['scoped:fable'].length === 2 && pairs['scoped:fable'].every((p) => Math.abs(p.du - 0.02) < 1e-9 && p.cost === 8), '⑨b …and the estimator forms TWO scoped:fable pairs (Δu 0.02 over $8 each) — a stream-written cap movement IS rate information', JSON.stringify(pairs));
+  ok(gateOf(Array.isArray(pairs['scoped:fable'])) && pairs['scoped:fable'].length === 2 && verdictOf(pairs['scoped:fable'].every((p) => Math.abs(p.du - 0.02) < 1e-9 && p.cost === 8)), '⑨b …and the estimator forms TWO scoped:fable pairs (Δu 0.02 over $8 each) — a stream-written cap movement IS rate information', JSON.stringify(pairs));
   const stale = lines.map((l) => ({ ...l, buckets: { ...l.buckets, scopedWeekly: l.buckets.scopedWeekly.map((s) => ({ ...s, asOf: PANEL })) } }));
   ok(!est.extractPairs(stale)['scoped:fable'] && est.extractPairs(stale).sevenDay?.length === 2, '⑨b CONTROL: the same anchors sharing ONE scoped asOf (the pre-r2 shape) form no scoped pair while the plan pairs still form — the guard the fix had to feed correctly');
   fs.rmSync(dir, { recursive: true, force: true });
@@ -386,7 +386,7 @@ fs.rmSync(dir, { recursive: true, force: true });
   // carries the parse's own line) is not a second mapping.
   const ls = (args) => execFileSync('git', ['-C', REPO, 'ls-files', '-z', ...args], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 }).toString('utf8').split('\0').filter(Boolean);
   const scope = [...new Set([...ls([]), ...ls(['--others', '--exclude-standard'])])].filter((f) => (/^src\//.test(f) || /^data\/bin\//.test(f) || f === 'server.js') && !/^scripts\/test-/.test(f));
-  ok(scope.includes('src/rate-limit-capture.js') && scope.includes('data/bin/vibespace-usage') && scope.length > 50, `⑩ the census scope is a source listing and non-vacuous (${scope.length} files)`);
+  ok(gateOf(scope.includes('src/rate-limit-capture.js')) && gateOf(scope.includes('data/bin/vibespace-usage')) && scope.length > 50, `⑩ the census scope is a source listing and non-vacuous (${scope.length} files)`);
   const files = scope.filter((f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8').includes('seven_day_overage_included'); } catch { return false; } }).sort();
   const ALLOW = {
     'src/rate-limit-capture.js': 'THE parse — the only executable type-to-lane mapping',
@@ -395,7 +395,7 @@ fs.rmSync(dir, { recursive: true, force: true });
     'src/auto-resume-signal.js': 'a comment naming the codex twin',
     'src/quota-model.js': 'the naming ladder\x27s essay (comment only — the PURE rule takes a reset and a map, never the type)',
   };
-  ok(files.length > 0 && files.every((f) => ALLOW[f]), `⑩ every file that spells seven_day_overage_included is allowlisted with a reason: ${files.join(', ')}`, files.filter((f) => !ALLOW[f]).join(', '));
+  ok(files.length > 0 && verdictOf(files.every((f) => ALLOW[f])), `⑩ every file that spells seven_day_overage_included is allowlisted with a reason: ${files.join(', ')}`, files.filter((f) => !ALLOW[f]).join(', '));
   const dead = Object.keys(ALLOW).filter((f) => !files.includes(f));
   ok(!dead.length, `⑩ no DEAD allowlist entry (dead: ${JSON.stringify(dead)})`);
   ok(!fs.readFileSync(path.join(REPO, 'src/weekly-lanes-unfold.js'), 'utf8').includes('seven_day_overage_included') && !fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf8').includes('seven_day_overage_included'),
@@ -403,9 +403,9 @@ fs.rmSync(dir, { recursive: true, force: true });
   const exec = (f) => fs.readFileSync(path.join(REPO, f), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).filter((l) => l.includes('seven_day_overage_included'));
   ok(exec('src/server/usage-pool-engine.js').length === 0 && exec('src/auto-resume-signal.js').length === 0 && exec('src/quota-model.js').length === 0, "⑩ …and outside the parse and the schema no EXECUTABLE line compares against the type (the engine's deferral set no longer names it)", JSON.stringify(exec('src/server/usage-pool-engine.js')));
   const cap = exec('src/rate-limit-capture.js');
-  ok(cap.length === 1 && /MODEL_CAP_TYPE = 'seven_day_overage_included'/.test(cap[0]), '⑩ …the parse spells it ONCE, as MODEL_CAP_TYPE (the window key reuses it)', JSON.stringify(cap));
+  ok(cap.length === 1 && verdictOf(/MODEL_CAP_TYPE = 'seven_day_overage_included'/.test(cap[0])), '⑩ …the parse spells it ONCE, as MODEL_CAP_TYPE (the window key reuses it)', JSON.stringify(cap));
   const tool = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-usage'), 'utf8');
-  ok(!tool.includes('seven_day_overage_included') && /rl\.model_scoped/.test(tool), '⑩ the statusline twin never sees the type (2.1.274 ships the bucket NAMED, as rate_limits.model_scoped[]) and reads that list instead');
+  ok(!tool.includes('seven_day_overage_included') && verdictOf(/rl\.model_scoped/.test(tool)), '⑩ the statusline twin never sees the type (2.1.274 ships the bucket NAMED, as rate_limits.model_scoped[]) and reads that list instead');
 }
 
 // ── B-6a92 (主开发 r5302, a must): A ROW's IDENTITY IS NEVER COPIED FROM A SIBLING THAT IS NOT ITS OWN ACCOUNT — at a rebuild from such a
@@ -462,8 +462,8 @@ fs.rmSync(dir, { recursive: true, force: true });
     const k3 = K(bare, { ownFile: own, ownHad: true, base: bare, baseId: 'z', ownIds: ['x', 'z'], ids: ['x', 'z'] });
     const k4 = K(sib, { ownFile: own, ownHad: false, base: sib, baseId: 'y', ownIds: ['x'], ids: ['x', 'y'] });
     const k5 = K(sib, { ownFile: own, ownHad: true, base: sib, baseId: 'y', ownIds: null, ids: ['x', 'y'] });
-    ok(k1.r && k1.c.orgUuid === 'org-x-0001' && k1.c.email === 'mail-x-0001' && !('orgName' in k1.c)
-      && k2.r && k2.c.orgUuid === 'org-x-0001' && k2.c.email === 'mail-x-0001'
+    ok(gateOf(k1.r) && k1.c.orgUuid === 'org-x-0001' && k1.c.email === 'mail-x-0001' && !('orgName' in k1.c)
+      && gateOf(k2.r) && k2.c.orgUuid === 'org-x-0001' && k2.c.email === 'mail-x-0001'
       && !k3.r && !('orgUuid' in k3.c) && !k4.r && k4.c.orgUuid === 'org-y-0001' && !k5.r && k5.c.orgUuid === 'org-y-0001',
       'B-6a92 (r5326) keepOwnIdentity, the ONE rule: kept for a base outside the own account and for an org-less base in a split group; as today when not split, with no file of its own, or with no ownIds', JSON.stringify({ k1, k2, k3, k4, k5 }));
   }
@@ -483,4 +483,4 @@ fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

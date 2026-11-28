@@ -25,7 +25,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-dial-'));
 const AGENTD_ROOT = path.join(tmp, 'agentd');
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -119,8 +119,8 @@ conn.mux.control({ op: 'open-pipe-session', chan, sid: 'dial-1', cmd: process.ex
 await ready;
 await sleep(1500);
 const nums = [...out.toString().matchAll(/D(\d+)/g)].map((m) => +m[1]);
-check('pipe session output flows over the dialed transport', nums.length === 10 && nums.every((v, i) => v === i), JSON.stringify(nums));
-check('exit sentinel over the dialed transport', out.toString().includes('"_remote_exit"'), '');
+check('pipe session output flows over the dialed transport', nums.length === 10 && verdictOf(nums.every((v, i) => v === i)), JSON.stringify(nums));
+check('exit sentinel over the dialed transport', verdictOf(out.toString().includes('"_remote_exit"')), '');
 
 console.log('— drop the ws: the device AUTO-REDIALS (NAT keepalive model) —');
 stream1.destroy();
@@ -244,45 +244,45 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
   const st1 = await waitFor(() => { const j = JSON.parse(fs.readFileSync(path.join(stB, 'dial-status.json'), 'utf8')); return j.last && j.last.code === 'dns' ? j : null; });
   check('WRONG HOST: the device records `dns` in state/dial-status.json', !!st1, JSON.stringify(st1));
   const log1 = fs.readFileSync(path.join(stB, 'agentd.log'), 'utf8');
-  check('…and ONE log line names the class: "dial-out failed — dns: … ENOTFOUND nonexistent.invalid"', /dial-out failed — dns: [^\n]*ENOTFOUND nonexistent\.invalid[^\n]*\(attempt \d+, retry in \d+ms\)/.test(log1), log1.split('\n').filter((l) => /dial-out/.test(l)).slice(-2).join(' | '));
+  check('…and ONE log line names the class: "dial-out failed — dns: … ENOTFOUND nonexistent.invalid"', verdictOf(/dial-out failed — dns: [^\n]*ENOTFOUND nonexistent\.invalid[^\n]*\(attempt \d+, retry in \d+ms\)/.test(log1)), log1.split('\n').filter((l) => /dial-out/.test(l)).slice(-2).join(' | '));
   check('…and the server heard nothing (a dial that never arrived is not a refusal)', !rowB().dial.lastRefusal && DF.dialRowState(rowB()).state === 'never');
   // WRONG TOKEN (the command generated before the current one): the server refuses BY NAME
   fs.writeFileSync(path.join(stB, 'dial.json'), JSON.stringify({ url: urlB, token: 'vsdt_' + 'f'.repeat(36) }), { mode: 0o600 });
   const st2 = await waitFor(() => { const j = JSON.parse(fs.readFileSync(path.join(stB, 'dial-status.json'), 'utf8')); return j.last && j.last.code === 'refused-token-mismatch' ? j : null; });
   check('WRONG TOKEN: the device records `refused-token-mismatch` (the server\'s 401 + X-VibeSpace-Dial-Refusal)', !!st2 && st2.last.status === 401, JSON.stringify(st2 && st2.last));
-  check('…with the server\'s own sentence as the detail', !!st2 && /does not match the pairing on record for "devB"/.test(st2.last.detail), st2 && st2.last.detail);
+  check('…with the server\'s own sentence as the detail', !!st2 && verdictOf(/does not match the pairing on record for "devB"/.test(st2.last.detail)), st2 && st2.last.detail);
   const log2 = fs.readFileSync(path.join(stB, 'agentd.log'), 'utf8');
-  check('…and the log says "dial-out refused — token-mismatch: …"', /dial-out refused — token-mismatch: the dial token does not match/.test(log2));
+  check('…and the log says "dial-out refused — token-mismatch: …"', verdictOf(/dial-out refused — token-mismatch: the dial token does not match/.test(log2)));
   const ref = await waitFor(() => (rowB().dial.lastRefusal ? rowB().dial.lastRefusal : null), 5000);
-  check('the server keeps the refusal: hosts.json dial.lastRefusal.code token-mismatch, the daemon\'s streak as `attempt`, its previous failure', !!ref && ref.code === 'token-mismatch' && ref.attempt >= 1 && ref.last && ref.last.code && ref.daemon, JSON.stringify(ref));
+  check('the server keeps the refusal: hosts.json dial.lastRefusal.code token-mismatch, the daemon\'s streak as `attempt`, its previous failure', !!ref && ref.code === 'token-mismatch' && ref.attempt >= 1 && gateOf(ref.last) && gateOf(ref.last.code) && verdictOf(ref.daemon), JSON.stringify(ref));
   check('THE ROW reads `refused (token mismatch)` — never a bare "offline" (attack 17)', DF.dialRowState(rowB()).state === 'refused' && DF.dialRowState(rowB()).reason === 'token-mismatch');
-  check('the refusal broadcast hosts-updated (the row repaints)', casts.some((m) => m.type === 'hosts-updated'));
+  check('the refusal broadcast hosts-updated (the row repaints)', verdictOf(casts.some((m) => m.type === 'hosts-updated')));
   // B-48a4: hosts.json is written on the store writer's thread — an urgent write lands at once (its pace set aside), not inside this tick
   const onDisk = await waitFor(() => { const h = JSON.parse(fs.readFileSync(path.join(dataB, 'hosts.json'), 'utf8')).hosts.find((x) => x.deviceId === 'devB'); return h && h.dial && h.dial.lastRefusal ? h : null; }, 2000, 50);
-  check('…and it is on disk at once (a NEW refusal code is an urgent write)', onDisk && onDisk.dial && onDisk.dial.lastRefusal && onDisk.dial.lastRefusal.code === 'token-mismatch');
+  check('…and it is on disk at once (a NEW refusal code is an urgent write)', gateOf(onDisk) && gateOf(onDisk.dial) && gateOf(onDisk.dial.lastRefusal) && onDisk.dial.lastRefusal.code === 'token-mismatch');
   // the RIGHT token: connected, after failures
   fs.writeFileSync(path.join(stB, 'dial.json'), JSON.stringify({ url: urlB, token: pair.dialToken }), { mode: 0o600 });
   const up = await waitFor(() => DP.agentdDials.has('devB'), 30000);
   check('RIGHT TOKEN: the device dials in', !!up);
   const acc = rowB().dial.lastAccept;
-  check('the accept carries the streak: lastAccept.attempt ≥ 2 with the previous failure refused-token-mismatch', acc && acc.attempt >= 2 && acc.last && acc.last.code === 'refused-token-mismatch', JSON.stringify(acc));
+  check('the accept carries the streak: lastAccept.attempt ≥ 2 with the previous failure refused-token-mismatch', gateOf(acc) && acc.attempt >= 2 && gateOf(acc.last) && acc.last.code === 'refused-token-mismatch', JSON.stringify(acc));
   const rsC = DF.dialRowState(rowB());
   check('THE ROW reads `connected` — before that N attempts failed (token mismatch)', rsC.state === 'connected' && rsC.n >= 2 && rsC.reason === 'token-mismatch', JSON.stringify(rsC));
   const st3 = await waitFor(() => { const j = JSON.parse(fs.readFileSync(path.join(stB, 'dial-status.json'), 'utf8')); return j.last && j.last.outcome === 'connected' ? j : null; }, 5000);
-  check('the device\'s file: connected, streak 0, history keeps dns + refused-token-mismatch', !!st3 && st3.streak === 0 && st3.history.some((e) => e.code === 'dns') && st3.history.some((e) => e.code === 'refused-token-mismatch'), JSON.stringify(st3 && st3.history));
+  check('the device\'s file: connected, streak 0, history keeps dns + refused-token-mismatch', !!st3 && st3.streak === 0 && gateOf(st3.history.some((e) => e.code === 'dns')) && verdictOf(st3.history.some((e) => e.code === 'refused-token-mismatch')), JSON.stringify(st3 && st3.history));
   check('the file never carries a token', !fs.readFileSync(path.join(stB, 'dial-status.json'), 'utf8').includes('vsdt_'));
-  check('…and the log says "dial-out connected: … (after N failed attempts)"', /dial-out connected: ws:\/\/127\.0\.0\.1:\d+\/api\/device-dial\?device=devB \(after \d+ failed attempts?\)/.test(fs.readFileSync(path.join(stB, 'agentd.log'), 'utf8')));
+  check('…and the log says "dial-out connected: … (after N failed attempts)"', verdictOf(/dial-out connected: ws:\/\/127\.0\.0\.1:\d+\/api\/device-dial\?device=devB \(after \d+ failed attempts?\)/.test(fs.readFileSync(path.join(stB, 'agentd.log'), 'utf8'))));
   // the `dial-status` op (THREE-TOUCH: the capability in the hello-ack, the reply routed by id)
   const dm = await DP.deviceForDial('devB');
-  check('the hello-ack lists the dial-status capability', (dm.status().info?.capabilities || []).includes('dial-status'));
+  check('the hello-ack lists the dial-status capability', verdictOf((dm.status().info?.capabilities || []).includes('dial-status')));
   const ds = await dm.dialStatus();
-  check('the dial-status op answers the device\'s file over the live link', ds && ds.last && ds.last.outcome === 'connected' && Array.isArray(ds.history) && ds.history.length >= 3, JSON.stringify(ds && ds.last));
+  check('the dial-status op answers the device\'s file over the live link', gateOf(ds) && gateOf(ds.last) && ds.last.outcome === 'connected' && gateOf(Array.isArray(ds.history)) && ds.history.length >= 3, JSON.stringify(ds && ds.last));
   // verify-r1 A5: the real daemon's run-cmd — the exit's call shape: a cut output is NAMED, the code is a number
   {
     const r1 = await dm.runCmd('sh', ['-lc', 'head -c 1500000 /dev/zero | tr "\\0" a; echo; echo TAIL'], { by: 'system:test', timeoutMs: 30000, waitMs: 40000 });
     check('a 1.5 MB stdout comes back cut to 1 MiB WITH `truncated: true` (the tail is missing and the reply says so)', r1.code === 0 && r1.truncated === true && String(r1.stdout).length === 1048576 && !String(r1.stdout).includes('TAIL'), JSON.stringify({ code: r1.code, truncated: r1.truncated, len: String(r1.stdout).length }));
     const r2 = await dm.runCmd('sh', ['-lc', 'head -c 3000000 /dev/zero | tr "\\0" b'], { by: 'system:test', timeoutMs: 30000, waitMs: 40000 });
-    check('a 3 MB stdout (over the daemon\'s 2 MiB maxBuffer) answers a NUMERIC code (was the string ERR_CHILD_PROCESS_STDIO_MAXBUFFER) + truncated, not timedOut', Number.isInteger(r2.code) && r2.truncated === true && r2.timedOut === false, JSON.stringify({ code: r2.code, truncated: r2.truncated, timedOut: r2.timedOut }));
+    check('a 3 MB stdout (over the daemon\'s 2 MiB maxBuffer) answers a NUMERIC code (was the string ERR_CHILD_PROCESS_STDIO_MAXBUFFER) + truncated, not timedOut', gateOf(Number.isInteger(r2.code)) && r2.truncated === true && r2.timedOut === false, JSON.stringify({ code: r2.code, truncated: r2.truncated, timedOut: r2.timedOut }));
     const r3 = await dm.runCmd('sh', ['-lc', 'echo small'], { by: 'system:test', timeoutMs: 30000 });
     check('a small output: code 0, truncated false', r3.code === 0 && r3.truncated === false && r3.stdout === 'small\n', JSON.stringify(r3));
   }
@@ -295,7 +295,7 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
   const back = await waitFor(() => DP.agentdDials.has('devB') && DP.agentdDials.get('devB') !== liveStream, 20000);
   let authErr = null;
   if (back) { try { await DP.deviceForDial('devB'); } catch (e) { authErr = e; } }
-  check('WRONG HOST KEY on the device: the hello is refused ("agentd auth failed")', !!back && authErr && /auth failed/.test(authErr.message), authErr && authErr.message);
+  check('WRONG HOST KEY on the device: the hello is refused ("agentd auth failed")', !!back && gateOf(authErr) && verdictOf(/auth failed/.test(authErr.message)), authErr && authErr.message);
   check('THE ROW reads `auth-fail` — dialed in, but the device refuses this server\'s key; never a plain "connected" (attack 18)', DF.dialRowState(rowB()).state === 'auth-fail', JSON.stringify(rowB().dial.lastAuthFail));
   // verify-r1 C2: the refused device KEEPS its link — no re-dial loop, the row steady at auth-fail, one line per device
   {
@@ -307,7 +307,7 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
     check('…and 4 s later the device is STILL on the same link (no re-dial loop: zero new "dial-out connected" lines)', DP.agentdDials.get('devB') === streamAF && dialsAfter === dialsBefore, `dials ${dialsBefore}→${dialsAfter}`);
     check('…the row read auth-fail the whole time — never "offline / silent" for a device that is dialed in', states['auth-fail'] === 8, JSON.stringify(states));
     const t0 = Date.now(); let e2 = null; try { await DP.deviceForDial('devB'); } catch (e) { e2 = e; }
-    check('…a second op is refused at once (auth_failed, the refused stream remembered) with no second hello', e2 && e2.code === 'auth_failed' && Date.now() - t0 < 300 && (fs.readFileSync(path.join(stB, 'agentd.log'), 'utf8').match(/auth-fail from a connection/g) || []).length === 1, e2 && `${e2.code} ${Date.now() - t0}ms`);
+    check('…a second op is refused at once (auth_failed, the refused stream remembered) with no second hello', gateOf(e2) && e2.code === 'auth_failed' && Date.now() - t0 < 300 && (fs.readFileSync(path.join(stB, 'agentd.log'), 'utf8').match(/auth-fail from a connection/g) || []).length === 1, e2 && `${e2.code} ${Date.now() - t0}ms`);
   }
   fs.writeFileSync(path.join(stB, 'token'), HOST_B, { mode: 0o600 });
   try { DP.agentdDials.get('devB').destroy(); } catch { }
@@ -316,8 +316,8 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
   // a PROBE (the installer's --dial-check) against the live server: 200, not registered, no broadcast
   const castsBefore = casts.length;
   const probe = await new Promise((resolve) => { const out = []; const c = spawn(process.execPath, [bundle, '--dial-check', urlB, '--dial-token', pair.dialToken], { env: { ...process.env, VIBESPACE_AGENTD_ROOT: path.join(tmp, 'probe-root'), VIBESPACE_DEVICE_ROOT: path.join(tmp, 'probe-root') } }); c.stdout.on('data', (d) => out.push(d)); c.on('exit', (code) => resolve({ code, out: Buffer.concat(out).toString() })); });
-  check('--dial-check against the live server: exit 0, "is a VibeSpace … and accepts device devB"', probe.code === 0 && /dial-check ok — 127\.0\.0\.1:\d+ is a VibeSpace [\d.]+ and accepts device "devB"/.test(probe.out), JSON.stringify(probe));
-  check('…the probe registered nothing (no hosts-updated, the live link unchanged) and stamped lastProbeAt (attack 22)', casts.length === castsBefore && DP.agentdDials.has('devB') && rowB().dial.lastProbeAt > 0);
+  check('--dial-check against the live server: exit 0, "is a VibeSpace … and accepts device devB"', probe.code === 0 && verdictOf(/dial-check ok — 127\.0\.0\.1:\d+ is a VibeSpace [\d.]+ and accepts device "devB"/.test(probe.out)), JSON.stringify(probe));
+  check('…the probe registered nothing (no hosts-updated, the live link unchanged) and stamped lastProbeAt (attack 22)', casts.length === castsBefore && gateOf(DP.agentdDials.has('devB')) && rowB().dial.lastProbeAt > 0);
   // a daemon WITHOUT the capability (a patched bundle — an older agent) is never asked: host_needs_daemon, fast
   killDaemon(stB);
   await waitFor(() => !DP.agentdDials.has('devB'), 10000);
@@ -333,7 +333,7 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
   const upOld = await waitFor(() => DP.agentdDials.has('devB'), 30000);
   let err = null; const t0 = Date.now();
   if (upOld) { try { const dm2 = await DP.deviceForDial('devB'); await dm2.dialStatus(); } catch (e) { err = e; } }
-  check('CONTROL: a daemon without the capability ⇒ host_needs_daemon at once (an old daemon is never asked — it would hang)', !!upOld && err && err.code === 'host_needs_daemon' && Date.now() - t0 < 3000, err ? `${err.code} ${Date.now() - t0}ms` : 'no error');
+  check('CONTROL: a daemon without the capability ⇒ host_needs_daemon at once (an old daemon is never asked — it would hang)', !!upOld && gateOf(err) && err.code === 'host_needs_daemon' && Date.now() - t0 < 3000, err ? `${err.code} ${Date.now() - t0}ms` : 'no error');
   killDaemon(stB);
   for (const d of DP.agentdDialDevices.values()) { try { d.stop(); } catch { } }
   srvB.close();
@@ -415,7 +415,7 @@ async function neverConverging({ tag, bundleSrc, ms }) {
   const bsrc = fs.readFileSync(bundle, 'utf8');
   const r = await neverConverging({ tag: 'c', bundleSrc: bsrc, ms: 12000 });
   check(`a never-converging device is upgraded at most 3 times in 12 s under the handshake-on-every-dial-in path (got ${r.upgrades}, ${r.accepts} dial-ins) — the per-device ledger`, r.upgrades >= 1 && r.upgrades <= 3, `upgrades=${r.upgrades} accepts=${r.accepts}`);
-  check('…and the link is then KEPT and usable (a hello completed on it, capability-gated)', r.hellos >= 1 && r.linked, `hellos=${r.hellos}`);
+  check('…and the link is then KEPT and usable (a hello completed on it, capability-gated)', r.hellos >= 1 && verdictOf(r.linked), `hellos=${r.hellos}`);
   // verify-r1 C3: the upgrade's re-exec ends the link ON PURPOSE — it is not a failed dial. Before the fix the old
   // process's `close` fired inside the 200 ms exit grace, upMs < 2 s ⇒ `closed-before-hello`, streak 1 written to
   // dial-status.json, and the NEW daemon's first dial-in carried attempt=1 + last=closed-before-hello ⇒ the row read
@@ -423,13 +423,13 @@ async function neverConverging({ tag, bundleSrc, ms }) {
   const dialLines = (log) => log.split('\n').filter((l) => /dial-out/.test(l)).slice(0, 4).join(' | ');
   check('C3: the re-exec\'d daemon\'s dial-in carries NO failure streak (lastAccept.attempt 0, no `last`) — a self-upgrade is not a failed attempt', !!r.acc && r.acc.attempt === 0 && !r.acc.last, JSON.stringify(r.acc));
   check('C3: the device\'s dial-status.json never records closed-before-hello for the upgrade (streak 0, history without it)', r.status.streak === 0 && !r.status.history.some((e) => e.code === 'closed-before-hello'), JSON.stringify({ streak: r.status.streak, history: r.status.history }));
-  check('C3: the log says "dial-out ended — self-upgrade re-exec" (never "dial-out failed — closed-before-hello")', /dial-out ended — self-upgrade re-exec/.test(r.log) && !/dial-out failed — closed-before-hello/.test(r.log), dialLines(r.log));
+  check('C3: the log says "dial-out ended — self-upgrade re-exec" (never "dial-out failed — closed-before-hello")', gateOf(/dial-out ended — self-upgrade re-exec/.test(r.log)) && !/dial-out failed — closed-before-hello/.test(r.log), dialLines(r.log));
   // CONTROL: the same run over a bundle whose upgrade never raises the flag — the pre-fix shape must come back
   // (closed-before-hello recorded, the next dial-in carrying attempt ≥ 1), else the three pins above prove nothing.
   const mutant = editAnchor(bsrc, 'upgradeLanded = true;\n', '', "the device bundle built from src/agentd/agentd.js");
   check('(C3 control: the mutant bundle drops the flag set)', mutant !== bsrc);
   const m = await neverConverging({ tag: 'c-ctl', bundleSrc: mutant, ms: 5000 });
-  check(`C3 CONTROL: without the flag the old process records closed-before-hello and the re-exec'd daemon dials in with attempt ≥ 1 (${m.upgrades} upgrades)`, m.upgrades >= 1 && m.status.history.some((e) => e.code === 'closed-before-hello') && /dial-out failed — closed-before-hello/.test(m.log) && !!m.acc && m.acc.attempt >= 1, JSON.stringify({ upgrades: m.upgrades, acc: m.acc, lines: dialLines(m.log) }));
+  check(`C3 CONTROL: without the flag the old process records closed-before-hello and the re-exec'd daemon dials in with attempt ≥ 1 (${m.upgrades} upgrades)`, m.upgrades >= 1 && gateOf(m.status.history.some((e) => e.code === 'closed-before-hello')) && gateOf(/dial-out failed — closed-before-hello/.test(m.log)) && !!m.acc && m.acc.attempt >= 1, JSON.stringify({ upgrades: m.upgrades, acc: m.acc, lines: dialLines(m.log) }));
 }
 
 // ── lane-pairing ④: a daemon under a 120-byte root on Linux listens on a SHORT rung, writes the witness, and the
@@ -516,26 +516,26 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
   await twoDaemons({ tag: 'dup', bundleA: bsrc, bundleB: bsrc, run: async ({ spawnOne, facts, logOf, statusOf, kill }) => {
     spawnOne('a', bsrc);
     await sleep(3000);
-    check('B9: daemon A dialed in (1 accept, the link held)', facts().accepts === 1 && facts().linked, JSON.stringify({ accepts: facts().accepts }));
+    check('B9: daemon A dialed in (1 accept, the link held)', facts().accepts === 1 && verdictOf(facts().linked), JSON.stringify({ accepts: facts().accepts }));
     const settled = await settledOf(facts), castsA = facts().castLog;
     spawnOne('b', bsrc); // the copy
     await sleep(9000);
     const f = facts(), cw = f.castLog.slice(castsA.length), sb0 = statusOf('b');
-    check(`B9: 9 s later the copy has NOT replaced A — still 1 accept, 0 closes (before: one accept + one close per second, a broadcast each)`, f.accepts === 1 && f.closes === 0 && f.linked, JSON.stringify({ accepts: f.accepts, closes: f.closes }));
-    check(`B9: A's first hello casts only NAMED once-per-record repaints, each at most once — the accept, the dial accepted, the policy and the runtime first said (lane device-node-version), the device identity first pinned (list line 144): ${castsA.join(' · ')}`, !!settled && castsA.includes('the accept') && castsA.includes('the device identity first pinned') && onceBad(castsA).length === 0, onceBad(castsA));
+    check(`B9: 9 s later the copy has NOT replaced A — still 1 accept, 0 closes (before: one accept + one close per second, a broadcast each)`, f.accepts === 1 && f.closes === 0 && verdictOf(f.linked), JSON.stringify({ accepts: f.accepts, closes: f.closes }));
+    check(`B9: A's first hello casts only NAMED once-per-record repaints, each at most once — the accept, the dial accepted, the policy and the runtime first said (lane device-node-version), the device identity first pinned (list line 144): ${castsA.join(' · ')}`, !!settled && gateOf(castsA.includes('the accept')) && gateOf(castsA.includes('the device identity first pinned')) && onceBad(castsA).length === 0, onceBad(castsA));
     check(`B9: …and in the copy's window a refused dial casts only when it changes what a person sees — exactly ONE (the duplicate note turning on), then ZERO for the copy's ${Math.max(0, ((sb0 && sb0.streak) || 0) - 1)} refused dial(s) after it: ${cw.join(' · ') || 'none'}`, copyBad(cw, sb0 && sb0.streak).length === 0, copyBad(cw, sb0 && sb0.streak));
     check('B9: the row stays `connected` with NO failure streak (lastAccept.attempt 0) and carries the duplicate note (dup.from)', f.rs.state === 'connected' && f.rs.n === 0 && !!f.rs.dup && f.rs.dup.from === '127.0.0.1', JSON.stringify({ rs: f.rs, lastAccept: f.row.dial.lastAccept }));
-    check('B9: hosts.json holds dial.lastDuplicate {at, from, boot, daemon}', !!f.row.dial.lastDuplicate && /^[0-9a-f]{16}$/.test(String(f.row.dial.lastDuplicate.boot)) && !!f.row.dial.lastDuplicate.daemon, JSON.stringify(f.row.dial.lastDuplicate));
+    check('B9: hosts.json holds dial.lastDuplicate {at, from, boot, daemon}', !!f.row.dial.lastDuplicate && gateOf(/^[0-9a-f]{16}$/.test(String(f.row.dial.lastDuplicate.boot))) && !!f.row.dial.lastDuplicate.daemon, JSON.stringify(f.row.dial.lastDuplicate));
     const sb = statusOf('b');
-    check('B9: the copy\'s dial-status.json says refused-duplicate-device with the server\'s sentence (401), streak climbing', !!sb && sb.last.code === 'refused-duplicate-device' && sb.last.status === 401 && /pair this machine under its own name/.test(sb.last.detail) && sb.streak >= 2, JSON.stringify(sb && sb.last));
-    check('B9: …and its log says "dial-out refused — duplicate-device: pair this machine under its own name …" (never a "connected")', /dial-out refused — duplicate-device: pair this machine under its own name/.test(logOf('b')) && !/dial-out connected/.test(logOf('b')), logOf('b').split('\n').filter((l) => /dial-out/.test(l)).slice(-2).join(' | '));
+    check('B9: the copy\'s dial-status.json says refused-duplicate-device with the server\'s sentence (401), streak climbing', !!sb && sb.last.code === 'refused-duplicate-device' && sb.last.status === 401 && gateOf(/pair this machine under its own name/.test(sb.last.detail)) && sb.streak >= 2, JSON.stringify(sb && sb.last));
+    check('B9: …and its log says "dial-out refused — duplicate-device: pair this machine under its own name …" (never a "connected")', gateOf(/dial-out refused — duplicate-device: pair this machine under its own name/.test(logOf('b'))) && !/dial-out connected/.test(logOf('b')), logOf('b').split('\n').filter((l) => /dial-out/.test(l)).slice(-2).join(' | '));
     check('B9: daemon A never lost its link (no "lost" / "closed-before-hello" line)', !/dial-out (lost|failed)/.test(logOf('a')), logOf('a').split('\n').filter((l) => /dial-out/.test(l)).join(' | '));
     // A goes away ⇒ the copy is the only device left and gets in on its next attempt (its ladder is at ≤ 15 s here)
     kill('a');
     const t0 = Date.now();
     while (Date.now() - t0 < 40000 && !/dial-out connected/.test(logOf('b'))) await sleep(500);
     const g = facts();
-    check(`B9: once A is gone the copy passes the gate on its next attempt (${Math.round((Date.now() - t0) / 1000)} s; ≤ 35 s = its 30 s ladder + a hello)`, /dial-out connected/.test(logOf('b')) && g.accepts === 2 && g.linked, JSON.stringify({ accepts: g.accepts, waited: Date.now() - t0 }));
+    check(`B9: once A is gone the copy passes the gate on its next attempt (${Math.round((Date.now() - t0) / 1000)} s; ≤ 35 s = its 30 s ladder + a hello)`, gateOf(/dial-out connected/.test(logOf('b'))) && g.accepts === 2 && verdictOf(g.linked), JSON.stringify({ accepts: g.accepts, waited: Date.now() - t0 }));
     // (i) THIS copy has its own root, so its OWN device identity: a different device holding a copied pairing, which list line 144
     // refuses at the hello by design — the row reads key-refused with its door, never connected, the duplicate note kept
     const kr = await waitFor(() => { const rs = facts().rs; return rs && rs.state === 'key-refused' ? rs : null; }, 15000);
@@ -548,11 +548,11 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
   await twoDaemons({ tag: 'duptrue', bundleA: bsrc, bundleB: bsrc, run: async ({ spawnOne, facts, logOf, statusOf, kill, DPD }) => {
     const stA = spawnOne('a', bsrc);
     const pinnedA = await waitFor(() => { const r = facts().row; return r && r.deviceKey && fs.existsSync(path.join(stA, 'identity.pem')) ? r.deviceKey : null; }, 20000);
-    check('B9 (ii): daemon A dialed in and its device identity is pinned (state/identity.pem minted, the row holds its key)', !!pinnedA && facts().accepts === 1 && facts().linked, JSON.stringify({ accepts: facts().accepts }));
+    check('B9 (ii): daemon A dialed in and its device identity is pinned (state/identity.pem minted, the row holds its key)', !!pinnedA && facts().accepts === 1 && verdictOf(facts().linked), JSON.stringify({ accepts: facts().accepts }));
     spawnOne('b', bsrc, undefined, { identityFrom: stA });
     await sleep(9000);
     const f = facts(), sb = statusOf('b');
-    check('B9 (ii): while A answers the TRUE copy is refused like any duplicate — 1 accept, 0 closes, its status refused-duplicate-device, streak ≥ 2', f.accepts === 1 && f.closes === 0 && f.linked && !!sb && sb.last.code === 'refused-duplicate-device' && sb.streak >= 2, JSON.stringify({ accepts: f.accepts, closes: f.closes, last: sb && sb.last && sb.last.code, streak: sb && sb.streak }));
+    check('B9 (ii): while A answers the TRUE copy is refused like any duplicate — 1 accept, 0 closes, its status refused-duplicate-device, streak ≥ 2', f.accepts === 1 && f.closes === 0 && gateOf(f.linked) && !!sb && sb.last.code === 'refused-duplicate-device' && sb.streak >= 2, JSON.stringify({ accepts: f.accepts, closes: f.closes, last: sb && sb.last && sb.last.code, streak: sb && sb.streak }));
     kill('a');
     const t0 = Date.now();
     const adm = await waitFor(() => { const x = facts(); return /dial-out connected/.test(logOf('b')) && x.accepts === 2 && x.rs && x.rs.state === 'connected' ? x.rs : null; }, 45000, 500);
@@ -563,7 +563,7 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
     const hello = adm ? await waitFor(() => (helloOn() ? true : null), 15000) : null;
     await sleep(1000);
     const g = facts();
-    check(`B9 (ii): once A is gone the TRUE copy is ADMITTED (${Math.round((Date.now() - t0) / 1000)} s) — it proves the pinned key: the hub's hello on its stream passed and holds, the row reads connected, before that N attempts failed (another device dials in as this one), the note still on`, !!adm && !!hello && helloOn() && g.rs.state === 'connected' && g.rs.n >= 2 && g.rs.reason === 'duplicate-device' && !!g.rs.dup && g.linked && !g.row.deviceKeyRefused, JSON.stringify({ rs: g.rs, accepts: g.accepts, hello: !!hello, keyRefused: (g.row && g.row.deviceKeyRefused) || null }));
+    check(`B9 (ii): once A is gone the TRUE copy is ADMITTED (${Math.round((Date.now() - t0) / 1000)} s) — it proves the pinned key: the hub's hello on its stream passed and holds, the row reads connected, before that N attempts failed (another device dials in as this one), the note still on`, !!adm && !!hello && gateOf(helloOn()) && g.rs.state === 'connected' && g.rs.n >= 2 && g.rs.reason === 'duplicate-device' && !!g.rs.dup && gateOf(g.linked) && !g.row.deviceKeyRefused, JSON.stringify({ rs: g.rs, accepts: g.accepts, hello: !!hello, keyRefused: (g.row && g.row.deviceKeyRefused) || null }));
   } });
   // verify-r2 B9-r2a: the copy runs a bundle WITHOUT the boot header (an old bundle — or a stolen pairing whose
   // holder simply strips the header). r1 judged it "as before: replaced" ⇒ 9 accepts / 8 closes in 8 s, i.e. any
@@ -577,8 +577,8 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
     spawnOne('b', noBoot);
     await sleep(8000);
     const f = facts();
-    check(`B9-r2a: a copy WITHOUT the boot header is refused like any duplicate while A answers — still 1 accept, 0 closes in 8 s (r1: ${'9 accepts / 8 closes'})`, f.accepts === 1 && f.closes === 0 && f.linked, JSON.stringify({ accepts: f.accepts, closes: f.closes, casts: f.casts }));
-    check('B9-r2a: …its log says refused — duplicate-device, never "connected"; A never lost its link', /dial-out refused — duplicate-device/.test(logOf('b')) && !/dial-out connected/.test(logOf('b')) && !/dial-out (lost|failed)/.test(logOf('a')), logOf('b').split('\n').filter((l) => /dial-out/.test(l)).slice(-1).join(''));
+    check(`B9-r2a: a copy WITHOUT the boot header is refused like any duplicate while A answers — still 1 accept, 0 closes in 8 s (r1: ${'9 accepts / 8 closes'})`, f.accepts === 1 && f.closes === 0 && verdictOf(f.linked), JSON.stringify({ accepts: f.accepts, closes: f.closes, casts: f.casts }));
+    check('B9-r2a: …its log says refused — duplicate-device, never "connected"; A never lost its link', gateOf(/dial-out refused — duplicate-device/.test(logOf('b'))) && !/dial-out connected/.test(logOf('b')) && !/dial-out (lost|failed)/.test(logOf('a')), logOf('b').split('\n').filter((l) => /dial-out/.test(l)).slice(-1).join(''));
   } });
   // CONTROL: the SERVER under r1's verdict ("no boot id ⇒ replace") — a closed world of patched copies (mutant-copy:
   // dial-pairing.js bound to a dial-facts.js with the old rule) — the same header-less copy brings the flap back.
@@ -627,7 +627,7 @@ console.log('— verify-r2 B8-r2: a rotation disconnects the holder NOW; the dev
   await twoDaemons({ tag: 'rotate', bundleA: bsrc, bundleB: bsrc, run: async ({ spawnOne, facts, logOf, statusOf, DPD, PD }) => {
     spawnOne('a', bsrc); // the holder of command #1
     await sleep(3000);
-    check('B8-r2: the holder dialed in on command #1', facts().accepts === 1 && facts().linked);
+    check('B8-r2: the holder dialed in on command #1', facts().accepts === 1 && verdictOf(facts().linked));
     const t0 = Date.now();
     const pair2 = DPD.agentdMintDialPair('mac', { host: `127.0.0.1:${PD}` }); // "Generate a new command", no in-place push
     check('B8-r2: the mint reports the holder locked out and its link is gone AT ONCE', pair2.lockedOut === true && !facts().linked && Date.now() - t0 < 200, JSON.stringify({ lockedOut: pair2.lockedOut, linked: facts().linked }));
@@ -638,7 +638,7 @@ console.log('— verify-r2 B8-r2: a rotation disconnects the holder NOW; the dev
     spawnOne('b', bsrc, pair2.dialToken); // the OWNER's device on the NEW command
     const t1 = Date.now();
     while (Date.now() - t1 < 15000 && !/dial-out connected/.test(logOf('b'))) await sleep(250);
-    check(`B8-r2: the device on the NEW command is admitted (${Math.round((Date.now() - t1) / 1000)} s; r1 refused it as the holder's duplicate 4× in 9 s)`, /dial-out connected/.test(logOf('b')) && facts().accepts === 2 && facts().linked && !facts().rs.dup, JSON.stringify({ accepts: facts().accepts, rs: facts().rs }));
+    check(`B8-r2: the device on the NEW command is admitted (${Math.round((Date.now() - t1) / 1000)} s; r1 refused it as the holder's duplicate 4× in 9 s)`, gateOf(/dial-out connected/.test(logOf('b'))) && facts().accepts === 2 && gateOf(facts().linked) && !facts().rs.dup, JSON.stringify({ accepts: facts().accepts, rs: facts().rs }));
   } });
   // CONTROL: a dial-pairing.js copy whose mint never ends the link (r1's minter) — the holder keeps its link, the
   // device on the new command is refused as its duplicate
@@ -655,7 +655,7 @@ console.log('— verify-r2 B8-r2: a rotation disconnects the holder NOW; the dev
       const pair2 = DPD.agentdMintDialPair('mac', { host: `127.0.0.1:${PD}` });
       spawnOne('b', bsrc, pair2.dialToken);
       await sleep(8000);
-      check(`B8-r2 CONTROL: without the lock-out the holder keeps its link and the device on the NEW command is refused as its duplicate (${facts().accepts} accept, dup note ${!!facts().rs.dup}) — the leg above goes red`, facts().accepts === 1 && facts().linked && /refused — duplicate-device/.test(logOf('b')) && !/dial-out connected/.test(logOf('b')), JSON.stringify({ accepts: facts().accepts, linked: facts().linked }));
+      check(`B8-r2 CONTROL: without the lock-out the holder keeps its link and the device on the NEW command is refused as its duplicate (${facts().accepts} accept, dup note ${!!facts().rs.dup}) — the leg above goes red`, facts().accepts === 1 && gateOf(facts().linked) && gateOf(/refused — duplicate-device/.test(logOf('b'))) && !/dial-out connected/.test(logOf('b')), JSON.stringify({ accepts: facts().accepts, linked: facts().linked }));
     } });
   }
 }
@@ -674,7 +674,7 @@ console.log('— lane-pairing ④: a 120-byte root — the socket rung + the wit
   dL.unref(); daemonsToKill.push(path.join(longRoot, 'state'));
   const wit = await waitFor(() => { const p = String(fs.readFileSync(SP.witnessPathOf(longRoot), 'utf8')).trim(); return p && fs.statSync(p).isSocket() ? p : null; }, 15000);
   check(`the daemon listens on the ${want.via} rung and writes the witness (${wit})`, !!wit && wit === want.path && want.via !== 'natural' && Buffer.byteLength(wit) <= 107, JSON.stringify({ wit, want }));
-  check('…its log names the rung and the bytes', /listening on [^\n]+ \((runtime-dir|tmpdir|tmp), \d+\/107 bytes\)/.test(fs.readFileSync(path.join(longRoot, 'state', 'agentd.log'), 'utf8')));
+  check('…its log names the rung and the bytes', verdictOf(/listening on [^\n]+ \((runtime-dir|tmpdir|tmp), \d+\/107 bytes\)/.test(fs.readFileSync(path.join(longRoot, 'state', 'agentd.log'), 'utf8'))));
   // the hub's transport: a DeviceManager over the same root reads the witness, provisions its token, completes hello
   const prevRoot = process.env.VIBESPACE_AGENTD_ROOT;
   process.env.VIBESPACE_AGENTD_ROOT = longRoot;
@@ -691,7 +691,7 @@ console.log('— lane-pairing ④: a 120-byte root — the socket rung + the wit
     hub.stop?.();
   } catch (e) { info = null; console.error('    hub connect:', e.message); }
   finally { if (prevRoot === undefined) delete process.env.VIBESPACE_AGENTD_ROOT; else process.env.VIBESPACE_AGENTD_ROOT = prevRoot; }
-  check('the hub\'s local DeviceManager connects over the short socket and completes hello', !!info && (info.capabilities || []).includes('dial-status'), JSON.stringify(info && info.daemonVersion));
+  check('the hub\'s local DeviceManager connects over the short socket and completes hello', !!info && verdictOf((info.capabilities || []).includes('dial-status')), JSON.stringify(info && info.daemonVersion));
 }
 // ── lane win-upgrade-pipe (2026-10-04): a REAL self-upgrade re-exec on POSIX — two real daemons through the REAL dial
 // gate: the old one (reporting 2.369.1) is upgraded, CLOSES its listener and only then starts the successor, which
@@ -752,7 +752,7 @@ console.log('— lane win-upgrade-pipe: a REAL re-exec hands over (close, then s
   check('REAL: the old daemon landed the upgrade, CLOSED its listener, and only then the successor started', landed >= 0 && handed > landed && newStart > handed, log.split('\n').filter((l) => /upgrade|hand-over|starting|listen|server error/.test(l)).join('\n    '));
   check('REAL: both daemons listened (old, then the successor), no "server error" anywhere', (log.match(/listening on /g) || []).length === 2 && !/server error/.test(log));
   const newPid = lockPidOf(stE);
-  check('REAL: the successor holds the singleton lock (a new pid) and the old process is gone', newPid > 0 && newPid !== oldPid && (() => { try { process.kill(oldPid, 0); return false; } catch { return true; } })(), JSON.stringify({ oldPid, newPid }));
+  check('REAL: the successor holds the singleton lock (a new pid) and the old process is gone', newPid > 0 && newPid !== oldPid && verdictOf((() => { try { process.kill(oldPid, 0); return false; } catch { return true; } })()), JSON.stringify({ oldPid, newPid }));
   const iA = events.indexOf('answered:2.369.1'), iB = events.indexOf('begun:' + version), iC = events.lastIndexOf('answered:' + version), iM = events.indexOf('matched:' + version);
   check('REAL: the hub\'s door saw answered (2.369.1) → begun (→ the shipped version) → answered → matched — the never-came-back watch is armed and disarmed by the real path', iA >= 0 && iB > iA && iC > iB && iM > iB, JSON.stringify(events));
   const third = await new Promise((resolve) => {
@@ -761,7 +761,7 @@ console.log('— lane win-upgrade-pipe: a REAL re-exec hands over (close, then s
     const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } resolve({ code: 'timeout', err }); }, 15000);
     c.on('exit', (code) => { clearTimeout(t); resolve({ code, err }); });
   });
-  check('REAL: a THIRD daemon on the same root is refused by the singleton lock (exit 3, "already running") — the retry never makes a second instance', third.code === 3 && /already running/.test(third.err), JSON.stringify(third));
+  check('REAL: a THIRD daemon on the same root is refused by the singleton lock (exit 3, "already running") — the retry never makes a second instance', third.code === 3 && verdictOf(/already running/.test(third.err)), JSON.stringify(third));
   for (const d of DPE.agentdDialDevices.values()) { try { d.stop(); } catch { } }
   killDaemon(stE);
   srvE.close();
@@ -778,4 +778,4 @@ httpSrv.close();
 if (process.env.KEEP_TMP) console.log('tmp:', tmp); else fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd DIAL-OUT tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

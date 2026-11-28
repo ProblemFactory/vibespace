@@ -33,7 +33,7 @@ const NARCH = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64
 const TARN = `node-${NODE_VERSION}-${NOS}-${NARCH}.tar.gz`;
 
 let fails = 0, skips = 0;
-const check = (name, ok, detail = '') => {
+const check = (name, ok, detail = '') => { if (typeof ok !== 'boolean') throw new TypeError(`check: its condition is a ${typeof ok}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (ok) console.log(`  ✓ ${name}`);
   else { fails++; console.error(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`); }
 };
@@ -139,12 +139,12 @@ else {
   const home = freshHome('h1'), root = path.join(home, 'root');
   const r = await run(['--node-only'], baseEnv(home, root));
   const priv = path.join(root, 'node', 'bin', 'node');
-  check('provisions a private node with no node on the machine', r.status === 0 && fs.existsSync(priv),
+  check('provisions a private node with no node on the machine', r.status === 0 && verdictOf(fs.existsSync(priv)),
     `exit=${r.status} ${(r.stderr || '').trim().slice(-200)}`);
-  check('reports the private node path', (r.stdout || '').includes(priv), (r.stdout || '').trim().slice(-160));
-  check('checksum was verified', (r.stdout || '').includes('checksum verified'));
+  check('reports the private node path', verdictOf((r.stdout || '').includes(priv)), (r.stdout || '').trim().slice(-160));
+  check('checksum was verified', verdictOf((r.stdout || '').includes('checksum verified')));
   check('breadcrumb state/node-path points at it',
-    fs.existsSync(path.join(root, 'state', 'node-path')) &&
+    gateOf(fs.existsSync(path.join(root, 'state', 'node-path'))) &&
     fs.readFileSync(path.join(root, 'state', 'node-path'), 'utf8') === priv);
   check('no download leftovers', fs.readdirSync(root).filter((f) => f.startsWith('.node-dl')).length === 0,
     fs.readdirSync(root).join(','));
@@ -160,18 +160,18 @@ else {
   const home3 = freshHome('h3'), root3 = path.join(home3, 'root');
   const r3 = await run(['--node-only'], baseEnv(home3, root3));
   check('tampered tarball ⇒ non-zero exit', r3.status !== 0, `exit=${r3.status}`);
-  check('tampered tarball ⇒ says checksum mismatch', /checksum mismatch/.test(r3.stdout || ''),
+  check('tampered tarball ⇒ says checksum mismatch', verdictOf(/checksum mismatch/.test(r3.stdout || '')),
     (r3.stdout || '').trim().slice(-160));
   check('tampered tarball ⇒ no $ROOT/node committed', !fs.existsSync(path.join(root3, 'node')));
   check('tampered tarball ⇒ no .node-dl leftovers',
-    fs.existsSync(root3) && fs.readdirSync(root3).filter((f) => f.startsWith('.node-dl')).length === 0);
+    gateOf(fs.existsSync(root3)) && fs.readdirSync(root3).filter((f) => f.startsWith('.node-dl')).length === 0);
 
   // ── 4. tarball missing from SHASUMS256.txt is REFUSED ─────────────────────
   mode = 'nosum';
   const home4 = freshHome('h4'), root4 = path.join(home4, 'root');
   const r4 = await run(['--node-only'], baseEnv(home4, root4));
   check('unlisted tarball ⇒ non-zero exit', r4.status !== 0, `exit=${r4.status}`);
-  check('unlisted tarball ⇒ names SHASUMS256.txt', /SHASUMS256\.txt/.test(r4.stdout || ''),
+  check('unlisted tarball ⇒ names SHASUMS256.txt', verdictOf(/SHASUMS256\.txt/.test(r4.stdout || '')),
     (r4.stdout || '').trim().slice(-160));
   check('unlisted tarball ⇒ no $ROOT/node committed', !fs.existsSync(path.join(root4, 'node')));
   mode = 'ok';
@@ -186,7 +186,7 @@ else {
   const before5 = hits.tar;
   const r5 = await run(['--node-only'], baseEnv(home5, root5));
   check('nvm node found with a PATH that has none',
-    r5.status === 0 && (r5.stdout || '').includes(path.join(nvmBin, 'node')), (r5.stdout || '').trim().slice(-160));
+    r5.status === 0 && verdictOf((r5.stdout || '').includes(path.join(nvmBin, 'node'))), (r5.stdout || '').trim().slice(-160));
   check('nvm node ⇒ nothing downloaded', hits.tar === before5, `tarHits ${before5}→${hits.tar}`);
 
   // ── 6. newest nvm version wins ────────────────────────────────────────────
@@ -195,7 +195,7 @@ else {
   fs.writeFileSync(path.join(olderBin, 'node'), NODE_STUB, { mode: 0o755 });
   const r6 = await run(['--node-only'], baseEnv(home5, path.join(home5, 'root6')));
   check('newest nvm version wins (v22 over v9, not lexicographic)',
-    (r6.stdout || '').includes(path.join(nvmBin, 'node')), (r6.stdout || '').trim().slice(-160));
+    verdictOf((r6.stdout || '').includes(path.join(nvmBin, 'node'))), (r6.stdout || '').trim().slice(-160));
 }
 
 // ── 7. --node override short-circuits discovery ──────────────────────────────
@@ -203,7 +203,7 @@ else {
   const home = freshHome('h7'), root = path.join(home, 'root');
   const before = hits.tar;
   const r = await run(['--node-only', '--node', overrideNode], baseEnv(home, root), { mask: canMask });
-  check('--node override is used verbatim', r.status === 0 && (r.stdout || '').includes(overrideNode),
+  check('--node override is used verbatim', r.status === 0 && verdictOf((r.stdout || '').includes(overrideNode)),
     `exit=${r.status} ${(r.stdout || '').trim().slice(-160)}`);
   check('--node override ⇒ nothing downloaded', hits.tar === before);
 }
@@ -218,7 +218,7 @@ else {
   const r = await run(['--node-only', '--node', bogus], baseEnv(home, root));
   // falls through to provisioning rather than trusting a broken binary
   check('a non-working --node falls back to provisioning',
-    r.status === 0 && fs.existsSync(path.join(root, 'node', 'bin', 'node')) && hits.tar === before + 1,
+    r.status === 0 && gateOf(fs.existsSync(path.join(root, 'node', 'bin', 'node'))) && hits.tar === before + 1,
     `exit=${r.status} tarHits ${before}→${hits.tar}`);
 }
 
@@ -232,7 +232,7 @@ else {
   check(`⑨ both installers pin ${NEW_VERSION} (sh ${pinSh}, ps1 ${pinPs}) and the pin is at or above the hub's floor for its line (${pinV.floor})`,
     pinSh === NEW_VERSION && pinPs === NEW_VERSION && pinV.state === 'ok', JSON.stringify(pinV));
   check('⑨ both comments name the advisory (the Node.js security releases of 2026-10-21)',
-    /security releases of 2026-10-21/.test(sh.slice(0, sh.indexOf('NODE_VERSION="'))) && /security releases of 2026-10-21/.test(ps1.slice(0, ps1.indexOf('$NodeVersion = '))));
+    gateOf(/security releases of 2026-10-21/.test(sh.slice(0, sh.indexOf('NODE_VERSION="')))) && verdictOf(/security releases of 2026-10-21/.test(ps1.slice(0, ps1.indexOf('$NodeVersion = ')))));
 }
 if (!canMask) skip('⑨ the pin-moved cases', 'needs a node-free sandbox');
 else {
@@ -245,10 +245,10 @@ else {
   const n1 = hits.byVersion[NEW_VERSION] || 0;
   const r1 = await run(['--node-only'], env9(NEW_VERSION));
   check(`⑨ the pin moved ⇒ its OWN node is replaced by ${NEW_VERSION} (downloaded once, checksum verified, said)`,
-    r1.status === 0 && vOf(priv) === NEW_VERSION && (hits.byVersion[NEW_VERSION] || 0) === n1 + 1 && (r1.stdout || '').includes(`this install's own Node ${NODE_VERSION} is older than the pinned ${NEW_VERSION} — replacing it`) && (r1.stdout || '').includes('checksum verified'),
+    r1.status === 0 && vOf(priv) === NEW_VERSION && (hits.byVersion[NEW_VERSION] || 0) === n1 + 1 && gateOf((r1.stdout || '').includes(`this install's own Node ${NODE_VERSION} is older than the pinned ${NEW_VERSION} — replacing it`)) && verdictOf((r1.stdout || '').includes('checksum verified')),
     `exit=${r1.status} v=${vOf(priv)} ${(r1.stdout || '').trim().slice(-300)}`);
   check('⑨ …the agent runs it (the breadcrumb + the resolved path), no .node-dl / node.old left behind',
-    (r1.stdout || '').includes(`→ node: ${priv} (${NEW_VERSION})`) && fs.readFileSync(path.join(root, 'state', 'node-path'), 'utf8') === priv
+    gateOf((r1.stdout || '').includes(`→ node: ${priv} (${NEW_VERSION})`)) && fs.readFileSync(path.join(root, 'state', 'node-path'), 'utf8') === priv
     && !fs.readdirSync(root).some((f) => f.startsWith('.node-dl') || f === 'node.old'), fs.readdirSync(root).join(','));
   const t2 = hits.tar;
   const r2 = await run(['--node-only'], env9(NEW_VERSION));
@@ -257,7 +257,7 @@ else {
   check('⑨ an OLDER pin never downgrades its own node', r3.status === 0 && hits.tar === t2 && vOf(priv) === NEW_VERSION, `v=${vOf(priv)} tarHits ${t2}→${hits.tar}`);
   const r4 = await run(['--node-only'], env9('v22.99.0'));   // the fixture mirror has no such build: the download fails
   check('⑨ the pin moved but the download fails ⇒ it keeps the node it had, says so, and goes on (exit 0)',
-    r4.status === 0 && vOf(priv) === NEW_VERSION && (r4.stdout || '').includes(`keeping ${NEW_VERSION} for now`), `exit=${r4.status} ${(r4.stdout || '').trim().slice(-240)}`);
+    r4.status === 0 && vOf(priv) === NEW_VERSION && verdictOf((r4.stdout || '').includes(`keeping ${NEW_VERSION} for now`)), `exit=${r4.status} ${(r4.stdout || '').trim().slice(-240)}`);
 
   // a node the machine HAD: on PATH (no own node in this root) and a --node — older than the pin, never touched
   const homeS = freshHome('h9s'), rootS = path.join(homeS, 'root');
@@ -266,11 +266,11 @@ else {
   const sysBytes = fs.readFileSync(sysNode, 'utf8'), t5 = hits.tar;
   const r5 = await run(['--node-only'], { ...baseEnv(homeS, rootS), VIBESPACE_NODE_VERSION: NEW_VERSION, PATH: `${sysBin}:/usr/bin:/bin` });
   check('⑨ a system node older than the pin (on PATH) is USED and never touched — nothing downloaded, no own node made',
-    r5.status === 0 && (r5.stdout || '').includes(`→ node: ${sysNode} (v22.10.0)`) && hits.tar === t5 && fs.readFileSync(sysNode, 'utf8') === sysBytes && !fs.existsSync(path.join(rootS, 'node')),
+    r5.status === 0 && gateOf((r5.stdout || '').includes(`→ node: ${sysNode} (v22.10.0)`)) && hits.tar === t5 && fs.readFileSync(sysNode, 'utf8') === sysBytes && !fs.existsSync(path.join(rootS, 'node')),
     `exit=${r5.status} ${(r5.stdout || '').trim().slice(-200)}`);
   const r6 = await run(['--node-only', '--node', sysNode], { ...baseEnv(home, root), VIBESPACE_NODE_VERSION: 'v22.30.0' });
   check('⑨ a --node older than the pin, beside an own node older than the pin: the --node is used, nothing downloaded or replaced',
-    r6.status === 0 && (r6.stdout || '').includes(`→ node: ${sysNode} (v22.10.0)`) && hits.tar === t5 && vOf(priv) === NEW_VERSION && fs.readFileSync(sysNode, 'utf8') === sysBytes,
+    r6.status === 0 && gateOf((r6.stdout || '').includes(`→ node: ${sysNode} (v22.10.0)`)) && hits.tar === t5 && vOf(priv) === NEW_VERSION && fs.readFileSync(sysNode, 'utf8') === sysBytes,
     `exit=${r6.status} ${(r6.stdout || '').trim().slice(-200)}`);
 
   // RED CONTROL: the 2.369.340 installer (git show 72056f53), the same root at the old pin, the pin moved
@@ -290,4 +290,4 @@ else {
 
 srv.close();
 console.log(fails ? `\n✗ ${fails} failure(s)${skips ? `, ${skips} skipped` : ''}` : `\n✓ all node-bootstrap checks passed${skips ? ` (${skips} skipped)` : ''}`);
-process.exit(fails ? 1 : 0);
+process.exit(fails ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

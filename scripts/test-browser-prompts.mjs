@@ -24,7 +24,7 @@ const { WebSocketServer, WebSocket: WSClient } = require('ws');
 const ST = require('../src/browser-stuck.js');
 const D = require('../src/server/browser-dialogs.js');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -173,41 +173,41 @@ const NAMED = 'bp-a0000002', KEY = 'bk-0000d1a1';
 const tgt = { profileId: NAMED, browserKey: KEY };
 await w.arm(NAMED); await settle3('the watch armed');
 const callsOf = (method) => ch.calls.filter((m) => m.method === method);
-ok(callsOf('Page.setInterceptFileChooserDialog').some((m) => m.params.enabled === true && m.sessionId), 'the file chooser is intercepted on the tab (its session)');
+ok(verdictOf(callsOf('Page.setInterceptFileChooserDialog').some((m) => m.params.enabled === true && m.sessionId)), 'the file chooser is intercepted on the tab (its session)');
 const fe = callsOf('Fetch.enable')[0];
-ok(fe && fe.params.handleAuthRequests === true && fe.params.patterns.length === 1 && fe.params.patterns[0].resourceType === 'Document' && fe.params.patterns[0].requestStage === 'Request', 'Fetch: sign-ins handled, Document requests only (a sub-resource never waits on this socket)', fe && fe.params);
+ok(gateOf(fe) && fe.params.handleAuthRequests === true && fe.params.patterns.length === 1 && fe.params.patterns[0].resourceType === 'Document' && fe.params.patterns[0].requestStage === 'Request', 'Fetch: sign-ins handled, Document requests only (a sub-resource never waits on this socket)', fe && fe.params);
 ch.emit('Fetch.requestPaused', { requestId: 'P9', request: { url: 'http://127.0.0.1:9/' } }); await settle3('requestPaused P9');
-ok(callsOf('Fetch.continueRequest').some((m) => m.params.requestId === 'P9'), 'a paused Document request is continued at once (never a second proxy)');
+ok(verdictOf(callsOf('Fetch.continueRequest').some((m) => m.params.requestId === 'P9')), 'a paused Document request is continued at once (never a second proxy)');
 ch.emit('Page.fileChooserOpened', FILE_P); await settle3('fileChooserOpened');
 let f = w.factFor({ ...tgt, consume: false });
-ok(f.prompt && f.prompt.type === 'file' && /vibespace-browser upload/.test(f.prompt.text) && events.some((e) => e.kind === 'prompt' && e.state === 'open'), 'fileChooserOpened ⇒ the record + THE SENTENCE + a prompt event', f.prompt);
+ok(gateOf(f.prompt) && f.prompt.type === 'file' && gateOf(/vibespace-browser upload/.test(f.prompt.text)) && verdictOf(events.some((e) => e.kind === 'prompt' && e.state === 'open')), 'fileChooserOpened ⇒ the record + THE SENTENCE + a prompt event', f.prompt);
 w.verbStarted(KEY, { profileId: NAMED, verb: 'upload' }); w.verbEnded(KEY, { profileId: NAMED });
 ok(w.factFor({ ...tgt, consume: false }).prompt === null, '…the agent\'s upload ends it');
 ch.emit('Page.fileChooserOpened', FILE_P); await settle3('fileChooserOpened');
-ok((await w.answerPrompt(tgt, { cancel: true })).ok && w.factFor({ ...tgt, consume: false }).prompt === null, '…the live view\'s Dismiss ends a file prompt (the page got nothing)');
+ok(gateOf((await w.answerPrompt(tgt, { cancel: true })).ok) && w.factFor({ ...tgt, consume: false }).prompt === null, '…the live view\'s Dismiss ends a file prompt (the page got nothing)');
 ch.emit('Fetch.authRequired', AUTH_P); await settle3('authRequired R1');
 f = w.factFor({ ...tgt, consume: false });
-ok(f.prompt && f.prompt.type === 'http-auth' && f.prompt.realm === 'Lane Realm' && /only the user can answer it/.test(f.prompt.text), 'authRequired ⇒ the sign-in record + THE SENTENCE', f.prompt);
+ok(gateOf(f.prompt) && f.prompt.type === 'http-auth' && f.prompt.realm === 'Lane Realm' && verdictOf(/only the user can answer it/.test(f.prompt.text)), 'authRequired ⇒ the sign-in record + THE SENTENCE', f.prompt);
 ok((await w.answerPrompt(tgt, { username: '' })).code === 'bad_request', 'an empty username is refused');
 const ans = await w.answerPrompt(tgt, { username: 'ann', password: PW });
 const cwa = callsOf('Fetch.continueWithAuth');
-ok(ans.ok && cwa.length === 1 && cwa[0].params.requestId === 'R1' && cwa[0].params.authChallengeResponse.response === 'ProvideCredentials' && cwa[0].params.authChallengeResponse.username === 'ann' && cwa[0].params.authChallengeResponse.password === PW, '…the answer ⇒ continueWithAuth ProvideCredentials on the paused request (on its session)', cwa);
+ok(gateOf(ans.ok) && cwa.length === 1 && cwa[0].params.requestId === 'R1' && cwa[0].params.authChallengeResponse.response === 'ProvideCredentials' && cwa[0].params.authChallengeResponse.username === 'ann' && cwa[0].params.authChallengeResponse.password === PW, '…the answer ⇒ continueWithAuth ProvideCredentials on the paused request (on its session)', cwa);
 let notes = w.factFor({ ...tgt, consume: true }).notes;
-ok(notes.length === 1 && /was answered: the user signed in/.test(notes[0]) && w.factFor({ ...tgt, consume: true }).notes.length === 0, '…the agent\'s next result: who answered, once', notes);
+ok(notes.length === 1 && gateOf(/was answered: the user signed in/.test(notes[0])) && w.factFor({ ...tgt, consume: true }).notes.length === 0, '…the agent\'s next result: who answered, once', notes);
 ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R2' }); await settle3('authRequired R2');
 await w.answerPrompt(tgt, { cancel: true });
-ok(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R2' && m.params.authChallengeResponse.response === 'CancelAuth'), 'Cancel ⇒ CancelAuth (the page gets its 401)');
+ok(verdictOf(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R2' && m.params.authChallengeResponse.response === 'CancelAuth')), 'Cancel ⇒ CancelAuth (the page gets its 401)');
 ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R3' }); await settle3('authRequired R3'); await untilFact(() => fy.added.length >= 1, 'R3: its For-you item past the ask clock');   // (was 200 ms: the ask clock is 120)
 ok(fy.added.length === 1 && fy.added[0].i18n.text.key === 'A page in the agent browser asks you to sign in ({host})' && fy.added[0].i18n.text.params.host === '127.0.0.1', 'unanswered past the ask clock ⇒ ONE For-you item naming the site', fy.added);
 // B-ebb7: the item is FILED by the real store (the watch's catch said nothing to the agent and the tray stayed empty before the cure)
 const signIn = fy.stored[0];
-ok(fy.stored.length === 1 && signIn && signIn.sessionKey === 'browser' && signIn.status === 'open' && Array.isArray(signIn.i18n && signIn.i18n.detail) && signIn.i18n.detail[0].key === 'Open its live view and type the username and password there — the agent never sees them.' && !lines.some((l) => /the sign-in For-you item was not filed/.test(l)), '…FILED by the real For-you store: its detail an array of lines the client words (B-ebb7)', { stored: fy.stored, said: lines.filter((l) => /not filed/.test(l)) });
+ok(fy.stored.length === 1 && gateOf(signIn) && signIn.sessionKey === 'browser' && signIn.status === 'open' && gateOf(Array.isArray(signIn.i18n && signIn.i18n.detail)) && signIn.i18n.detail[0].key === 'Open its live view and type the username and password there — the agent never sees them.' && !lines.some((l) => /the sign-in For-you item was not filed/.test(l)), '…FILED by the real For-you store: its detail an array of lines the client words (B-ebb7)', { stored: fy.stored, said: lines.filter((l) => /not filed/.test(l)) });
 // the control: the shape before the cure (detail as one object) is REFUSED by the same store — the leg above judges with a real judge
 let objRefused = null; try { fileItem({ text: 't', detail: 'd', i18n: { text: { key: 'A page in the agent browser asks you to sign in ({host})', params: { host: 'x' } }, detail: { key: 'd' } } }); } catch (e) { objRefused = String(e && e.message); }
-ok(/i18n\.detail must be an array of lines/.test(String(objRefused)), 'the control: the pre-cure object detail is REFUSED by the store by name (so a watch that files it files nothing)', objRefused);
+ok(verdictOf(/i18n\.detail must be an array of lines/.test(String(objRefused))), 'the control: the pre-cure object detail is REFUSED by the store by name (so a watch that files it files nothing)', objRefused);
 await untilFact(() => w.factFor({ ...tgt, consume: false }).prompt === null && fy.resolved.includes(signIn && signIn.id), 'R3: the hold clock ran out (its record gone, its item resolved)'); await settle3('R3 cancelled');   // (was 320 ms more: the hold is 400)
-ok(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R3' && m.params.authChallengeResponse.response === 'CancelAuth') && fy.resolved.includes(signIn && signIn.id) && todos.get(signIn.id).status === 'done' && w.factFor({ ...tgt, consume: false }).prompt === null, 'nobody answers within the hold ⇒ CancelAuth, the For-you item resolved, the record gone');
-ok(/nobody answered it within/.test(w.factFor({ ...tgt, consume: true }).notes.join(' ')), '…and the agent hears it was cancelled for want of an answer');
+ok(gateOf(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R3' && m.params.authChallengeResponse.response === 'CancelAuth')) && gateOf(fy.resolved.includes(signIn && signIn.id)) && todos.get(signIn.id).status === 'done' && w.factFor({ ...tgt, consume: false }).prompt === null, 'nobody answers within the hold ⇒ CancelAuth, the For-you item resolved, the record gone');
+ok(verdictOf(/nobody answered it within/.test(w.factFor({ ...tgt, consume: true }).notes.join(' '))), '…and the agent hears it was cancelled for want of an answer');
 ch.emit('Page.fileChooserOpened', FILE_P); await settle3('fileChooserOpened');
 ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R4' }); await settle3('authRequired R4');
 ok(w.factFor({ ...tgt, consume: false }).prompt.type === 'http-auth', 'one prompt per tab: the newer one is said');
@@ -217,7 +217,7 @@ const r4 = fy.stored[fy.stored.length - 1]; const r4Item = r4 && todos.get(r4.id
 const r4Open = !!(r4Item && r4Item !== signIn && r4Item.status === 'open' && String(r4Item.itemKey || '').startsWith(`prompt-auth:${NAMED}:`));
 const said0 = lines.length;
 const wNext = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: false }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400 });
-ok(r4Open && todos.get(r4.id).status === 'dismissed' && todos.get(r4.id).resolvedBy === 'hub-restart' && lines.slice(said0).filter((l) => /sign-in For-you item\(s\) of a past hub life resolved/.test(l)).length === 1, '…its item is KEYED (prompt-auth:<profile>:…) and the next hub life\'s watch closes a past life\'s open sign-in item — DISMISSED by «hub-restart», never «done» (nobody answered it), said once', { r4Open, now: r4 && todos.get(r4.id) && { status: todos.get(r4.id).status, by: todos.get(r4.id).resolvedBy }, said: lines.slice(said0) });
+ok(gateOf(r4Open) && todos.get(r4.id).status === 'dismissed' && todos.get(r4.id).resolvedBy === 'hub-restart' && lines.slice(said0).filter((l) => /sign-in For-you item\(s\) of a past hub life resolved/.test(l)).length === 1, '…its item is KEYED (prompt-auth:<profile>:…) and the next hub life\'s watch closes a past life\'s open sign-in item — DISMISSED by «hub-restart», never «done» (nobody answered it), said once', { r4Open, now: r4 && todos.get(r4.id) && { status: todos.get(r4.id).status, by: todos.get(r4.id).resolvedBy }, said: lines.slice(said0) });
 wNext.shutdown();
 { // …the tray says who closed it in words (zh / ja with it), and the hub's own wiring passes the close through
   const { resolvedByText } = await import('../src/lib/user-todos-row.js');
@@ -228,7 +228,7 @@ wNext.shutdown();
   const FA = require('../src/foryou-actions.js');
   ok(FA.settledWords({ status: 'dismissed', resolvedBy: 'hub-restart' }, (k) => k) === W0, 'the For-you window\'s own closer words (settledWords) say «VibeSpace restarted before it was answered» for the sweep\'s close, never a bare «dismissed»');
   const wiring = read('src/server/mounts-plugins-wiring.js'), dsrcW = read('src/server/browser-dialogs.js');
-  ok(/sweepAs: \(prefix, status, by\) => \{[^\n]*userTodos\.setStatus\(id, status, by\); return ids\.length; \}/.test(wiring) && /sweep: \(prefix\) => \{[^\n]*userTodos\.setStatus\(id, 'done', 'browser'\); return ids\.length; \}/.test(wiring) && (wiring.match(/userTodos\.idsWhere\(\(i\) => i\.status === 'open' && i\.sessionKey === 'browser'/g) || []).length === 1 && (wiring.match(/const ids = browserItemIds\(prefix\);/g) || []).length === 2 && dsrcW.includes("forYou.sweepAs(PROMPT_FY_KEY, 'dismissed', 'hub-restart')") && dsrcW.includes("forYou.sweep('pk-left:')"),
+  ok(gateOf(/sweepAs: \(prefix, status, by\) => \{[^\n]*userTodos\.setStatus\(id, status, by\); return ids\.length; \}/.test(wiring)) && gateOf(/sweep: \(prefix\) => \{[^\n]*userTodos\.setStatus\(id, 'done', 'browser'\); return ids\.length; \}/.test(wiring)) && (wiring.match(/userTodos\.idsWhere\(\(i\) => i\.status === 'open' && i\.sessionKey === 'browser'/g) || []).length === 1 && (wiring.match(/const ids = browserItemIds\(prefix\);/g) || []).length === 2 && gateOf(dsrcW.includes("forYou.sweepAs(PROMPT_FY_KEY, 'dismissed', 'hub-restart')")) && verdictOf(dsrcW.includes("forYou.sweep('pk-left:')")),
     'the hub\'s wiring: sweepAs names the close (status, closer) BESIDE the release\'s sweep, which the passkey sweep keeps (its «done»; the wiring block test-browser-passkey ⑨r10 reads is untouched)');
 }
 { // CONTROL: a watch copy WITHOUT the sweep leaves a past life's sign-in item open for good
@@ -242,7 +242,7 @@ wNext.shutdown();
   ok(todos.get(past).status === 'open', 'CONTROL (a watch without the sweep): a past hub life\'s sign-in item stays open for good', todos.get(past));
   wm.shutdown();
   forYou.sweep('prompt-auth:');
-  for (const c of copiesCensus(MUTP.files, MUTP.dir, REPO, { label: '③ sweep control: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUTP.files, MUTP.dir, REPO, { label: '③ sweep control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 w.shutdown(); await ch.close();
 
@@ -263,15 +263,15 @@ console.log('③x the X road: the sign-in is Chrome\'s own sheet');
   chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X1' }); await settleX('authRequired X1');
   let fx = wx.factFor({ ...tx, consume: false });
   ok(cwaX().length === 1 && cwaX()[0].params.requestId === 'X1' && cwaX()[0].params.authChallengeResponse.response === 'Default', 'X road: the sign-in is answered `Default` AT ONCE — Chrome draws its own sheet (the request is never held for a form of ours)', cwaX());
-  ok(fx.prompt && fx.prompt.native === true && fx.prompt.title === 'Sign in' && /^Chrome's own sign-in sheet \("Sign in"/.test(fx.prompt.text), "…and it STANDS as Chrome's native sheet, said by its title", fx.prompt);
+  ok(gateOf(fx.prompt) && fx.prompt.native === true && fx.prompt.title === 'Sign in' && verdictOf(/^Chrome's own sign-in sheet \("Sign in"/.test(fx.prompt.text)), "…and it STANDS as Chrome's native sheet, said by its title", fx.prompt);
   ok((await wx.answerPrompt(tx, { username: 'ann', password: PW })).code === 'native_sheet' && cwaX().length === 1, '…the live view\'s form cannot answer it (no credential ever passes through VibeSpace on this road)');
   chx.emit('Page.frameNavigated', { frame: { id: 'T1', url: 'chrome-error://chromewebdata/' } }); await settleX('frameNavigated chrome-error');
-  ok(wx.factFor({ ...tx, consume: false }).prompt && wx.factFor({ ...tx, consume: false }).prompt.native, 'the chrome-error://chromewebdata/ commit UNDER the sheet leaves it standing (measured: the sheet shows over it)');
+  ok(gateOf(wx.factFor({ ...tx, consume: false }).prompt) && verdictOf(wx.factFor({ ...tx, consume: false }).prompt.native), 'the chrome-error://chromewebdata/ commit UNDER the sheet leaves it standing (measured: the sheet shows over it)');
   chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X2' }); await settleX('authRequired X2');
-  ok(cwaX().some((m) => m.params.requestId === 'X2' && m.params.authChallengeResponse.response === 'Default') && wx.factFor({ ...tx, consume: false }).prompt.native, 'a wrong password (authRequired again) ⇒ Default again, the sheet stands');
+  ok(gateOf(cwaX().some((m) => m.params.requestId === 'X2' && m.params.authChallengeResponse.response === 'Default')) && verdictOf(wx.factFor({ ...tx, consume: false }).prompt.native), 'a wrong password (authRequired again) ⇒ Default again, the sheet stands');
   chx.emit('Page.frameNavigated', { frame: { id: 'T1', url: 'http://127.0.0.1:9/' } }); await settleX('frameNavigated the page');
   fx = wx.factFor({ ...tx, consume: true });
-  ok(fx.prompt === null && fx.notes.length === 1 && /closed in its window/.test(fx.notes[0]), 'a commit of the page itself (signed in, or the 401 body after Cancel) ⇒ the sheet is gone, told ONCE', fx.notes);
+  ok(fx.prompt === null && fx.notes.length === 1 && verdictOf(/closed in its window/.test(fx.notes[0])), 'a commit of the page itself (signed in, or the 401 body after Cancel) ⇒ the sheet is gone, told ONCE', fx.notes);
   chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X3' }); await settleX('authRequired X3'); await untilFact(() => wx.factFor({ ...tx, consume: false }).prompt === null, 'X3: the hold clock ran out (the native sheet forgotten)'); await settleX('X3 forgotten');   // (was 450 ms: the hold is 400)
   ok(wx.factFor({ ...tx, consume: false }).prompt === null && !cwaX().some((m) => m.params.requestId === 'X3' && m.params.authChallengeResponse.response === 'CancelAuth'), 'past the hold clock a native sheet is FORGOTTEN, never cancelled by the watch (it is Chrome\'s)');
   road = 'screencast';
@@ -284,7 +284,7 @@ console.log('③x the X road: the sign-in is Chrome\'s own sheet');
   await untilFact(() => hx.inHeld.length >= 1, 'X4 reached the held socket');
   asStood.held = hx.inHeld.length; recX.release(hx); await settleX('X4 released');
   ok(asStood.prompt === null && asStood.held >= 1 && !!wx.factFor({ ...tx, consume: false }).prompt, 'PLACED (the census\'s find, at will): the sign-in HELD at the watch\'s socket — the read as it stood (40 ms after the emit) finds no prompt though Chrome raised it; released, the socket\'s order brings it', asStood);
-  ok(!cwaX().some((m) => m.params.requestId === 'X4') && wx.factFor({ ...tx, consume: false }).prompt && !wx.factFor({ ...tx, consume: false }).prompt.native, 'CONTROL: the SCREENCAST road holds the sign-in for the live view\'s form exactly as before (no Default)');
+  ok(!cwaX().some((m) => m.params.requestId === 'X4') && gateOf(wx.factFor({ ...tx, consume: false }).prompt) && !wx.factFor({ ...tx, consume: false }).prompt.native, 'CONTROL: the SCREENCAST road holds the sign-in for the live view\'s form exactly as before (no Default)');
   wx.shutdown(); await chx.close();
 }
 
@@ -294,13 +294,13 @@ const surfaces = { lines, events, forYou: fy, facts: w.factFor({ ...tgt, consume
 ok(!JSON.stringify(surfaces).includes(PW), 'no log line, event, fact, note, For-you item or answer carries the password');
 const dsrc = read('src/server/browser-dialogs.js'), ssrc = read('src/server/browser-stream.js'), lsrc = read('src/lib/browser-live-window.js');
 const dLines = dsrc.split('\n').filter((l) => /\bpassword\b/.test(l));
-ok(dLines.length > 0 && dLines.every((l) => !/say\(|log\.|console\.|emit\(|push\(/.test(l.replace(/w\.promptNotes\.push\(\{ id: rec\.id, prompt: rec, how, by, at: now\(\), targetId: rec\.targetId, person: w\.mode === 'person', boundMs: authHoldMaxMs \}\)/, ''))), 'the watch: no line naming the password logs, emits or keeps it', dLines);
+ok(dLines.length > 0 && verdictOf(dLines.every((l) => !/say\(|log\.|console\.|emit\(|push\(/.test(l.replace(/w\.promptNotes\.push\(\{ id: rec\.id, prompt: rec, how, by, at: now\(\), targetId: rec\.targetId, person: w\.mode === 'person', boundMs: authHoldMaxMs \}\)/, '')))), 'the watch: no line naming the password logs, emits or keeps it', dLines);
 const sFn = (ssrc.match(/function answerPromptFor[\s\S]*?\n {2}\}\n/) || [''])[0];
-ok(sFn && !/console\.|say\(|trace|record\(/.test(sFn) && /prompt-ack/.test(sFn) && !/password[^:]*\}\)\)$/.test(sFn), 'the stream: answerPromptFor never logs or traces the message; the ack carries no credential');
-ok(/msg\.type === 'prompt-answer'\) \{ answerPromptFor\(relay, viewer, msg\); return; \}/.test(ssrc) && ssrc.indexOf("msg.type === 'prompt-answer'") < ssrc.indexOf('function onViewerMessage') + 600, 'the stream hands prompt-answer off first thing (before any later handler sees it)');
-ok(/promptWords\(pr, t, \{ person: !!H \}\)/.test(lsrc) && /send\(\{ type: 'prompt-answer', id: key, username: user\.value, password: pass\.value \}\); pass\.value = '';/.test(lsrc) && /box\('password', prw\.password/.test(lsrc), 'the live view: the bar from promptWords; the password box is a password input, cleared once sent');
-ok(/after\.prompt && after\.prompt\.text\) console\.error\(`note: \$\{after\.prompt\.text\} \[page_prompt\]`\)/.test(read('data/bin/vibespace-browser')) && /prompt: fct\.prompt \|\| null/.test(read('src/routes/browser.js')), 'the agent: the audit carries the prompt; the CLI prints THE SENTENCE as a [page_prompt] note');
-ok(/'loop-cleared', 'passkey', 'prompt'\]\.includes\(ev\.kind\)/.test(read('src/server/mounts-plugins-wiring.js')), 'a prompt event re-publishes the digest (the chip and the live view read it)');
+ok(gateOf(sFn) && !/console\.|say\(|trace|record\(/.test(sFn) && gateOf(/prompt-ack/.test(sFn)) && !/password[^:]*\}\)\)$/.test(sFn), 'the stream: answerPromptFor never logs or traces the message; the ack carries no credential');
+ok(gateOf(/msg\.type === 'prompt-answer'\) \{ answerPromptFor\(relay, viewer, msg\); return; \}/.test(ssrc)) && ssrc.indexOf("msg.type === 'prompt-answer'") < ssrc.indexOf('function onViewerMessage') + 600, 'the stream hands prompt-answer off first thing (before any later handler sees it)');
+ok(gateOf(/promptWords\(pr, t, \{ person: !!H \}\)/.test(lsrc)) && gateOf(/send\(\{ type: 'prompt-answer', id: key, username: user\.value, password: pass\.value \}\); pass\.value = '';/.test(lsrc)) && verdictOf(/box\('password', prw\.password/.test(lsrc)), 'the live view: the bar from promptWords; the password box is a password input, cleared once sent');
+ok(gateOf(/after\.prompt && after\.prompt\.text\) console\.error\(`note: \$\{after\.prompt\.text\} \[page_prompt\]`\)/.test(read('data/bin/vibespace-browser'))) && verdictOf(/prompt: fct\.prompt \|\| null/.test(read('src/routes/browser.js'))), 'the agent: the audit carries the prompt; the CLI prints THE SENTENCE as a [page_prompt] note');
+ok(verdictOf(/'loop-cleared', 'passkey', 'prompt'\]\.includes\(ev\.kind\)/.test(read('src/server/mounts-plugins-wiring.js'))), 'a prompt event re-publishes the digest (the chip and the live view read it)');
 
 // ═══ ⑤ lane browser-ui-prompts-r2: THE TWO MEASURED HANGS decided before they hold + the verb hears a sign-in at once ═══
 console.log('⑤ permissions decided ahead, the print preview released, the verb woken by a sign-in');
@@ -368,9 +368,9 @@ async function printLeg(Dmod) {
 }
 const pl = await printLeg(D);
 const perms = pl.calls.filter((m) => m.method === 'Browser.setPermission');
-ok(perms.length === Object.keys(ST.PERMISSION_KINDS).length && perms.every((m) => m.params.setting === 'denied' && m.params.browserContextId === 'C1' && !m.params.origin), `arm ⇒ every kind DENIED ahead for the tab's browser context, once (${perms.length} calls for 2 tabs)`, perms.length);
-ok(pl.released.length === 1 && pl.released[0] === 'PV' && pl.closed.length === 0 && !pl.tracked.includes('PV') && pl.tracked.includes('T1') && pl.tracked.includes('T2'), 'chrome://print ⇒ ITS cancel pressed in the preview (never a tab of the conversation); the normal tabs never touched', { released: pl.released, closed: pl.closed, tracked: pl.tracked });
-ok(pl.notes.filter((n) => /tried to print/.test(n) && /vibespace-browser pdf/.test(n)).length === 1 && !pl.again.some((n) => /tried to print/.test(n)) && pl.evs.some((e) => e.kind === 'print' && e.targetId === 'T1' && e.released), 'the opener\'s conversation is told ONCE per occurrence; the live view hears it', pl.notes);
+ok(perms.length === Object.keys(ST.PERMISSION_KINDS).length && verdictOf(perms.every((m) => m.params.setting === 'denied' && m.params.browserContextId === 'C1' && !m.params.origin)), `arm ⇒ every kind DENIED ahead for the tab's browser context, once (${perms.length} calls for 2 tabs)`, perms.length);
+ok(pl.released.length === 1 && pl.released[0] === 'PV' && pl.closed.length === 0 && !pl.tracked.includes('PV') && gateOf(pl.tracked.includes('T1')) && verdictOf(pl.tracked.includes('T2')), 'chrome://print ⇒ ITS cancel pressed in the preview (never a tab of the conversation); the normal tabs never touched', { released: pl.released, closed: pl.closed, tracked: pl.tracked });
+ok(pl.notes.filter((n) => /tried to print/.test(n) && /vibespace-browser pdf/.test(n)).length === 1 && !pl.again.some((n) => /tried to print/.test(n)) && verdictOf(pl.evs.some((e) => e.kind === 'print' && e.targetId === 'T1' && e.released)), 'the opener\'s conversation is told ONCE per occurrence; the live view hears it', pl.notes);
 // the permission flip
 const flips = []; pl.w._watches.get('bp-a0000003'); 
 const kp = { cdpEndpointFor: async () => ({ ok: true, url: pl.ch.url }), notePermission: (...a) => { flips.push(a); return true; } };
@@ -381,8 +381,8 @@ await w3.arm('bp-a0000003'); await settled(pl.ch, rec3b, 'the second watch armed
 const n0 = pl.ch.calls.length;
 const fl = await w3.setPermission(pl.t, { kind: 'geolocation', setting: 'allow', at: '51.5,-0.12' });
 const after = pl.ch.calls.slice(n0);
-ok(fl.ok && after.some((m) => m.method === 'Browser.setPermission' && m.params.setting === 'granted' && m.params.origin === 'http://127.0.0.1:9' && m.params.browserContextId === 'C1') && after.some((m) => m.method === 'Emulation.setGeolocationOverride' && m.params.latitude === 51.5 && m.sessionId), '`permission geolocation allow` ⇒ granted for the tab\'s origin + a position (measured: without one it pends)', after.map((m) => m.method));
-ok(fl.text === 'permission geolocation granted to http://127.0.0.1:9 by the agent' && flips.length === 1 && flips[0][2].setting === 'granted' && ev3.some((e) => e.kind === 'permission' && e.permission.origin === 'http://127.0.0.1:9'), '…recorded on the lease, said, and the live view\'s line', fl);
+ok(gateOf(fl.ok) && gateOf(after.some((m) => m.method === 'Browser.setPermission' && m.params.setting === 'granted' && m.params.origin === 'http://127.0.0.1:9' && m.params.browserContextId === 'C1')) && verdictOf(after.some((m) => m.method === 'Emulation.setGeolocationOverride' && m.params.latitude === 51.5 && m.sessionId)), '`permission geolocation allow` ⇒ granted for the tab\'s origin + a position (measured: without one it pends)', after.map((m) => m.method));
+ok(fl.text === 'permission geolocation granted to http://127.0.0.1:9 by the agent' && flips.length === 1 && flips[0][2].setting === 'granted' && verdictOf(ev3.some((e) => e.kind === 'permission' && e.permission.origin === 'http://127.0.0.1:9')), '…recorded on the lease, said, and the live view\'s line', fl);
 ok((await w3.setPermission(pl.t, { kind: 'camera', setting: 'allow', origin: 'chrome://x' })).code === 'no_origin', '…a non-web origin is refused');
 // the verb-wake seam
 const tW = Date.now(); const pw = w3.waitForOpen(pl.t, 5000, { prompt: true }); const plain = w3.waitForOpen(pl.t, 300, {});
@@ -392,10 +392,10 @@ await sleep(30); pl.ch.emit('Fetch.authRequired', AUTH_P, pl.ch.sidOf('T1'));
 const onEvent = await Promise.race([pw.then(() => true), new Promise((res) => setImmediate(() => res(false)))]);
 const plainNow = await Promise.race([plain.then(() => true), new Promise((res) => setImmediate(() => res(false)))]);
 const hit = await pw;
-ok(hit && hit.prompt && hit.prompt.type === 'http-auth' && hit.via === 'event' && onEvent, `authRequired ⇒ the waiting verb answers on the event, before the loop turned (${Date.now() - tW} ms incl. the 30 ms lead)`, hit);
+ok(gateOf(hit) && gateOf(hit.prompt) && hit.prompt.type === 'http-auth' && hit.via === 'event' && verdictOf(onEvent), `authRequired ⇒ the waiting verb answers on the event, before the loop turned (${Date.now() - tW} ms incl. the 30 ms lead)`, hit);
 ok((await plain) === null && plainNow === false, '…a long-poll that did not ask for prompts is not woken by one (CONTROL: it had not settled when the loop turned — it ran out its own 300 ms)');
 const again = await w3.waitForOpen(pl.t, 2000, { prompt: true });
-ok(again && again.via === 'already-waiting' && again.prompt.realm === 'Lane Realm', '…and a verb that starts while the sign-in stands is answered at once');
+ok(gateOf(again) && again.via === 'already-waiting' && again.prompt.realm === 'Lane Realm', '…and a verb that starts while the sign-in stands is answered at once');
 w3.shutdown(); await pl.ch.close();
 // B-9584 U2c: a profile whose location the PERSON set (a place, or «blocked») is held on every tab by the keeper's hold — nobody's
 // `permission geolocation allow` reaches Chrome there (a grant beside a hold that drops would read this machine's real position), a
@@ -450,11 +450,11 @@ async function heldLeg(Dmod, tag) {
 {
   const h = await heldLeg(D, 'real');
   ok(!h.at.ok && h.at.code === 'place_held' && h.atCalls === 0, 'B-9584 U2c: on a profile whose place the person set, an agent\'s own position is refused BY NAME (place_held) — nothing sent', h.at);
-  ok(h.pre.ok && !h.allow.ok && h.allow.code === 'place_held' && /reads it as blocked/.test(h.allow.error) && h.allowCalls === 0, '…and an allow WITHOUT one is refused by name too: no site is allowed the location on a place profile (a grant beside a hold that drops, or a tab left unplaced, would read this machine\'s real position) — nothing sent', h.allow);
-  ok(h.replayEnabled && h.replayOverride === 0, '…the watch\'s replay of a grant made before the place, on a NEW tab, sets no position over the held place', h);
-  ok(h.handReset && h.handClear === 0, 'r1264 must 1: the person takes over (the watch moves agent → person) with an agent\'s geolocation grant standing — the overrides reset as ever, the held place NEVER cleared on an open tab', h);
-  ok(h.deny.ok && h.denyClear === 0, '…a deny is the site\'s denial — the held place is never cleared', h);
-  ok(!h.blocked.ok && h.blocked.code === 'place_held' && /blocked/.test(h.blocked.error) && h.blockedCalls === 0, '…and on a profile whose location is «blocked», a site is never allowed the location (refused by name, nothing sent)', h.blocked);
+  ok(gateOf(h.pre.ok) && !h.allow.ok && h.allow.code === 'place_held' && gateOf(/reads it as blocked/.test(h.allow.error)) && h.allowCalls === 0, '…and an allow WITHOUT one is refused by name too: no site is allowed the location on a place profile (a grant beside a hold that drops, or a tab left unplaced, would read this machine\'s real position) — nothing sent', h.allow);
+  ok(gateOf(h.replayEnabled) && h.replayOverride === 0, '…the watch\'s replay of a grant made before the place, on a NEW tab, sets no position over the held place', h);
+  ok(gateOf(h.handReset) && h.handClear === 0, 'r1264 must 1: the person takes over (the watch moves agent → person) with an agent\'s geolocation grant standing — the overrides reset as ever, the held place NEVER cleared on an open tab', h);
+  ok(gateOf(h.deny.ok) && h.denyClear === 0, '…a deny is the site\'s denial — the held place is never cleared', h);
+  ok(!h.blocked.ok && h.blocked.code === 'place_held' && gateOf(/blocked/.test(h.blocked.error)) && h.blockedCalls === 0, '…and on a profile whose location is «blocked», a site is never allowed the location (refused by name, nothing sent)', h.blocked);
   const MUh = mutantCopies('prompts-geo-held', REPO);
   const dsH = read('src/server/browser-dialogs.js');
   const Dh = MUh.load('src/server/browser-dialogs.js', anchored(dsH, "    if (v.kind === 'geolocation' && !held) for (const e of [...w.targets.values()])", "    if (v.kind === 'geolocation') for (const e of [...w.targets.values()])", 'prompts RED held ignored'), 'held-ignored');   // stale-pins: kept (the RED's own replacement: a watch that ignores the hold)
@@ -468,8 +468,8 @@ async function heldLeg(Dmod, tag) {
   ok(hg.handClear > 0, 'RED — the release\'s hand-over: the takeover CLEARS the held place on every open tab (then a site allowed earlier reads this machine\'s position)', hg);
   const Da = MUh.load('src/server/browser-dialogs.js', anchored(dsH, "    if (held && v.setting === 'granted') return { ok: false, code: 'place_held',", "    if (held && v.setting === 'granted' && held.kind === 'blocked') return { ok: false, code: 'place_held',", 'prompts RED place allowed'), 'place-allowed');   // stale-pins: kept (the RED's own replacement: the allow refused on «blocked» only)
   const ha = await heldLeg(Da, 'red3');
-  ok(ha.allow.ok && ha.allowGranted, 'RED — the allow as before (refused on «blocked» only): an agent\'s allow on a place profile is SENT to Chrome (granted), so a hold that drops leaves that site this machine\'s real position', ha);
-  for (const c of copiesCensus(MUh.files, MUh.dir, REPO, { label: 'B-9584 U2c held-place control: ' })) ok(c.pass, c.name, c.detail);
+  ok(gateOf(ha.allow.ok) && verdictOf(ha.allowGranted), 'RED — the allow as before (refused on «blocked» only): an agent\'s allow on a place profile is SENT to Chrome (granted), so a hold that drops leaves that site this machine\'s real position', ha);
+  for (const c of copiesCensus(MUh.files, MUh.dir, REPO, { label: 'B-9584 U2c held-place control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 // the control: a rule that releases a NORMAL page goes red
 const dsrcM = read('src/server/browser-dialogs.js').replace('if (ST.printTargetVerdict(info)) return releasePrint(w, info);', "if (info && info.type === 'page' && info.targetId === 'T2') return releasePrint(w, info);").replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`);
@@ -480,9 +480,9 @@ ok(!(plM.released.length === 1 && plM.released[0] === 'PV' && !plM.tracked.inclu
 plM.w.shutdown(); await plM.ch.close();
 // the wiring (source pins)
 const cli = read('data/bin/vibespace-browser'), rsrc = read('src/routes/browser.js');
-ok(/\$\{pmWake \? '&prompt=1' : ''\}/.test(cli) && /if \(w\.prompt && pmWake\) \{ promptHit = w\.prompt;/.test(cli) && /console\.error\('\[page_prompt\]'\)/.test(cli) && /prompt: String\(req\.query\.prompt \|\| ''\) === '1'/.test(rsrc), 'the CLI asks `prompt=1` and ends its verb with THE SENTENCE [page_prompt]; the route passes it to the seam');
-ok(/router\.post\('\/api\/agent\/browser\/permission'/.test(rsrc) && /verbName === 'permission'/.test(cli) && /tapDialogAct\(\{ sessionId, profileId = null, action, dialog = null, permission = null(?:, passkey = null)? \}/.test(ssrc), 'the permission verb: CLI → route → the watch, its trace row through the dialog act\'s tap');
-ok(/a page waiting on a permission: decide it with `permission`/.test(read('docs/agent/browser-manual.md')), 'the browser manual §0 recipe');
+ok(gateOf(/\$\{pmWake \? '&prompt=1' : ''\}/.test(cli)) && gateOf(/if \(w\.prompt && pmWake\) \{ promptHit = w\.prompt;/.test(cli)) && gateOf(/console\.error\('\[page_prompt\]'\)/.test(cli)) && verdictOf(/prompt: String\(req\.query\.prompt \|\| ''\) === '1'/.test(rsrc)), 'the CLI asks `prompt=1` and ends its verb with THE SENTENCE [page_prompt]; the route passes it to the seam');
+ok(gateOf(/router\.post\('\/api\/agent\/browser\/permission'/.test(rsrc)) && gateOf(/verbName === 'permission'/.test(cli)) && verdictOf(/tapDialogAct\(\{ sessionId, profileId = null, action, dialog = null, permission = null(?:, passkey = null)? \}/.test(ssrc)), 'the permission verb: CLI → route → the watch, its trace row through the dialog act\'s tap');
+ok(verdictOf(/a page waiting on a permission: decide it with `permission`/.test(read('docs/agent/browser-manual.md'))), 'the browser manual §0 recipe');
 
 // ═══ ⑥ B-b56d (the owner's ruling B, 2026-11-18): THE PERSON'S OWN BROWSING TAKES OVER AN HTTP SIGN-IN — the watch's half ═══
 // Chrome hands a challenge to DevTools only on a request it paused (Fetch.enable refuses handleAuthRequests with no pattern), so the
@@ -594,58 +594,58 @@ if (!HOOK6) {
   ok(!o6.window.fe && o6.noWindow.fetch === 0, 'B-b56d OUT: the person browses with a window open and the watch arms NO sign-in hook (Fetch never enabled) — the release before B-b56d', o6.window);
   ok(o6.window.state === null, 'B-b56d OUT (the second reader): the person\'s window state says nothing with a window open — no bound\'s line, no «cannot see sign-in requests» line', o6.window.state);
   const m6 = await scene6(D, { agentFirst: true, windowsAtMove: 1 });
-  ok(m6.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default') && !m6.moved.form, 'B-b56d OUT (the third reader): a sign-in a conversation\'s watch held is handed back to Chrome (Default) when the person takes the browser — even with a window of the person open', m6.moved);
+  ok(gateOf(m6.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default')) && !m6.moved.form, 'B-b56d OUT (the third reader): a sign-in a conversation\'s watch held is handed back to Chrome (Default) when the person takes the browser — even with a window of the person open', m6.moved);
   const dsrcO = read('src/server/browser-dialogs.js'); const SWITCH = 'const PERSON_SIGNIN_HOOK = false;';   // stale-pins: kept — the OUT block's anchor: that block runs only with the switch OFF, when this line is what stands
   if (dsrcO.split(SWITCH).length !== 2) throw new Error('B-b56d OUT control setup: the switch line is not found once in src/server/browser-dialogs.js');
   const MO = mutantCopies('uiprompts-b56d-out', REPO);
   const on6 = await scene6(MO.load('src/server/browser-dialogs.js', anchored(dsrcO, SWITCH, 'const PERSON_SIGNIN_HOOK = true;', 'b56d-out-hook-on'), 'hook-on'), { stop: 'window' });
-  ok(on6.window.fe && on6.window.fe.handleAuthRequests === true && on6.window.state && on6.window.state.hook && on6.window.state.hook.armed === true, 'CONTROL (B-b56d OUT): the same watch with the switch ON arms the hook and says so — the switch is what holds both off (RED for the two legs above)', on6.window);
+  ok(gateOf(on6.window.fe) && on6.window.fe.handleAuthRequests === true && gateOf(on6.window.state) && gateOf(on6.window.state.hook) && on6.window.state.hook.armed === true, 'CONTROL (B-b56d OUT): the same watch with the switch ON arms the hook and says so — the switch is what holds both off (RED for the two legs above)', on6.window);
   const onM = await scene6(MO.load('src/server/browser-dialogs.js', anchored(dsrcO, SWITCH, 'const PERSON_SIGNIN_HOOK = true;', 'b56d-out-hook-on-move'), 'hook-on-move'), { agentFirst: true, windowsAtMove: 1 });
-  ok(onM.moved.cwa.length === 0 && onM.moved.form && onM.moved.form.type === 'http-auth', 'CONTROL (B-b56d OUT): with the switch ON the held sign-in stays for the person\'s form (RED for the hand-back leg above)', onM.moved);
-  for (const c of copiesCensus(MO.files, MO.dir, REPO, { label: '⑥ OUT control: ' })) ok(c.pass, c.name, c.detail);
+  ok(onM.moved.cwa.length === 0 && gateOf(onM.moved.form) && onM.moved.form.type === 'http-auth', 'CONTROL (B-b56d OUT): with the switch ON the held sign-in stays for the person\'s form (RED for the hand-back leg above)', onM.moved);
+  for (const c of copiesCensus(MO.files, MO.dir, REPO, { label: '⑥ OUT control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 if (HOOK6) {
 const s6 = await scene6(D);
 ok(s6.noWindow.fetch === 0, 'B-b56d (law 6): the person browses with NO window of theirs open — no hook at all (a browser nobody watches changes nothing)', s6.noWindow);
-ok(s6.window.fe && s6.window.fe.handleAuthRequests === true && s6.window.fe.patterns.length === 1 && s6.window.fe.patterns[0].resourceType === 'Document' && s6.window.fe.patterns[0].requestStage === 'Request' && s6.window.chooser === 0 && s6.window.perm === 0 && s6.window.state.hook && s6.window.state.hook.armed === true,
+ok(gateOf(s6.window.fe) && s6.window.fe.handleAuthRequests === true && s6.window.fe.patterns.length === 1 && s6.window.fe.patterns[0].resourceType === 'Document' && s6.window.fe.patterns[0].requestStage === 'Request' && s6.window.chooser === 0 && s6.window.perm === 0 && gateOf(s6.window.state.hook) && s6.window.state.hook.armed === true,
   '…a window of the person opens ⇒ sign-ins hooked on Document requests only; the agent\'s other policies stay off (no file chooser hook, no permission decided) and the window is told the hook is armed', s6.window);
 ok(s6.paused.cont === 1 && s6.paused.fail === 0, 'B-b56d (law 6): a paused Document request with no challenge is continued at once — never failed, never held', s6.paused);
-ok(s6.form && s6.form.type === 'http-auth' && !s6.form.native && s6.form.origin === ORIGIN6 && s6.form.realm === '<b>Team</b>' && !/‮/.test(s6.form.realm),
+ok(gateOf(s6.form) && s6.form.type === 'http-auth' && !s6.form.native && s6.form.origin === ORIGIN6 && s6.form.realm === '<b>Team</b>' && !/‮/.test(s6.form.realm),
   'B-b56d (law 3): the challenge becomes the person\'s form — WHO ASKS is the challenge\'s own origin and realm, page text (a bidi character dropped; markup kept as text — the window draws it with textContent)', s6.form);
-ok(s6.ans && s6.ans.ok && s6.cwa[0] && s6.cwa[0].id === 'A1' && s6.cwa[0].r === 'ProvideCredentials' && s6.cwa[0].u === USER6 && s6.cwa[0].p === PW6,
+ok(gateOf(s6.ans) && gateOf(s6.ans.ok) && gateOf(s6.cwa[0]) && s6.cwa[0].id === 'A1' && s6.cwa[0].r === 'ProvideCredentials' && s6.cwa[0].u === USER6 && s6.cwa[0].p === PW6,
   'B-b56d (law 1): the person\'s answer ⇒ continueWithAuth ProvideCredentials on the paused request, nothing else', s6.cwa[0] && { ...s6.cwa[0], p: s6.cwa[0].p === PW6 ? '(the password)' : 'OTHER' });
-ok(s6.cwa.some((x) => x.id === 'A2' && x.r === 'CancelAuth') && s6.cwa.some((x) => x.id === 'A3' && x.r === 'CancelAuth'), 'B-b56d (law 4): Cancel ⇒ CancelAuth; nobody answers within the bound ⇒ CancelAuth (the page is never left hanging)', s6.cwa.map((x) => x.id + ':' + x.r));
-ok(s6.ended && s6.ended.how === 'expired' && s6.ended.origin === ORIGIN6 && s6.ended.boundMs === 300 && s6.endedEv, 'B-b56d (law 4): …and the bound is SAID — the person\'s state names the cancelled sign-in, and an event moves the window', s6.ended);
+ok(gateOf(s6.cwa.some((x) => x.id === 'A2' && x.r === 'CancelAuth')) && verdictOf(s6.cwa.some((x) => x.id === 'A3' && x.r === 'CancelAuth')), 'B-b56d (law 4): Cancel ⇒ CancelAuth; nobody answers within the bound ⇒ CancelAuth (the page is never left hanging)', s6.cwa.map((x) => x.id + ':' + x.r));
+ok(gateOf(s6.ended) && s6.ended.how === 'expired' && s6.ended.origin === ORIGIN6 && s6.ended.boundMs === 300 && verdictOf(s6.endedEv), 'B-b56d (law 4): …and the bound is SAID — the person\'s state names the cancelled sign-in, and an event moves the window', s6.ended);
 ok(s6.heldKeeps === 0 && s6.offAfter.join() === 'A4,off', 'B-b56d (law 6 / law 4): the last window closes while a sign-in is held ⇒ the hook stays until it is answered; then it goes, AFTER Chrome has the answer', s6.offAfter);
-ok(s6.refused.hook && s6.refused.hook.armed === false && s6.refused.hook.why === 'refused' && s6.refused.ev.includes(false) && s6.repaired.hook && s6.repaired.hook.armed === true && s6.repaired.ev[s6.repaired.ev.length - 1] === true,
+ok(gateOf(s6.refused.hook) && s6.refused.hook.armed === false && s6.refused.hook.why === 'refused' && gateOf(s6.refused.ev.includes(false)) && gateOf(s6.repaired.hook) && s6.repaired.hook.armed === true && s6.repaired.ev[s6.repaired.ev.length - 1] === true,
   'B-b56d (law 5): a hook Chrome refused is told to the person\'s window (armed false, why refused) and its return is told too — never a silent dead end', { refused: s6.refused, repaired: s6.repaired });
 ok(!s6.census.includes(PW6) && !s6.census.includes(USER6), 'B-b56d (law 1): the typed user name and password are in no log line, event, For-you item, state, fact or answer of the person\'s road');
-ok(s6.abandoned.form === null && s6.abandoned.cwa.length === 0 && s6.abandoned.endedSame, 'B-b56d (its read, S1): a held sign-in the page ABANDONS (its tab commits another page) is dropped — no CancelAuth to a request that is gone, no note, never said as «cancelled»', s6.abandoned);
-ok(s6.refusedAtBound.cwa.join() === 'CancelAuth' && s6.refusedAtBound.endedSame && s6.refusedAtBound.evs === 0, 'B-b56d (its read, S1): at the bound, a CancelAuth Chrome REFUSES (the request was gone) writes no note and moves no window — the window never says «VibeSpace cancelled it» of a sign-in it did not cancel', s6.refusedAtBound);
+ok(s6.abandoned.form === null && s6.abandoned.cwa.length === 0 && verdictOf(s6.abandoned.endedSame), 'B-b56d (its read, S1): a held sign-in the page ABANDONS (its tab commits another page) is dropped — no CancelAuth to a request that is gone, no note, never said as «cancelled»', s6.abandoned);
+ok(s6.refusedAtBound.cwa.join() === 'CancelAuth' && gateOf(s6.refusedAtBound.endedSame) && s6.refusedAtBound.evs === 0, 'B-b56d (its read, S1): at the bound, a CancelAuth Chrome REFUSES (the request was gone) writes no note and moves no window — the window never says «VibeSpace cancelled it» of a sign-in it did not cancel', s6.refusedAtBound);
 ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO For-you item for a sign-in left unanswered past the ask clock (the person\'s window shows the form, and the bound is said there)', s6.fy6);
 { // the X road: the person alone gets what the agent's road gives there — Chrome's own sheet (Default at once) and its «Open in Desktop» door
   const sx = await scene6(D, { road: 'x' });
-  ok(sx.cwa.length === 1 && sx.cwa[0].id === 'A1' && sx.cwa[0].r === 'Default' && sx.form && sx.form.native === true && sx.ans.code === 'native_sheet', 'B-b56d: on the X road the person\'s sign-in is Chrome\'s own sheet — Default at once, the native record the window\'s door reads, no form answers it', { cwa: sx.cwa, form: sx.form, ans: sx.ans });
+  ok(sx.cwa.length === 1 && sx.cwa[0].id === 'A1' && sx.cwa[0].r === 'Default' && gateOf(sx.form) && sx.form.native === true && sx.ans.code === 'native_sheet', 'B-b56d: on the X road the person\'s sign-in is Chrome\'s own sheet — Default at once, the native record the window\'s door reads, no form answers it', { cwa: sx.cwa, form: sx.form, ans: sx.ans });
 }
 { // a conversation drove; the person now browses alone with a window open: the held sign-in is the person's to answer (never handed to an invisible sheet)
   const sm = await scene6(D, { agentFirst: true, windowsAtMove: 1, withM0: true });
   ok(sm.moved.ended === null, 'B-b56d (its read, S2): a sign-in the CONVERSATION\'S watch cancelled at its bound is never said in the person\'s window (only the person\'s road\'s own notes)', sm.moved.ended);
-  ok(sm.moved.cwa.length === 0 && sm.moved.form && sm.moved.form.type === 'http-auth' && sm.ans && sm.ans.ok && sm.movedAfter.some((x) => x.id === 'M1' && x.r === 'ProvideCredentials'),
+  ok(sm.moved.cwa.length === 0 && gateOf(sm.moved.form) && sm.moved.form.type === 'http-auth' && gateOf(sm.ans) && gateOf(sm.ans.ok) && verdictOf(sm.movedAfter.some((x) => x.id === 'M1' && x.r === 'ProvideCredentials')),
     'B-b56d: a sign-in held while a conversation drove stays held when the person takes the browser with a window open — the person\'s form answers it', { moved: sm.moved.cwa, after: sm.movedAfter.map((x) => x.id + ':' + x.r) });
   const s0 = await scene6(D, { agentFirst: true, windowsAtMove: 0 });
-  ok(s0.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default') && !s0.moved.form, '…with NO window of the person open it is handed back to Chrome (Default), as before', s0.moved.cwa);
+  ok(gateOf(s0.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default')) && !s0.moved.form, '…with NO window of the person open it is handed back to Chrome (Default), as before', s0.moved.cwa);
 }
 { // its read (S3): a window of the person open and NO watch (its endpoint refused) — the state says the sign-ins cannot be seen; no window: nothing
   const wu = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: false, code: 'unavailable', error: 'the stand-in refuses' }) }, log: { warn() {}, log() {}, error() {} }, holdersOf: () => [{ browserKey: HK6, sessionId: null, ephemeral: false, human: true }] });
   await wu.arm(PID6, { by: 'person' });
   const none = wu.personPromptStateOf(HK6); wu.personWindows(PID6, 1); const unw = wu.personPromptStateOf(HK6);
-  ok(none === null && unw && unw.hook && unw.hook.armed === false && unw.hook.why === 'unwatched' && ST.personPromptLines(unw, tFor('en')).hook, 'B-b56d (its read, S3): no open watch while a window of the person shows the browser ⇒ «cannot see sign-in requests» is said (beside the passkey line, never hidden by it); with no window open, nothing', { none, unw });
+  ok(none === null && gateOf(unw) && gateOf(unw.hook) && unw.hook.armed === false && unw.hook.why === 'unwatched' && verdictOf(ST.personPromptLines(unw, tFor('en')).hook), 'B-b56d (its read, S3): no open watch while a window of the person shows the browser ⇒ «cannot see sign-in requests» is said (beside the passkey line, never hidden by it); with no window open, nothing', { none, unw });
   wu.shutdown();
 }
 }
 { // the person's window's two lines and the kernel / connecting words — PURE, no hook needed (they run whatever the switch)
   const lw6 = read('src/lib/browser-live-window.js');
-  ok((lw6.match(/if \(prLine\) drawPrLines\(prLine\);/g) || []).length === 2 && /\n {6}if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /\} else if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /const prl = H && !d && !stuck && !blind && !pkElse \? personPromptLines/.test(lw6), '…the window draws BOTH sign-in lines (the bound, the hook) in the passkey «unknown» branch too (the cure: the bound\'s line was missing there)');
+  ok((lw6.match(/if \(prLine\) drawPrLines\(prLine\);/g) || []).length === 2 && gateOf(/\n {6}if \(prLine\) drawPrLines\(prLine\);/.test(lw6)) && gateOf(/\} else if \(prLine\) drawPrLines\(prLine\);/.test(lw6)) && verdictOf(/const prl = H && !d && !stuck && !blind && !pkElse \? personPromptLines/.test(lw6)), '…the window draws BOTH sign-in lines (the bound, the hook) in the passkey «unknown» branch too (the cure: the bound\'s line was missing there)');
   ok(ST.personPromptLines({ hook: { armed: false, why: 'kernel', x: false } }, tFor('en')).hook === null && ST.personPromptLines({ hook: { armed: null, why: 'connecting' } }, tFor('en')).hook === null, 'B-b56d (its read): a kernel (its own road) and a watch still connecting draw no standing line — only a refused hook and no watch at all are said');
 }
 { // B-1327: A CONVERSATION'S HELD SIGN-IN THE PAGE ABANDONED (its tab committed another page) goes at once — the agent's road as the
@@ -681,9 +681,9 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const baseDrop = anchored(dsrcC, "{ const hr = e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId ? w.prompts.get(e.targetId) : null;", "{ const hr = e && w.mode === 'person' && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId ? w.prompts.get(e.targetId) : null;", 'B-1327 control: the base\'s person-only drop');   // stale-pins: kept — the base's line, written back by this RED control
   const MC = mutantCopies('uiprompts-b1327', REPO);
   const scB = await sceneC(MC.load('src/server/browser-dialogs.js', baseDrop, 'person-only-drop'), { goneMs: 400 });
-  ok(baseDrop !== dsrcC && scB.held === 'http-auth' && scB.prompt && scB.prompt.type === 'http-auth' && scB.resolved.length === 0,
+  ok(baseDrop !== dsrcC && scB.held === 'http-auth' && gateOf(scB.prompt) && scB.prompt.type === 'http-auth' && scB.resolved.length === 0,
     'CONTROL (B-1327): a watch that drops an abandoned sign-in on the person\'s road only keeps the conversation\'s record and its tray item open (RED for the legs above)', { prompt: scB.prompt && scB.prompt.type, resolved: scB.resolved });
-  for (const c of copiesCensus(MC.files, MC.dir, REPO, { label: 'B-1327 control: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { label: 'B-1327 control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 { // its read (M1): THE PERSON TYPES INTO THE FORM — the window always drives its own tab, so the keys belong to the page unless a box is the
   // window's OWN: the address row and (B-b56d) the sign-in form's two boxes, in each of the four keyboard handlers (keys, paste, input, focus)
@@ -695,15 +695,15 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const ADDR = { classList: { contains: () => false } };
   const user = mk('browser-live-prompt-user', true), pass = mk('browser-live-prompt-pass', true), stray = mk('browser-live-prompt-pass', false), other = mk('browser-live-dialog-input', true);
   const own = ownLine ? build(ownLine, { key: HK6 }) : null, conv = ownLine ? build(ownLine, null) : null;
-  ok(own && own(user) && own(pass) && own(ADDR) && !own(stray) && !own(other) && conv(user) && conv(pass) && !conv(ADDR) && !conv(stray) && !conv(other),
+  ok(gateOf(own) && gateOf(own(user)) && gateOf(own(pass)) && gateOf(own(ADDR)) && !own(stray) && !own(other) && gateOf(conv(user)) && gateOf(conv(pass)) && !conv(ADDR) && !conv(stray) && !conv(other),
     'B-b56d (its read, M1) as B-1327 widened it: the person\'s window\'s OWN boxes are its address row and the sign-in form\'s two boxes (in its dialog bar only); a conversation\'s view keeps the two sign-in boxes (a person who took over types the password there, never into the page) and no address row', ownLine.slice(0, 120));
   { // CONTROL (B-1327): the base's line (the person's window only) — in a conversation's view a takeover's keys left the sign-in boxes for the page
     const baseOwn = anchored(ownLine, '{ return !!el && ((!!H && el === addrInput) || (', '{ return !!H && !!el && (el === addrInput || (', 'B-1327 control: the base\'s person-window-only boxes');   // stale-pins: kept — the base's line, written back by this RED control
     const ownB = build(baseOwn, { key: HK6 }), convB = build(baseOwn, null);
-    ok(baseOwn !== ownLine && ownB(user) && ownB(ADDR) && !convB(user) && !convB(pass), 'CONTROL (B-1327): the base\'s ownBox gives a conversation\'s view no sign-in box — a takeover\'s keys went to the page (RED for the leg above)');
+    ok(baseOwn !== ownLine && gateOf(ownB(user)) && gateOf(ownB(ADDR)) && !convB(user) && !convB(pass), 'CONTROL (B-1327): the base\'s ownBox gives a conversation\'s view no sign-in box — a takeover\'s keys went to the page (RED for the leg above)');
   }
   const noBaseGuard = !/document\.activeElement === addrInput\)\) focusSink/.test(lw7);   // stale-pins: kept — a deliberate check that the base's mode-redraw guard is gone
-  ok((lw7.match(/ownBox\(e\.target\)/g) || []).length === 4 && (lw7.match(/!ownBox\(document\.activeElement\)\) focusSink\(\)/g) || []).length === 1 && !/e\.target === addrInput/.test(lw7) && noBaseGuard, '…and all four keyboard handlers (keys, paste, beforeinput, focusin) AND the mode redraw\'s focus guard (the cure) leave them alone — none keeps the old address-row-only test');   // stale-pins: kept — a deliberate check that the base's test is gone
+  ok((lw7.match(/ownBox\(e\.target\)/g) || []).length === 4 && (lw7.match(/!ownBox\(document\.activeElement\)\) focusSink\(\)/g) || []).length === 1 && !/e\.target === addrInput/.test(lw7) && verdictOf(noBaseGuard), '…and all four keyboard handlers (keys, paste, beforeinput, focusin) AND the mode redraw\'s focus guard (the cure) leave them alone — none keeps the old address-row-only test');   // stale-pins: kept — a deliberate check that the base's test is gone
   // 主开发 17:00Z (1), as if a must: A SECRET IS NEVER TYPED INTO THE PAGE — every road that gives the focus to the sink goes through
   // focusSink, and focusSink keeps the caret in a box of the window's own unless the person's OWN press moves it (the window's code, sliced)
   const fsLine = (lw7.match(/^ {2}function focusSink\(\{ press = false \} = \{\}\) \{[^\n]*$/m) || [''])[0];
@@ -711,7 +711,7 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const redraw = fsLine ? sinkOf(fsLine, pass) : null; if (redraw) redraw.fn();              // a mode record's redraw while the caret is in the secret's box
   const pressed = fsLine ? sinkOf(fsLine, pass) : null; if (pressed) pressed.fn({ press: true }); // the person's own press on the picture
   const elsewhere = fsLine ? sinkOf(fsLine, stray) : null; if (elsewhere) elsewhere.fn();     // the caret in no box of the window's own
-  ok(redraw && redraw.calls.length === 0 && pressed.calls.length === 1 && elsewhere.calls.length === 1 && (lw7.match(/focusSink\(\{ press: true \}\)/g) || []).length === 3,
+  ok(gateOf(redraw) && redraw.calls.length === 0 && pressed.calls.length === 1 && elsewhere.calls.length === 1 && (lw7.match(/focusSink\(\{ press: true \}\)/g) || []).length === 3,
     'B-b56d cure (主开发 (1)): with the caret in the secret\'s box a redraw (a mode record) leaves it there; only the person\'s own press (the picture, the Keyboard button, the take press — three sites) moves it to the page; elsewhere the sink takes it as before', { fs: fsLine.slice(0, 80) });
   const baseFs = "  function focusSink() { try { const sk = sinkNow(); if (document.activeElement !== sk) sk.focus({ preventScroll: true }); } catch { /* detached */ } }";   // stale-pins: kept — the base's focusSink, the control below
   const baseRun = sinkOf(baseFs, pass); baseRun.fn();
@@ -724,20 +724,20 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const lines = ['en', 'zh', 'ja'].map((lang) => ST.personPromptLines({ ended: { id: 'e1', how: 'expired', origin: ORIGIN6, boundMs: 600000 }, hook: { armed: false, why: 'refused', x: false } }, tFor(lang)));
   const lx = ST.personPromptLines({ hook: { armed: false, why: 'unwatched', x: true } }, tFor('en'));
   const lp = ST.personPromptLines({ ended: { id: 'e2', how: 'expired', origin: 'http://proxy.example.test:3128', proxy: true, boundMs: 600000 } }, tFor('en'));
-  ok(pw.title === 'A proxy asks you to sign in' && /proxy\.example\.test:3128 — Corp/.test(pw.body) && ST.promptWords({ type: 'http-auth', origin: ORIGIN6, realm: 'Team' }, tFor('en')).title === 'The page asks you to sign in',
+  ok(pw.title === 'A proxy asks you to sign in' && gateOf(/proxy\.example\.test:3128 — Corp/.test(pw.body)) && ST.promptWords({ type: 'http-auth', origin: ORIGIN6, realm: 'Team' }, tFor('en')).title === 'The page asks you to sign in',
     'B-b56d (law 3): the form says who asks — a proxy\'s challenge is titled as a proxy\'s, its origin and realm in the body', pw);
   { // B-b56d (2.369.413): the person's OWN window's words for the browser's own sheet (the display road) — no «take over»: the person holds the controls already
     const nat = { type: 'http-auth', native: true, origin: 'http://127.0.0.1:9', realm: 'Team' };
     const own = ['en', 'zh', 'ja'].map((lang) => ST.promptWords(nat, tFor(lang), { person: true }));
     const agent = ST.promptWords(nat, tFor('en'));
-    ok(own.every((w) => w && w.native && w.form === false && w.hint && !/take over|Take over/.test(w.hint)) && /VibeSpace never sees them/.test(own[0].hint) && /Take over/.test(agent.hint) && own[0].title === 'Chrome asks you to sign in — in its own window, which this view does not show' && agent.title === 'Chrome asks you to sign in — in its window below' && own.slice(1).every((w) => w.title !== own[0].title),
+    ok(gateOf(own.every((w) => w && w.native && w.form === false && w.hint && !/take over|Take over/.test(w.hint))) && gateOf(/VibeSpace never sees them/.test(own[0].hint)) && gateOf(/Take over/.test(agent.hint)) && own[0].title === 'Chrome asks you to sign in — in its own window, which this view does not show' && agent.title === 'Chrome asks you to sign in — in its window below' && verdictOf(own.slice(1).every((w) => w.title !== own[0].title)),
       'B-b56d (2.369.413): on the display road the person\'s own window says the browser\'s own sheet in Chrome\'s own window, which the view does not show, with the person\'s hint (en / zh / ja, never «take over»); a conversation\'s view keeps «in its window below» and its «Take over» hint', { own: own[0], agent: agent });
   }
-  ok(lines.every((l) => l.ended && l.ended.line.includes('signin.example.test') && l.ended.line.includes('10') && l.hook && l.hook.line) && /cancelled it/.test(lines[0].ended.line) && /may wait/.test(lines[0].hook.line) && /open it in Desktop/.test(lx.hook.line) && /proxy sign-in/.test(lp.ended.line) && ST.personPromptLines({ hook: { armed: true } }, tFor('en')).hook === null,
+  ok(gateOf(lines.every((l) => l.ended && l.ended.line.includes('signin.example.test') && l.ended.line.includes('10') && l.hook && l.hook.line)) && gateOf(/cancelled it/.test(lines[0].ended.line)) && gateOf(/may wait/.test(lines[0].hook.line)) && gateOf(/open it in Desktop/.test(lx.hook.line)) && gateOf(/proxy sign-in/.test(lp.ended.line)) && ST.personPromptLines({ hook: { armed: true } }, tFor('en')).hook === null,
     'B-b56d (laws 4 / 5): the person\'s window\'s two lines — the bound said with its host and minutes, a refused hook said (the X road\'s names Desktop) — every one in en / zh / ja; an armed hook says nothing', { en: lines[0], lx: lx.hook, lp: lp.ended });
   const lsrc6 = read('src/lib/browser-live-window.js');
   const blk = (lsrc6.match(/  function drawPrLines\(prLine\) \{[\s\S]*?\n {2}\}\n/) || [''])[0];
-  ok(blk && /prLine\.ended\.line/.test(blk) && /prLine\.hook\.line/.test(blk) && (blk.match(/textContent = /g) || []).length === 2 && !/innerHTML/.test(blk) && /st\.prEnded = m\.ended && typeof m\.ended === 'object'/.test(lsrc6) && /pass\.value = ''; if \(H\) user\.value = '';/.test(lsrc6),
+  ok(gateOf(blk) && gateOf(/prLine\.ended\.line/.test(blk)) && gateOf(/prLine\.hook\.line/.test(blk)) && (blk.match(/textContent = /g) || []).length === 2 && !/innerHTML/.test(blk) && gateOf(/st\.prEnded = m\.ended && typeof m\.ended === 'object'/.test(lsrc6)) && verdictOf(/pass\.value = ''; if \(H\) user\.value = '';/.test(lsrc6)),
     'B-b56d (law 3): the person\'s window draws both lines as TEXT (textContent, never innerHTML) from its relay record', blk.length);
 }
 if (HOOK6) {
@@ -785,7 +785,7 @@ if (HOOK6) {
   wk.postMessage({ cmd: 'counts' }); const cnt = await next((x) => x.kind === 'counts');
   const counts = new Map(cnt ? cnt.counts : []);
   console.log(`    law 8 numbers (the hub's own turn — the real watch, the fake Chrome in its own thread over a loopback socket — ${N8} paused Document requests on an idle loop): median ${med !== undefined ? med.toFixed(2) : '?'} ms, worst ${worst !== undefined ? worst.toFixed(2) : '?'} ms; the hub's loop held 400 ms in the continue's window: the page's request waited ${stall ? stall.ms.toFixed(0) : '?'} ms, then went on`);
-  ok(!!armed && spans.length === N8 && Array.from({ length: N8 }, (_, i) => counts.get('L8-' + i)).every((k) => k === 1) && !!stall && counts.get('L8-stall') === 1 && cnt && cnt.fails === 0,
+  ok(!!armed && spans.length === N8 && gateOf(Array.from({ length: N8 }, (_, i) => counts.get('L8-' + i)).every((k) => k === 1)) && !!stall && counts.get('L8-stall') === 1 && gateOf(cnt) && cnt.fails === 0,
     `B-b56d (law 8): ${N8} paused Document requests on an idle loop — each continued exactly once; a stall placed in the hub's loop holds the page's request for as long as it lasts (the page's clock, another thread), then it is continued once — never failed, never dropped (the numbers printed above)`, { n: spans.length, stall, fails: cnt && cnt.fails });
   wq.shutdown(); wk.postMessage({ cmd: 'close' }); await next((x) => x.kind === 'closed', 2000); await wk.terminate();
 }
@@ -803,10 +803,10 @@ if (HOOK6) {
   const c3 = await scene6(M6.load('src/server/browser-dialogs.js', cut(RESYNC, '', 'b56d-no-resync'), 'no-resync'), { stop: 'off' });
   ok(c3.offAfter.join() === 'A4', 'CONTROL (B-b56d): a settled sign-in that does not read its tab\'s hook again leaves the person\'s browser hooked with no window open (RED for the leg above)', c3.offAfter);
   const c4 = await scene6(M6.load('src/server/browser-dialogs.js', cut(KEEP, '', 'b56d-hand-back'), 'hand-back'), { agentFirst: true, windowsAtMove: 1 });
-  ok(c4.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default'), 'CONTROL (B-b56d): the base\'s hand-back gives the held sign-in to Chrome even with the person\'s window open (RED for the leg above)', c4.moved.cwa);
-  for (const c of copiesCensus(M6.files, M6.dir, REPO, { label: '⑥ B-b56d controls: ' })) ok(c.pass, c.name, c.detail);
+  ok(verdictOf(c4.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default')), 'CONTROL (B-b56d): the base\'s hand-back gives the held sign-in to Chrome even with the person\'s window open (RED for the leg above)', c4.moved.cwa);
+  for (const c of copiesCensus(M6.files, M6.dir, REPO, { label: '⑥ B-b56d controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 }
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

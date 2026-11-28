@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { AccountManager } = require('../src/accounts.js');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pool-so-'));
 const warn = console.warn; console.warn = () => {};
@@ -44,9 +44,9 @@ try {
 
   // 1. plain spawn: heals instead of throwing
   const r = am.resolveForSpawn(pool.id);
-  ok(!!r && r.pooled, 'a pooled spawn with a signed-out target still resolves (was: hard throw)');
-  ok([good, other].includes(am.poolCurrent(pool.id)), 're-pointed to a LIVE member', am.poolCurrent(pool.id));
-  ok([good, other].includes(r.poolTarget), 'the returned billing target is the live one');
+  ok(!!r && verdictOf(r.pooled), 'a pooled spawn with a signed-out target still resolves (was: hard throw)');
+  ok(verdictOf([good, other].includes(am.poolCurrent(pool.id))), 're-pointed to a LIVE member', am.poolCurrent(pool.id));
+  ok(verdictOf([good, other].includes(r.poolTarget)), 'the returned billing target is the live one');
 
   // 2. per-session link: a chooser that returns a dead member is overruled
   am.setPoolTarget(pool.id, good);
@@ -64,7 +64,7 @@ try {
   kill(good); kill(other);
   let msg = '';
   try { am.resolveForSpawn(pool.id); } catch (e) { msg = e.message; }
-  ok(/signed out/.test(msg) && /Manage Agents/.test(msg),
+  ok(gateOf(/signed out/.test(msg)) && verdictOf(/Manage Agents/.test(msg)),
     'a fully signed-out pool fails with an actionable message naming the fix', msg);
 
   // ── DELETE hygiene (2.335.0, owner report: deleting the account a pool sat
@@ -76,8 +76,8 @@ try {
   am.ensureSessionPoolLink(pool2.id, 'sess-a', m1);
   am.ensureSessionPoolLink(pool2.id, 'sess-b', m2);
   am.remove(m1);
-  ok([m2, m3].includes(am.poolCurrent(pool2.id)), 'deleting the pool TARGET re-points the default link to a live member', am.poolCurrent(pool2.id));
-  ok(am.readSubCreds(pool2.id).loggedIn, 'the pool reads as logged-in immediately (no dangling-symlink limbo)');
+  ok(verdictOf([m2, m3].includes(am.poolCurrent(pool2.id))), 'deleting the pool TARGET re-points the default link to a live member', am.poolCurrent(pool2.id));
+  ok(verdictOf(am.readSubCreds(pool2.id).loggedIn), 'the pool reads as logged-in immediately (no dangling-symlink limbo)');
   ok(am.poolCurrentFor(pool2.id, 'sess-a') !== m1 && !!am.poolCurrentFor(pool2.id, 'sess-a'),
     'a per-session link that billed to the deleted account is re-pointed', am.poolCurrentFor(pool2.id, 'sess-a'));
   ok(am.poolCurrentFor(pool2.id, 'sess-b') === m2, 'a link on a SURVIVING member is untouched');
@@ -98,10 +98,10 @@ try {
   ok(am.poolCurrent(pool2.id) === null, 'last member deleted → pool target honestly absent (no dangling link)');
   let msg2 = '';
   try { am.resolveForSpawn(pool2.id); } catch (e) { msg2 = e.message; }
-  ok(/signed out|Manage Agents/.test(msg2), 'resolve on a memberless pool fails with the actionable message', msg2);
+  ok(verdictOf(/signed out|Manage Agents/.test(msg2)), 'resolve on a memberless pool fails with the actionable message', msg2);
 } finally {
   console.warn = warn;
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

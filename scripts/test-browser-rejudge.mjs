@@ -34,7 +34,7 @@ const K = require('../src/server/browser-keeper.js');
 const D = require('../src/browser-display.js');
 const V = require('../src/browser-verbs.js');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -61,14 +61,14 @@ console.log('— ① PURE: the display key, the re-judge table, the fresh-daemon
   ok(JSON.stringify(table) === JSON.stringify(['ask:display', 'ask:boot', 'none:-', 'none:-:seed', 'none:-', 'none:-']),
     'the re-judge table: fact changed ⇒ one ask, boot adoption ⇒ one ask, neither ⇒ none; a pre-lane record (no key) is seeded, never asked; a `closing` verdict is never re-judged (B-47f9 unchanged)', table);
   const fd = (n, a, b) => B.freshDaemonDue({ failed: n ? { count: n, since: 1 } : null, launched: a, now: b });
-  ok(B.HEAL_FRESH_AT === 3 && !fd(0, k0, k1) && !fd(1, k0, k1) && fd(2, k0, k1) && fd(5, k0, k1) && !fd(2, k0, k0) && !fd(2, null, k1) && !fd(2, k0, null),
+  ok(B.HEAL_FRESH_AT === 3 && !fd(0, k0, k1) && !fd(1, k0, k1) && gateOf(fd(2, k0, k1)) && gateOf(fd(5, k0, k1)) && !fd(2, k0, k0) && !fd(2, null, k1) && !fd(2, k0, null),
     'the fresh-daemon rung: the 3rd failed ask (2 before it) and later, only when the display the daemon was launched under is not the display now', [fd(2, k0, k1), fd(2, k0, k0)]);
   const ut = B.unstableText({ label: 'Bank', count: 10, kind: 'failing', spanMs: 280000 });
   const parked = { state: 'ready', pid: 3928207, browser: null, closed: { code: 'browser_unstable', error: ut, unstable: 'failing' } };
   const cell = V.browserCell(parked);
-  ok(/^parked \(browser_unstable, failing\) — /.test(cell) && cell.includes(ut) && !/ready/.test(cell) && !cell.includes('3928207'),
+  ok(gateOf(/^parked \(browser_unstable, failing\) — /.test(cell)) && gateOf(cell.includes(ut)) && !/ready/.test(cell) && !cell.includes('3928207'),
     'status: a parked profile says parked + the keeper\'s own words (B.unstableText: the state + the way out) — never "ready", never the daemon\'s pid', cell);
-  ok(V.browserCell({ state: 'ready', pid: 3928207, browser: { pid: 4100 } }) === 'ready pid 4100' && V.browserCell({ state: 'ready', pid: 3928207, browser: null }) === 'ready' && V.browserCell(null) === 'not running' && /^closed \(browser_closed\) — /.test(V.browserCell({ state: 'ready', pid: 1, closed: { code: 'browser_closed', error: 'x' } })),
+  ok(V.browserCell({ state: 'ready', pid: 3928207, browser: { pid: 4100 } }) === 'ready pid 4100' && V.browserCell({ state: 'ready', pid: 3928207, browser: null }) === 'ready' && V.browserCell(null) === 'not running' && verdictOf(/^closed \(browser_closed\) — /.test(V.browserCell({ state: 'ready', pid: 1, closed: { code: 'browser_closed', error: 'x' } }))),
     'status: a ready browser shows ITS pid (Chrome\'s) or none; a closed one is said closed with its code', V.browserCell({ state: 'ready', pid: 3928207, browser: { pid: 4100 } }));
 }
 
@@ -272,23 +272,23 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
 
 {
   const a = await legs.fresh(K, 'fresh');
-  ok(!a.threw && a.wd1 === 'wayland-0' && a.after1 === 1 && a.fails === 2 && a.launches === 2 && !a.d1Alive && a.v.pid !== a.d1 && a.wd2 === 'wayland-1' && a.v.state === 'ready' && !a.v.closed && a.chromeAlive && /wayland-1$/.test(a.v.socket || ''),
+  ok(!a.threw && a.wd1 === 'wayland-0' && a.after1 === 1 && a.fails === 2 && a.launches === 2 && !a.d1Alive && a.v.pid !== a.d1 && a.wd2 === 'wayland-1' && a.v.state === 'ready' && !a.v.closed && gateOf(a.chromeAlive) && verdictOf(/wayland-1$/.test(a.v.socket || '')),
     '② the fresh-daemon rung: 2 asks to the daemon frozen on the dead wayland-0 failed, the 3rd was a NEW daemon (the old one stopped) launched with the display probed now — WAYLAND_DISPLAY=wayland-1 in its environ, its browser up', a);
-  ok(!a.threw && a.v.heals && a.v.heals.lastOutcome === 'fresh-daemon' && a.v.heals.attempts.length === 1 && !a.v.heals.failed && a.launchesAfter === a.launches && a.failsAfter === a.fails && a.notices === 0,
+  ok(!a.threw && gateOf(a.v.heals) && a.v.heals.lastOutcome === 'fresh-daemon' && a.v.heals.attempts.length === 1 && !a.v.heals.failed && a.launchesAfter === a.launches && a.failsAfter === a.fails && a.notices === 0,
     '② …the day of attempts rides the new record (the B-47f9 tiers keep counting), the streak ended, nothing asked after, no notice', a.v.heals);
   const c = await legs.changed(K, 'changed');
-  ok(!c.threw && c.parked.closed === 'browser_unstable' && c.parked.unstable === 'failing' && c.parked.fails === B.HEAL_FAIL_BUDGET && c.parked.launches === 1 && /^wayland:.*wayland-0\|/.test(c.parked.key || '') && c.parked.noticeId,
+  ok(!c.threw && c.parked.closed === 'browser_unstable' && c.parked.unstable === 'failing' && c.parked.fails === B.HEAL_FAIL_BUDGET && c.parked.launches === 1 && gateOf(/^wayland:.*wayland-0\|/.test(c.parked.key || '')) && verdictOf(c.parked.noticeId),
     '③ parked `failing` under one display: the r6 ladder unchanged while the display is the same (10 failed asks, never a fresh daemon) — the key it was parked under recorded, its notice id kept', c.parked);
-  ok(!c.threw && /^parked \(browser_unstable, failing\) — /.test(c.cellParked) && /could not be started/.test(c.cellParked) && /Browser panel/.test(c.cellParked) && !c.cellParked.includes(String(c.d1)),
+  ok(!c.threw && gateOf(/^parked \(browser_unstable, failing\) — /.test(c.cellParked)) && gateOf(/could not be started/.test(c.cellParked)) && gateOf(/Browser panel/.test(c.cellParked)) && !c.cellParked.includes(String(c.d1)),
     '③ status for the parked profile: "parked (browser_unstable, failing)" + the way out, never ready, never the daemon pid', c.cellParked);
   ok(!c.threw && c.neither.fails === c.parked.fails && c.neither.launches === 1 && c.neither.closed === 'browser_unstable' && c.neither.notices === 1,
     '③ NEITHER (nothing changed, no restart): no ask in 3 ticks, still parked, the notice filed once', c.neither);
-  ok(!c.threw && c.launches1 === 2 && c.v.state === 'ready' && !c.v.closed && c.wd2 === 'wayland-1' && !c.d1Alive && c.launchesAfter === 2 && /^ready pid \d+$/.test(c.cellAfter) && c.cellAfter !== 'ready pid ' + c.v.pid,
+  ok(!c.threw && c.launches1 === 2 && c.v.state === 'ready' && !c.v.closed && c.wd2 === 'wayland-1' && !c.d1Alive && c.launchesAfter === 2 && gateOf(/^ready pid \d+$/.test(c.cellAfter)) && c.cellAfter !== 'ready pid ' + c.v.pid,
     '③ FACT CHANGED (wayland-0 gone, wayland-1 up): ONE fresh ask — a new daemon on wayland-1, the verdict cleared; 3 ticks after ask nothing; status shows Chrome\'s pid', { launches1: c.launches1, after: c.launchesAfter, wd2: c.wd2, cell: c.cellAfter, v: c.v });
-  ok(!c.threw && c.notices.length === 1 && c.notices[0].status === 'done' && /could not be started/.test(c.notices[0].text),
+  ok(!c.threw && c.notices.length === 1 && c.notices[0].status === 'done' && verdictOf(/could not be started/.test(c.notices[0].text)),
     '③ the ONE "could not be started" notice (filed once) is resolved when the re-judge brings the browser back', c.notices);
   const b = await legs.boot(K, 'boot');
-  ok(!b.threw && b.parked === 'browser_unstable:failing' && b.boot && b.boot.browsers === 1 && b.adopted === 'browser_unstable' && b.launches1 === 1 && b.v.state === 'ready' && !b.v.closed && !b.d1Alive && b.launchesAfter === 1,
+  ok(!b.threw && b.parked === 'browser_unstable:failing' && gateOf(b.boot) && b.boot.browsers === 1 && b.adopted === 'browser_unstable' && b.launches1 === 1 && b.v.state === 'ready' && !b.v.closed && !b.d1Alive && b.launchesAfter === 1,
     '④ BOOT ADOPTION: the restart adopts the parked daemon with its verdict, asks ONCE (a fresh daemon) and the browser is back; 3 ticks after ask nothing', b);
 
   console.log('— ⑤ patched-copy controls');
@@ -303,7 +303,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     'CONTROL 1: a keeper copy that never re-judges keeps the adopted profile parked for ever (no ask at boot, none after) — the boot leg catches it', { launches1: cb.launches1, closed: cb.v && cb.v.closed });
   const KF = M.load('src/server/browser-keeper.js', editAnchor(ksrc, NO_FRESH, 'if (false && B.freshDaemonDue({ failed: L.failed,', "src/server/browser-keeper.js"), 'stale-daemon-only');
   const cf = await legs.fresh(KF, 'ctl-fresh');
-  ok(!cf.threw && cf.fails === 3 && cf.launches === 1 && cf.d1Alive && cf.v.closed === 'browser_closed',
+  ok(!cf.threw && cf.fails === 3 && cf.launches === 1 && gateOf(cf.d1Alive) && cf.v.closed === 'browser_closed',
     'CONTROL 2: a keeper copy that relaunches only through the stale daemon fails its 3rd ask too (the daemon is still the one frozen on wayland-0) — the fresh leg catches it', { fails: cf.fails, launches: cf.launches, closed: cf.v && cf.v.closed });
   const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
   const CELL = "  if (c) return `${c.code === 'browser_unstable' ? 'parked' : 'closed'}";
@@ -313,4 +313,4 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
   ok(pc === 'ready pid 3928207' && !/^parked/.test(pc), 'CONTROL 3: a status copy that says "ready pid <daemon>" for a parked profile (the incident\'s words) is caught by the ① status check', pc);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

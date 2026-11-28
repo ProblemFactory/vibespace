@@ -24,7 +24,7 @@ const hostId = process.argv[2];
 if (!hostId) { console.error('usage: test-agentd-switchover.mjs <hostId>'); process.exit(2); }
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 
 const { HostManager } = require('../src/hosts.js');
 const { RemoteFs } = require('../src/remote-fs.js');
@@ -108,7 +108,7 @@ console.log('— S3 transcript slab: incremental delta sync —');
   const p2 = await hosts.fetchSessionJsonl(hostId, sid);
   const local = fs.readFileSync(p2, 'utf8');
   const remote = (await dm.fsReadRange(remotePath, 0, 10 * 1024 * 1024)).data.toString('utf8');
-  check('post-append refetch is byte-identical to the remote', local === remote && local.includes('"delta":true'), `lens ${local.length} vs ${remote.length}`);
+  check('post-append refetch is byte-identical to the remote', local === remote && verdictOf(local.includes('"delta":true')), `lens ${local.length} vs ${remote.length}`);
   await dm.fsRm(`${home}/${remoteDir}`, true, { by: 'system:test' });
   fs.rmSync(p2, { force: true }); fs.rmSync(p2 + '.meta', { force: true });
 }
@@ -139,4 +139,4 @@ console.log('— S4 usage harvest through the daemon (streaming) —');
 dm.stop();
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall data-plane SWITCHOVER tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf } from './lib/check.mjs';

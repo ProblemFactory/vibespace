@@ -70,7 +70,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 // GIT_INDEX_FILE / GIT_PREFIX) — see scripts/git-env.mjs for the incident.
 const GIT_ENV = gitEnvFrom(process.env);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const arMod = require(path.join(REPO, 'src/server/auto-resume.js'));
 const { create: createAR, CONTINUE_PROMPT, GRACE_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, continueNoticeFor } = arMod;
@@ -315,16 +315,16 @@ console.log('\n§1 the incident: a member becomes usable while two conversations
     // the pre-fire gate re-verdicting the target before it spends, which is
     // that gate's whole job (§3 pins that the EDGE reads once per login edge).
     ok('the login edge reads the member through the EXISTING caps-routed rung (the claude cli-usage rung)',
-      r.ok === true && w.probes[0] === w.NEW && w.probes.every((p) => p === w.NEW), JSON.stringify({ ok: r.ok, probes: w.probes }));
+      r.ok === true && w.probes[0] === w.NEW && verdictOf(w.probes.every((p) => p === w.NEW)), JSON.stringify({ ok: r.ok, probes: w.probes }));
     ok('…the reading is now on disk', (w.readCache(w.NEW) || {}).fiveHour?.utilization === 0.04);
-    ok('…the wake ACTED and named the pool it re-decided', r.wake.acted === true && r.wake.pools.includes(w.P), JSON.stringify(r.wake));
+    ok('…the wake ACTED and named the pool it re-decided', r.wake.acted === true && verdictOf(r.wake.pools.includes(w.P)), JSON.stringify(r.wake));
     ok('…and BOTH waiting conversations were continued, exactly once each',
       r.wake.fired.length === 2 && w.fired.length === 2 && new Set(w.fired.map((f) => f.id)).size === 2, JSON.stringify(w.fired.map((f) => f.id)));
-    ok('…with the CLI\'s own continue prompt (a real send, not a notice)', w.fired.every((f) => IS_CONTINUE(f.text)));
+    ok('…with the CLI\'s own continue prompt (a real send, not a notice)', verdictOf(w.fired.every((f) => IS_CONTINUE(f.text))));
     ok('…and they are no longer armed', !w.ar._armed.get(w.A._webuiId) || w.ar._armed.get(w.A._webuiId).fired === true);
     const card = [...w.fired.map((f) => f.note).filter(Boolean), ...w.notes.map((n) => n.text)].join(' | ');   // 2.369.97: a delivered continue carries its cause on the prompt; a separate notice survives only where no prompt reached the conversation
     ok('the card names WHAT UNBLOCKED IT — the account became usable — not a pool switch that never happened',
-      /UCI Max 已恢复可用/.test(card) && !/账号池已切换到/.test(card), card.slice(0, 200));
+      gateOf(/UCI Max 已恢复可用/.test(card)) && !/账号池已切换到/.test(card), card.slice(0, 200));
   }
 
   // (c) EACH HALF IS LOAD-BEARING, FOR A DIFFERENT SHAPE
@@ -340,7 +340,7 @@ console.log('\n§1 the incident: a member becomes usable while two conversations
     const r = await w.eng.onMemberLoginSuccess(w.NEW, 'login success');
     await settle();
     ok('HALF ② OFF: the pool half still runs and the reading still lands…',
-      r.wake.acted === true && r.wake.pools.includes(w.P) && (w.readCache(w.NEW) || {}).fiveHour?.utilization === 0.04);
+      r.wake.acted === true && gateOf(r.wake.pools.includes(w.P)) && (w.readCache(w.NEW) || {}).fiveHour?.utilization === 0.04);
     ok('…the pool re-decide moves NOBODY (they were already parked on the newcomer — the incident\'s own shape)',
       w.linkOf(w.A._webuiId) === linksBefore[0] && w.linkOf(w.B._webuiId) === linksBefore[1] && linksBefore[0] === w.NEW);
     ok('…so nobody is continued, and the wake SAYS why rather than claiming success',
@@ -454,9 +454,9 @@ console.log('\n§2 "no reading" is a refusal to act, never a verdict of 0%');
     w.writeCache(w.NEW, { ...w.healthy(), sevenDay: { utilization: 0.1, resetsAt: foreignWeekly } });
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh');
     ok('a FOREIGN reading (its weekly window is another member\'s) ⇒ refuse, and say whose',
-      r.acted === false && r.reason === 'foreign-reading' && /userP/.test(String(r.detail)), JSON.stringify(r));
+      r.acted === false && r.reason === 'foreign-reading' && verdictOf(/userP/.test(String(r.detail))), JSON.stringify(r));
     ok('…and the edge composes with the ONE predicate rather than copying it (src/reading-lag.js decideReadingTarget, rule ②)',
-      /decideReadingTarget/.test(read('src/server/usage-pool-engine.js').split('function readingForeignForWake')[1].slice(0, 600)));
+      verdictOf(/decideReadingTarget/.test(read('src/server/usage-pool-engine.js').split('function readingForeignForWake')[1].slice(0, 600))));
     ok('…READ-ONLY: refusing to wake never archives or moves the reading (guardReadingTarget is the write path, this is not)',
       JSON.parse(fs.readFileSync(path.join(w.cacheDir, w.NEW + '.json'), 'utf8')).sevenDay.resetsAt === foreignWeekly);
     // …and the incident's own case still acts: a brand-new member has no
@@ -487,7 +487,7 @@ console.log('\n§3 idempotent, rate-floored, and never an unbounded side effect 
     ok('…and only one round of continues was delivered: the TWO the wake decided, each landed, never a third',
       r1.fired.length === 2 && !L.missing.length && w.fired.length === 2, `decided=${JSON.stringify(r1.fired)} delivered=${JSON.stringify(w.fired.map((f) => f.id))} missing=${JSON.stringify(L.missing)}`);
     ok('…the floor is stamped only when the wake ACTED (a declined wake must not eat the real one)',
-      /THE FLOOR IS STAMPED ONLY WHEN WE ACT/.test(read('src/server/usage-pool-engine.js')));
+      verdictOf(/THE FLOOR IS STAMPED ONLY WHEN WE ACT/.test(read('src/server/usage-pool-engine.js'))));
   }
   {
     const w = mkWorld();
@@ -506,7 +506,7 @@ console.log('\n§3 idempotent, rate-floored, and never an unbounded side effect 
     const t0 = Date.now();
     await w.eng.onMemberLoginSuccess(w.NEW, 'login success');
     ok('…and the loop can see it: lastMemberReadAt names the instant of that read', w.eng.lastMemberReadAt(w.NEW) >= t0);
-    ok('…which the auto-cli loop (src/server/auto-cli-loop.js since quota r2) folds into its own lastAttemptAt (quota r3: over every id of the identity)', /lastAttemptAt: Math\.max\(\.\.\.mem\.map\(\(x\) => Math\.max\(attempts\.get\(x\) \|\| 0, d\.lastMemberReadAt\(x\) \|\| 0\)\)\)/.test(read('src/server/auto-cli-loop.js')) && /createAutoCliLoop\(\{[^\n]*lastMemberReadAt,/.test(read('server.js')));
+    ok('…which the auto-cli loop (src/server/auto-cli-loop.js since quota r2) folds into its own lastAttemptAt (quota r3: over every id of the identity)', gateOf(/lastAttemptAt: Math\.max\(\.\.\.mem\.map\(\(x\) => Math\.max\(attempts\.get\(x\) \|\| 0, d\.lastMemberReadAt\(x\) \|\| 0\)\)\)/.test(read('src/server/auto-cli-loop.js'))) && verdictOf(/createAutoCliLoop\(\{[^\n]*lastMemberReadAt,/.test(read('server.js'))));
   }
 }
 
@@ -531,9 +531,9 @@ console.log('\n§4 not ready is not failed (the auto-cli readiness gate)');
   w.login(w.NEW);
   ok('a live login is ready', w.eng.autoCliReady(w.NEW) === true);
   ok('an id that is not a claude subscription never blocks (null = no claim)', w.eng.autoCliReady('__global__') === true && w.eng.autoCliReady(w.P) === true);
-  ok('the loop asks it before it spends a spawn (wiring pin)', /\|\| !d\.autoCliReady\(a\.id\)\) continue;/.test(read('src/server/auto-cli-loop.js')) && /createAutoCliLoop\(\{[^\n]*autoCliReady,/.test(read('server.js')));
+  ok('the loop asks it before it spends a spawn (wiring pin)', gateOf(/\|\| !d\.autoCliReady\(a\.id\)\) continue;/.test(read('src/server/auto-cli-loop.js'))) && verdictOf(/createAutoCliLoop\(\{[^\n]*autoCliReady,/.test(read('server.js'))));
   ok('…and the FILE reader is the right one because the rung strips the long-lived token from the child env',
-    /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(read('src/usage-routes.js')));
+    verdictOf(/delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(read('src/usage-routes.js'))));
 }
 
 // ── §5 THE LOOP BREAKER IS UNTOUCHED ───────────────────────────────────────
@@ -587,7 +587,7 @@ console.log('\n§5 the wake never spends by itself');
   // call and lets its trailing arguments grow, while still failing if the route
   // changes (a second delivery path, or `attemptFire` dropped from fireNow).
   ok('…and every release went through attemptFire, not around it (wiring pin)',
-    /return attemptFire\(id, session, a, 'now', why, cause[^;]*\);/.test(read('src/server/auto-resume.js')));
+    verdictOf(/return attemptFire\(id, session, a, 'now', why, cause[^;]*\);/.test(read('src/server/auto-resume.js'))));
 }
 
 // ── §6 THE PRODUCERS ───────────────────────────────────────────────────────
@@ -595,16 +595,16 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
 {
   const usageSrc = read('src/usage-routes.js');
   for (const rung of ['manual refresh (session)', 'manual refresh (cli-panel)', 'manual refresh (token)']) {
-    ok(`/api/usage/refresh takes the edge on the ${rung.replace(/manual refresh \(|\)/g, '')} rung`, usageSrc.includes(`wakePool(key, '${rung}')`));
+    ok(`/api/usage/refresh takes the edge on the ${rung.replace(/manual refresh \(|\)/g, '')} rung`, verdictOf(usageSrc.includes(`wakePool(key, '${rung}')`)));
   }
   ok('…and the HOST branch takes none of them (a remote machine\'s pool is not ours to decide for)',
-    /LOCAL ONLY, DELIBERATELY/.test(usageSrc));
+    verdictOf(/LOCAL ONLY, DELIBERATELY/.test(usageSrc)));
   ok('…the edge reaches the routes as an injected dep, not a require (tier: usage-routes stays ORCH wiring)',
-    /probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null \}\) \{/.test(usageSrc) && /onMemberReadingFresh, CLAUDE_CMD, cliCmds \}\);/.test(read('server.js')));
+    gateOf(/probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null \}\) \{/.test(usageSrc)) && verdictOf(/onMemberReadingFresh, CLAUDE_CMD, cliCmds \}\);/.test(read('server.js'))));
 
   const srv = read('src/server/auto-cli-loop.js');
   ok('the auto-cli loop — the THIRD producer, whose successful read at 02:31:43 changed nothing — takes the same edge, and only on success',
-    /ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\)[\s\S]{0,2800}?if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \}/.test(srv)   /* B-360d: + the sign-in-unknown give-back between them (no failure, the attempt given back); B-574d (主开发 r4732 (5)): + the after-write awaited before the wake, its landing said once (1887 → 2590 chars) */ && /createAutoCliLoop\(\{[^\n]*usage, onMemberReadingFresh,/.test(read('server.js')));
+    gateOf(/ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\)[\s\S]{0,2800}?if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \}/.test(srv))   /* B-360d: + the sign-in-unknown give-back between them (no failure, the attempt given back); B-574d (主开发 r4732 (5)): + the after-write awaited before the wake, its landing said once (1887 → 2590 chars) */ && verdictOf(/createAutoCliLoop\(\{[^\n]*usage, onMemberReadingFresh,/.test(read('server.js'))));
   ok('…and the edge is NOT buried inside refreshViaCliPanel, where the pre-fire spend gate also calls it (a gate that fires conversations as a side effect of asking a question is not a gate)',
     !/onMemberReadingFresh/.test(read('src/usage-routes.js').split('async function refreshViaCliPanel')[1].split('\n}\n')[0]));
 
@@ -664,10 +664,10 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
     return { w, app, call, swept, handlers };
   }
 
-  ok('the routes module registers all three finalize routes', (() => {
+  ok('the routes module registers all three finalize routes', verdictOf((() => {
     const { handlers } = mkRoutes();
     return ['POST /api/accounts/:id/relogin-finalize', 'POST /api/accounts/subscription/:id/finalize', 'POST /api/accounts/codex-subscription/:id/finalize'].every((k) => handlers.has(k));
-  })());
+  })()));
 
   // exit 1: relogin-finalize 'same' — the ordinary in-place re-login
   {
@@ -727,12 +727,12 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
     ok('control setup: the Add flow really took the auto-merge exit (this leg is worthless if it did not)',
       r?.merged === true && !w.am.get(w.NEW), JSON.stringify({ merged: r?.merged, throwawayGone: !w.am.get(w.NEW) }));
     ok('EXIT 4 the auto-merge exit wakes the SURVIVOR — waking the throwaway would read a record about to stop existing and leave the one the pool holds unread',
-      w.probes.includes(w.PANDY), JSON.stringify(w.probes));
+      verdictOf(w.probes.includes(w.PANDY)), JSON.stringify(w.probes));
     ok('…and it wakes NOBODY ELSE: the throwaway is never probed, so no panel is spawned for a record that is about to be deleted',
       !w.probes.includes(w.NEW) && w.probes.length === 1, JSON.stringify(w.probes));
     ok('…and no usage-cache entry is left keyed to the deleted record (nothing ever removes those, and establishedWindows() reads them all)',
       w.readCache(w.NEW) === null, JSON.stringify(w.readCache(w.NEW)));
-    ok('…and the survivor is named at the call site, not inferred', /wakeOnLoginSuccess\(dup\.id, merged, 'subscription login merge', merged\?\.id \|\| dup\.id\)/.test(read('src/server/account-usage-routes.js')));
+    ok('…and the survivor is named at the call site, not inferred', verdictOf(/wakeOnLoginSuccess\(dup\.id, merged, 'subscription login merge', merged\?\.id \|\| dup\.id\)/.test(read('src/server/account-usage-routes.js'))));
     // NEGATIVE CONTROL: the PRE-FIX route — the wake ungated, above the merge
     const mutR = mutantRoutes([
       ["    if (fin?.loggedIn && !dupOf) wakeOnLoginSuccess(req.params.id, fin, 'subscription login');",
@@ -747,7 +747,7 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
     w2.setProbeAnswer(() => w2.healthy());
     const r2 = await call2('POST /api/accounts/subscription/:id/finalize', { id: w2.NEW });
     ok('NEGATIVE CONTROL (pre-fix): the same exit spawns TWO panels — one of them for the record it then deletes — and leaves a usage-cache entry keyed to a phantom',
-      r2?.merged === true && !w2.am.get(w2.NEW) && w2.probes.length === 2 && w2.probes.includes(w2.NEW) && w2.readCache(w2.NEW) !== null,
+      r2?.merged === true && !w2.am.get(w2.NEW) && w2.probes.length === 2 && gateOf(w2.probes.includes(w2.NEW)) && w2.readCache(w2.NEW) !== null,
       JSON.stringify({ probes: w2.probes, phantomCache: !!w2.readCache(w2.NEW) }));
   }
   // exit 4b: the fold did NOT happen, so this record still holds the login
@@ -775,12 +775,12 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
   // exit 5: codex device-auth
   {
     const src = read('src/server/account-usage-routes.js');
-    ok('EXIT 5 codex device-auth finalize takes the edge', /if \(fin\?\.loggedIn\) wakeOnLoginSuccess\(req\.params\.id, fin, 'codex device-auth'\);/.test(src));
-    ok('…and \'moved\' wakes the record the login was RELOCATED INTO', /r\?\.movedTo\?\.id \|\| r\?\.account\?\.id \|\| req\.params\.id/.test(src));
+    ok('EXIT 5 codex device-auth finalize takes the edge', verdictOf(/if \(fin\?\.loggedIn\) wakeOnLoginSuccess\(req\.params\.id, fin, 'codex device-auth'\);/.test(src)));
+    ok('…and \'moved\' wakes the record the login was RELOCATED INTO', verdictOf(/r\?\.movedTo\?\.id \|\| r\?\.account\?\.id \|\| req\.params\.id/.test(src)));
     ok('…the gate is the EXISTING transition predicate (loginFingerprint off the answer the route already holds), never a second credential reader',
-      /const fp = loginFingerprint\(r\);/.test(src.split('const wakeOnLoginSuccess')[1].slice(0, 800)));
+      verdictOf(/const fp = loginFingerprint\(r\);/.test(src.split('const wakeOnLoginSuccess')[1].slice(0, 800))));
     ok('…on its OWN latch, so disabling one of the two side effects cannot silently disable the other',
-      /const lastWakeFingerprint = new Map\(\)/.test(src));
+      verdictOf(/const lastWakeFingerprint = new Map\(\)/.test(src)));
   }
 
   // ── §6b THE LOGIN RE-CHECK, WIRED (2026-09-29, owner "好" = A) ──────────
@@ -805,7 +805,7 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
     const prodEngine = (eng) => Object.fromEntries(names.map((n) => [n, eng[n]]));
     const masterEngine = (eng) => Object.fromEntries(names.filter((n) => n !== 'onMemberLoginSuccess').map((n) => [n, eng[n]]));
     ok(`the routes get server.js's own engine literal (${names.length} names) — onMemberLoginSuccess among them, every name a real engine function`,
-      names.includes('onMemberLoginSuccess') && names.length >= 10 && names.every((n) => typeof probeWorld.eng[n] === 'function'), JSON.stringify(names));
+      gateOf(names.includes('onMemberLoginSuccess')) && names.length >= 10 && verdictOf(names.every((n) => typeof probeWorld.eng[n] === 'function')), JSON.stringify(names));
     /** run `fn` with console.log captured (the journal lines the engine writes) */
     const journal = async (fn) => {
       const lines = [], orig = console.log;
@@ -839,9 +839,9 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
       ok('a login SUCCESS ⇒ ONE usage read of that member, through the EXISTING rung (the stubbed cli-usage panel)',
         w.probes.length === 1 && w.probes[0] === w.NEW && L.r?.ok === true && L.r?.probe?.rung === 'cli-usage', JSON.stringify({ probes: w.probes, probe: L.r?.probe }));
       ok('…ONE `member wake UCI Max (login)` journal line, naming the ONE pool it re-decided',
-        L.wakes.length === 1 && /re-decided 1 pool\(s\)/.test(L.wakes[0]) && L.r?.wake?.acted === true && JSON.stringify(L.r.wake.pools) === JSON.stringify([w.P]), JSON.stringify({ wakes: L.wakes, wake: L.r?.wake }));
+        L.wakes.length === 1 && gateOf(/re-decided 1 pool\(s\)/.test(L.wakes[0])) && L.r?.wake?.acted === true && JSON.stringify(L.r.wake.pools) === JSON.stringify([w.P]), JSON.stringify({ wakes: L.wakes, wake: L.r?.wake }));
       ok('…and the pinned conversation RETURNS to its pin (the pin rules: its member settled, the conversation idle ⇒ pin-return at once)',
-        w.linkOf(w.A._webuiId) === w.NEW && L.lines.some((l) => l.includes(`per-session switch ${w.P}/${w.A._webuiId}`) && /pin return \(pinned\)/.test(l)),
+        w.linkOf(w.A._webuiId) === w.NEW && verdictOf(L.lines.some((l) => l.includes(`per-session switch ${w.P}/${w.A._webuiId}`) && /pin return \(pinned\)/.test(l))),
         L.lines.filter((l) => /per-session|pin/.test(l)).join(' | '));
       ok('…an unpinned conversation is left to the automatic rules (it stays on its healthy member — a pin moves only its own conversation)',
         w.linkOf(w.B._webuiId) === w.FISH, String(w.linkOf(w.B._webuiId)));
@@ -875,7 +875,7 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
     {
       const { h: { w }, L } = await noReadingWorld();
       ok('the read did NOT answer ⇒ the pool is still re-decided ONCE, said as one `member wake UCI Max (login)` line',
-        w.probes.length === 1 && L.r?.ok === false && L.r?.wake?.reason === 'no-reading' && L.r.wake.redecided === true && L.wakes.length === 1 && /re-decided 1 pool\(s\) without a reading \(no-reading\)/.test(L.wakes[0]),
+        w.probes.length === 1 && L.r?.ok === false && L.r?.wake?.reason === 'no-reading' && L.r.wake.redecided === true && L.wakes.length === 1 && verdictOf(/re-decided 1 pool\(s\) without a reading \(no-reading\)/.test(L.wakes[0])),
         JSON.stringify({ probes: w.probes, wake: L.r?.wake, wakes: L.wakes }));
       ok('…the re-decision is real (the automatic rules moved both conversations off the spent member — an unread member is unknown, never 0 %) and nobody was continued',
         w.linkOf(w.A._webuiId) === w.NEW && w.linkOf(w.B._webuiId) === w.NEW && w.fired.length === 0 && L.r.wake.fired.length === 0,
@@ -1010,7 +1010,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     await landed(w2, r2.fired, 'the pre-fix copy');
     const spentCache = w2.readCache(w2.linkOf(w2.A._webuiId));
     ok('NEGATIVE CONTROL (pre-fix): the same world DOES spend a turn — on a member measured at 100% utilization — and the card names that member as recovered',
-      r2.fired.length === 1 && w2.fired.length === 1 && spentCache?.fiveHour?.utilization === 1 && /Fish Max 已恢复可用/.test(cardsOf(w2)),
+      r2.fired.length === 1 && w2.fired.length === 1 && spentCache?.fiveHour?.utilization === 1 && verdictOf(/Fish Max 已恢复可用/.test(cardsOf(w2))),
       JSON.stringify({ fired: w2.fired.length, util: spentCache?.fiveHour?.utilization, cards: cardsOf(w2) }));
   }
 
@@ -1021,7 +1021,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     await landed(w, r.fired, 'the remote conversation');   // r152: a wake that decided nothing has nothing in flight — judged by its decision, never a sleep
     ok('REMOTE conversation (s.host): same verdict — the per-session pass skips it by design, so the wake must not fire it either',
       r.acted === true && r.fired.length === 0 && w.fired.length === 0 && r.skipped[0]?.why === 'lands-elsewhere', JSON.stringify(r));
-    ok('…and the pool half still ran (this is a refusal to SPEND, not a refusal to think)', r.pools.includes(w.P), JSON.stringify(r.pools));
+    ok('…and the pool half still ran (this is a refusal to SPEND, not a refusal to think)', verdictOf(r.pools.includes(w.P)), JSON.stringify(r.pools));
   }
 
   // (c) COLD pool — the pool RESTARTS such a conversation through the client
@@ -1033,7 +1033,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
     await landed(w, r.fired, 'the cold pool');   // r152: a wake that decided nothing has nothing in flight — judged by its decision, never a sleep
     ok('COLD pool (hot:false): the wake continues NOBODY — a cold conversation is RESTARTED, and master guards its own fireNow with the same `if (a.hot)`',
-      r.acted === true && r.fired.length === 0 && w.fired.length === 0 && /^cold pool/.test(r.skipped[0]?.why || ''), JSON.stringify(r));
+      r.acted === true && r.fired.length === 0 && w.fired.length === 0 && verdictOf(/^cold pool/.test(r.skipped[0]?.why || '')), JSON.stringify(r));
     ok('…and it added no second restart broadcast either (it only declined to spend)', w.coldRestarts() === restarts, `${restarts} → ${w.coldRestarts()}`);
 
     // NEGATIVE CONTROL: ONLY the cold clause removed — one mechanism, one control
@@ -1133,12 +1133,12 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
 
     const w = await codexWalled();
     ok('control setup (codex): the REAL codex rejection producer armed it, and the pool COLD-restarted it onto the newcomer',
-      w.armed() && w.linkOf() === w.NEW && w.coldRestarts() >= 1,
+      gateOf(w.armed()) && w.linkOf() === w.NEW && w.coldRestarts() >= 1,
       `armed=${w.armed()} onNew=${w.linkOf() === w.NEW} restarts=${w.coldRestarts()}`);
     const restarts = w.coldRestarts();
     const r = await w.wake('manual refresh (cli-panel)');
     ok('CODEX pool with hot:true: the wake continues NOBODY — hotness is the caps-gated verdict the engine acts on, never the raw flag',
-      r.acted === true && r.fired.length === 0 && w.fired.length === 0 && /^cold pool/.test(r.skipped[0]?.why || ''), JSON.stringify(r));
+      r.acted === true && r.fired.length === 0 && w.fired.length === 0 && verdictOf(/^cold pool/.test(r.skipped[0]?.why || '')), JSON.stringify(r));
     ok('…and it added no second restart broadcast either (it only declined to spend)', w.coldRestarts() === restarts, `${restarts} → ${w.coldRestarts()}`);
     ok('…and no card claims a member recovered', !/已恢复可用/.test(w.cards()), w.cards());
 
@@ -1151,7 +1151,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     const w2 = await codexWalled(mutC.mod);
     const r2 = await w2.wake('manual refresh (cli-panel)');
     ok('NEGATIVE CONTROL (raw flag): the same world DELIVERS a continue into a codex CLI that cannot re-read credentials, while the pool was restarting that very conversation',
-      r2.fired.length === 1 && w2.fired.length === 1 && w2.coldRestarts() >= 1 && /ChatGPT New 已恢复可用/.test(w2.cards()),
+      r2.fired.length === 1 && w2.fired.length === 1 && w2.coldRestarts() >= 1 && verdictOf(/ChatGPT New 已恢复可用/.test(w2.cards())),
       JSON.stringify({ fired: w2.fired.length, restarts: w2.coldRestarts(), cards: w2.cards() }));
   }
 
@@ -1166,7 +1166,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     await settle(); await delivered(w, r.fired.length);
     ok('THE INCIDENT: both conversations were ALREADY parked on the newcomer, so the continue lands on the member that became usable — both released',
       r.fired.length === 2 && w.fired.length === 2 && r.skipped.length === 0, JSON.stringify({ fired: r.fired.length, sent: w.fired.length, skipped: r.skipped }));
-    ok('…and the card names the account that recovered', /UCI Max 已恢复可用/.test(cardsOf(w)), cardsOf(w));
+    ok('…and the card names the account that recovered', verdictOf(/UCI Max 已恢复可用/.test(cardsOf(w))), cardsOf(w));
   }
   // (d′) B-2e0b PLACED: the same incident with B's PRE-FIRE GATE answering LATE (held until the first delivery is seen) — the .385
   // runner's {fired 2, sent 1}. The leg waits for the deliveries by their count; the old leg's read (after settle()) is the control.
@@ -1207,13 +1207,13 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     ok('half ① moved the link and fired it ITSELF, so half ② stands down and names why',
       w.linkOf(w.A._webuiId) === w.NEW && r.fired.length === 0 && r.skipped[0]?.why === 'the wake moved it', JSON.stringify(r));
     ok('…and EXACTLY ONE continue was delivered, worded as the pool switch it was',
-      w.fired.length === 1 && /账号池已切换到 UCI Max/.test(cardsOf(w)), JSON.stringify({ fired: w.fired.length, cards: cardsOf(w) }));
+      w.fired.length === 1 && verdictOf(/账号池已切换到 UCI Max/.test(cardsOf(w))), JSON.stringify({ fired: w.fired.length, cards: cardsOf(w) }));
     // HONEST BOUNDARY, measured: deleting this snapshot changes no outcome today
     // — auto-resume refuses the second fire on its own (§8f drives that). It
     // stays so half ②'s money-safety is not OWED to another module's private
     // in-flight flag, and the source has to SAY that it is redundant.
     ok('…and the source says so at the snapshot (a redundant guard must announce that it is redundant)',
-      /MEASURED HONESTLY: deleting this snapshot changes no outcome TODAY/.test(engSrc0));
+      verdictOf(/MEASURED HONESTLY: deleting this snapshot changes no outcome TODAY/.test(engSrc0)));
   }
 
   // (f) THE INTERLOCK ITSELF — what actually prevents the second fire today,
@@ -1246,8 +1246,8 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     ok('a REAL pool switch on a near-armed session is still described as a switch (the pair round 1 changed)',
       C({ kind: 'now', armReason: 'account usable again', label: 'X' }) === '账号池已切换到 X，已自动继续这个任务。');
     ok('…and the engine really writes both halves of that pair (drift pin: the near-arm reason and a kind:\'now\' switch fire)',
-      /armIfEnabled\?\.\(id, session, Date\.now\(\) \+ 45000, 'account usable again'\)/.test(engSrc0)
-      && /if \(a\.hot( && ds\.reason !== 'not-a-member')?\) \{ try \{ getAutoResume\(\)\?\.fireNow\?\.\(sid, `账号池已切换到 \$\{toName\}`\)/.test(engSrc0)); // 2026-09-28: a REMOVED member's eviction never fires the continue (it starts no turn)
+      gateOf(/armIfEnabled\?\.\(id, session, Date\.now\(\) \+ 45000, 'account usable again'\)/.test(engSrc0))
+      && verdictOf(/if \(a\.hot( && ds\.reason !== 'not-a-member')?\) \{ try \{ getAutoResume\(\)\?\.fireNow\?\.\(sid, `账号池已切换到 \$\{toName\}`\)/.test(engSrc0))); // 2026-09-28: a REMOVED member's eviction never fires the continue (it starts no turn)
     ok('the account that came back BY ITSELF (timed path) still reads as a recovery',
       C({ kind: 'timed', armReason: 'account usable again', label: 'X' }) === '账号 X 已恢复可用，已自动继续这个任务。');
     ok('the WAKE names the member that became usable', C({ kind: 'now', armReason: 'usage limit', label: 'X', cause: 'member-usable' }) === '账号 X 已恢复可用，已自动继续这个任务。');
@@ -1288,9 +1288,9 @@ console.log('\n§7 no new vendor surface');
   const engSrc = read('src/server/usage-pool-engine.js');
   const wake = engSrc.split('async function onMemberLoginSuccess')[1].split('\n}')[0];
   ok('the login half reads through the EXISTING caps-routed dispatcher and constructs nothing itself',
-    /probeQuotaForKey\(memberId\)/.test(wake) && !/https|request\(|fetch\(/.test(wake));
+    gateOf(/probeQuotaForKey\(memberId\)/.test(wake)) && !/https|request\(|fetch\(/.test(wake));
   ok('…and the dispatcher is the one that routes claude → the cli panel and codex → its app-server twin (no claude spawn for a codex identity)',
-    /rung === 'cli-usage'/.test(engSrc) && /if \(liveReadSource\(backend\)\) \{/.test(engSrc));
+    gateOf(/rung === 'cli-usage'/.test(engSrc)) && verdictOf(/if \(liveReadSource\(backend\)\) \{/.test(engSrc)));
   const w = mkWorld();
   // a codex member has no cli-usage rung: the edge must not spawn a claude panel
   let CX = null;
@@ -1391,7 +1391,7 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
       okd === true && w.files().length >= 1 && JSON.parse(fs.readFileSync(path.join(w.cacheDir, w.id + '.json'), 'utf8')).fiveHour?.utilization === 0.04,
       JSON.stringify(w.files()));
     ok('…and it stamped the account\'s own window sidecar too (so the removal leg below can prove BOTH writes are refused)',
-      w.files().some((f) => f.startsWith('.window-')), JSON.stringify(w.files()));
+      verdictOf(w.files().some((f) => f.startsWith('.window-'))), JSON.stringify(w.files()));
   }
 
   // §9b THE ROUTE STOPS INSTEAD OF ESCALATING (r3 verifier, LOW): the belt's
@@ -1439,14 +1439,14 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
       const okd = await w.u.refreshViaCliPanel(w.id);
       const pv = w.u.panelVerdictFor(w.id);
       ok('§9c a panel whose typed cache write is REFUSED answers false (the loop takes the failure backoff) and its verdict names the write',
-        okd === false && pv && pv.code === 'write' && pv.outcome === 'write-refused', JSON.stringify({ okd, pv }));
+        okd === false && gateOf(pv) && pv.code === 'write' && pv.outcome === 'write-refused', JSON.stringify({ okd, pv }));
       const routes = {}; const app = { get(p2, h) { routes['GET ' + p2] = h; }, post(p2, h) { routes['POST ' + p2] = h; }, put() { }, delete() { }, use() { }, locals: {} };
       const w3 = mkUsage({ app });
       let n = 0; const ut = w3.am.usageToken.bind(w3.am); w3.am.usageToken = (...a) => { n++; return ut(...a); };
       const res = { code: 200, body: null, status(c) { res.code = c; return res; }, json(b) { res.body = b; return res; } };
       await routes['POST /api/usage/refresh']({ body: { account: w3.id } }, res);
       ok('§9c …and the ⟳ route answers "not recorded" with the reason, never consulting the token ladder (the vendor already answered once)',
-        res.body && /^not recorded/.test(String(res.body.error || '')) && n === 0, JSON.stringify({ body: res.body, tokenAsked: n }));
+        gateOf(res.body) && gateOf(/^not recorded/.test(String(res.body.error || ''))) && n === 0, JSON.stringify({ body: res.body, tokenAsked: n }));
       const mut = mutantUsage([['  return wroteOk;\n}', '  return true;\n}']]);
       ok('control setup: the pre-fix refresher copy (answers true whatever the write did) applied its replacement', mut.hits === 1, JSON.stringify(mut));
       const w2 = mkUsage({ usageModule: mut.mod });
@@ -1483,7 +1483,7 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
     const okd2 = await p2;
     ok('control setup: the pre-fix copy\'s account was removed while its panel RAN (the panel\'s own mark)', running2 === true, JSON.stringify({ running2 }));
     ok('NEGATIVE CONTROL (pre-fix): the same race leaves a cache file AND a window sidecar keyed to an id the roster no longer knows',
-      okd2 === true && !w2.am.get(w2.id) && w2.files().some((f) => f.endsWith('.json')) && w2.files().some((f) => f.startsWith('.window-')),
+      okd2 === true && !w2.am.get(w2.id) && gateOf(w2.files().some((f) => f.endsWith('.json'))) && verdictOf(w2.files().some((f) => f.startsWith('.window-'))),
       JSON.stringify({ okd2, files: w2.files() }));
   }
 }
@@ -1506,7 +1506,7 @@ console.log('\n§10 the patched copies never touch the tree');
   const ours = (porcelain || '').split('\n').filter((l) => l && (/vs-wake-/.test(l) || l.includes('-' + process.pid + '-') || l.includes('-' + process.pid + '.')));
   ok('git status (untracked + ignored) shows nothing under src/ that this run wrote', porcelain !== null && ours.length === 0, gitErr || ours.join(' ; '));
   ok(`…and the run really made copies to judge (${mutantFiles.length}), every one of them outside the checkout, in this process's scratch dir`,
-    mutantFiles.length >= 5 && mutantFiles.every((f) => path.relative(REPO, f).startsWith('..' + path.sep) && f.startsWith(MUT_DIR + path.sep) && fs.existsSync(f)),
+    mutantFiles.length >= 5 && verdictOf(mutantFiles.every((f) => path.relative(REPO, f).startsWith('..' + path.sep) && f.startsWith(MUT_DIR + path.sep) && fs.existsSync(f))),
     JSON.stringify(mutantFiles));
 }
 
@@ -1524,4 +1524,4 @@ if (process.env.VS_WAKE_HOLD) {
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -40,7 +40,7 @@ const B = require('../src/browser-profiles.js');
 const S = require('../src/browser-stream.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -86,8 +86,8 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
 {
   ok(D.runtimeDirOf({ XDG_RUNTIME_DIR: '/run/user/7' }) === '/run/user/7' && D.runtimeDirOf({ XDG_RUNTIME_DIR: 'rel' }) === null && D.runtimeDirOf({}) === null, 'runtimeDirOf: an absolute XDG_RUNTIME_DIR, else none (never a guessed /run/user/<uid>)');
   const x = (v) => D.parseX11Display(v, '/x');
-  ok(eq(x(':0'), { n: 0, name: ':0', path: '/x/X0', abstract: '@/x/X0' }) && x(':1.0').path === '/x/X1' && x('unix:3').path === '/x/X3' && x('host:10.0').tcp === true && x('localhost:0').tcp === true && x('') === null && x(undefined) === null, 'parseX11Display: :N / :N.S / unix:N are local sockets; a host form is TCP; unset is null');
-  ok(eq(D.displayCandidates({ env: { XDG_RUNTIME_DIR: '/r', WAYLAND_DISPLAY: 'wayland-3', DISPLAY: ':2' }, listing: ['wayland-1', 'wayland-0', 'wayland-0.lock', 'pulse', 'wayland-x'], x11Dir: '/x' }), ['/r/wayland-3', '/r/wayland-0', '/r/wayland-1', '/x/X2', '@/x/X2']), 'displayCandidates: the named socket, the runtime dir\'s wayland-N in order (never a .lock), DISPLAY\'s X socket + its abstract twin — nothing else');
+  ok(gateOf(eq(x(':0'), { n: 0, name: ':0', path: '/x/X0', abstract: '@/x/X0' })) && x(':1.0').path === '/x/X1' && x('unix:3').path === '/x/X3' && x('host:10.0').tcp === true && x('localhost:0').tcp === true && x('') === null && x(undefined) === null, 'parseX11Display: :N / :N.S / unix:N are local sockets; a host form is TCP; unset is null');
+  ok(verdictOf(eq(D.displayCandidates({ env: { XDG_RUNTIME_DIR: '/r', WAYLAND_DISPLAY: 'wayland-3', DISPLAY: ':2' }, listing: ['wayland-1', 'wayland-0', 'wayland-0.lock', 'pulse', 'wayland-x'], x11Dir: '/x' }), ['/r/wayland-3', '/r/wayland-0', '/r/wayland-1', '/x/X2', '@/x/X2'])), 'displayCandidates: the named socket, the runtime dir\'s wayland-N in order (never a .lock), DISPLAY\'s X socket + its abstract twin — nothing else');
   const V = (env, entries) => D.displayVerdict({ env, entries, x11Dir: '/x' });
   const sock = (p, alive = true) => ({ path: p, type: 'socket', alive });
   const cases = [
@@ -111,40 +111,40 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   for (const [name, env, entries, kind, socket] of cases) { const v = V(env, entries); if (v.kind !== kind || v.socket !== socket) bad.push({ name, got: [v.kind, v.socket] }); }
   ok(!bad.length, `displayVerdict: ${cases.length} env × socket rows`, bad);
   const vr = V({ XDG_RUNTIME_DIR: '/r' }, [sock('/r/wayland-0')]);
-  ok(eq(vr.env, { WAYLAND_DISPLAY: 'wayland-0' }) && eq(V({ XDG_RUNTIME_DIR: '/r', WAYLAND_DISPLAY: 'wayland-0' }, [sock('/r/wayland-0')]).env, {}), 'a socket FOUND in the runtime dir is named for the launch (WAYLAND_DISPLAY); one the env already names adds nothing');
+  ok(gateOf(eq(vr.env, { WAYLAND_DISPLAY: 'wayland-0' })) && verdictOf(eq(V({ XDG_RUNTIME_DIR: '/r', WAYLAND_DISPLAY: 'wayland-0' }, [sock('/r/wayland-0')]).env, {})), 'a socket FOUND in the runtime dir is named for the launch (WAYLAND_DISPLAY); one the env already names adds nothing');
   const vb = V({ XDG_RUNTIME_DIR: '/r', DISPLAY: ':1' }, [sock('/r/wayland-0'), sock('/x/X1')]);
-  ok(eq(vb.available, ['wayland', 'x11']) && vb.why.length === 0, 'available lists every kind here; nothing unexplained');
+  ok(gateOf(eq(vb.available, ['wayland', 'x11'])) && vb.why.length === 0, 'available lists every kind here; nothing unexplained');
   const vn = V({ XDG_RUNTIME_DIR: '/r', DISPLAY: 'h:1' }, []);
-  ok(vn.why.some((w) => /no wayland-\* socket in \/r/.test(w)) && vn.why.some((w) => /not a local display/.test(w)), 'why: one short line per thing looked at and not counted (Settings\' detail)', vn.why);
+  ok(gateOf(vn.why.some((w) => /no wayland-\* socket in \/r/.test(w))) && verdictOf(vn.why.some((w) => /not a local display/.test(w))), 'why: one short line per thing looked at and not counted (Settings\' detail)', vn.why);
 
   // launchPlan
   const none = V({}, []);
   const wl = V({ XDG_RUNTIME_DIR: '/r' }, [sock('/r/wayland-0')]);
   const x11 = V({ DISPLAY: ':0' }, [sock('/x/X0')]);
   const p1 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none });
-  ok(p1.headed === false && p1.args === '--no-sandbox,--disable-blink-features=AutomationControlled' && p1.changed && eq(p1.fallback, { why: 'no-display', wanted: 'headed', rung: 'headless', dropped: ['--ozone-platform=wayland'] }) && eq(p1.env, {}), 'THE OWNER\'S CASE: headed + the Wayland pin + no display ⇒ headless, the pin dropped, the fallback named', p1);
+  ok(p1.headed === false && p1.args === '--no-sandbox,--disable-blink-features=AutomationControlled' && gateOf(p1.changed) && gateOf(eq(p1.fallback, { why: 'no-display', wanted: 'headed', rung: 'headless', dropped: ['--ozone-platform=wayland'] })) && verdictOf(eq(p1.env, {})), 'THE OWNER\'S CASE: headed + the Wayland pin + no display ⇒ headless, the pin dropped, the fallback named', p1);
   const p2 = D.launchPlan({ wanted: { headed: true, args: ['--no-sandbox', '--ozone-platform=x11'] }, display: none });
-  ok(eq(p2.args, ['--no-sandbox']) && p2.headed === false, 'a LIST of args stays a list');
+  ok(gateOf(eq(p2.args, ['--no-sandbox'])) && p2.headed === false, 'a LIST of args stays a list');
   const p3 = D.launchPlan({ wanted: { headed: true, args: '--a\n--ozone-platform=wayland\n--b' }, display: none });
   ok(p3.args === '--a\n--b', 'newline-separated args stay newline-separated');
   const p4 = D.launchPlan({ wanted: { headed: true, args: '--no-sandbox' }, display: none });
-  ok(p4.headed === false && p4.args === '--no-sandbox' && p4.changed && eq(p4.fallback.dropped, []), 'no ozone arg: headless all the same (agent-browser\'s own Xvfb is not assumed)');
+  ok(p4.headed === false && p4.args === '--no-sandbox' && gateOf(p4.changed) && verdictOf(eq(p4.fallback.dropped, [])), 'no ozone arg: headless all the same (agent-browser\'s own Xvfb is not assumed)');
   const p5 = D.launchPlan({ wanted: { headed: true, args: '--ozone-platform=headless' }, display: none });
   ok(p5.args === '--ozone-platform=headless' && p5.headed === false, 'an explicit --ozone-platform=headless pins no display — kept');
   ok(!D.launchPlan({ wanted: { headed: false, args: OWNER_ARGS }, display: none }).changed && !D.launchPlan({ wanted: { headed: null, args: OWNER_ARGS }, display: none }).changed, 'a launch that wants no window is untouched (measured: headless launches with the Wayland pin)');
   const p6 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: wl });
-  ok(!p6.changed && p6.headed === true && p6.args === OWNER_ARGS && eq(p6.env, { WAYLAND_DISPLAY: 'wayland-0' }), 'a display here ⇒ untouched (+ the socket it found named for a Wayland launch)', p6);
+  ok(!p6.changed && p6.headed === true && p6.args === OWNER_ARGS && verdictOf(eq(p6.env, { WAYLAND_DISPLAY: 'wayland-0' })), 'a display here ⇒ untouched (+ the socket it found named for a Wayland launch)', p6);
   const p7 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: x11 });
-  ok(p7.changed && p7.headed === true && p7.args === '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11' && eq(p7.fallback, { why: 'ozone-unavailable', wanted: 'wayland', used: 'x11' }) && eq(p7.env, {}), 'the config pins Wayland, only X11 is here ⇒ the pin becomes x11, still headed', p7);
+  ok(gateOf(p7.changed) && p7.headed === true && p7.args === '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11' && gateOf(eq(p7.fallback, { why: 'ozone-unavailable', wanted: 'wayland', used: 'x11' })) && verdictOf(eq(p7.env, {})), 'the config pins Wayland, only X11 is here ⇒ the pin becomes x11, still headed', p7);
   const p8 = D.launchPlan({ wanted: { headed: true, args: '--ozone-platform=x11,--z,--ozone-platform=x11' }, display: wl });
-  ok(p8.args === '--ozone-platform=wayland,--z' && p8.fallback.used === 'wayland' && eq(p8.env, { WAYLAND_DISPLAY: 'wayland-0' }), 'the X11 pin with only Wayland here ⇒ ONE wayland pin in the first one\'s place (every pin replaced) + the socket named', p8);
+  ok(p8.args === '--ozone-platform=wayland,--z' && p8.fallback.used === 'wayland' && verdictOf(eq(p8.env, { WAYLAND_DISPLAY: 'wayland-0' })), 'the X11 pin with only Wayland here ⇒ ONE wayland pin in the first one\'s place (every pin replaced) + the socket named', p8);
   // THE HIDDEN-WINDOW RUNG (addendum): Xvfb here + mode auto ⇒ a normal window on the CLI's own Xvfb
   const noneX = V({}, []); noneX.xvfb = true;
   const staleX = D.displayVerdict({ env: { DISPLAY: ':97', XDG_SESSION_TYPE: 'wayland' }, entries: [], x11Dir: '/x', xvfb: true });
   const h1 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX });
-  ok(h1.headed === true && h1.args === '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing' && h1.fallback.rung === 'hidden-window' && eq(h1.fallback.dropped, ['--ozone-platform=wayland']) && eq(h1.env, {}), 'no display + Xvfb here (auto) ⇒ HEADED on the CLI\'s own Xvfb: the Wayland pin becomes x11 (XDG_SESSION_TYPE=wayland would pick Wayland — measured), rung hidden-window', h1);
+  ok(h1.headed === true && h1.args === '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing' && h1.fallback.rung === 'hidden-window' && gateOf(eq(h1.fallback.dropped, ['--ozone-platform=wayland'])) && verdictOf(eq(h1.env, {})), 'no display + Xvfb here (auto) ⇒ HEADED on the CLI\'s own Xvfb: the Wayland pin becomes x11 (XDG_SESSION_TYPE=wayland would pick Wayland — measured), rung hidden-window', h1);
   const h2 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: staleX });
-  ok(staleX.kind === 'none' && staleX.envNamesDisplay === true && eq(h2.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'a STALE DISPLAY in the process env ⇒ the launch clears BOTH (measured: a named display keeps the CLI from starting its Xvfb; DISPLAY=\'\' beside a set WAYLAND_DISPLAY does too)', { staleX, h2 });
+  ok(staleX.kind === 'none' && staleX.envNamesDisplay === true && verdictOf(eq(h2.env, { DISPLAY: '', WAYLAND_DISPLAY: '' })), 'a STALE DISPLAY in the process env ⇒ the launch clears BOTH (measured: a named display keeps the CLI from starting its Xvfb; DISPLAY=\'\' beside a set WAYLAND_DISPLAY does too)', { staleX, h2 });
   ok(D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX, mode: 'headless' }).fallback.rung === 'headless' && D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: { ...noneX, xvfb: false } }).fallback.rung === 'headless' && D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none }).headed === false, 'browser.noDisplayMode = headless, no Xvfb, or Xvfb unknown ⇒ the headless rung');
   ok(!D.launchPlan({ wanted: { headed: false, args: OWNER_ARGS }, display: noneX }).changed && D.launchPlan({ wanted: { headed: true, args: null }, display: noneX }).args === '--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing', 'no window wanted ⇒ untouched even with Xvfb; no args ⇒ just the x11 pin (+ the software-WebGL pair)');
   // B-cc68 (lane browser-reliability): THE HIDDEN WINDOW DRAWS WEBGL IN SOFTWARE — measured: an Xvfb has no GL (no WebGL, GPU
@@ -153,25 +153,25 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
     const g2 = D.launchPlan({ wanted: { headed: true, args: '--use-angle=vulkan' }, display: noneX });
     const g3 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none });
     const gf = D.displayFact({ display: noneX, plan: h1, wanted: { headed: true, args: OWNER_ARGS }, mode: 'auto' });
-    ok(eq(h1.fallback.softwareGl, ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing']) && eq(g1.args, ['--no-sandbox', '--ozone-platform=x11', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing']) && g2.args === '--use-angle=vulkan,--ozone-platform=x11' && eq(g2.fallback.softwareGl, []) && !/swiftshader/.test(String(g3.args)) && g3.fallback.softwareGl === undefined && eq(gf.fallback.softwareGl, h1.fallback.softwareGl) && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, gf), h1) && /WebGL in software \(--use-angle=swiftshader --enable-unsafe-swiftshader/.test(D.journalLine(gf, 'launch')), 'B-cc68: the hidden-window rung adds the SwiftShader pair (a list stays a list; a config naming its own --use-angle keeps it); headless is untouched; the fact carries it, every later call re-derives it, the launch line says WebGL in software', { g1: g1.args, g2: g2.args, line: D.journalLine(gf, 'launch') }); }
+    ok(gateOf(eq(h1.fallback.softwareGl, ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing'])) && gateOf(eq(g1.args, ['--no-sandbox', '--ozone-platform=x11', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing'])) && g2.args === '--use-angle=vulkan,--ozone-platform=x11' && gateOf(eq(g2.fallback.softwareGl, [])) && !/swiftshader/.test(String(g3.args)) && g3.fallback.softwareGl === undefined && gateOf(eq(gf.fallback.softwareGl, h1.fallback.softwareGl)) && gateOf(eq(D.planForFact({ args: OWNER_ARGS, headed: true }, gf), h1)) && verdictOf(/WebGL in software \(--use-angle=swiftshader --enable-unsafe-swiftshader/.test(D.journalLine(gf, 'launch'))), 'B-cc68: the hidden-window rung adds the SwiftShader pair (a list stays a list; a config naming its own --use-angle keeps it); headless is untouched; the fact carries it, every later call re-derives it, the launch line says WebGL in software', { g1: g1.args, g2: g2.args, line: D.journalLine(gf, 'launch') }); }
   const fh = D.displayFact({ display: noneX, plan: h1, wanted: { headed: true, args: OWNER_ARGS }, mode: 'auto' });
-  ok(D.factCode(fh) === 'hidden-window' && fh.xvfb === true && fh.mode === 'auto' && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, fh), h1) && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, D.displayFact({ display: noneX, wanted: { headed: true, args: OWNER_ARGS }, mode: 'headless' })).fallback.rung, 'headless'), 'the fact carries Xvfb + the mode, so every later call re-derives the SAME rung');
-  ok(/runs in a hidden window/.test(D.agentNote(fh)) && /\[browser_hidden_window\]$/.test(D.agentNote(fh)) && /HIDDEN WINDOW/.test(D.journalLine(fh, 'x')), 'the agent\'s note and the journal name the rung');
+  ok(D.factCode(fh) === 'hidden-window' && fh.xvfb === true && fh.mode === 'auto' && gateOf(eq(D.planForFact({ args: OWNER_ARGS, headed: true }, fh), h1)) && verdictOf(eq(D.planForFact({ args: OWNER_ARGS, headed: true }, D.displayFact({ display: noneX, wanted: { headed: true, args: OWNER_ARGS }, mode: 'headless' })).fallback.rung, 'headless')), 'the fact carries Xvfb + the mode, so every later call re-derives the SAME rung');
+  ok(gateOf(/runs in a hidden window/.test(D.agentNote(fh))) && gateOf(/\[browser_hidden_window\]$/.test(D.agentNote(fh))) && verdictOf(/HIDDEN WINDOW/.test(D.journalLine(fh, 'x'))), 'the agent\'s note and the journal name the rung');
   ok(!D.launchPlan({ wanted: { headed: true, args: '--ozone-platform=x11' }, display: vb }).changed && !D.launchPlan({ wanted: { headed: true, args: '--no-sandbox' }, display: x11 }).changed, 'a pin the machine has, or no pin with a display ⇒ untouched');
   ok(D.ozoneOf('--ozone-platform=x11,--ozone-platform=Wayland') === 'wayland' && D.ozoneOf(null) === null, 'the pin Chrome takes is the LAST one (case-folded)');
   const cfg = { args: OWNER_ARGS, headed: true, allowedDomains: ['a.example'] };
   const ap = D.applyPlan(cfg, p1);
-  ok(ap !== cfg && ap.headed === false && ap.args === p1.args && eq(ap.allowedDomains, ['a.example']) && cfg.headed === true && cfg.args === OWNER_ARGS, 'applyPlan: a copy — every other key kept (the fence), the input never mutated');
+  ok(ap !== cfg && ap.headed === false && ap.args === p1.args && gateOf(eq(ap.allowedDomains, ['a.example'])) && cfg.headed === true && cfg.args === OWNER_ARGS, 'applyPlan: a copy — every other key kept (the fence), the input never mutated');
   ok(D.applyPlan(cfg, p6) === cfg && !('args' in D.applyPlan({ args: '--ozone-platform=wayland', headed: true }, D.launchPlan({ wanted: { headed: true, args: '--ozone-platform=wayland' }, display: none }))), 'unchanged ⇒ the same object; an args list emptied ⇒ the key dropped');
-  ok(eq(D.wantedOf({ headed: true, args: 'x' }), { headed: true, args: 'x' }) && D.wantedOf({ headed: true }, { headedEnv: false }).headed === false && D.wantedOf({}, { headedEnv: true }).headed === true, 'wantedOf: the config\'s headed, an AGENT_BROWSER_HEADED value winning over it');
+  ok(gateOf(eq(D.wantedOf({ headed: true, args: 'x' }), { headed: true, args: 'x' })) && D.wantedOf({ headed: true }, { headedEnv: false }).headed === false && D.wantedOf({}, { headedEnv: true }).headed === true, 'wantedOf: the config\'s headed, an AGENT_BROWSER_HEADED value winning over it');
   const f1 = D.displayFact({ display: none, plan: p1, wanted: { headed: true, args: OWNER_ARGS }, at: 5 });
-  ok(f1.kind === 'none' && f1.headed === false && f1.fallback.why === 'no-display' && f1.wanted.ozone === 'wayland' && f1.recovered === null && D.planApplies(f1) && D.factCode(f1) === 'headless', 'displayFact: what was wanted, what the plan did', f1);
+  ok(f1.kind === 'none' && f1.headed === false && f1.fallback.why === 'no-display' && f1.wanted.ozone === 'wayland' && f1.recovered === null && gateOf(D.planApplies(f1)) && D.factCode(f1) === 'headless', 'displayFact: what was wanted, what the plan did', f1);
   const f2 = D.displayFact({ display: wl, plan: p6, wanted: { headed: true, args: OWNER_ARGS }, prev: f1, at: 6 });
-  ok(f2.recovered === 'no-display' && !D.planApplies(f2) && D.factCode(f2) === 'recovered' && eq(f2.env, { WAYLAND_DISPLAY: 'wayland-0' }), 'the display is back after a fallback ⇒ `recovered` (the row says the window is back)');
+  ok(f2.recovered === 'no-display' && !D.planApplies(f2) && D.factCode(f2) === 'recovered' && verdictOf(eq(f2.env, { WAYLAND_DISPLAY: 'wayland-0' })), 'the display is back after a fallback ⇒ `recovered` (the row says the window is back)');
   ok(D.displayFact({ display: none, plan: p1, wanted: { headed: true }, prev: f1 }).recovered === null && D.factCode(D.displayFact({ display: wl, plan: p6, wanted: { headed: true } })) === null, 'still no display ⇒ not recovered; a plain headed launch ⇒ nothing to say');
-  ok(eq(D.planForFact(cfg, f1), p1) && !D.planForFact(cfg, f2).changed, 'planForFact: a recorded fact re-derives the SAME plan for the same base config (every later call names the same file)');
-  ok(/no desktop session, so this browser runs headless/.test(D.agentNote(f1)) && /\[browser_headless\]$/.test(D.agentNote(f1)) && /back/.test(D.agentNote(f2)) && D.agentNote(null) === '' && !/agent-browser/.test(D.agentNote(f1)), 'the agent\'s sentence (English, a code tag, never the hidden CLI\'s name)');
-  ok(/launched headless instead of the window/.test(D.journalLine(f1, 'x')) && /dropped --ozone-platform=wayland/.test(D.journalLine(f1, 'x')) && D.journalLine({ kind: 'wayland' }, 'x') === '', 'the journal line names what was dropped');
+  ok(gateOf(eq(D.planForFact(cfg, f1), p1)) && !D.planForFact(cfg, f2).changed, 'planForFact: a recorded fact re-derives the SAME plan for the same base config (every later call names the same file)');
+  ok(gateOf(/no desktop session, so this browser runs headless/.test(D.agentNote(f1))) && gateOf(/\[browser_headless\]$/.test(D.agentNote(f1))) && gateOf(/back/.test(D.agentNote(f2))) && D.agentNote(null) === '' && !/agent-browser/.test(D.agentNote(f1)), 'the agent\'s sentence (English, a code tag, never the hidden CLI\'s name)');
+  ok(gateOf(/launched headless instead of the window/.test(D.journalLine(f1, 'x'))) && gateOf(/dropped --ozone-platform=wayland/.test(D.journalLine(f1, 'x'))) && D.journalLine({ kind: 'wayland' }, 'x') === '', 'the journal line names what was dropped');
 
   // THE UNSET PREFERENCE (lane hooks-create H5 — the owner's decision 2026-10-01): on a machine with NO desktop session where
   // Xvfb is installed (mode auto) an unset browser.headed asks for a window ⇒ the hidden-window rung; with a desktop, or
@@ -206,9 +206,9 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   const offBad = ROWS.filter(([, d, pref, mode, why]) => D.resolveHeaded({ setting: pref, display: d, mode }).why !== (why === 'no-desktop' ? 'inherit' : why));
   ok(D.NO_DESKTOP_WINDOW_DEFAULT === false && offBad.length === 0 && ROWS.filter((r) => r[4] === 'no-desktop').length === 3, 'H5 THE SHIPPED DEFAULT (2.369.200): the switch is OFF — unset + no desktop + Xvfb inherits (headless), exactly as .199; "yes" still asks the hidden window', offBad.map((r) => r[0]));
   const ph = launchOf('', staleX);
-  ok(ph.headed === true && ph.args === ['--no-sandbox', '--ozone-platform=x11', ...D.HIDDEN_WINDOW_ARGS].join(',') && eq(ph.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'H5: the pod\'s launch is the hidden-window rung exactly (x11 pinned, a stale display cleared; + lane browser-reliability\'s software GL — composed at the 2.369.202 integration)', ph);
+  ok(ph.headed === true && ph.args === ['--no-sandbox', '--ozone-platform=x11', ...D.HIDDEN_WINDOW_ARGS].join(',') && verdictOf(eq(ph.env, { DISPLAY: '', WAYLAND_DISPLAY: '' })), 'H5: the pod\'s launch is the hidden-window rung exactly (x11 pinned, a stale display cleared; + lane browser-reliability\'s software GL — composed at the 2.369.202 integration)', ph);
   const fd = D.displayFact({ display: noneX, plan: launchOf('', noneX), wanted: { headed: true, args: '--no-sandbox' }, mode: 'auto', byDefault: true });
-  ok(fd.wanted.byDefault === true && D.factCode(fd) === 'hidden-window' && eq(D.planForFact(POD, fd), launchOf('', noneX)) && D.applyPlan(POD, D.planForFact(POD, fd)).headed === true && D.planForFact({ ...POD, headed: false }, fd).headed === true, 'H5: the fact says the window was the default\'s (wanted.byDefault) and EVERY later call re-derives the same planned config — headed:true — from a base that says nothing (or false)', fd);
+  ok(fd.wanted.byDefault === true && D.factCode(fd) === 'hidden-window' && gateOf(eq(D.planForFact(POD, fd), launchOf('', noneX))) && D.applyPlan(POD, D.planForFact(POD, fd)).headed === true && D.planForFact({ ...POD, headed: false }, fd).headed === true, 'H5: the fact says the window was the default\'s (wanted.byDefault) and EVERY later call re-derives the same planned config — headed:true — from a base that says nothing (or false)', fd);
   ok(D.displayFact({ display: noneX, plan: h1, wanted: { headed: true } }).wanted.byDefault === undefined && !D.planForFact(POD, D.displayFact({ display: noneX, wanted: { headed: false, args: '--no-sandbox' }, mode: 'auto' })).changed, 'H5: a fact without the default\'s mark never asks a window for a base that says nothing (today\'s meaning)');
 
   // CONTROLS: patched copies of the PURE module, judged by the SAME rows
@@ -224,9 +224,9 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
       && P.c && P.c.webgl === true && P.a && P.c.gpu * 2 <= P.a.gpu && P.e && P.e.webgl === false && /^2\.369\.\d+$/.test(P.version) && /^\d{4}-\d\d-\d\d$/.test(P.measured);
   };
   { const LE = D.HIDDEN_WINDOW_CPU_PROOF.lowEnd;
-    ok(LE && LE.nineTabs.rpl.blockMs > 1000 && LE.nineTabs.shipped.blockMs < 100 && LE.webglAndCanvas2dKept === true && !D.HIDDEN_WINDOW_ARGS.some((a) => /low-end|process-per-site|renderer-process-limit|accelerated-2d|smooth-scrolling|device-scale|BackForwardCache/.test(a)),
+    ok(gateOf(LE) && LE.nineTabs.rpl.blockMs > 1000 && LE.nineTabs.shipped.blockMs < 100 && LE.webglAndCanvas2dKept === true && !D.HIDDEN_WINDOW_ARGS.some((a) => /low-end|process-per-site|renderer-process-limit|accelerated-2d|smooth-scrolling|device-scale|BackForwardCache/.test(a)),
       'lane browser-swiftshader-cpu-r2: the low-end flags were MEASURED and none ships (CPU ≤ 2.5 %, low-end mode 4–8 % memory; the process cap\'s 36 % memory makes one conversation\'s busy page stall another\'s same-site tab 2.8 s)', LE); }
-  ok(hiddenArgsRow(D), 'lane browser-swiftshader-cpu: the hidden-window rung = x11 + the SwiftShader pair + --disable-gpu-compositing (the measured minimum keeping WebGL; a config naming its own compositing keeps it; the dated proof says c ≤ a/2 with WebGL, e without)');
+  ok(verdictOf(hiddenArgsRow(D)), 'lane browser-swiftshader-cpu: the hidden-window rung = x11 + the SwiftShader pair + --disable-gpu-compositing (the measured minimum keeping WebGL; a config naming its own compositing keeps it; the dated proof says c ≤ a/2 with WebGL, e without)');
   { const BI = require('../src/browser-idle.js'); const V = BI.idlePaintVerdict; const T0 = 1e6;
     const idleRow = (V0) => { const VV = (o) => V0({ enabled: true, ...o }); return VV({ now: T0, lastVerbAt: T0 - 31000 }).act === 'freeze' && VV({ now: T0, lastVerbAt: T0 - 29000 }).act === null
       && VV({ now: T0, lastVerbAt: T0 - 31000, viewers: 1 }).act === null && VV({ now: T0, lastVerbAt: 0, viewers: 1, frozen: true }).act === 'thaw'
@@ -239,17 +239,17 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
       && VV({ enabled: 'yes', now: T0, lastVerbAt: T0 - 600000 }).act === null && VV({ enabled: false, now: T0, lastVerbAt: T0 - 600000, frozen: true }).act === 'thaw';
     const ssrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8'); const sch = (ssrc.split("  'browser.idlePaintFreeze': {")[1] || '').split('\n  },')[0];
     const ksrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'); const sw = ksrc0.slice(ksrc0.indexOf('async function sweepIdlePaint(t)'), ksrc0.indexOf('function idleReleaseAfterMs()'));
-    ok(offRow(V) && /type: 'boolean', default: IDLE_PAINT_DEFAULT,/.test(sch) && /^import \{ IDLE_PAINT_DEFAULT \} from '\.\.\/browser-idle\.js';/m.test(ssrc) && /tier: 'advanced',/.test(sch) && /category: t\('Agent browser'\)/.test(sch) && /setting\('browser\.idlePaintFreeze', BIdle\.IDLE_PAINT_DEFAULT\) === true/.test(sw) && /idlePaintVerdict\(\{ enabled,/.test(sw),
+    ok(gateOf(offRow(V)) && gateOf(/type: 'boolean', default: IDLE_PAINT_DEFAULT,/.test(sch)) && gateOf(/^import \{ IDLE_PAINT_DEFAULT \} from '\.\.\/browser-idle\.js';/m.test(ssrc)) && gateOf(/tier: 'advanced',/.test(sch)) && gateOf(/category: t\('Agent browser'\)/.test(sch)) && gateOf(/setting\('browser\.idlePaintFreeze', BIdle\.IDLE_PAINT_DEFAULT\) === true/.test(sw)) && verdictOf(/idlePaintVerdict\(\{ enabled,/.test(sw)),
       'lane browser-swiftshader-cpu-r2: browser.idlePaintFreeze (advanced; its default is IDLE_PAINT_DEFAULT at the schema row AND the keeper\'s read, never a literal of their own) — off ⇒ never a freeze (an absent `enabled` in the verdict = off), a browser frozen before it went off is thawed; the keeper reads the switch at EVERY sweep', sch);
-    ok(idleRow(V) && BI.IDLE_PAINT_MS === 30000 && BI.IDLE_PAINT_PROOF.frozenThenFlip.gpu === 0 && BI.IDLE_PAINT_PROOF.minimized.gpu > 50,
+    ok(gateOf(idleRow(V)) && BI.IDLE_PAINT_MS === 30000 && BI.IDLE_PAINT_PROOF.frozenThenFlip.gpu === 0 && BI.IDLE_PAINT_PROOF.minimized.gpu > 50,
       'lane browser-swiftshader-cpu: idlePaintVerdict — no viewer and no verb for 30 s ⇒ freeze; a viewer / a recent viewer / a verb ⇒ thaw; a dialog or a navigation ⇒ left drawing; the proof: frozen 0 %, minimized still draws');
-    ok(BI.unseenRung({ headed: true, fallback: { rung: 'hidden-window' } }) && BI.unseenRung({ headed: false }) && !BI.unseenRung({ headed: true, fallback: null }) && !BI.unseenRung(null),
+    ok(gateOf(BI.unseenRung({ headed: true, fallback: { rung: 'hidden-window' } })) && gateOf(BI.unseenRung({ headed: false })) && !BI.unseenRung({ headed: true, fallback: null }) && !BI.unseenRung(null),
       'lane browser-swiftshader-cpu: only the hidden window and headless are frozen — a window on a real desktop never (a person may be looking at it)');
     const MI = mutantCopies('browser-idle', REPO); const isrc = fs.readFileSync(path.join(REPO, 'src/browser-idle.js'), 'utf8');
     const vline = "  else if ((Number(viewers) || 0) > 0) why = 'watched';";
-    ok(isrc.includes(vline) && !idleRow(MI.load('src/browser-idle.js', editAnchor(isrc, vline, '', "src/browser-idle.js"), 'no-viewer-rule').idlePaintVerdict), 'CONTROL: a verdict that ignores the live view freezes a watched page (RED on the idle row)');
+    ok(gateOf(isrc.includes(vline)) && !idleRow(MI.load('src/browser-idle.js', editAnchor(isrc, vline, '', "src/browser-idle.js"), 'no-viewer-rule').idlePaintVerdict), 'CONTROL: a verdict that ignores the live view freezes a watched page (RED on the idle row)');
     const offLine = "  if (enabled !== true) why = 'off';\n  else if (driving) why = 'driving';";
-    ok(isrc.includes(offLine) && !offRow(MI.load('src/browser-idle.js', editAnchor(isrc, offLine, "  if (driving) why = 'driving';", "src/browser-idle.js"), 'switch-blind').idlePaintVerdict), 'CONTROL: a verdict that ignores the switch freezes while it is off (RED on the off row)');
+    ok(gateOf(isrc.includes(offLine)) && !offRow(MI.load('src/browser-idle.js', editAnchor(isrc, offLine, "  if (driving) why = 'driving';", "src/browser-idle.js"), 'switch-blind').idlePaintVerdict), 'CONTROL: a verdict that ignores the switch freezes while it is off (RED on the off row)');
     // lane idle-paint-default-on (the owner 2026-10-20 「可以」 on IDLE_PAINT_PROOF.fleet): ON BY DEFAULT — the REAL keeper's
     // sweep over a stand-in paint watch on ONE idle hidden-window browser, the setting unset / '' / false / true. A default
     // never rewrites a stored value: explicitly false stays off.
@@ -275,61 +275,61 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
     const n = { recent: await idleSweep(K0, undefined, { lastVerbAt: NOW_I - 5000 }), busy: await idleSweep(K0, undefined, { busy: true }), frozen: await idleSweep(K0, undefined, { frozen: true }) };
     ok(n.recent === '' && n.busy === '' && n.frozen === '', 'lane idle-paint-default-on: nothing else moves — a verb 5 s ago or a dialog / navigation pending leaves it drawing; one already frozen is not frozen again', n);
     const P = BI.IDLE_PAINT_PROOF.fleet;
-    ok(P && P.image === 'vibespace:3.7.0' && /^\d{4}-\d\d-\d\d$/.test(P.measured) && P.dashboard.gpu > 50 && P.dashboard.frozenGpu === 0 && P.light.frozenGpu === 0 && P.dashboard.frozenFrames10s === 0 && P.dashboard.resumeMs < 100 && P.light.resumeMs < 100 && P.dashboard.fpsAfter === 60,
+    ok(gateOf(P) && P.image === 'vibespace:3.7.0' && gateOf(/^\d{4}-\d\d-\d\d$/.test(P.measured)) && P.dashboard.gpu > 50 && P.dashboard.frozenGpu === 0 && P.light.frozenGpu === 0 && P.dashboard.frozenFrames10s === 0 && P.dashboard.resumeMs < 100 && P.light.resumeMs < 100 && P.dashboard.fpsAfter === 60,
       'lane idle-paint-default-on: the default\'s reason is dated beside it — the fleet image: a dashboard\'s GPU process 99.8 % → frozen 0 %, 0 frames; back in 31–43 ms at 60 fps', P);
     // r4176 (b): while a viewer watches, the sweep asks the watch to try the failed shows again (owedShows) — never without a viewer, never
     // when nothing is owed; RED: the keeper without that branch (the person waits for the agent's next verb)
     const RETRY_LINE = "        else if (vw.n > 0 && f.owedShows > 0 && !f.busy && typeof paintWatch.retryOwedShows === 'function') { const pid = rec.profileId, pr = paintWatch.retryOwedShows(pid); if (pr && typeof pr.catch === 'function') pr.catch((e) => log.warn?.(`[browser] ${pid}: idle paint retry of a failed show failed: ${e && e.message}`)); }";
     const rtry = (x) => x.split(',').includes('retry bp-000000c1');
     const rw = { watched: await idleSweep(K0, true, { owedShows: 1 }, { viewers: 1 }), alone: await idleSweep(K0, true, { owedShows: 1, lastVerbAt: NOW_I - 5000 }), none: await idleSweep(K0, true, {}, { viewers: 1 }), busy: await idleSweep(K0, true, { owedShows: 1, busy: true }, { viewers: 1 }) };
-    ok(ksrc0.includes(RETRY_LINE) && rtry(rw.watched) && !rtry(rw.alone) && !rtry(rw.none) && !rtry(rw.busy), 'r4176 (b) / r4186 (1): a viewer watching a browser with a failed show owed ⇒ the sweep asks retryOwedShows; no viewer, nothing owed, or the browser BUSY (a verb running, a dialog open) ⇒ never', rw);
+    ok(gateOf(ksrc0.includes(RETRY_LINE)) && gateOf(rtry(rw.watched)) && !rtry(rw.alone) && !rtry(rw.none) && !rtry(rw.busy), 'r4176 (b) / r4186 (1): a viewer watching a browser with a failed show owed ⇒ the sweep asks retryOwedShows; no viewer, nothing owed, or the browser BUSY (a verb running, a dialog open) ⇒ never', rw);
     // r4186 (1)'s red: the keeper's line as it stood at 6ed465256 (no busy test) asks the retry in the middle of the agent's verb
     const BUSY_CUT = '&& f.owedShows > 0 && !f.busy &&';
     const Kbz = ksrc0.includes(BUSY_CUT) ? MI.load('src/server/browser-keeper.js', editAnchor(ksrc0, BUSY_CUT, '&& f.owedShows > 0 &&', 'src/server/browser-keeper.js'), 'r4186-retry-when-busy') : null;
-    if (Kbz) { const bz = await idleSweep(Kbz, true, { owedShows: 1, busy: true }, { viewers: 1 }); ok(rtry(bz), 'CONTROL (6ed465256: the sweep\'s retry blind to a running verb): asked while the agent\'s verb runs — RED', bz); }
+    if (Kbz) { const bz = await idleSweep(Kbz, true, { owedShows: 1, busy: true }, { viewers: 1 }); ok(verdictOf(rtry(bz)), 'CONTROL (6ed465256: the sweep\'s retry blind to a running verb): asked while the agent\'s verb runs — RED', bz); }
     const Knr = ksrc0.includes(RETRY_LINE) ? MI.load('src/server/browser-keeper.js', editAnchor(ksrc0, RETRY_LINE, '', 'src/server/browser-keeper.js'), 'r4176-no-retry') : null;
     if (Knr) { const rc = await idleSweep(Knr, true, { owedShows: 1 }, { viewers: 1 }); ok(!rtry(rc), 'CONTROL (3ae970836: the sweep never retries a failed show): the person watching waits for the agent\'s next verb — RED', rc); }
     const ksrc1 = ksrc0, readLine = "setting('browser.idlePaintFreeze', BIdle.IDLE_PAINT_DEFAULT) === true";
     const Klit = MI.load('src/server/browser-keeper.js', ksrc1.replace(readLine, "setting('browser.idlePaintFreeze', false) === true"), 'literal-default');
     const c = { unset: await idleSweep(Klit, undefined), on: await idleSweep(Klit, true) };
-    ok(ksrc1.includes(readLine) && c.unset !== FZ && c.on === FZ, 'CONTROL: a keeper whose read keeps a literal default of its own (the .331 `false`) never freezes an instance whose owner never set the switch (RED on the default row) — an explicit true still freezes', c);
+    ok(gateOf(ksrc1.includes(readLine)) && c.unset !== FZ && c.on === FZ, 'CONTROL: a keeper whose read keeps a literal default of its own (the .331 `false`) never freezes an instance whose owner never set the switch (RED on the default row) — an explicit true still freezes', c);
     const src0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8'); const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
     const thawAt = rsrc.indexOf('await D.thawPaint(t.profileId, { holder: t })');
-    ok((thawAt > 0 && thawAt < rsrc.indexOf('if (arm) D.verbStarted(')) && /Target\.activateTarget[\s\S]{0,120}Target\.createTarget[\s\S]{0,300}Target\.closeTarget[\s\S]{0,200}Target\.activateTarget/.test(src0)
-      && /const need = \[\.\.\.\(w\.hiddenFronts \|\| \[\]\)\]\.filter\(\(tid\) => inScope\(scope, tid\)\);/.test(src0),
+    ok((thawAt > 0 && thawAt < rsrc.indexOf('if (arm) D.verbStarted(')) && gateOf(/Target\.activateTarget[\s\S]{0,120}Target\.createTarget[\s\S]{0,300}Target\.closeTarget[\s\S]{0,200}Target\.activateTarget/.test(src0))
+      && verdictOf(/const need = \[\.\.\.\(w\.hiddenFronts \|\| \[\]\)\]\.filter\(\(tid\) => inScope\(scope, tid\)\);/.test(src0)),
       'lane browser-swiftshader-cpu: the resolve door thaws BEFORE the verb is marked running — THIS conversation\'s fronts only (r2); the thaw shows a front by its tab strip, the front activated FIRST so the blank lands in its window (measured: `active` alone leaves it hidden; a plain create lands in the last activated window)'); }
   const MP = mutantCopies('browser-display-pure', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/browser-display.js'), 'utf8');
   const liveLine = "const live = (p) => { const e = p ? byPath.get(p) : null; return !!e && e.type === 'socket' && e.alive !== false; };";
   const keepLine = "    const cut = withoutDisplayOzone(args);";
-  ok(src.includes(liveLine) && src.includes(keepLine), 'CONTROL setup: the liveness line and the drop line are found');
+  ok(gateOf(src.includes(liveLine)) && verdictOf(src.includes(keepLine)), 'CONTROL setup: the liveness line and the drop line are found');
   const DS = MP.load('src/browser-display.js', editAnchor(src, liveLine, "const live = (p) => { const e = p ? byPath.get(p) : null; return !!e && e.type === 'socket'; };", "src/browser-display.js"), 'stale-counts');
   ok(DS.displayVerdict({ env: { XDG_RUNTIME_DIR: '/r' }, entries: [sock('/r/wayland-0', false)] }).kind === 'wayland', 'CONTROL: a verdict that ignores the connect test counts the STALE socket (the table row above would be red)');
   { const hwLine = "const HIDDEN_WINDOW_ARGS = Object.freeze([...SOFTWARE_GL_ARGS, '--disable-gpu-compositing']);";
-    ok(src.includes(hwLine), 'CONTROL setup: the hidden-window args line is found');
+    ok(verdictOf(src.includes(hwLine)), 'CONTROL setup: the hidden-window args line is found');
     const DH = MP.load('src/browser-display.js', editAnchor(src, hwLine, 'const HIDDEN_WINDOW_ARGS = SOFTWARE_GL_ARGS;', "src/browser-display.js"), 'pre-fix-args');
     ok(!hiddenArgsRow(DH), 'CONTROL: the pre-fix rung (the SwiftShader pair alone — every frame composited on SwiftShader) is RED on the args row'); }
   const DK = MP.load('src/browser-display.js', editAnchor(src, keepLine, '    const cut = { args, dropped: [] };', "src/browser-display.js"), 'keeps-pin');
   ok(DK.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none }).args === OWNER_ARGS, 'CONTROL: a plan that keeps the Wayland pin is caught by the owner\'s-case row');
   const modeLine = "    if (noDisplayModeOf(mode) === 'auto' && d.xvfb === true) {";
   const clearLine = "env: d.envNamesDisplay ? { DISPLAY: '', WAYLAND_DISPLAY: '' } : {} };";
-  ok(src.includes(modeLine) && src.includes(clearLine), 'CONTROL setup: the rung\'s mode gate and its display clearing are found');
+  ok(gateOf(src.includes(modeLine)) && verdictOf(src.includes(clearLine)), 'CONTROL setup: the rung\'s mode gate and its display clearing are found');
   const DM = MP.load('src/browser-display.js', editAnchor(src, modeLine, '    if (d.xvfb === true) {', "src/browser-display.js"), 'ignores-mode');
   const glLine = "      const gl = withSoftwareGl(withOzone(cut.args, 'x11'));";
-  ok(src.includes(glLine), 'B-cc68 CONTROL setup: the rung\'s software-WebGL line is found');
+  ok(verdictOf(src.includes(glLine)), 'B-cc68 CONTROL setup: the rung\'s software-WebGL line is found');
   const DG = MP.load('src/browser-display.js', editAnchor(src, glLine, "      const gl = { args: withOzone(cut.args, 'x11'), added: [] };", "src/browser-display.js"), 'no-software-gl');
   ok(!/swiftshader/.test(String(DG.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX }).args)), 'B-cc68 CONTROL: a plan without the pair (the base) launches the hidden window with no WebGL — caught by the B-cc68 row');
   ok(DM.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX, mode: 'headless' }).fallback.rung === 'hidden-window', 'CONTROL: a plan that ignores browser.noDisplayMode is caught by the "headless" row');
   const DC = MP.load('src/browser-display.js', editAnchor(src, clearLine, 'env: {} };', "src/browser-display.js"), 'keeps-stale-display');
-  ok(eq(DC.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: staleX }).env, {}), 'CONTROL: a plan that keeps a stale DISPLAY is caught by the stale-display row (the fake below fails that launch)');
+  ok(verdictOf(eq(DC.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: staleX }).env, {})), 'CONTROL: a plan that keeps a stale DISPLAY is caught by the stale-display row (the fake below fails that launch)');
   // H5 CONTROL: the OLD meaning (unset ⇒ inherit everywhere) — a patched copy without the no-desktop branch — fails the table
   const h5Line = "  if (noDesktopWindow === true && noDisplayModeOf(mode) === 'auto' && isObj(display) && noDesktop(display) && display.xvfb === true) return { headed: true, why: 'no-desktop' };";
-  ok(src.includes(h5Line), 'CONTROL setup: resolveHeaded\'s no-desktop branch is found');
+  ok(verdictOf(src.includes(h5Line)), 'CONTROL setup: resolveHeaded\'s no-desktop branch is found');
   const DI = MP.load('src/browser-display.js', editAnchor(src, h5Line, '', "src/browser-display.js"), 'keeps-inherit');
   const badOld = ROWS.filter(([, d, pref, mode, why]) => DI.resolveHeaded({ setting: pref, display: d, mode, ...H5 }).why !== why);
   const noDesk = ROWS.filter((r) => r[4] === 'no-desktop').length;
-  ok(noDesk === 3 && badOld.length === noDesk && badOld.every((r) => r[4] === 'no-desktop'), 'CONTROL: a copy that keeps the old inherit reads every no-desktop + Xvfb row as inherit — the table goes red on exactly those 3 rows', badOld.map((r) => r[0]));
-  for (const r of copiesCensus(MP.files, MP.dir, REPO, { label: 'PURE controls: ' })) ok(r.pass, r.name, r.detail);
+  ok(noDesk === 3 && badOld.length === noDesk && verdictOf(badOld.every((r) => r[4] === 'no-desktop')), 'CONTROL: a copy that keeps the old inherit reads every no-desktop + Xvfb row as inherit — the table goes red on exactly those 3 rows', badOld.map((r) => r[0]));
+  for (const r of copiesCensus(MP.files, MP.dir, REPO, { label: 'PURE controls: ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 // ═══ ② the SHARED probe ═════════════════════════════════════════════════
@@ -342,10 +342,10 @@ console.log('— ② the probe (SHARED src/browser-facts.js probeDisplay) over r
   await staleSocketAt(path.join(run, 'wayland-0'));
   fs.writeFileSync(path.join(run, 'wayland-1'), 'not a socket');
   v = await F.probeDisplay({ env: { XDG_RUNTIME_DIR: run } });
-  ok(v.kind === 'none' && fs.statSync(path.join(run, 'wayland-0')).isSocket(), 'a socket file whose server was killed and a regular file ⇒ still no display (connected to, refused)', v);
+  ok(v.kind === 'none' && verdictOf(fs.statSync(path.join(run, 'wayland-0')).isSocket()), 'a socket file whose server was killed and a regular file ⇒ still no display (connected to, refused)', v);
   await listenAt(path.join(run, 'wayland-2'));
   v = await F.probeDisplay({ env: { XDG_RUNTIME_DIR: run } });
-  ok(v.kind === 'wayland' && v.name === 'wayland-2' && eq(v.env, { WAYLAND_DISPLAY: 'wayland-2' }), 'a LISTENING wayland-2 beside them ⇒ Wayland, named for the launch', v);
+  ok(v.kind === 'wayland' && v.name === 'wayland-2' && verdictOf(eq(v.env, { WAYLAND_DISPLAY: 'wayland-2' })), 'a LISTENING wayland-2 beside them ⇒ Wayland, named for the launch', v);
   await listenAt(path.join(R2, 'x', 'X9'));
   v = await F.probeDisplay({ env: { DISPLAY: ':9' }, x11Dir: path.join(R2, 'x') });
   ok(v.kind === 'x11' && v.socket === path.join(R2, 'x', 'X9'), 'DISPLAY=:9 + a listening X9 in the (injected) X dir ⇒ X11', v);
@@ -363,7 +363,7 @@ console.log('— ② the probe (SHARED src/browser-facts.js probeDisplay) over r
   const netHung = { createConnection: () => { const s = { destroyed: false, once() { return s; }, destroy() { s.destroyed = true; } }; hung.push(s); return s; } };
   const t0 = Date.now();
   v = await F.probeDisplay({ env: { DISPLAY: ':7' }, x11Dir: path.join(R2, 'x'), netImpl: netHung, connectMs: 60 });
-  ok(v.kind === 'none' && hung.length >= 1 && hung.every((s) => s.destroyed), `a display socket that never answers ⇒ none, every connect cut by the probe's own timer (${hung.length} cut, ${Date.now() - t0} ms)`, { v, hung: hung.length });
+  ok(v.kind === 'none' && hung.length >= 1 && verdictOf(hung.every((s) => s.destroyed)), `a display socket that never answers ⇒ none, every connect cut by the probe's own timer (${hung.length} cut, ${Date.now() - t0} ms)`, { v, hung: hung.length });
 }
 
 // ═══ ③ the keeper + routes + the shipped CLI over a fake 0.38.1 ══════════════
@@ -500,21 +500,21 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   let L = launches().filter((l) => l.sess === 'vs-' + KEY_N);
   const notFormedN = sceneNotFormed(c);
   if (notFormedN) console.log(`  ⊘ SKIP rung N, NO DISPLAY: the scene did not form — ${notFormedN} — the first verb and the same-file leg are not judged`);
-  else ok(c.status === 0 && recN && recN.state === 'ready', 'rung N, NO DISPLAY: the first verb SUCCEEDS (it failed "The platform failed to initialize" before)', c.stderr);
+  else ok(c.status === 0 && gateOf(recN) && recN.state === 'ready', 'rung N, NO DISPLAY: the first verb SUCCEEDS (it failed "The platform failed to initialize" before)', c.stderr);
   ok(L.length === 1 && L[0].headed === false && L[0].args === '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-logging,--log-level=3,--vibespace-keeper=' + KEY_N && !/ozone/.test(L[0].args), 'the launch ran HEADLESS with the Wayland pin dropped (its launch tail kept: B-1789 cure, the quiet log switches — the keeper\'s own file for a fresh launch — then the mark)', L);
-  ok(L[0].config && L[0].config.startsWith(path.join(DATA, 'browser-env', 'display') + '/') && cfgOfLaunch(L[0]).headed === false, 'under the PLANNED file (data/browser-env/display/…), never the base', L[0]);
-  ok(recN && recN.display && recN.display.kind === 'none' && recN.display.fallback.why === 'no-display' && recN.display.wanted.headed === true && recN.display.wanted.ozone === 'wayland', 'the fact rides the record (no display, a window was wanted, Wayland pinned)', recN && recN.display);
-  ok(NOTE_HEADLESS.test(c.stderr) && (c.stderr.match(/\[browser_headless\]/g) || []).length === 1, 'the AGENT is told once, on the verb that launched it', c.stderr);
+  ok(gateOf(L[0].config) && gateOf(L[0].config.startsWith(path.join(DATA, 'browser-env', 'display') + '/')) && cfgOfLaunch(L[0]).headed === false, 'under the PLANNED file (data/browser-env/display/…), never the base', L[0]);
+  ok(gateOf(recN) && gateOf(recN.display) && recN.display.kind === 'none' && recN.display.fallback.why === 'no-display' && recN.display.wanted.headed === true && recN.display.wanted.ozone === 'wayland', 'the fact rides the record (no display, a window was wanted, Wayland pinned)', recN && recN.display);
+  ok(gateOf(NOTE_HEADLESS.test(c.stderr)) && (c.stderr.match(/\[browser_headless\]/g) || []).length === 1, 'the AGENT is told once, on the verb that launched it', c.stderr);
   c = await cli(['click', '@e1'], cliEnvFor(sN));
   const cm = cmds().filter((x) => x.sess === 'vs-' + KEY_N);
   ok(c.status === 0 && !/\[browser_headless\]/.test(c.stderr) && restarts().length === 0 && launches().filter((l) => l.sess === 'vs-' + KEY_N).length === 1, 'a later verb: no note, NO restart (its view equals the launch\'s), still one launch', { stderr: c.stderr, restarts: restarts() });
-  if (!notFormedN) ok(cm.length === 3 && cm[0].verb === 'open' && cm.every((x) => x.config === L[0].config), 'the launch and every agent command named the SAME planned file (/resolve handed it to the CLI)', cm);
+  if (!notFormedN) ok(cm.length === 3 && cm[0].verb === 'open' && verdictOf(cm.every((x) => x.config === L[0].config)), 'the launch and every agent command named the SAME planned file (/resolve handed it to the CLI)', cm);
   const eRow = k.ephemerals().find((e) => e.browserKey === KEY_N);
-  ok(eRow && eRow.display && eRow.display.fallback.why === 'no-display' && k.list().browsers[pN.id].display.fallback.why === 'no-display', 'the Agent browser panel\'s ephemeral row and the digest\'s browsers carry the fact');
-  ok(journal.some((j) => /no desktop session on this machine .* launched headless instead of the window its config asks for; dropped --ozone-platform=wayland/.test(j)), 'ONE journal line names the fallback and what was dropped', journal);
+  ok(gateOf(eRow) && gateOf(eRow.display) && eRow.display.fallback.why === 'no-display' && k.list().browsers[pN.id].display.fallback.why === 'no-display', 'the Agent browser panel\'s ephemeral row and the digest\'s browsers carry the fact');
+  ok(verdictOf(journal.some((j) => /no desktop session on this machine .* launched headless instead of the window its config asks for; dropped --ozone-platform=wayland/.test(j))), 'ONE journal line names the fallback and what was dropped', journal);
   ok(sha(UCFG) === USER_SHA, 'the user\'s ~/.agent-browser/config.json is byte-identical');
   const disp = await (await fetch(API + '/api/browser/display')).json();
-  ok(disp.display && disp.display.kind === 'none' && Array.isArray(disp.display.why), 'GET /api/browser/display (Settings\' line): this machine, now — no display', disp);
+  ok(gateOf(disp.display) && disp.display.kind === 'none' && verdictOf(Array.isArray(disp.display.why)), 'GET /api/browser/display (Settings\' line): this machine, now — no display', disp);
 
   // ─ rung D: the session's OWN generated config (browser-env's) is the base — it is never rewritten either
   const genD = path.join(DATA, 'browser-env', KEY_D + '.json');
@@ -525,10 +525,10 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   c = await cli(['open', 'https://example.test/'], cliEnvFor(sD));
   L = launches().filter((l) => l.sess === 'vs-' + KEY_D);
   ok(c.status === 0 && L.length === 1 && L[0].headed === false && !/ozone/.test(L[0].args) && L[0].config !== genD && sha(genD) === genSha, 'rung D: the launch ran headless under a planned copy of the session\'s generated config — that file untouched', { L, stderr: c.stderr });
-  ok(NOTE_HEADLESS.test(c.stderr), '…and the agent is told', c.stderr);
+  ok(verdictOf(NOTE_HEADLESS.test(c.stderr)), '…and the agent is told', c.stderr);
   c = await cli(['snapshot'], cliEnvFor(sD));
   const cmD = cmds().filter((x) => x.sess === 'vs-' + KEY_D);
-  ok(c.status === 0 && restarts().length === 0 && cmD.length === 3 && cmD.every((x) => x.config === L[0].config), 'its later verb names the same planned file (the answer\'s `config` wins over the pairs\' own) — no restart', { cmD, restarts: restarts() });
+  ok(c.status === 0 && restarts().length === 0 && cmD.length === 3 && verdictOf(cmD.every((x) => x.config === L[0].config)), 'its later verb names the same planned file (the answer\'s `config` wins over the pairs\' own) — no restart', { cmD, restarts: restarts() });
 
   // ─ a NAMED profile, the setting asking for a window: the launch view carries HEADED=0 and the planned file
   settings['browser.headed'] = 'yes';
@@ -538,10 +538,10 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const Lw = launches().filter((l) => l.ns === 'vs-' + prof.id);
   const recW = k.browserOf(prof.id);
   ok(c.status === 0 && recW.state === 'ready' && Lw.length === 1 && Lw[0].headed === false && !/ozone/.test(Lw[0].args) && recW.launchEnv.AGENT_BROWSER_HEADED === '0', 'a NAMED profile (browser.headed = "Show the window"): launched headless — HEADED=0 in its launch view, the pin dropped', { Lw, env: recW.launchEnv, stderr: c.stderr });
-  ok(/\[browser_headless\]/.test(c.stderr) && recW.display.fallback.why === 'no-display', '`use` told the agent (the launch was this use\'s)', c.stderr);
+  ok(gateOf(/\[browser_headless\]/.test(c.stderr)) && recW.display.fallback.why === 'no-display', '`use` told the agent (the launch was this use\'s)', c.stderr);
   ok(restarts().length === 0, 'the keeper\'s own cdp-url after the launch did not restart it (same view)', restarts());
   c = await cli(['snapshot'], cliEnvFor(sW));
-  ok(c.status === 0 && restarts().length === 0 && !/\[browser_headless\]/.test(c.stderr) && cmds().some((x) => x.verb === 'snapshot' && x.cdp), 'its commands reach the one browser over CDP (no launch, no note)', { status: c.status, stderr: c.stderr, stdout: c.stdout, cmds: cmds().slice(-3) });
+  ok(c.status === 0 && restarts().length === 0 && !/\[browser_headless\]/.test(c.stderr) && verdictOf(cmds().some((x) => x.verb === 'snapshot' && x.cdp)), 'its commands reach the one browser over CDP (no launch, no note)', { status: c.status, stderr: c.stderr, stdout: c.stdout, cmds: cmds().slice(-3) });
   settings['browser.headed'] = '';
 
   // ─ THE DISPLAY COMES BACK: the owner logs in — the NEXT launch is headed again, and says so (no restart of anything)
@@ -551,9 +551,9 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   c = await cli(['snapshot'], cliEnvFor(sN));
   const L2 = launches().slice(before).filter((l) => l.sess === 'vs-' + KEY_N);
   const recN2 = k.browserOf(pN.id);
-  ok(c.status === 0 && L2.length === 1 && L2[0].headed === true && /--ozone-platform=wayland/.test(L2[0].args) && L2[0].wayland === 'wayland-0', 'a Wayland socket appeared: the next launch is HEADED on it (the pin kept, WAYLAND_DISPLAY named — the server env never had it)', { L2, stderr: c.stderr });
-  ok(recN2.display.kind === 'wayland' && recN2.display.fallback === null && recN2.display.recovered === 'no-display' && /the desktop session is back/.test(c.stderr), 'the record says the window is back (`recovered`) and the agent is told', { d: recN2.display, stderr: c.stderr });
-  ok(L2[0].config && !L2[0].config.includes(path.join('browser-env', 'display')), 'no plan ⇒ the base file itself');
+  ok(c.status === 0 && L2.length === 1 && L2[0].headed === true && gateOf(/--ozone-platform=wayland/.test(L2[0].args)) && L2[0].wayland === 'wayland-0', 'a Wayland socket appeared: the next launch is HEADED on it (the pin kept, WAYLAND_DISPLAY named — the server env never had it)', { L2, stderr: c.stderr });
+  ok(recN2.display.kind === 'wayland' && recN2.display.fallback === null && recN2.display.recovered === 'no-display' && verdictOf(/the desktop session is back/.test(c.stderr)), 'the record says the window is back (`recovered`) and the agent is told', { d: recN2.display, stderr: c.stderr });
+  ok(gateOf(L2[0].config) && !L2[0].config.includes(path.join('browser-env', 'display')), 'no plan ⇒ the base file itself');
   const disp2 = await (await fetch(API + '/api/browser/display')).json();
   ok(disp2.display.kind === 'wayland' && disp2.display.name === 'wayland-0', 'Settings\' line follows: Wayland now', disp2);
   ok(sha(UCFG) === USER_SHA, 'the user file is still byte-identical');
@@ -577,14 +577,14 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const pH = ephOf(kx, 'bk-0000d0a1');
   const recH = pH ? kx.browserOf(pH.id) : null;
   const LH = launches().slice(b0).filter((l) => l.sess === 'vs-bk-0000d0a1');
-  ok(c.status === 0 && LH.length === 1 && LH[0].headed === true && LH[0].xvfb === true && /--ozone-platform=x11/.test(LH[0].args) && !/wayland/.test(LH[0].args) && LH[0].display === '', 'Xvfb on the PATH, no desktop: launched HEADED on the CLI\'s own Xvfb — the Wayland pin became x11, the stale DISPLAY cleared', { LH, stderr: c.stderr });
-  ok(recH && recH.display && recH.display.fallback.rung === 'hidden-window' && recH.display.xvfb === true && /\[browser_hidden_window\]/.test(c.stderr) && !/\[browser_headless\]/.test(c.stderr), 'the record says hidden-window; the agent is told which rung', { d: recH && recH.display, stderr: c.stderr });
+  ok(c.status === 0 && LH.length === 1 && LH[0].headed === true && LH[0].xvfb === true && gateOf(/--ozone-platform=x11/.test(LH[0].args)) && !/wayland/.test(LH[0].args) && LH[0].display === '', 'Xvfb on the PATH, no desktop: launched HEADED on the CLI\'s own Xvfb — the Wayland pin became x11, the stale DISPLAY cleared', { LH, stderr: c.stderr });
+  ok(gateOf(recH) && gateOf(recH.display) && recH.display.fallback.rung === 'hidden-window' && recH.display.xvfb === true && gateOf(/\[browser_hidden_window\]/.test(c.stderr)) && !/\[browser_headless\]/.test(c.stderr), 'the record says hidden-window; the agent is told which rung', { d: recH && recH.display, stderr: c.stderr });
   c = await cli(['eval', 'navigator.userAgent'], cliX(sH));
-  ok(c.status === 0 && /Chrome\/154/.test(c.stdout) && !/HeadlessChrome/.test(c.stdout) && restarts().length === r0, 'navigator.userAgent through the keeper: Chrome/154 (not HeadlessChrome) — and no restart (the same planned file)', { stdout: c.stdout, restarts: restarts().slice(r0) });
+  ok(c.status === 0 && gateOf(/Chrome\/154/.test(c.stdout)) && !/HeadlessChrome/.test(c.stdout) && restarts().length === r0, 'navigator.userAgent through the keeper: Chrome/154 (not HeadlessChrome) — and no restart (the same planned file)', { stdout: c.stdout, restarts: restarts().slice(r0) });
   const eRow = kx.ephemerals().find((e) => e.browserKey === 'bk-0000d0a1');
-  ok(eRow && D.factCode(eRow.display) === 'hidden-window', 'the Agent browser panel\'s row carries the rung');
+  ok(gateOf(eRow) && D.factCode(eRow.display) === 'hidden-window', 'the Agent browser panel\'s row carries the rung');
   const dispX = await (await fetch(API + '/api/browser/display')).json();
-  ok(dispX.display && dispX.display.kind === 'none' && dispX.display.xvfb === true && dispX.mode === 'auto', 'Settings\' route: no display, Xvfb installed, mode auto', dispX);
+  ok(gateOf(dispX.display) && dispX.display.kind === 'none' && dispX.display.xvfb === true && dispX.mode === 'auto', 'Settings\' route: no display, Xvfb installed, mode auto', dispX);
   // browser.noDisplayMode = headless: Xvfb present, headless all the same
   settings['browser.noDisplayMode'] = 'headless';
   const sH2 = mkSession('sess-h2', 'bk-0000d0a2', 'k', pairsN('bk-0000d0a2'), 'N');
@@ -598,7 +598,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   // own — the facts' print is cut at 700 characters, so the note is never read by a prefix)
   const fbH2 = !recH2 ? 'the record is null' : !recH2.display ? 'the record has no display' : (recH2.display.fallback || 'the record has no fallback');
   const rungH2 = (fbH2 && typeof fbH2 === 'object' && fbH2.rung) || null, tagH2 = /\[browser_headless\]/.test(c.stderr);
-  const okH2 = ok(c.status === 0 && LH2.length === 1 && LH2[0].headed === false && LH2[0].xvfb === false && rungH2 === 'headless' && tagH2, 'browser.noDisplayMode = "Always headless": Xvfb present, the launch is headless', { status: c.status, signal: c.signal, killed: c.killed, ms: c.ms, fallback: fbH2, tag: tagH2, launches: LH2.length, LH2 });
+  const okH2 = ok(c.status === 0 && LH2.length === 1 && LH2[0].headed === false && LH2[0].xvfb === false && rungH2 === 'headless' && verdictOf(tagH2), 'browser.noDisplayMode = "Always headless": Xvfb present, the launch is headless', { status: c.status, signal: c.signal, killed: c.killed, ms: c.ms, fallback: fbH2, tag: tagH2, launches: LH2.length, LH2 });
   if (!okH2) { const at = c.stderr.indexOf('note: this machine has no desktop'); console.error('    the stderr from the display note to its end: ' + JSON.stringify(at >= 0 ? c.stderr.slice(at) : c.stderr)); }
   const dispH = await (await fetch(API + '/api/browser/display')).json();
   ok(dispH.mode === 'headless', 'the route says the mode', dispH);
@@ -625,24 +625,24 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const recP = ephOf(kp, 'bk-0000e5a1') ? kp.browserOf(ephOf(kp, 'bk-0000e5a1').id) : null;
   const LP = launches().slice(b0).filter((l) => l.sess === 'vs-bk-0000e5a1');
   let planned = null; try { planned = LP[0] && LP[0].config ? JSON.parse(fs.readFileSync(LP[0].config, 'utf8')) : null; } catch { planned = null; }
-  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(c.status === 0 && LP.length === 1 && LP[0].headed === true && LP[0].xvfb === true && /--ozone-platform=x11/.test(LP[0].args), 'H5 the pod, setting UNSET: the launch is HEADED on the CLI\'s own Xvfb (the hidden-window rung), not headless', { LP, stderr: c.stderr });
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(c.status === 0 && LP.length === 1 && LP[0].headed === true && LP[0].xvfb === true && verdictOf(/--ozone-platform=x11/.test(LP[0].args)), 'H5 the pod, setting UNSET: the launch is HEADED on the CLI\'s own Xvfb (the hidden-window rung), not headless', { LP, stderr: c.stderr });
   // r1679 (the load row — seen red at 717191cda-20261121224429-both, UTC only: the launch WAS headless, one, no default mark, no
   // fallback — every product term held; the one term the detail never printed was the verb's own answer, c.status, and its stderr
   // was cut at its HEAD): the verb's answer is its OWN leg now (status, killed, signal, ms, stderr's TAIL), and the display law is
   // judged on the launch and the record alone — a slow or refused verb on a loaded runner is said by name, never read as the law
   else {
     ok(c.status === 0, `H5 OFF …the agent's verb answered (status ${c.status}${c.killed ? ', KILLED at the runner\'s 30 s bound' : ''}${c.signal ? ', signal ' + c.signal : ''}, ${c.ms} ms)`, { status: c.status, killed: c.killed, signal: c.signal, ms: c.ms, stderrTail: String(c.stderr || '').slice(-300) });
-    ok(LP.length === 1 && LP[0].headed === false && recP && recP.display && !recP.display.wanted.byDefault && !recP.display.fallback, 'H5 OFF (2.369.200) the pod, setting UNSET: the launch is headless as in .199 — no window asked, no plan, no default mark', { LP, d: recP && recP.display });
+    ok(LP.length === 1 && LP[0].headed === false && gateOf(recP) && gateOf(recP.display) && !recP.display.wanted.byDefault && !recP.display.fallback, 'H5 OFF (2.369.200) the pod, setting UNSET: the launch is headless as in .199 — no window asked, no plan, no default mark', { LP, d: recP && recP.display });
   }
-  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(planned && planned.headed === true && recP && recP.display && recP.display.wanted.byDefault === true && recP.display.fallback.rung === 'hidden-window', 'H5 …the LAUNCH CONFIG the keeper names carries headed:true, and the record\'s fact says the window was the default\'s (wanted.byDefault)', { planned, d: recP && recP.display });
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(gateOf(planned) && planned.headed === true && gateOf(recP) && gateOf(recP.display) && recP.display.wanted.byDefault === true && recP.display.fallback.rung === 'hidden-window', 'H5 …the LAUNCH CONFIG the keeper names carries headed:true, and the record\'s fact says the window was the default\'s (wanted.byDefault)', { planned, d: recP && recP.display });
   else ok(!planned || planned.headed !== true, 'H5 OFF …the launch config the keeper names asks no window', { planned });
   c = await cli(['eval', 'navigator.userAgent'], cliP(sP));
-  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(c.status === 0 && /Chrome\/154/.test(c.stdout) && !/HeadlessChrome/.test(c.stdout) && restarts().length === r0, 'H5 …navigator.userAgent = Chrome/154 (never HeadlessChrome) and the agent\'s next verb restarts nothing (the same planned file)', { stdout: c.stdout, restarts: restarts().slice(r0) });
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(c.status === 0 && gateOf(/Chrome\/154/.test(c.stdout)) && !/HeadlessChrome/.test(c.stdout) && restarts().length === r0, 'H5 …navigator.userAgent = Chrome/154 (never HeadlessChrome) and the agent\'s next verb restarts nothing (the same planned file)', { stdout: c.stdout, restarts: restarts().slice(r0) });
   else ok(c.status === 0 && restarts().length === r0, 'H5 OFF …the agent\'s next verb runs and restarts nothing', { stdout: c.stdout, restarts: restarts().slice(r0) });
   const dispP = await (await fetch(API + '/api/browser/display')).json();
   const W5 = await import('../src/lib/browser-display-words.js');
-  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(dispP.preference === null && dispP.display.kind === 'none' && dispP.display.xvfb === true && /with the window setting unset, an agent's browser runs in a hidden window/.test(W5.machineDisplayText(dispP)), 'H5 Settings\' line on the pod: "with the window setting unset, an agent\'s browser runs in a hidden window" (the route answers the stored preference)', { dispP, line: W5.machineDisplayText(dispP) });
-  else ok(dispP.preference === null && dispP.display.kind === 'none' && dispP.display.xvfb === true && /a browser that asks for a window runs in a hidden window/.test(W5.machineDisplayText(dispP)) && !/with the window setting unset/.test(W5.machineDisplayText(dispP)), 'H5 OFF Settings\' line on the pod: .199\'s sentence (a browser that ASKS for a window runs in a hidden one) — never the unset rule', W5.machineDisplayText(dispP));
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(dispP.preference === null && dispP.display.kind === 'none' && dispP.display.xvfb === true && verdictOf(/with the window setting unset, an agent's browser runs in a hidden window/.test(W5.machineDisplayText(dispP))), 'H5 Settings\' line on the pod: "with the window setting unset, an agent\'s browser runs in a hidden window" (the route answers the stored preference)', { dispP, line: W5.machineDisplayText(dispP) });
+  else ok(dispP.preference === null && dispP.display.kind === 'none' && dispP.display.xvfb === true && gateOf(/a browser that asks for a window runs in a hidden window/.test(W5.machineDisplayText(dispP))) && !/with the window setting unset/.test(W5.machineDisplayText(dispP)), 'H5 OFF Settings\' line on the pod: .199\'s sentence (a browser that ASKS for a window runs in a hidden one) — never the unset rule', W5.machineDisplayText(dispP));
   // 'no' still forces headless
   podSettings['browser.headed'] = 'no';
   const sP2 = mkSession('sess-pod2', 'bk-0000e5a2', 'q', pairsN('bk-0000e5a2'), 'N');
@@ -651,7 +651,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const LP2 = launches().slice(b1).filter((l) => l.sess === 'vs-bk-0000e5a2');
   const recP2 = ephOf(kp, 'bk-0000e5a2') ? kp.browserOf(ephOf(kp, 'bk-0000e5a2').id) : null;
   const dispP2 = await (await fetch(API + '/api/browser/display')).json();
-  ok(c.status === 0 && LP2.length === 1 && LP2[0].headed === false && LP2[0].xvfb === false && recP2 && !recP2.display.wanted.byDefault && /says Headless/.test(W5.machineDisplayText(dispP2)), 'H5 browser.headed = "no" on the pod: still headless (and Settings\' line says the setting decided)', { LP2, d: recP2 && recP2.display, line: W5.machineDisplayText(dispP2) });
+  ok(c.status === 0 && LP2.length === 1 && LP2[0].headed === false && LP2[0].xvfb === false && gateOf(recP2) && !recP2.display.wanted.byDefault && verdictOf(/says Headless/.test(W5.machineDisplayText(dispP2))), 'H5 browser.headed = "no" on the pod: still headless (and Settings\' line says the setting decided)', { LP2, d: recP2 && recP2.display, line: W5.machineDisplayText(dispP2) });
   delete podSettings['browser.headed'];
   // a DESKTOP (a live Wayland socket) + Xvfb, unset ⇒ today's meaning: nothing asks a window — headless as the pod config says
   await listenAt(path.join(XDG, 'wayland-0'));
@@ -660,7 +660,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   c = await cli(['snapshot'], cliP(sP3));
   const LP3 = launches().slice(b2).filter((l) => l.sess === 'vs-bk-0000e5a3');
   const recP3 = ephOf(kp, 'bk-0000e5a3') ? kp.browserOf(ephOf(kp, 'bk-0000e5a3').id) : null;
-  ok(c.status === 0 && LP3.length === 1 && LP3[0].headed === false && recP3 && !recP3.display.fallback && !recP3.display.wanted.byDefault, 'H5 with a desktop session, unset keeps today\'s meaning (inherit: no window asked, no plan)', { LP3, d: recP3 && recP3.display });
+  ok(c.status === 0 && LP3.length === 1 && LP3[0].headed === false && gateOf(recP3) && !recP3.display.fallback && !recP3.display.wanted.byDefault, 'H5 with a desktop session, unset keeps today\'s meaning (inherit: no window asked, no plan)', { LP3, d: recP3 && recP3.display });
   for (const s0 of servers.splice(0)) { await new Promise((res) => s0.close(() => res())); }
   try { fs.unlinkSync(path.join(XDG, 'wayland-0')); } catch { /* gone */ }
   for (const e of kp.ephemerals()) { try { await kp.stop(e.profileId, { why: 'user' }); } catch { /* */ } }
@@ -674,14 +674,14 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   let r5 = await BS5.runBrowserServeOp(bs5, 'start', { profileId: pid5, idleMs: 0, headed: null });
   const L5 = launches().slice(b3).filter((l) => l.ns === ns5);
   let plan5 = null; try { plan5 = JSON.parse(fs.readFileSync(BS5.planFileOf(bs5, ns5), 'utf8')); } catch { plan5 = null; }
-  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(r5.ok && r5.display.wanted.byDefault === true && r5.display.fallback.rung === 'hidden-window' && L5.length === 1 && L5[0].headed === true && L5[0].xvfb === true && plan5 && plan5.headed === true, 'H5 a paired machine (browser-serve start, preference unset): ITS no-desktop + Xvfb ⇒ the hidden-window rung under its planned copy (headed:true)', { r5: r5.display, L5, plan5 });
-  else ok(r5.ok && !r5.display.fallback && !r5.display.wanted.byDefault && L5.length === 1 && L5[0].headed === false, 'H5 OFF a paired machine (browser-serve start, preference unset): headless as in .199, no plan', { r5: r5.display, L5 });
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(gateOf(r5.ok) && r5.display.wanted.byDefault === true && r5.display.fallback.rung === 'hidden-window' && L5.length === 1 && L5[0].headed === true && L5[0].xvfb === true && gateOf(plan5) && plan5.headed === true, 'H5 a paired machine (browser-serve start, preference unset): ITS no-desktop + Xvfb ⇒ the hidden-window rung under its planned copy (headed:true)', { r5: r5.display, L5, plan5 });
+  else ok(gateOf(r5.ok) && !r5.display.fallback && !r5.display.wanted.byDefault && L5.length === 1 && L5[0].headed === false, 'H5 OFF a paired machine (browser-serve start, preference unset): headless as in .199, no plan', { r5: r5.display, L5 });
   await BS5.runBrowserServeOp(bs5, 'stop', { profileId: pid5 });
   dsp5 = { ...D.displayVerdict({}), xvfb: false };
   const b4 = launches().length;
   r5 = await BS5.runBrowserServeOp(bs5, 'start', { profileId: pid5, idleMs: 0, headed: null });
   const L6 = launches().slice(b4).filter((l) => l.ns === ns5);
-  ok(r5.ok && !r5.display.fallback && !r5.display.wanted.byDefault && L6.length === 1 && L6[0].headed === false, 'H5 …the same machine without Xvfb: unset keeps today\'s meaning (headless, no plan)', { r5: r5.display, L6 });
+  ok(gateOf(r5.ok) && !r5.display.fallback && !r5.display.wanted.byDefault && L6.length === 1 && L6[0].headed === false, 'H5 …the same machine without Xvfb: unset keeps today\'s meaning (headless, no plan)', { r5: r5.display, L6 });
   await BS5.runBrowserServeOp(bs5, 'stop', { profileId: pid5 });
   Rt.setup({ keeper: k, activeSessions: sessions, browserEnv: () => null, adoptRoots: { homeDir: fakeHome, dataDir: DATA }, tasksForSession: () => [] });
 }
@@ -700,18 +700,18 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   let r = await BS.runBrowserServeOp(bs, 'start', { profileId: pid, idleMs: 0, headed: true });
   const Ls = launches().slice(before).filter((l) => l.ns === ns);
   const plan = BS.planFileOf(bs, ns);
-  ok(r.ok && r.display && r.display.fallback && r.display.fallback.why === 'no-display' && Ls.length === 1 && Ls[0].headed === false && !/ozone/.test(Ls[0].args) && Ls[0].config === plan, 'browser-serve `start` (the hub asks headed): THAT machine\'s probe says no display ⇒ launched headless under ITS planned copy (~/.vibespace/browser-serve/<ns>.json), the fact answered', { r, Ls });
+  ok(gateOf(r.ok) && gateOf(r.display) && gateOf(r.display.fallback) && r.display.fallback.why === 'no-display' && Ls.length === 1 && Ls[0].headed === false && !/ozone/.test(Ls[0].args) && Ls[0].config === plan, 'browser-serve `start` (the hub asks headed): THAT machine\'s probe says no display ⇒ launched headless under ITS planned copy (~/.vibespace/browser-serve/<ns>.json), the fact answered', { r, Ls });
   ok(restarts().length === r0 && sha(sCfg) === sSha, '…its own cdp-url asked under the launch\'s view (no restart); the machine\'s user file untouched', restarts().slice(r0));
   const c1 = await BS.runBrowserServeOp(bs, 'cdp-url', { profileId: pid });
   const rv = restarts().slice(r0).map((x) => JSON.parse(x.to));
-  ok(c1.ok && rv.every((v) => v.headed === false && !/ozone/.test(v.args)), 'a later `cdp-url` op names the planned file (its existence IS the view): headless, no pin — never the user file (it carries no idle; the hub never asks it after a start)', restarts().slice(r0));
+  ok(gateOf(c1.ok) && verdictOf(rv.every((v) => v.headed === false && !/ozone/.test(v.args))), 'a later `cdp-url` op names the planned file (its existence IS the view): headless, no pin — never the user file (it carries no idle; the hub never asks it after a start)', restarts().slice(r0));
   await BS.runBrowserServeOp(bs, 'stop', { profileId: pid });
   dsp = D.displayVerdict({ env: { XDG_RUNTIME_DIR: XDG }, entries: [{ path: path.join(XDG, 'wayland-0'), type: 'socket', alive: true }] });
   const b2 = launches().length;
   await listenAt(path.join(XDG, 'wayland-0'));
   r = await BS.runBrowserServeOp(bs, 'start', { profileId: pid, idleMs: 0, headed: true });
   const L2 = launches().slice(b2).filter((l) => l.ns === ns);
-  ok(r.ok && !r.display.fallback && L2.length === 1 && L2[0].headed === true && /--ozone-platform=wayland/.test(L2[0].args) && L2[0].config === null && !fs.existsSync(plan), 'its desktop is back ⇒ the next start is headed under the CLI\'s own config search (the planned copy removed)', { r: r.display, L2 });
+  ok(gateOf(r.ok) && !r.display.fallback && L2.length === 1 && L2[0].headed === true && gateOf(/--ozone-platform=wayland/.test(L2[0].args)) && L2[0].config === null && !fs.existsSync(plan), 'its desktop is back ⇒ the next start is headed under the CLI\'s own config search (the planned copy removed)', { r: r.display, L2 });
   await BS.runBrowserServeOp(bs, 'stop', { profileId: pid });
   for (const s0 of servers.splice(0)) { await new Promise((res) => s0.close(() => res())); }
   try { fs.unlinkSync(path.join(XDG, 'wayland-0')); } catch { /* gone */ }
@@ -724,7 +724,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const factLine = '        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode(), preference: headedSetting() });';
   const envLine = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });';
   const plannedLine = '    const planned = (file) => (rec && rec.display && file ? displays.fileFor(file, rec.display) : file);';
-  ok(src.includes(factLine) && src.includes(envLine) && src.includes(plannedLine), 'CONTROL setup: the launch\'s fact line and /resolve\'s planned-file line are found in the keeper');
+  ok(gateOf(src.includes(factLine)) && gateOf(src.includes(envLine)) && verdictOf(src.includes(plannedLine)), 'CONTROL setup: the launch\'s fact line and /resolve\'s planned-file line are found in the keeper');
   // (i) THE PRE-FIX LAUNCH: no fact ⇒ the preference decides ⇒ the incident, reproduced
   const pre = MK.load('src/server/browser-keeper.js', editAnchor(editAnchor(src, factLine, '        rec.display = null;', "src/server/browser-keeper.js"), envLine, '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });', "src/server/browser-keeper.js"), 'no-fact');
   const kPre = mkKeeper(pre);
@@ -733,7 +733,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   let c = await cli(['snapshot'], cliEnvFor(s1));
   const p1 = ephOf(kPre, KEY_C1);
   const Lc = launches().filter((l) => l.sess === 'vs-' + KEY_C1);
-  ok(c.status !== 0 && /launch_failed/.test(c.stderr) && p1 && kPre.browserOf(p1.id).state === 'failed' && Lc.length === 1 && Lc[0].headed === true && /--ozone-platform=wayland/.test(Lc[0].args), 'CONTROL (the pre-fix launch): the headed + Wayland-pinned launch is attempted and the verb answers launch_failed — the incident, reproduced', { stderr: c.stderr, Lc });
+  ok(c.status !== 0 && gateOf(/launch_failed/.test(c.stderr)) && gateOf(p1) && kPre.browserOf(p1.id).state === 'failed' && Lc.length === 1 && Lc[0].headed === true && verdictOf(/--ozone-platform=wayland/.test(Lc[0].args)), 'CONTROL (the pre-fix launch): the headed + Wayland-pinned launch is attempted and the verb answers launch_failed — the incident, reproduced', { stderr: c.stderr, Lc });
   // (ii) /resolve naming the BASE file: the launch is headless, the agent's own verb then differs from it ⇒ a restart
   // into the same failure (why the planned file must reach every call)
   const pre2 = MK.load('src/server/browser-keeper.js', editAnchor(src, plannedLine, '    const planned = (file) => file;', "src/server/browser-keeper.js"), 'base-to-agent');
@@ -743,8 +743,8 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const r0 = restarts().length;
   c = await cli(['snapshot'], cliEnvFor(s2));
   const rs = restarts().slice(r0);
-  ok(c.status !== 0 && rs.length === 1 && rs[0].sess === 'vs-' + KEY_C2 && /Failed to connect to Wayland display/.test(c.stdout + c.stderr), 'CONTROL (the agent handed the base file): its verb RESTARTS the headless daemon into a headed Wayland launch and fails', { rs, status: c.status, stderr: c.stderr, stdout: c.stdout });
-  for (const r of copiesCensus(MK.files, MK.dir, REPO, { label: 'keeper controls: ' })) ok(r.pass, r.name, r.detail);
+  ok(c.status !== 0 && rs.length === 1 && rs[0].sess === 'vs-' + KEY_C2 && verdictOf(/Failed to connect to Wayland display/.test(c.stdout + c.stderr)), 'CONTROL (the agent handed the base file): its verb RESTARTS the headless daemon into a headed Wayland launch and fails', { rs, status: c.status, stderr: c.stderr, stdout: c.stdout });
+  for (const r of copiesCensus(MK.files, MK.dir, REPO, { label: 'keeper controls: ' })) ok(verdictOf(r.pass), r.name, r.detail);
   Rt.setup({ keeper: k, activeSessions: sessions, browserEnv: () => null, adoptRoots: { homeDir: fakeHome, dataDir: DATA }, tasksForSession: () => [] });
 }
 
@@ -761,7 +761,7 @@ console.log('— ④ the words every surface says it with, and where they are dr
   const noDX = { ...D.displayVerdict({}), xvfb: true };
   const hid = D.displayFact({ display: noDX, wanted: { headed: true, args: OWNER_ARGS } });
   ok(W.displayFactText(hid) === 'This machine has no desktop session — the browser runs in a hidden window (the live view can still take over)', 'the hidden-window sentence names the rung', W.displayFactText(hid));
-  ok(/runs in a hidden window .* · Xvfb: installed$/.test(W.machineDisplayText({ display: noDX, mode: 'auto' })) && /runs headless .* · Xvfb: installed$/.test(W.machineDisplayText({ display: noDX, mode: 'headless' })) && /runs headless .* · Xvfb: not installed$/.test(W.machineDisplayText({ display: { ...D.displayVerdict({}), xvfb: false }, mode: 'auto' })), 'Settings\' line: the rung the setting and Xvfb pick + "Xvfb: installed / not installed"');
+  ok(gateOf(/runs in a hidden window .* · Xvfb: installed$/.test(W.machineDisplayText({ display: noDX, mode: 'auto' }))) && gateOf(/runs headless .* · Xvfb: installed$/.test(W.machineDisplayText({ display: noDX, mode: 'headless' }))) && verdictOf(/runs headless .* · Xvfb: not installed$/.test(W.machineDisplayText({ display: { ...D.displayVerdict({}), xvfb: false }, mode: 'auto' }))), 'Settings\' line: the rung the setting and Xvfb pick + "Xvfb: installed / not installed"');
   ok(W.displayFactText(sub) === 'The browser settings ask for Wayland, which this machine does not have right now — it runs on X11 instead', 'the substituted sentence names both displays', W.displayFactText(sub));
   ok(W.displayFactText(back) === 'The desktop session is back — the browser runs in a window again' && W.displayFactText(D.displayFact({ display: wl, wanted: { headed: true } })) === '' && W.displayFactText(null) === '', 'the window-is-back sentence; a plain launch / no fact says nothing');
   ok(W.displayFactOf({ browsers: { 'bp-1': { display: noD } } }, 'bp-1') === noD && W.displayFactOf({ browsers: {} }, 'bp-1') === null && W.displayFactOf(null, 'bp-1') === null, 'displayFactOf reads the digest\'s record');
@@ -796,11 +796,11 @@ console.log('— ④ the words every surface says it with, and where they are dr
     const WF = await import(pathToFileURL(MR.write('src/lib/browser-display-words.js', anchored(wsrcR, '  return { first, at, say: left > 0, leftMs: Math.max(0, left) };', '  return { first, at, say: true, leftMs: Math.max(0, left) };', 'r1505 control: said for ever'), 'said-for-ever')).href);
     const runRed = runTable(WF.runLineVerdict);
     ok(runRed.length === 1 && runRed[0] === 'not said at +20 s', `CONTROL (r1505): a line said for ever — the table is RED by name: «${runRed[0]}»`, runRed);
-    for (const r of copiesCensus(MR.files, MR.dir, REPO, { label: 'B-346d r1505 control: ' })) ok(r.pass, r.name, r.detail);
+    for (const r of copiesCensus(MR.files, MR.dir, REPO, { label: 'B-346d r1505 control: ' })) ok(verdictOf(r.pass), r.name, r.detail);
     const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-    ok(['Hidden window', 'No window'].every((k) => zh.includes('  ' + JSON.stringify(k) + ': ') && ja.includes('  ' + JSON.stringify(k) + ': ')), 'B-346d r1228: the mark\'s words have zh and ja rows');
+    ok(verdictOf(['Hidden window', 'No window'].every((k) => zh.includes('  ' + JSON.stringify(k) + ': ') && ja.includes('  ' + JSON.stringify(k) + ': '))), 'B-346d r1228: the mark\'s words have zh and ja rows');
   }
-  ok(/Wayland desktop session \(wayland-0\)/.test(W.machineDisplayText({ display: wl })) && /X11 display \(:0\)/.test(W.machineDisplayText({ display: x11Only })) && /no desktop session now .* runs headless/.test(W.machineDisplayText({ display: D.displayVerdict({}) })) && /Could not check this machine's display: boom/.test(W.machineDisplayText({ error: 'boom' })), 'Settings\' line: Wayland / X11 / none / an error said by name');
+  ok(gateOf(/Wayland desktop session \(wayland-0\)/.test(W.machineDisplayText({ display: wl }))) && gateOf(/X11 display \(:0\)/.test(W.machineDisplayText({ display: x11Only }))) && gateOf(/no desktop session now .* runs headless/.test(W.machineDisplayText({ display: D.displayVerdict({}) }))) && verdictOf(/Could not check this machine's display: boom/.test(W.machineDisplayText({ error: 'boom' }))), 'Settings\' line: Wayland / X11 / none / an error said by name');
   // B-d635 (lane browser-reliability, userW's inc-murizo36-ecri): VibeSpace's own VNC desktop (Desktop apps' Xtigervnc, :7)
   // is a desktop the user sees — beside it no surface says "no desktop session"; the words say the browser is NOT on it
   { const vncE = [{ path: '/tmp/.X11-unix/X7', type: 'socket', alive: true }];
@@ -812,34 +812,34 @@ console.log('— ④ the words every surface says it with, and where they are dr
     const { vd, vh, words } = vncCase(D);
     const vdead = D.displayVerdict({ entries: [{ path: '/tmp/.X11-unix/X7', type: 'socket', alive: false }], vncDisplay: ':7', xvfb: true });
     const vsame = D.displayVerdict({ env: { DISPLAY: ':7' }, entries: vncE, vncDisplay: ':7' });
-    ok(vd.kind === 'none' && eq(vd.vnc, { name: ':7', socket: '/tmp/.X11-unix/X7' }) && vdead.vnc === null && vsame.kind === 'x11' && vsame.vnc === null && D.factCode(vh) === 'hidden-window' && eq(vh.vnc, vd.vnc) && D.displayCandidates({ vncDisplay: ':7' }).includes('/tmp/.X11-unix/X7') && words.every((w) => !/no desktop session/i.test(w) && /VNC desktop \(:7\)/.test(w)) && /hidden window/.test(words[0]) && /headless/.test(words[1]) && /\[browser_hidden_window\]$/.test(words[3]) && /\[browser_headless\]$/.test(words[4]), 'B-d635: VibeSpace\'s own VNC desktop (:7, a live socket) is in the fact — beside it the row, the Settings line and the agent\'s note say the browser is NOT on that desktop, never "no desktop session" (a dead socket, or the VNC display being the one DISPLAY names, adds nothing)', words);
+    ok(vd.kind === 'none' && gateOf(eq(vd.vnc, { name: ':7', socket: '/tmp/.X11-unix/X7' })) && vdead.vnc === null && vsame.kind === 'x11' && vsame.vnc === null && D.factCode(vh) === 'hidden-window' && gateOf(eq(vh.vnc, vd.vnc)) && gateOf(D.displayCandidates({ vncDisplay: ':7' }).includes('/tmp/.X11-unix/X7')) && gateOf(words.every((w) => !/no desktop session/i.test(w) && /VNC desktop \(:7\)/.test(w))) && gateOf(/hidden window/.test(words[0])) && gateOf(/headless/.test(words[1])) && gateOf(/\[browser_hidden_window\]$/.test(words[3])) && verdictOf(/\[browser_headless\]$/.test(words[4])), 'B-d635: VibeSpace\'s own VNC desktop (:7, a live socket) is in the fact — beside it the row, the Settings line and the agent\'s note say the browser is NOT on that desktop, never "no desktop session" (a dead socket, or the VNC display being the one DISPLAY names, adds nothing)', words);
     const dsrc = fs.readFileSync(path.join(REPO, 'src/browser-display.js'), 'utf8');
     const VL = "  const vnc = vx && !vx.tcp && !(x11 && x11.name === vx.name) && (live(vx.path) || live(vx.abstract)) ? { name: vx.name, socket: live(vx.path) ? vx.path : vx.abstract } : null;";
-    ok(dsrc.includes(VL), 'B-d635 control setup: the VNC-desktop line is found');
+    ok(verdictOf(dsrc.includes(VL)), 'B-d635 control setup: the VNC-desktop line is found');
     const MV = mutantCopies('browser-display-vnc', REPO);
     const cv = vncCase(MV.load('src/browser-display.js', editAnchor(dsrc, VL, '  const vnc = null;', "src/browser-display.js"), 'no-vnc'));
-    ok(cv.words.slice(0, 3).every((w) => /no desktop session/i.test(w)) && /no desktop session/.test(cv.words[3]), 'B-d635 CONTROL: a probe that cannot see the VNC desktop (the base) says "This machine has no desktop session" on every surface — the row above can go red', cv.words);
-    for (const r of copiesCensus(MV.files, MV.dir, REPO, { label: 'B-d635 control: ' })) ok(r.pass, r.name, r.detail);
+    ok(gateOf(cv.words.slice(0, 3).every((w) => /no desktop session/i.test(w))) && verdictOf(/no desktop session/.test(cv.words[3])), 'B-d635 CONTROL: a probe that cannot see the VNC desktop (the base) says "This machine has no desktop session" on every surface — the row above can go red', cv.words);
+    for (const r of copiesCensus(MV.files, MV.dir, REPO, { label: 'B-d635 control: ' })) ok(verdictOf(r.pass), r.name, r.detail);
     // hermetic: only the SERVER names its VNC display (the wiring) — a probe / a keeper built without it never reads the
     // machine's :7 (a test keeper on a box whose desktop singleton runs must see what the test planted, nothing else)
     const fsrc = fs.readFileSync(path.join(REPO, 'src/browser-facts.js'), 'utf8'), csrc = fs.readFileSync(path.join(REPO, 'src/server/browser-display-config.js'), 'utf8'), ksrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), wsrc0 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-    ok(/netImpl = require\('net'\), vncDisplay = null \} = \{\}\) \{/.test(fsrc) && /probeDisplay\(\{ env: env\(\) \|\| \{\}, vncDisplay \}\)/.test(csrc) && /env: \(\) => rtEnv, now, vncDisplay \}\);/.test(ksrc0) && /vncDisplay: process\.env\.VIBESPACE_VNC_DISPLAY \|\| ':7',/.test(wsrc0), 'B-d635: the VNC display is named by the SERVER wiring only (src/vnc.js\'s default) — the probe\'s default is none, so a test keeper is hermetic');
+    ok(gateOf(/netImpl = require\('net'\), vncDisplay = null \} = \{\}\) \{/.test(fsrc)) && gateOf(/probeDisplay\(\{ env: env\(\) \|\| \{\}, vncDisplay \}\)/.test(csrc)) && gateOf(/env: \(\) => rtEnv, now, vncDisplay \}\);/.test(ksrc0)) && verdictOf(/vncDisplay: process\.env\.VIBESPACE_VNC_DISPLAY \|\| ':7',/.test(wsrc0)), 'B-d635: the VNC display is named by the SERVER wiring only (src/vnc.js\'s default) — the probe\'s default is none, so a test keeper is hermetic');
   }
   const wsrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-display-words.js'), 'utf8');
   const keys = [...wsrc.matchAll(/\bt\((['"])((?:(?!\1).)+)\1/g)].map((m) => m[2].replace(/\\'/g, "'"));
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const missing = keys.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
   ok(keys.length >= 7 && !missing.length, `every sentence has a zh AND a ja entry (${keys.length} keys)`, missing);
-  ok(zh.includes('"This machine has no desktop session — the browser runs headless (the live view can still take over)": "这台机器没有桌面会话 — 浏览器以 headless 运行（实时视图可正常接管）"'), 'zh says the brief\'s words exactly');
+  ok(verdictOf(zh.includes('"This machine has no desktop session — the browser runs headless (the live view can still take over)": "这台机器没有桌面会话 — 浏览器以 headless 运行（实时视图可正常接管）"')), 'zh says the brief\'s words exactly');
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const tv = read('src/lib/browser-trace-view.js'), sv = read('src/server/browser-trace.js'), sw = read('src/lib/browser-switcher.js'), lv = read('src/lib/browser-live-window.js'), ss = read('src/lib/settings-schema.js'), su = read('src/lib/settings-ui.js'), css = read('public/style.css');
-  ok(/r\.display = keeper && typeof keeper\.browserOf === 'function'/.test(sv) && /display: displayFactText,/.test(tv) && /\{ key: 'display', k: t\('Display'\), v: disp \}/.test(read('src/lib/browser-panel-model.js')) /* design 015: the row's fold */ && /displayLine\(st, e\.display\);/.test(tv), 'WIRING: the Agent browser panel\'s profile rows (the housekeeping row carries the record\'s fact) and ephemeral rows draw it');
-  ok(/key: 'display', kind: 'display', text: dt/.test(sw) && /displayFactText\(displayFactOf\(app\._browserProfiles, profileId\)\)/.test(sw), 'WIRING: the switch dialog says it under the now line');
+  ok(gateOf(/r\.display = keeper && typeof keeper\.browserOf === 'function'/.test(sv)) && gateOf(/display: displayFactText,/.test(tv)) && gateOf(/\{ key: 'display', k: t\('Display'\), v: disp \}/.test(read('src/lib/browser-panel-model.js'))) /* design 015: the row's fold */ && verdictOf(/displayLine\(st, e\.display\);/.test(tv)), 'WIRING: the Agent browser panel\'s profile rows (the housekeeping row carries the record\'s fact) and ephemeral rows draw it');
+  ok(gateOf(/key: 'display', kind: 'display', text: dt/.test(sw)) && verdictOf(/displayFactText\(displayFactOf\(app\._browserProfiles, profileId\)\)/.test(sw)), 'WIRING: the switch dialog says it under the now line');
   // the .197 integration: the merged line (browse-yourself's address / share / end lines, browser-stuck's dialog bar) keeps the note right after the blocked bar
-  ok(/root\.append\(strip, tabRow, watchLine, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body\)/.test(lv) && /const renderBackend = \(\) => \{\n    renderDisplay\(\);/.test(lv) && /st\.rows = computeRows\(\);\n    renderDisplay\(\);/.test(lv), 'WIRING: the live view\'s note under the bar (lane site-reset\'s reset line beside it, its loop banner after the dialog card), re-drawn with the digest and the strip');
-  ok(/'browser\.noDisplayMode': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[\s\S]{0,120}\{ value: 'headless'/.test(ss) && /noDisplayMode: noDisplayMode\(\)/.test(fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8')), 'WIRING: the setting browser.noDisplayMode (auto default | headless) — the keeper reads it at every launch and hands it to a paired machine');
-  ok(/'browser\.headed': \{[\s\S]{0,1600}fact: 'browser-display',/.test(ss) && /if \(schema\.fact === 'browser-display'\) this\._renderDisplayFact\(info\);/.test(su) && /fetchJson\('\/api\/browser\/display'\)/.test(su), 'WIRING: Settings → Agent browser: the read-only line under "Show the agent browser window"');
-  ok(['.settings-row-fact', '.browser-live-display-note', '.brsw-display', '.bprof-display'].every((c) => css.includes(c + ' {')), 'each line has its own rule (theme tokens only)');
+  ok(gateOf(/root\.append\(strip, tabRow, watchLine, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body\)/.test(lv)) && gateOf(/const renderBackend = \(\) => \{\n    renderDisplay\(\);/.test(lv)) && verdictOf(/st\.rows = computeRows\(\);\n    renderDisplay\(\);/.test(lv)), 'WIRING: the live view\'s note under the bar (lane site-reset\'s reset line beside it, its loop banner after the dialog card), re-drawn with the digest and the strip');
+  ok(gateOf(/'browser\.noDisplayMode': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[\s\S]{0,120}\{ value: 'headless'/.test(ss)) && verdictOf(/noDisplayMode: noDisplayMode\(\)/.test(fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'))), 'WIRING: the setting browser.noDisplayMode (auto default | headless) — the keeper reads it at every launch and hands it to a paired machine');
+  ok(gateOf(/'browser\.headed': \{[\s\S]{0,1600}fact: 'browser-display',/.test(ss)) && gateOf(/if \(schema\.fact === 'browser-display'\) this\._renderDisplayFact\(info\);/.test(su)) && verdictOf(/fetchJson\('\/api\/browser\/display'\)/.test(su)), 'WIRING: Settings → Agent browser: the read-only line under "Show the agent browser window"');
+  ok(verdictOf(['.settings-row-fact', '.browser-live-display-note', '.brsw-display', '.bprof-display'].every((c) => css.includes(c + ' {'))), 'each line has its own rule (theme tokens only)');
   const cliSrc = read('data/bin/vibespace-browser');
   ok((cliSrc.match(/if \(r\.displayNote\) console\.error\(`note: \$\{r\.displayNote\}`\)/g) || []).length === 2, 'WIRING: the CLI prints the note on a page verb and on `use`');
 }
@@ -856,14 +856,14 @@ console.log('— B-346d law 1: the live view of a stopped browser says why, from
   const user = W.stoppedText({ by: 'user', idleMs: 900000, early: null }), none = W.stoppedText(null);
   ok(idle === `Stopped on its own after 15 min with no command (its idle timeout) — ${tail}` && idleNoMs === `Stopped on its own (its idle timeout) — ${tail}`,
     'its own idle timeout: «Stopped on its own after 15 min with no command (its idle timeout)» (the record\'s launched idle), and without a known idle the same without the minutes', { idle, idleNoMs });
-  ok(early === `Ended on its own — found gone within 69 s of a command it served, before its 15 min idle timeout; why is not known here. ${tail}` && earlyNoIdle.startsWith('Ended on its own — found gone within 1 s of a command it served; why is not known here.'),
+  ok(early === `Ended on its own — found gone within 69 s of a command it served, before its 15 min idle timeout; why is not known here. ${tail}` && verdictOf(earlyNoIdle.startsWith('Ended on its own — found gone within 1 s of a command it served; why is not known here.')),
     'ended EARLY (law 2\'s bound): «found gone within 69 s of a command it served, before its 15 min idle timeout; why is not known here» — a bound, never when it ended', { early, earlyNoIdle });
   ok(user === `Stopped — ${tail}` && none === `Stopped — ${tail}`, 'CONTROL: a stop by an act (the user, a release) or no record keeps the plain sentence — never a guessed cause', { user, none });
   // the wiring: the keeper's refusal carries the record's facts, the bridge forwards them, the view says them
   const KS = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), BS = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), LW = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
   const pins = [[KS, "code: 'browser_stopped', state: e.state, ...(e.state === 'stopped' ? { ended: endedFactsOf(reg.browsers[e.profileId]) } : {}),"], [KS, 'return { by: rec.stoppedBy ? String(rec.stoppedBy).slice(0, 40) : null, idleMs: idle, early, at: Number(rec.endedAt) || null };'], [BS, "...(r.ended && typeof r.ended === 'object' ? { ended: r.ended } : {}) });"], [LW, 'setStatus(stoppedText(m.ended), { reconnect: true });']];
   const n = (txt, x) => txt.split(x).length - 1;
-  ok(pins.every(([txt, x]) => n(txt, x) === 1), 'WIRING, each line ONCE: the keeper\'s browser_stopped carries `ended` (endedFactsOf over the record: stoppedBy, the launched idle, endedEarly), the bridge forwards it, the stopped view says stoppedText(m.ended)', pins.filter(([txt, x]) => n(txt, x) !== 1).map(([, x]) => x));
+  ok(verdictOf(pins.every(([txt, x]) => n(txt, x) === 1)), 'WIRING, each line ONCE: the keeper\'s browser_stopped carries `ended` (endedFactsOf over the record: stoppedBy, the launched idle, endedEarly), the bridge forwards it, the stopped view says stoppedText(m.ended)', pins.filter(([txt, x]) => n(txt, x) !== 1).map(([, x]) => x));
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const keys = ["the agent's next browser command starts it again, and this view reconnects then", 'Stopped — {tail}', 'Ended on its own — found gone within {sec} s of a command it served, before its {min} min idle timeout; why is not known here. {tail}', 'Ended on its own — found gone within {sec} s of a command it served; why is not known here. {tail}', 'Stopped on its own after {min} min with no command (its idle timeout) — {tail}', 'Stopped on its own (its idle timeout) — {tail}'];
   const miss = keys.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
@@ -919,7 +919,7 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
       const WR = await import(pathToFileURL(MW.write('src/lib/browser-display-words.js', cut)).href);
       const asStood = { click: WR.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { canFront: true, driving: true, chipDrawn: false }), take: WR.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { chipDrawn: false, canTake: true }) };
       ok(asStood.click === CLICK_B && asStood.take === EN['show-left'], 'CONTROL (r4334: the line as it stood at ceaff7077, no drawing asked): with no chip drawn above, it still says «Click its tab above» / «Take over, then click its tab above» — RED', asStood);
-      for (const r of copiesCensus(MW.files, MW.dir, REPO, { label: 'r4334 control: ' })) ok(r.pass, r.name, r.detail);
+      for (const r of copiesCensus(MW.files, MW.dir, REPO, { label: 'r4334 control: ' })) ok(verdictOf(r.pass), r.name, r.detail);
     }
   }
   // r4340 law 4 (a second round of ONE class — r4297 then r4334, a door named that is not there — changes the shape): ONE builder of
@@ -941,11 +941,11 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
     const tree = stillCensus(srcFiles);
     ok(srcFiles.length > 100 && tree.length === 0, `B-bcf8 r4340 law 4: ONE builder of the still line's door words — paintLineOf, asked from ONE place (paintLineNow, which reads the view's drawing), its sentences in no other src file (${srcFiles.length} src files read)`, tree);
     const planted = stillCensus([...srcFiles, ['src/lib/planted-still.js', "export const say = () => t('" + CLICK_B + "'); paintLineOf(r, id);"]]);
-    ok(planted.length === 2 && planted.some((x) => /2 place/.test(x)) && planted.some((x) => x.startsWith('src/lib/planted-still.js writes')), 'CONTROL (r4340 law 4): a planted file that words the door itself and asks the builder from a second place is RED by name, twice', planted);
+    ok(planted.length === 2 && gateOf(planted.some((x) => /2 place/.test(x))) && verdictOf(planted.some((x) => x.startsWith('src/lib/planted-still.js writes'))), 'CONTROL (r4340 law 4): a planted file that words the door itself and asks the builder from a second place is RED by name, twice', planted);
   }
   const zhB = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jaB = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const missB = [...Object.values(EN), CLICK_B, BARE_B].filter((k) => !(zhB.includes('  ' + JSON.stringify(k) + ': ') && jaB.includes('  ' + JSON.stringify(k) + ': ')));
-  ok(missB.length === 0 && Object.values(EN).every((x) => !/[{}]|https?:/.test(x)), 'B-bcf8 (r4256) (3): the three lines have zh and ja rows, and no line has a slot (no title, no address can ride it)', missB);
+  ok(missB.length === 0 && verdictOf(Object.values(EN).every((x) => !/[{}]|https?:/.test(x))), 'B-bcf8 (r4256) (3): the three lines have zh and ja rows, and no line has a slot (no title, no address can ride it)', missB);
   // the live view's wiring (src/lib/browser-live-window.js), each line ONCE: the shown tab (the watched one, else the agent's current tab),
   // its line from the digest's record, said AFTER the once-a-run drop (a still picture is said while it stands, not 20 s a run) and
   // before the line is drawn; renderTabRow re-renders the display when the shown tab's line moved (a tab switch, a watch)
@@ -988,7 +988,7 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
     const tbSrc = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8'), KEEPS = "front: require('./browser-windows.js').currentTabFront({ owner, human, driving, mediated, active })";
     const branchOf = (src) => { const i = src.indexOf('  if (driving) {', src.indexOf('function tabClickVerdict')); return i < 0 ? '' : src.slice(i, src.indexOf('\n  }\n', i)); };
     const oneSource = (src) => { const b = branchOf(src); return b.includes(ASKS) && (b.match(/act: 'front'/g) || []).length === 1 && tbSrc.split(KEEPS).length === 2; };
-    ok(parts.length === 0 && oneSource(bwSrc), 'B-bcf8 r4412: ONE verdict — currentTabFront (src/browser-windows.js, PURE): the chip\'s «front» and the keeper\'s act (userTabVerdict\'s `front`) agree over all eight driving / mediated / on-show cases, and both ask that one function', parts);
+    ok(parts.length === 0 && verdictOf(oneSource(bwSrc)), 'B-bcf8 r4412: ONE verdict — currentTabFront (src/browser-windows.js, PURE): the chip\'s «front» and the keeper\'s act (userTabVerdict\'s `front`) agree over all eight driving / mediated / on-show cases, and both ask that one function', parts);
     const asStoodBranch = "  if (driving) {\n    if (mediated) return { act: 'none', why: 'mediated_tabs' };\n    return active ? { act: 'front', why: 'its-current-tab' } : { act: 'switch', why: 'another-of-its-tabs' };";   // stale-pins: kept — the chip's driving branch as it stood, planted back as this control
     const planted = bwSrc.replace(branchOf(bwSrc), asStoodBranch);
     ok(planted !== bwSrc && !oneSource(planted), 'CONTROL (r4412: the chip\'s driving branch as it stood — its own «front», the keeper\'s apart): RED by the one-source census');
@@ -1029,15 +1029,15 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
   const judgePriv = (r) => !!r && J(r.rows[0].paint) === J({ [TA]: 'show-owed' }) && !/example|https?:|Inbox|title|front/i.test(J(r.rows[0].paint));
   const KP = require('../src/server/browser-keeper.js');
   const [pd, pv, pw, pn] = await Promise.all([paintKeeper(KP, STEPS), paintKeeper(KP, PRIV), paintKeeper(KP, [{ still: { [TA]: 'show-left' }, later: {} }], { viewers: 1 }), paintKeeper(KP, [{ still: { [TA]: 'show-left' }, later: {} }])]);
-  ok(judgeSteps(pd), 'B-bcf8 (r4256) (2): the REAL keeper\'s digest carries `paint` — the still tabs by code, keyed by target id — pushed when it MOVES (a code appears, another joins, all clear: 1 push each) and NEVER on a tick that changed nothing (0)', pd.rows);
-  ok(judgePriv(pv), 'B-bcf8 (r4256) (2): CODES AND TARGET IDS ONLY — whatever the watch hands, an address, a page title, a key not of a target id\'s shape and a code not of the three are dropped, never carried', pv.rows);
+  ok(verdictOf(judgeSteps(pd)), 'B-bcf8 (r4256) (2): the REAL keeper\'s digest carries `paint` — the still tabs by code, keyed by target id — pushed when it MOVES (a code appears, another joins, all clear: 1 push each) and NEVER on a tick that changed nothing (0)', pd.rows);
+  ok(verdictOf(judgePriv(pv)), 'B-bcf8 (r4256) (2): CODES AND TARGET IDS ONLY — whatever the watch hands, an address, a page title, a key not of a target id\'s shape and a code not of the three are dropped, never carried', pv.rows);
   ok(pw.asked === 1 && pw.rows[0].pushed === 2 && pw.rows[0].paint === null && pn.asked === 0 && pn.rows[0].pushed === 1 && J(pn.rows[0].paint) === J({ [TA]: 'show-left' }),
     'B-bcf8 (r4256): a LEFT tab brought forward while a person watches — the sweep asks the recheck (reads only) and its dropped mark is pushed at once, between ticks; with nobody watching, never asked', { watched: pw, alone: pn });
   // r4297 (part 2): THE FIELD IS THE PAGE's — the agent's own status answer (statusFor: its lease's browser, agentBrowserView) carries
   // no `paint` while a code stands, the person's digest does
   const pa = await paintKeeper(KP, [{ still: { [TA]: 'show-left' } }], { lease: true });
   const judgeAgent = (r) => !!r && J(r.rows[0].paint) === J({ [TA]: 'show-left' }) && !!r.rows[0].agent && r.rows[0].agent.row === true && r.rows[0].agent.paint === false;
-  ok(judgeAgent(pa), 'B-bcf8 r4297 (part 2): the field is the PAGE\'s — while a code stands the person\'s digest carries it and the agent\'s own status answer (its lease\'s browser) does not (a code that comes and goes would tell an agent a person watches)', pa.rows);
+  ok(verdictOf(judgeAgent(pa)), 'B-bcf8 r4297 (part 2): the field is the PAGE\'s — while a code stands the person\'s digest carries it and the agent\'s own status answer (its lease\'s browser) does not (a code that comes and goes would tell an agent a person watches)', pa.rows);
   // the reds: today's record (no `paint`), a keeper that pushes at every tick, a keeper that carries the watch's map as it comes
   const MPB = mutantCopies('browser-display-paint', REPO), ksrcB = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const PANCH = ', paint: paintOf(rec.profileId) /* B-bcf8 (r4256): the still tabs, codes and ids only */', TANCH = '    pushPaintIfMoved(); // B-bcf8 (r4256)', RANCHB = "if (/^[0-9A-Fa-f]{16,64}$/.test(id) && (code === 'thaw-unread' || code === 'show-owed' || code === 'show-left')) out[id.toUpperCase()] = code;";
@@ -1051,14 +1051,14 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
   const Kagent = MPB.load('src/server/browser-keeper.js', anchored(ksrcB, AANCHB, 'const { launchEnv, ...rest } = v;', 'B-bcf8 control: the agent\'s view as it spread before r4297'), 'bcf8-agent-sees');   // stale-pins: kept — the agent view's line before r4297, planted back as this control
   const Kalone = MPB.load('src/server/browser-keeper.js', anchored(ksrcB, VANCHB, 'if (!f.busy && !f.frozen && typeof paintWatch.recheckLeft', 'B-bcf8 control: the recheck asked with nobody watching'), 'bcf8-recheck-alone');
   const [cP, cT, cR, cA, cN] = await Promise.all([paintKeeper(KnoP, STEPS), paintKeeper(Ktick, STEPS), paintKeeper(Kraw, PRIV), paintKeeper(Kagent, [{ still: { [TA]: 'show-left' } }], { lease: true }), paintKeeper(Kalone, [{ still: { [TA]: 'show-left' }, later: {} }])]);
-  ok(!judgeSteps(cP) && cP.rows.every((x) => x.paint === 'NO FIELD'), 'CONTROL (the record as it is today): no `paint` in the digest — the live view has nothing to say for a still picture — RED', cP.rows.map((x) => x.paint));
+  ok(!judgeSteps(cP) && verdictOf(cP.rows.every((x) => x.paint === 'NO FIELD')), 'CONTROL (the record as it is today): no `paint` in the digest — the live view has nothing to say for a still picture — RED', cP.rows.map((x) => x.paint));
   ok(!judgeSteps(cT) && cT.rows[2].pushed === 1 && cT.rows[5].pushed === 1, 'CONTROL (the digest pushed at every tick): a push on ticks that changed nothing — RED', cT.rows.map((x) => x.pushed));
   ok(!judgePriv(cR), 'CONTROL (the watch\'s map carried as it comes): an address and a page title ride the digest — RED', cR.rows[0].paint);
-  ok(!judgeAgent(cA) && cA.rows[0].agent && cA.rows[0].agent.paint === true, 'CONTROL (r4297: the agent\'s view spread as before): the code rides into the agent\'s own status — RED', cA.rows[0].agent);
+  ok(!judgeAgent(cA) && gateOf(cA.rows[0].agent) && cA.rows[0].agent.paint === true, 'CONTROL (r4297: the agent\'s view spread as before): the code rides into the agent\'s own status — RED', cA.rows[0].agent);
   ok(cN.asked === 1, 'CONTROL (the recheck asked with nobody watching): the sweep reads a left tab no person looks at — RED against the leg above (never asked alone)', { asked: cN.asked });
-  for (const r of copiesCensus(MPB.files, MPB.dir, REPO, { label: 'B-bcf8 control: ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(MPB.files, MPB.dir, REPO, { label: 'B-bcf8 control: ' })) ok(verdictOf(r.pass), r.name, r.detail);
   }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

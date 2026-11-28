@@ -32,7 +32,7 @@ const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { re
 const SHOTS = scratch('uiscale-shots');
 fs.mkdirSync(SHOTS, { recursive: true });
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -170,7 +170,7 @@ try {
             visFrac: wr.width / wsr.width });
     }, 400));
   })()`);
-  check(`snapToHalf stays inside the workspace at 125% (right ${snap.inRight}, bottom ${snap.inBottom})`, snap.inRight && snap.inBottom);
+  check(`snapToHalf stays inside the workspace at 125% (right ${snap.inRight}, bottom ${snap.inBottom})`, gateOf(snap.inRight) && verdictOf(snap.inBottom));
   check(`captured gridBounds fraction matches the visual fraction (${snap.frac?.toFixed(3)} vs ${snap.visFrac?.toFixed(3)})`, snap.frac != null && Math.abs(snap.frac - snap.visFrac) < 0.02);
 
   // ── F2 regression (review-caught): a context menu opened near the bottom-
@@ -203,8 +203,8 @@ try {
     const vals = [...pop.querySelectorAll('.font-size-ctrl span')].map((s) => s.textContent);
     return { labels, vals };
   })()`);
-  check('gs-menu has the two new rows', !!rows && rows.labels.some((l) => /DPI/.test(l)) && rows.labels.some((l) => /font size|字体/.test(l)));
-  check('rows show current % values', !!rows && rows.vals.includes('125%') && rows.vals.includes('120%'));
+  check('gs-menu has the two new rows', !!rows && gateOf(rows.labels.some((l) => /DPI/.test(l))) && verdictOf(rows.labels.some((l) => /font size|字体/.test(l))));
+  check('rows show current % values', !!rows && gateOf(rows.vals.includes('125%')) && verdictOf(rows.vals.includes('120%')));
   await shot('gs-menu-125.png');
   await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`);
 
@@ -221,4 +221,4 @@ try {
 } catch (e) {
   console.error('HARNESS ERROR:', e.message);
   process.exit(1);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

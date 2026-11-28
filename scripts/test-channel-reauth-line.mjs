@@ -25,7 +25,7 @@ const SHOTS = process.env.RAL_SHOTS || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the bundle: the REAL panel of the tree (patch = {from, to} rewrites channels-panel.js for the control)
@@ -119,13 +119,13 @@ const SECS = `(() => {
 const RED_RE = /^rgb\((2[0-5]\d|1[6-9]\d), (\d{1,2}|1[0-2]\d), (\d{1,2}|1[0-2]\d)\)$/;   // a red: R high, G and B low (the theme's --red)
 const first = (S, label) => {
   const { 'gmail:a': D, 'gmail:b': P, 'lark:a': L } = S.secs;
-  ok(D && D.line === `登录失效 — 需要重新授权 · 服务方拒绝了刷新令牌 · 始于 ${hhmm(at0714)}` && D.shown && D.afterHead && D.btn === '重新连接' && D.state === 'expired',
+  ok(gateOf(D) && D.line === `登录失效 — 需要重新授权 · 服务方拒绝了刷新令牌 · 始于 ${hhmm(at0714)}` && gateOf(D.shown) && gateOf(D.afterHead) && D.btn === '重新连接' && D.state === 'expired',
     `${label} ① the dead account: the FIRST line under its head says what, why and since when — «${D && D.line}» + 「${D && D.btn}」`, JSON.stringify(D));
-  ok(D && RED_RE.test(D.color) && RED_RE.test(D.btnBg || '') === false && D.dead && /inset/.test(D.edge) && /chan-dot-bad/.test(D.dot) && !D.errline,
+  ok(gateOf(D) && gateOf(RED_RE.test(D.color)) && RED_RE.test(D.btnBg || '') === false && gateOf(D.dead) && gateOf(/inset/.test(D.edge)) && gateOf(/chan-dot-bad/.test(D.dot)) && !D.errline,
     `${label} ① …in red (${D && D.color}), the section's red left edge (${D && D.edge}) and red dot; ONE sentence — the old error line is not drawn beside it`, JSON.stringify(D));
-  ok(P && P.line === '正在重新授权…（在打开的那个标签页里）' && P.btn === '取消' && P.state === 'pending' && P.dead && L && L.line === null && !L.dead && !/chan-dot-bad/.test(L.dot),
+  ok(gateOf(P) && P.line === '正在重新授权…（在打开的那个标签页里）' && P.btn === '取消' && P.state === 'pending' && gateOf(P.dead) && gateOf(L) && L.line === null && !L.dead && !/chan-dot-bad/.test(L.dot),
     `${label} ① a re-authorize in flight says «${P && P.line}» + 「${P && P.btn}」; the working Lark account says nothing`, JSON.stringify({ P, L }));
-  ok(S.sw <= S.vw && Object.values(S.secs).every((s) => s.right <= S.vw && s.lineRight <= S.vw), `${label} nothing wider than the screen`, JSON.stringify({ vw: S.vw, sw: S.sw }));
+  ok(S.sw <= S.vw && verdictOf(Object.values(S.secs).every((s) => s.right <= S.vw && s.lineRight <= S.vw)), `${label} nothing wider than the screen`, JSON.stringify({ vw: S.vw, sw: S.sw }));
 };
 
 console.log('§1 desk (1100 px, zh, light): the dead sign-in under its account');
@@ -137,7 +137,7 @@ console.log('§2 folded, the line still shows');
 await d.ev(`(() => { document.querySelector('.chan-account[data-adapter="gmail:a"] > .chan-sec-head').click(); return 1; })()`);
 await sleep(200);
 const F = (await d.ev(SECS)).secs['gmail:a'];
-ok(F.folded && F.shown && F.line && F.line.startsWith('登录失效'), '② the person folds the account: its rows go, the red line stays (a folded section still says it)', JSON.stringify(F));
+ok(gateOf(F.folded) && gateOf(F.shown) && gateOf(F.line) && verdictOf(F.line.startsWith('登录失效')), '② the person folds the account: its rows go, the red line stays (a folded section still says it)', JSON.stringify(F));
 await d.ev(`(() => { document.querySelector('.chan-account[data-adapter="gmail:a"] > .chan-sec-head').click(); return 1; })()`);
 await sleep(200);
 
@@ -145,7 +145,7 @@ console.log('§3 「重新连接」 opens THE account\'s Re-authorize dialog');
 await d.ev(`(() => { document.querySelector('.chan-account[data-adapter="gmail:a"] .chan-sec-reauth-btn').click(); return 1; })()`);
 let dlg = null;
 for (let i = 0; i < 20 && !dlg; i++) { await sleep(150); dlg = await d.ev(`(() => { const x = document.getElementById('chan-reauth-dialog'); return x ? (x.textContent || '').slice(0, 200) : null; })()`); }
-ok(dlg && /重新授权/.test(dlg) && /alice@example\.test|Gmail/.test(dlg), '③ 「重新连接」 opens the account\'s Re-authorize dialog (the same road — the account kept)', dlg);
+ok(gateOf(dlg) && gateOf(/重新授权/.test(dlg)) && verdictOf(/alice@example\.test|Gmail/.test(dlg)), '③ 「重新连接」 opens the account\'s Re-authorize dialog (the same road — the account kept)', dlg);
 await d.ev(`(() => { const x = document.getElementById('chan-reauth-dialog'); const c = x && (x.closest('.modal-overlay, .dialog-overlay') || x); if (c) c.remove(); return 1; })()`);
 
 console.log('§4 the first good pass takes the line away — live, through the broadcast');
@@ -157,7 +157,7 @@ const LIVEGO = `(async () => {
 })()`;
 const G = await d.ev(LIVEGO);
 const G2 = (await d.ev(SECS)).secs['gmail:a'];
-ok(G.same && G2.line === null && !G2.dead && !/chan-dot-bad/.test(G2.dot), '④ a broadcast whose account view says ok: the line, the edge and the red dot are gone — the same section node, no reload', JSON.stringify({ G, G2 }));
+ok(gateOf(G.same) && G2.line === null && !G2.dead && !/chan-dot-bad/.test(G2.dot), '④ a broadcast whose account view says ok: the line, the edge and the red dot are gone — the same section node, no reload', JSON.stringify({ G, G2 }));
 d.close();
 
 console.log('§5 phone (390 px): the same line, stacked');
@@ -176,7 +176,7 @@ console.log('§7 lane lark-refresh-stall: a Lark sign-in lost to a hub stall say
   adapters = [DEAD, PENDING, LOST];
   const lp = await page(1100, 900, 'b=after.js');
   const L = (await lp.ev(SECS)).secs['lark:a'] || {};
-  ok(typeof L.line === 'string' && L.line.startsWith('登录失效') && L.line.includes('hub 在刷新令牌时卡住了 89 分钟，一次性刷新令牌已被用掉') && !/另一个 VibeSpace/.test(L.line) && !/[（(]/.test(L.line) && !/飞书|Lark/.test(L.line), `⑦ the Lark row's red line names the MEASURED stall (zh, r2: 89 min, no unmeasured cause word, no parentheses, no vendor name): «${L.line}»`, JSON.stringify(L));
+  ok(typeof L.line === 'string' && gateOf(L.line.startsWith('登录失效')) && gateOf(L.line.includes('hub 在刷新令牌时卡住了 89 分钟，一次性刷新令牌已被用掉')) && !/另一个 VibeSpace/.test(L.line) && !/[（(]/.test(L.line) && !/飞书|Lark/.test(L.line), `⑦ the Lark row's red line names the MEASURED stall (zh, r2: 89 min, no unmeasured cause word, no parentheses, no vendor name): «${L.line}»`, JSON.stringify(L));
   await lp.shot('lark-refresh-lost.png');
   lp.close();
   adapters = [DEAD, PENDING, LIVE];
@@ -186,8 +186,8 @@ console.log('§6 CONTROL: the bundle rebuilt without the red line');
 if (fs.existsSync(path.join(dir, 'noline.js'))) {
   const c = await page(1100, 900, 'b=noline.js');
   const X = (await c.ev(SECS)).secs['gmail:a'];
-  ok(X.line === null && X.errline, 'CONTROL: without it the dead account shows only the old error line, no 「重新连接」 line — leg ① would be red', JSON.stringify(X));
+  ok(X.line === null && verdictOf(X.errline), 'CONTROL: without it the dead account shows only the old error line, no 「重新连接」 line — leg ① would be red', JSON.stringify(X));
   c.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -33,7 +33,7 @@ const DR = createRequire(import.meta.url)('../src/device-runtime.js');
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 500) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 500) : '')); } };
 // a private session: chrome and the server never see the owner's runtime dir, home or display
 const PRIV = { XDG_RUNTIME_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-hsd-xdg-')), HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-hsd-home-')) };
 fs.chmodSync(PRIV.XDG_RUNTIME_DIR, 0o700);
@@ -63,14 +63,14 @@ try {
   ok(!!live, 'the REAL daemon dialed in (online, lastAccept)', live && live.dial);
   const HID = live.id;
   const hubId = await (async () => { for (let i = 0; i < 40; i++) { try { const h = fs.readFileSync(path.join(W.wt, 'data', 'agentd', 'hub-id'), 'utf8').trim(); const d = JSON.parse(fs.readFileSync(path.join(paired.root, 'state', 'dial.json'), 'utf8')); if (h && d.hub === h) return h; } catch { } await sleep(250); } return null; })();
-  ok(/^vh-[0-9a-f]{16}$/.test(hubId || ''), 'lane mac-repair-retires-stale: the REAL daemon learned the hub at its accepted dial — its dial.json `hub` is the server\'s data/agentd/hub-id', hubId);
+  ok(verdictOf(/^vh-[0-9a-f]{16}$/.test(hubId || '')), 'lane mac-repair-retires-stale: the REAL daemon learned the hub at its accepted dial — its dial.json `hub` is the server\'s data/agentd/hub-id', hubId);
   const k = [];
   for (let i = 0; i < 3; i++) { k.push(await knock('oldmac', 'vsdt_' + 'a'.repeat(43))); await sleep(400); }
-  ok(k.every((r) => r.status === 401 && r.code === 'token-mismatch'), 'three knocks with an old token ⇒ 401 token-mismatch each', k);
+  ok(verdictOf(k.every((r) => r.status === 401 && r.code === 'token-mismatch')), 'three knocks with an old token ⇒ 401 token-mismatch each', k);
   let row = null;
   for (let i = 0; i < 40 && !row; i++) { const h = await W.hostRow('oldmac'); if (h && h.dialHealth) row = h; else await sleep(250); }
-  ok(row && row.online && row.dialHealth.kind === 'second-dialer-stale-token' && row.dialHealth.every === 30 && row.dialHealth.platform === process.platform && typeof row.dialHealth.recipe === 'string', 'the /api/hosts row carries dialHealth (second dialer, every 30 s, the daemon\'s platform + recipe) while the device stays online', row && row.dialHealth);
-  ok(row && row.dialHealth.live === 'device@127.0.0.1' && row.dialHealth.recipe.split('\n')[0].endsWith("| grep -vxF 'device@127.0.0.1'") && row.dialHealth.recipe.endsWith('kill $(cat ~/.vibespace/device@<x>/state/agentd.lock)'), 'lane mac-repair-retires-stale: the row names the LIVE install (device@<the host the command was minted for>); its recipe lists only the others and stops the agent itself by its lock pid', row && row.dialHealth);
+  ok(gateOf(row) && gateOf(row.online) && row.dialHealth.kind === 'second-dialer-stale-token' && row.dialHealth.every === 30 && row.dialHealth.platform === process.platform && typeof row.dialHealth.recipe === 'string', 'the /api/hosts row carries dialHealth (second dialer, every 30 s, the daemon\'s platform + recipe) while the device stays online', row && row.dialHealth);
+  ok(gateOf(row) && row.dialHealth.live === 'device@127.0.0.1' && gateOf(row.dialHealth.recipe.split('\n')[0].endsWith("| grep -vxF 'device@127.0.0.1'")) && verdictOf(row.dialHealth.recipe.endsWith('kill $(cat ~/.vibespace/device@<x>/state/agentd.lock)')), 'lane mac-repair-retires-stale: the row names the LIVE install (device@<the host the command was minted for>); its recipe lists only the others and stops the agent itself by its lock pid', row && row.dialHealth);
   const log = W.serverLog.join('');
   const n2 = (log.match(/a SECOND agent with an old token/g) || []).length, nTold = (log.match(/\[dial-health\] oldmac: a second agent with an old token .* told the user/g) || []).length;
   ok(n2 === 1 && nTold === 1, `the journal: ONE refusal line across 3 knocks (${n2}), ONE "told the user" line (${nTold})`);
@@ -79,7 +79,7 @@ try {
   let ledger = {};
   for (let i = 0; i < 40; i++) { try { ledger = JSON.parse(fs.readFileSync(path.join(W.wt, 'data', 'dial-health.json'), 'utf8')); } catch { ledger = {}; } if (Object.keys(ledger.hosts || {}).length) break; await sleep(250); }
   const recs = Object.values(ledger.hosts || {});
-  ok(recs.length === 1 && recs[0].itemId && recs[0].machine === 'oldmac', 'ONE For-you item filed (the ledger names it)', recs);
+  ok(recs.length === 1 && gateOf(recs[0].itemId) && recs[0].machine === 'oldmac', 'ONE For-you item filed (the ledger names it)', recs);
 
   console.log('── ② the row (zh + en) + Copy + PNG');
   for (const lang of ['zh', 'en']) {
@@ -88,17 +88,17 @@ try {
     const want = lang === 'zh' ? '另一个 VibeSpace agent 也在从 ' : 'Another VibeSpace agent is also dialing in from ';
     const drawn = await P.waitFor(`(${ROW(HID)}?.querySelector('.mounts-second-dialer')?.textContent || '').includes(${JSON.stringify(want)})`, 15000);
     const facts = await P.evalJs(`(() => { const l = ${ROW(HID)}?.querySelector('.mounts-second-dialer'); if (!l) return null; const b = l.querySelector('.mounts-second-dialer-copy'); const g = l.querySelector('.mounts-second-dialer-glyph svg'); const r = l.getBoundingClientRect(), rr = ${ROW(HID)}.getBoundingClientRect(); return { text: l.textContent, btn: b && b.textContent, title: b && b.title, glyph: !!g && g.getBoundingClientRect().width > 0, inRow: r.left >= rr.left - 1 && r.right <= rr.right + 1 && r.height > 0, color: getComputedStyle(l).color }; })()`);
-    ok(drawn && facts && facts.glyph && facts.inRow && facts.text.includes('127.0.0.1') && /30/.test(facts.text), `${lang}: the line under the machine — glyph, the address, every 30 s, inside the row`, facts);
+    ok(gateOf(drawn) && gateOf(facts) && gateOf(facts.glyph) && gateOf(facts.inRow) && gateOf(facts.text.includes('127.0.0.1')) && verdictOf(/30/.test(facts.text)), `${lang}: the line under the machine — glyph, the address, every 30 s, inside the row`, facts);
     const liveW = lang === 'zh' ? '那台机器上正在用的安装是 device@127.0.0.1；把其余的停掉' : 'The live install on that machine is device@127.0.0.1; stop the others';
     const doorW = lang === 'zh' ? '在这台机器的「机器」卡片上重新配对，会替你停用这个 hub 的旧安装' : 'Re-pairing this machine from its Machines card retires the older installs of this hub for you';
-    ok(facts && facts.text.includes(liveW) && facts.text.includes(doorW), `${lang}: the line names the live install and the door (a re-pair retires the older installs of this hub)`, facts && facts.text);
-    ok(facts && facts.btn === (lang === 'zh' ? '复制停止命令' : 'Copy the stop command') && facts.title === row.dialHealth.recipe, `${lang}: the Copy button carries the ${process.platform} recipe (WORDS, never run)`, facts && [facts.btn, facts.title]);
+    ok(gateOf(facts) && gateOf(facts.text.includes(liveW)) && verdictOf(facts.text.includes(doorW)), `${lang}: the line names the live install and the door (a re-pair retires the older installs of this hub)`, facts && facts.text);
+    ok(gateOf(facts) && facts.btn === (lang === 'zh' ? '复制停止命令' : 'Copy the stop command') && facts.title === row.dialHealth.recipe, `${lang}: the Copy button carries the ${process.platform} recipe (WORDS, never run)`, facts && [facts.btn, facts.title]);
     await P.evalJs(`(() => { window.__copied = null; if (navigator.clipboard) navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); }; return true; })()`);
     const clicked = await P.realClick(`(${ROW(HID)}.querySelector('.mounts-second-dialer-copy'))`);
     const toast = lang === 'zh' ? '已复制 — 请在那台机器上运行' : 'Copied — run it on that machine';
-    ok(clicked && await P.waitFor(`document.body.innerText.includes(${JSON.stringify(toast)})`, 5000), `${lang}: Copy ⇒ the toast "${toast}"`);
+    ok(gateOf(clicked) && verdictOf(await P.waitFor(`document.body.innerText.includes(${JSON.stringify(toast)})`, 5000)), `${lang}: Copy ⇒ the toast "${toast}"`);
     const copied = await P.evalJs('window.__copied');
-    ok(copied === row.dialHealth.recipe && copied.includes("grep -vxF 'device@127.0.0.1'") && /\nkill \$\(cat ~\/\.vibespace\/device@<x>\/state\/agentd\.lock\)$/.test(copied), `${lang}: Copy COPIES the recipe naming the live install (left out of the listing) + the kill line — words, never run`, copied);
+    ok(copied === row.dialHealth.recipe && gateOf(copied.includes("grep -vxF 'device@127.0.0.1'")) && verdictOf(/\nkill \$\(cat ~\/\.vibespace\/device@<x>\/state\/agentd\.lock\)$/.test(copied)), `${lang}: Copy COPIES the recipe naming the live install (left out of the listing) + the kill line — words, never run`, copied);
     if (lang === 'zh' && SHOT) {
       await sleep(2600); // the toast fades before the picture
       await P.evalJs(`${ROW(HID)}.scrollIntoView({ block: 'center' })`);
@@ -132,11 +132,11 @@ try {
   }
   rows.newm = await W.hostRow('newmac');
   const line = DR.upgradeLineOf(process.platform);
-  ok(rows.own && rows.own.runtime.state === 'old' && rows.own.runtime.fix === 'reinstall' && rows.own.runtime.own === true && rows.own.runtime.node === 'v22.22.0' && rows.own.runtime.openssl === process.versions.openssl && rows.own.runtime.floor === '22.23.4',
+  ok(gateOf(rows.own) && rows.own.runtime.state === 'old' && rows.own.runtime.fix === 'reinstall' && rows.own.runtime.own === true && rows.own.runtime.node === 'v22.22.0' && rows.own.runtime.openssl === process.versions.openssl && rows.own.runtime.floor === '22.23.4',
     '③ the /api/hosts row of the device on its OWN node: runtime old · reinstall (v22.22.0 < 22.23.4, own = true, its OpenSSL)', rows.own && rows.own.runtime);
-  ok(rows.sys && rows.sys.runtime.state === 'old' && rows.sys.runtime.fix === 'system' && rows.sys.runtime.own === false && rows.sys.runtime.line === line && rows.sys.runtime.floor === '24.22.1',
+  ok(gateOf(rows.sys) && rows.sys.runtime.state === 'old' && rows.sys.runtime.fix === 'system' && rows.sys.runtime.own === false && rows.sys.runtime.line === line && rows.sys.runtime.floor === '24.22.1',
     `③ …the device on a node the machine had: old · system, its platform's upgrade line (${line})`, rows.sys && rows.sys.runtime);
-  ok(rows.newm && rows.newm.runtime && rows.newm.runtime.state === 'unknown', '③ …the device that never dialed in: unknown', rows.newm && rows.newm.runtime);
+  ok(gateOf(rows.newm) && gateOf(rows.newm.runtime) && rows.newm.runtime.state === 'unknown', '③ …the device that never dialed in: unknown', rows.newm && rows.newm.runtime);
   const ACC = (id) => `[...document.querySelectorAll('.agents-mach-acc')].find((d) => d.dataset.host === ${JSON.stringify(id)})`;
   const openMachines = async (P) => P.evalJs(`(() => { localStorage.setItem('vibespace.agentsTab', 'machines'); app._showAgentsDialog({ forceModal: true }); return true; })()`);
   const cardOf = (P, id) => P.evalJs(`(() => { const d = ${ACC(id)}; if (!d) return null; const l = d.querySelector('.agents-mach-runtime'); const c = l && l.querySelector('.agents-mach-runtime-old'); const f = d.querySelector('.agents-mach-runtime-fix'); return { text: l ? l.textContent : null, state: l ? l.dataset.runtime : null, chip: c ? c.textContent : null, tip: c ? c.title : null, fix: f ? f.querySelector('span').textContent : null, line: f && f.querySelector('.agents-mach-runtime-line') ? f.querySelector('.agents-mach-runtime-line').textContent : null, door: f && f.querySelector('.agents-mach-reinstall') ? f.querySelector('.agents-mach-reinstall').textContent : null }; })()`);
@@ -146,15 +146,15 @@ try {
     await P.waitFor(`['host-dial-ownmac', 'host-dial-nodemac', 'host-dial-newmac'].every((id) => !![...document.querySelectorAll('.agents-mach-acc')].find((d) => d.dataset.host === id)?.querySelector('.agents-mach-runtime'))`, 15000);
     const o = await cardOf(P, 'host-dial-ownmac'), s = await cardOf(P, 'host-dial-nodemac'), n = await cardOf(P, 'host-dial-newmac');
     const CHIP = lang === 'zh' ? '运行时过旧' : 'Runtime too old';
-    ok(o && o.text === `Node v22.22.0 · OpenSSL ${process.versions.openssl} ${CHIP}` && o.chip === CHIP && s && s.chip === CHIP && s.text.startsWith('Node v24.12.0 · OpenSSL '),
+    ok(gateOf(o) && o.text === `Node v22.22.0 · OpenSSL ${process.versions.openssl} ${CHIP}` && o.chip === CHIP && gateOf(s) && s.chip === CHIP && verdictOf(s.text.startsWith('Node v24.12.0 · OpenSSL ')),
       `${lang}: the card's line says which Node each agent runs, 「${CHIP}」 on the two below their floor`, { o, s });
-    ok(o && o.tip.includes('2026-10-21') && o.tip.includes('CVE-2026-111497') && o.tip.includes('22.23.4') && s.tip.includes('24.22.1'), `${lang}: the chip's title names the floor, the advisory's date and its ids`, o && o.tip);
-    ok(n && n.text === (lang === 'zh' ? 'Node：未知' : 'Node: unknown') && n.chip === null && n.fix === null && n.state === 'unknown', `${lang}: the device whose agent never said reads «${lang === 'zh' ? 'Node：未知' : 'Node: unknown'}» — no chip, no recipe`, n);
+    ok(gateOf(o) && gateOf(o.tip.includes('2026-10-21')) && gateOf(o.tip.includes('CVE-2026-111497')) && gateOf(o.tip.includes('22.23.4')) && verdictOf(s.tip.includes('24.22.1')), `${lang}: the chip's title names the floor, the advisory's date and its ids`, o && o.tip);
+    ok(gateOf(n) && n.text === (lang === 'zh' ? 'Node：未知' : 'Node: unknown') && n.chip === null && n.fix === null && n.state === 'unknown', `${lang}: the device whose agent never said reads «${lang === 'zh' ? 'Node：未知' : 'Node: unknown'}» — no chip, no recipe`, n);
     const OWNW = lang === 'zh' ? '它的 agent 运行的是安装器自带的 Node：在那台机器上再运行一次配对命令' : 'Its agent runs the Node its installer provisioned: run the pairing command again on the machine';
     const SYSW = lang === 'zh' ? '它的 agent 运行的是这台机器原有的 Node，安装器从不替换它：请在那台机器上把它升级到 24.22.1 或更新' : 'Its agent runs a Node this machine already had, which the installer never replaces: upgrade it to 24.22.1 or newer on the machine';
     const DOOR = lang === 'zh' ? '重新安装…' : 'Install again…';
-    ok(o && o.fix.includes(OWNW) && o.door === DOOR && o.line === null, `${lang}: the own node's recipe — run the pairing command again (the installer replaces it), the 「${DOOR}」 door`, o && o.fix);
-    ok(s && s.fix.includes(SYSW) && s.line === line && s.door === DOOR, `${lang}: the system node's recipe — upgrade it (its line), then the pairing command`, s && [s.fix, s.line]);
+    ok(gateOf(o) && gateOf(o.fix.includes(OWNW)) && o.door === DOOR && o.line === null, `${lang}: the own node's recipe — run the pairing command again (the installer replaces it), the 「${DOOR}」 door`, o && o.fix);
+    ok(gateOf(s) && gateOf(s.fix.includes(SYSW)) && s.line === line && s.door === DOOR, `${lang}: the system node's recipe — upgrade it (its line), then the pairing command`, s && [s.fix, s.line]);
     if (lang === 'zh') {
       await P.evalJs(`(() => { const d = ${ACC('host-dial-ownmac')}; d.open = true; d.scrollIntoView({ block: 'center' }); return true; })()`);
       await sleep(300);
@@ -165,7 +165,7 @@ try {
       }
       const clicked = await P.realClick(`(${ACC('host-dial-ownmac')}.querySelector('.agents-mach-reinstall'))`);
       const sheet = clicked && await P.waitFor(`(() => { const d = document.getElementById('device-pair-dialog'); return !!d && d.textContent.includes('ownmac'); })()`, 8000);
-      ok(sheet, '③ 「重新安装…」 opens THAT device\'s pairing sheet (its command, run again on the machine, is the re-install)', await P.evalJs(`document.getElementById('device-pair-dialog')?.textContent.slice(0, 160) || null`));
+      ok(verdictOf(sheet), '③ 「重新安装…」 opens THAT device\'s pairing sheet (its command, run again on the machine, is the re-install)', await P.evalJs(`document.getElementById('device-pair-dialog')?.textContent.slice(0, 160) || null`));
     }
     await P.cdp('Page.close').catch(() => {});
   }
@@ -179,7 +179,7 @@ try {
     await openMachines(P);
     await P.waitFor(`!!${ACC('host-dial-ownmac')}`, 15000); await sleep(800);
     const pre = await cardOf(P, 'host-dial-ownmac');
-    ok(pre && pre.text === null && pre.chip === null, 'CONTROL ③: without the paint the card says nothing of its Node — the old runtime is nowhere on screen', pre);
+    ok(gateOf(pre) && pre.text === null && pre.chip === null, 'CONTROL ③: without the paint the card says nothing of its Node — the old runtime is nowhere on screen', pre);
     await P.cdp('Page.close').catch(() => {});
   }
 
@@ -194,7 +194,7 @@ try {
   await openRemote(P);
   await P.waitFor(`!!${ROW(HID)}`, 15000); await sleep(800);
   const pre = await P.evalJs(`(() => { const r = ${ROW(HID)}; return r ? { line: !!r.querySelector('.mounts-second-dialer'), state: r.querySelector('.mounts-dial-state')?.dataset.dialState } : null; })()`);
-  ok(pre && !pre.line && pre.state === 'connected', 'CONTROL: without the paint the row reads only "connected" — the second agent is nowhere on screen (② red)', pre);
+  ok(gateOf(pre) && !pre.line && pre.state === 'connected', 'CONTROL: without the paint the row reads only "connected" — the second agent is nowhere on screen (② red)', pre);
   await P.cdp('Page.close').catch(() => {});
   code = fail ? 1 : 0;
 } catch (e) {
@@ -203,4 +203,4 @@ try {
   W.cleanup();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : code);
+process.exit(fail ? 1 : code); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -29,7 +29,7 @@ const M = require(path.join(REPO, 'src/channels/slack-manifest.js'));
 const SLACK = require(path.join(REPO, 'src/channels/slack.js'));
 const AUTH = 'src/auth.js', DOOR = 'src/door.js', ROUTES = 'src/routes/channels.js';   // DOOR: the door lines, lifted verbatim out of AUTH by B3a
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const MUT = mutantCopies('slack-landing-nologin', REPO);
 const DIR = scratch('slack-landing-nologin'); fs.mkdirSync(DIR, { recursive: true });
 
@@ -84,9 +84,9 @@ const landed = (r) => r.status === 200 && /data-landing="ok"/.test(r.text) && r.
 console.log('① no cookie: the landing passes the ONE gate, nothing else does');
 for (const mode of ['password', 'clerk']) {
   const I = await instance(mode);
-  ok(I.auth.enabled && (mode === 'password' ? I.auth.passwordEnabled : (I.auth.ssoEnabled && !I.auth.passwordEnabled)), `${mode}: the gate is on (${mode === 'password' ? 'a password' : 'Clerk SSO, no password'})`);
+  ok(gateOf(I.auth.enabled) && (mode === 'password' ? verdictOf(I.auth.passwordEnabled) : (gateOf(I.auth.ssoEnabled) && !I.auth.passwordEnabled)), `${mode}: the gate is on (${mode === 'password' ? 'a password' : 'Clerk SSO, no password'})`);
   const L = await hit(I.base, cb(stateAt()));
-  ok(landed(L) && I.eng.calls.length === 1, `${mode}: GET …/oauth/cb/slack?code&state, text/html, NO cookie → the route (200, “go back” page naming ${USER}, no sign-in words; engine asked once)`, JSON.stringify({ status: L.status, loc: L.loc, calls: I.eng.calls.length, text: L.text.slice(0, 300) }));
+  ok(gateOf(landed(L)) && I.eng.calls.length === 1, `${mode}: GET …/oauth/cb/slack?code&state, text/html, NO cookie → the route (200, “go back” page naming ${USER}, no sign-in words; engine asked once)`, JSON.stringify({ status: L.status, loc: L.loc, calls: I.eng.calls.length, text: L.text.slice(0, 300) }));
   const others = [
     ['POST /api/channels/oauth/callback', await hit(I.base, '/api/channels/oauth/callback', { method: 'POST', accept: 'application/json', body: { url: 'x' } }), 401],
     ['GET /api/channels/oauth/status', await hit(I.base, '/api/channels/oauth/status', { accept: 'application/json' }), 401],
@@ -101,7 +101,7 @@ for (const mode of ['password', 'clerk']) {
     const tok = I.auth.issueToken('test');
     const C = await hit(I.base, cb(stateAt()), { cookie: `vs_token=${tok}` });
     const S = await hit(I.base, '/api/channels/oauth/status', { accept: 'application/json', cookie: `vs_token=${tok}` });
-    ok(landed(C) && S.status === 200, 'password: the same landing WITH the owner\'s cookie still lands; the cookied status poll answers 200');
+    ok(gateOf(landed(C)) && S.status === 200, 'password: the same landing WITH the owner\'s cookie still lands; the cookied status poll answers 200');
   }
   await I.close();
 }
@@ -113,7 +113,7 @@ console.log('② refusals by name, still without a cookie');
   const flip = good.slice(0, -1) + (good.endsWith('A') ? 'B' : 'A');
   const R = { forged: await hit(I.base, cb(flip)), expired: await hit(I.base, cb(stateAt(Date.now() - 31 * 60e3))), first: await hit(I.base, cb(good)), used: await hit(I.base, cb(good)) };
   const said = (r, words) => r.status === 400 && /data-landing="refused"/.test(r.text) && r.text.includes(`(${words})`);
-  ok(said(R.forged, 'not signed by this VibeSpace') && said(R.expired, 'expired') && landed(R.first) && said(R.used, 'already used') && I.eng.calls.length === 4, 'a forged signature, a state past the TTL, a replay of a used one: 400 refused pages BY NAME (not signed by this VibeSpace / expired / already used) — no redirect, no login', JSON.stringify(Object.fromEntries(Object.entries(R).map(([k, r]) => [k, r.status, r.text.slice(-200)]))));
+  ok(gateOf(said(R.forged, 'not signed by this VibeSpace')) && gateOf(said(R.expired, 'expired')) && gateOf(landed(R.first)) && gateOf(said(R.used, 'already used')) && I.eng.calls.length === 4, 'a forged signature, a state past the TTL, a replay of a used one: 400 refused pages BY NAME (not signed by this VibeSpace / expired / already used) — no redirect, no login', JSON.stringify(Object.fromEntries(Object.entries(R).map(([k, r]) => [k, r.status, r.text.slice(-200)]))));
   await I.close();
 }
 
@@ -123,7 +123,7 @@ console.log('③ the door limit: ≤ 30 landings / address / minute');
   const I = await instance('clerk');
   const rs = await flood(I, 31);
   const last = rs[30];
-  ok(rs.slice(0, 30).every((r) => r.status === 400) && last.status === 429 && /text\/html/.test(last.type) && /data-landing="too-many"/.test(last.text) && ['Wait a minute, then reload this page', '等一分钟后刷新本页', '1 分待ってからこのページを再読み込み'].every((w) => last.text.includes(w)) && !/Start again|重新开始|やり直/.test(last.text) && I.eng.calls.length === 30, 'thirty landings are judged (400 bad-shape); the 31st is 429 html saying wait + reload in en / zh / ja (never "start again") and the state is NEVER judged (the engine asked 30 times)', JSON.stringify({ last: [last.status, last.type, last.text.slice(-200)], calls: I.eng.calls.length }));
+  ok(gateOf(rs.slice(0, 30).every((r) => r.status === 400)) && last.status === 429 && gateOf(/text\/html/.test(last.type)) && gateOf(/data-landing="too-many"/.test(last.text)) && gateOf(['Wait a minute, then reload this page', '等一分钟后刷新本页', '1 分待ってからこのページを再読み込み'].every((w) => last.text.includes(w))) && !/Start again|重新开始|やり直/.test(last.text) && I.eng.calls.length === 30, 'thirty landings are judged (400 bad-shape); the 31st is 429 html saying wait + reload in en / zh / ja (never "start again") and the state is NEVER judged (the engine asked 30 times)', JSON.stringify({ last: [last.status, last.type, last.text.slice(-200)], calls: I.eng.calls.length }));
   const real = Date.now, t0 = real();
   Date.now = () => t0 - 3600e3;   // verify r1: an NTP step back used to keep the window until the clock caught up (an hour of 429)
   let back; try { back = (await flood(I, 1))[0]; } finally { Date.now = real; }
@@ -153,9 +153,9 @@ console.log('④ the owner\'s finish line names who landed (DOM-free)');
   globalThis.__I18N = table('src/lib/i18n-ja.js'); const ja = D.connectedLine(USER);
   globalThis.__I18N = null;
   ok(en === `✓ Connected as ${USER} — finish with the “Connect” button below.` && none === '✓ Connected — finish with the “Connect” button below.', `en: “${en}”; no identity answered → the old line`);
-  ok(zh.includes(USER) && /连接/.test(zh) && ja.includes(USER) && /接続/.test(ja), `zh / ja carry the identity: “${zh}” · “${ja}”`);
+  ok(gateOf(zh.includes(USER)) && gateOf(/连接/.test(zh)) && gateOf(ja.includes(USER)) && verdictOf(/接続/.test(ja)), `zh / ja carry the identity: “${zh}” · “${ja}”`);
   const dlg = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf-8');
-  ok(/if \(st\.token\) finish\(st\.token, st\.user \|\| null\)/.test(dlg) && /status\.textContent = typeof finishText === 'function' \? finishText\(user\) : \(finishText \|\| connectedLine\(user\)\)/.test(dlg), 'the consent block\'s status poll hands st.user to finish(), which draws connectedLine(user)');
+  ok(gateOf(/if \(st\.token\) finish\(st\.token, st\.user \|\| null\)/.test(dlg)) && verdictOf(/status\.textContent = typeof finishText === 'function' \? finishText\(user\) : \(finishText \|\| connectedLine\(user\)\)/.test(dlg)), 'the consent block\'s status poll hands st.user to finish(), which draws connectedLine(user)');
 }
 
 console.log('⑤ patched-copy controls (never src/)');
@@ -178,4 +178,4 @@ console.log('⑤ patched-copy controls (never src/)');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -55,7 +55,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('roster-eta');
 const home = scratchHome('roster-eta-home', fs);
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
 
@@ -109,7 +109,7 @@ const api = async (p, init) => (await fetch(`http://127.0.0.1:${PORT}${p}`, init
 const post = (p, body) => api(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 bootServer();
-check('worktree server boots', await waitServer());
+check('worktree server boots', verdictOf(await waitServer()));
 { const sh = await until(async () => { const v = await cliShape(); return shapeIs(v, 'installed') ? v : null; }, 20000, 300);
   check(`THE FIXTURE'S SHAPE, never the box's: the hub's (scratch) login shell finds the claude + codex stand-ins in the scratch HOME's ~/.local/bin (${JSON.stringify(sh || await cliShape())})`, !!sh); }
 
@@ -186,7 +186,7 @@ fs.writeFileSync(path.join(cacheDir, AF.id + '.json'), JSON.stringify(snap({
 })));
 // the boot seed reads the directory ONCE; reboot so the files are the server's truth
 srv.kill('SIGKILL'); await sleep(400); bootServer();
-check('the server reboots over the seeded caches', await waitServer());
+check('the server reboots over the seeded caches', verdictOf(await waitServer()));
 const u = await api('/api/usage');
 check('/api/usage carries the three seeded accounts with their states verbatim', u?.accounts?.[A.id]?.fiveHour?.state === 'running' && u?.accounts?.[B.id]?.fiveHour?.state === 'empty' && u?.accounts?.[C.id]?.sevenDay?.resetsAt === undefined, Object.keys(u?.accounts || {}));
 // what the PURE rule says these labels must read, derived from the SAME fixture
@@ -261,28 +261,28 @@ try {
   const a = byId(rows, A.id), b = byId(rows, B.id), c = byId(rows, C.id);
   // the roster also carries usage-LESS rows (the machine login with no cache, the pool) — the geometry claims are about rows that render a usage cell
   const usageRows = rows.filter((r) => r.cols.length > 0);
-  check('control: exactly the six seeded members render a usage cell', usageRows.length === 6 && [A.id, B.id, C.id, AD.id, AE.id, AF.id].every((id) => byId(usageRows, id)), rows.map((r) => [r.name, r.cols.length]));
+  check('control: exactly the six seeded members render a usage cell', usageRows.length === 6 && verdictOf([A.id, B.id, C.id, AD.id, AE.id, AF.id].every((id) => byId(usageRows, id))), rows.map((r) => [r.name, r.cols.length]));
   check(`Member A: the labels under the donuts read ${expectA.join(' / ')} in bucket order (5h, 7d, Fa)`, a.cols.map((x) => x.eta).join(' ') === expectA.join(' ') && a.cols.map((x) => x.label).join(' ') === '5h 7d Fa', a.cols.map((x) => [x.label, x.eta]));
-  check('Member A: each label sits BELOW its donut, centred on it', a.cols.every((x) => x.etaBelow === true && x.etaCentred === true), a.cols);
-  check('Member A: the label is ≈ 8 px', a.cols.every((x) => /^(8|9)px$/.test(x.etaFont || '')), a.cols.map((x) => x.etaFont));
-  check('Member A: colour = the donut\'s pressure colour at ≥ 80 % (7d 87 % yellow, Fable 96 % red), text-secondary below (5h 42 %)', a.cols[0].etaColor === 'var(--text-secondary)' && /var\(--yellow/.test(a.cols[1].etaColor) && /var\(--red/.test(a.cols[2].etaColor), a.cols.map((x) => x.etaColor));
-  check('Member A: the donut tooltip keeps the full "resets in …" text', /resets in 1h\dm/.test(a.cols[0].tip) && /resets in 14h\d+m/.test(a.cols[1].tip) && /resets in 3d\d+h/.test(a.cols[2].tip), a.cols.map((x) => x.tip));
-  check('Member B (two EMPTY windows — the reset slides, B-8b12): two donuts, NO label under either', b.cols.length === 2 && b.cols.every((x) => x.eta === null), b.cols);
-  check('Member B: the empty window\'s tooltip does not claim a reset either', b.cols.every((x) => !/resets in/.test(x.tip)), b.cols.map((x) => x.tip));
-  check('Member C (a passed reset + a missing one): no label under either donut', c.cols.length === 2 && c.cols.every((x) => x.eta === null), c.cols);
-  check('the row-level tightest-bucket countdown line (.acct-reset-eta) is GONE from every row', rows.every((r) => !r.resetLine));
-  check('the data-age cell is one line again and keeps its fixed min-width (6.5ch ≈ 32px; the donut columns stay right-anchored)', usageRows.every((r) => r.ageLines === 1 && parseFloat(r.ageMinW) >= 20), usageRows.map((r) => [r.ageLines, r.ageMinW]));
+  check('Member A: each label sits BELOW its donut, centred on it', verdictOf(a.cols.every((x) => x.etaBelow === true && x.etaCentred === true)), a.cols);
+  check('Member A: the label is ≈ 8 px', verdictOf(a.cols.every((x) => /^(8|9)px$/.test(x.etaFont || ''))), a.cols.map((x) => x.etaFont));
+  check('Member A: colour = the donut\'s pressure colour at ≥ 80 % (7d 87 % yellow, Fable 96 % red), text-secondary below (5h 42 %)', a.cols[0].etaColor === 'var(--text-secondary)' && gateOf(/var\(--yellow/.test(a.cols[1].etaColor)) && verdictOf(/var\(--red/.test(a.cols[2].etaColor)), a.cols.map((x) => x.etaColor));
+  check('Member A: the donut tooltip keeps the full "resets in …" text', gateOf(/resets in 1h\dm/.test(a.cols[0].tip)) && gateOf(/resets in 14h\d+m/.test(a.cols[1].tip)) && verdictOf(/resets in 3d\d+h/.test(a.cols[2].tip)), a.cols.map((x) => x.tip));
+  check('Member B (two EMPTY windows — the reset slides, B-8b12): two donuts, NO label under either', b.cols.length === 2 && verdictOf(b.cols.every((x) => x.eta === null)), b.cols);
+  check('Member B: the empty window\'s tooltip does not claim a reset either', verdictOf(b.cols.every((x) => !/resets in/.test(x.tip))), b.cols.map((x) => x.tip));
+  check('Member C (a passed reset + a missing one): no label under either donut', c.cols.length === 2 && verdictOf(c.cols.every((x) => x.eta === null)), c.cols);
+  check('the row-level tightest-bucket countdown line (.acct-reset-eta) is GONE from every row', verdictOf(rows.every((r) => !r.resetLine)));
+  check('the data-age cell is one line again and keeps its fixed min-width (6.5ch ≈ 32px; the donut columns stay right-anchored)', verdictOf(usageRows.every((r) => r.ageLines === 1 && parseFloat(r.ageMinW) >= 20)), usageRows.map((r) => [r.ageLines, r.ageMinW]));
   check('a label-less column is exactly as tall as a labelled one (the min-height belt keeps rows aligned)', Math.abs(a.cols[0].colH - b.cols[0].colH) < 0.5 && Math.abs(a.cols[0].colH - c.cols[0].colH) < 0.5, [a.cols[0].colH, b.cols[0].colH, c.cols[0].colH]);
   check(`row heights are equal across labelled and label-less rows (${usageRows.map((r) => r.rowH.toFixed(1)).join(' / ')})`, Math.max(...usageRows.map((r) => r.rowH)) - Math.min(...usageRows.map((r) => r.rowH)) < 0.5);
   check(`the row grew by at most the label's height: ≤ 45 px (donut 22 + gap 1 + label 10 + padding 8; got ${a.rowH.toFixed(1)})`, a.rowH <= 45);
   const edges = rows.filter((r) => r.clusterRight != null).map((r) => r.clusterRight);
   check(`2.245.2 invariant kept: every visible cluster's right edge is aligned ±1px (spread ${(Math.max(...edges) - Math.min(...edges)).toFixed(1)}px over ${edges.length} rows)`, edges.length >= 3 && Math.max(...edges) - Math.min(...edges) <= 1);
-  check('donut mode: the narrow-width pill is hidden', rows.every((r) => !r.miniVisible));
+  check('donut mode: the narrow-width pill is hidden', verdictOf(rows.every((r) => !r.miniVisible)));
   // ── 2026-09-16 (owner: 排版非常歪) — three geometry pins over rows WITH and WITHOUT labels, short and 6-day tokens ──
   const tops = usageRows.flatMap((r) => r.donutTops);
-  check(`every donut sits at the same y inside its row, labelled or not (spread ${(Math.max(...tops) - Math.min(...tops)).toFixed(1)}px over ${tops.length} donuts) — a label-less column carries a 10px slot`, Math.max(...tops) - Math.min(...tops) <= 1 && usageRows.every((r) => r.cols.every((x) => x.eta != null || x.slotH === 10)), usageRows.map((r) => [r.name, r.donutTops, r.cols.map((x) => x.slotH)]));
+  check(`every donut sits at the same y inside its row, labelled or not (spread ${(Math.max(...tops) - Math.min(...tops)).toFixed(1)}px over ${tops.length} donuts) — a label-less column carries a 10px slot`, Math.max(...tops) - Math.min(...tops) <= 1 && verdictOf(usageRows.every((r) => r.cols.every((x) => x.eta != null || x.slotH === 10))), usageRows.map((r) => [r.name, r.donutTops, r.cols.map((x) => x.slotH)]));
   const f = byId(rows, AF.id);
-  check(`Member F (7d spent, resets in 6 d 14 h): the widest token the roster prints ("${f.next.text}")`, /^6d1[34]h\d+m$/.test(f.next.text) && f.next.blocked === true, f.next);
+  check(`Member F (7d spent, resets in 6 d 14 h): the widest token the roster prints ("${f.next.text}")`, gateOf(/^6d1[34]h\d+m$/.test(f.next.text)) && f.next.blocked === true, f.next);
   const ageRights = usageRows.map((r) => r.ageRight);
   check(`the label cell is a FIXED column: the age cell's right edge is aligned ±1px across all six rows, 6-day token included (spread ${(Math.max(...ageRights) - Math.min(...ageRights)).toFixed(1)}px)`, Math.max(...ageRights) - Math.min(...ageRights) <= 1, usageRows.map((r) => [r.name, r.next.text, r.ageRight, r.nextW]));
   const iconLefts = usageRows.filter((r) => r.iconLeft != null).map((r) => r.iconLeft);
@@ -292,36 +292,36 @@ try {
   // ── the per-account countdown + the two-soonest highlight (2026-09-15) ──
   console.log('§1b one full-precision "next reset" label per account, the two soonest rows highlighted');
   const d = byId(rows, AD.id), e = byId(rows, AE.id);
-  check('every usage row renders the label cell (empty when nothing counts) so the columns stay aligned', usageRows.every((r) => r.next?.present), usageRows.map((r) => [r.name, r.next]));
-  check(`Member A (free, 5h 42 % / 7d 87 % / Fable 96 %): the label = the EARLIEST reset in full form ("${a.next.text}" ≈ 1h5m), with the hourglass icon`, /^1h[45]m$/.test(a.next.text) && a.next.blocked === false && a.next.hasIcon === true && /next reset in 1h[45]m/.test(a.next.title), a.next);
-  check(`Member D (free): "${d.next.text}" ≈ 40m — minutes only below an hour`, /^(39|40)m$/.test(d.next.text) && d.next.blocked === false, d.next);
-  check(`Member E (7d SPENT at 100 %): the label counts to the 7d reset ("${e.next.text}" ≈ 20h0m), NOT to the sooner 5h — that is when E is usable again`, /^(20h0m|19h5\dm)$/.test(e.next.text) && e.next.blocked === true && /usable again in/.test(e.next.title) && /7d/.test(e.next.title), e.next);
+  check('every usage row renders the label cell (empty when nothing counts) so the columns stay aligned', verdictOf(usageRows.every((r) => r.next?.present)), usageRows.map((r) => [r.name, r.next]));
+  check(`Member A (free, 5h 42 % / 7d 87 % / Fable 96 %): the label = the EARLIEST reset in full form ("${a.next.text}" ≈ 1h5m), with the hourglass icon`, gateOf(/^1h[45]m$/.test(a.next.text)) && a.next.blocked === false && a.next.hasIcon === true && verdictOf(/next reset in 1h[45]m/.test(a.next.title)), a.next);
+  check(`Member D (free): "${d.next.text}" ≈ 40m — minutes only below an hour`, gateOf(/^(39|40)m$/.test(d.next.text)) && d.next.blocked === false, d.next);
+  check(`Member E (7d SPENT at 100 %): the label counts to the 7d reset ("${e.next.text}" ≈ 20h0m), NOT to the sooner 5h — that is when E is usable again`, gateOf(/^(20h0m|19h5\dm)$/.test(e.next.text)) && e.next.blocked === true && gateOf(/usable again in/.test(e.next.title)) && verdictOf(/7d/.test(e.next.title)), e.next);
   check('Members B (empty windows) and C (passed / missing resets) carry NO countdown', b.next.text === '' && b.next.ms == null && c.next.text === '' && c.next.ms == null, [b.next, c.next]);
-  check('the two SOONEST rows (D ≈ 40m, A ≈ 65m) carry .usage-acct-soon; E (20 h), F (6 d), B and C do not', d.soon && a.soon && !e.soon && !byId(rows, AF.id).soon && !b.soon && !c.soon && rows.filter((r) => r.soon).length === 2, rows.map((r) => [r.name, r.soon]));
-  check('a highlighted row\'s tooltip says why; an unhighlighted one\'s does not', /closest to a reset/.test(a.next.title) && /closest to a reset/.test(d.next.title) && !/closest to a reset/.test(e.next.title), [a.next.title, d.next.title, e.next.title]);
+  check('the two SOONEST rows (D ≈ 40m, A ≈ 65m) carry .usage-acct-soon; E (20 h), F (6 d), B and C do not', gateOf(d.soon) && gateOf(a.soon) && !e.soon && !byId(rows, AF.id).soon && !b.soon && !c.soon && rows.filter((r) => r.soon).length === 2, rows.map((r) => [r.name, r.soon]));
+  check('a highlighted row\'s tooltip says why; an unhighlighted one\'s does not', gateOf(/closest to a reset/.test(a.next.title)) && gateOf(/closest to a reset/.test(d.next.title)) && !/closest to a reset/.test(e.next.title), [a.next.title, d.next.title, e.next.title]);
   check('the highlight is a RENDERED background (a highlighted row differs from a plain one)', d.rowBg !== c.rowBg, [d.rowBg, c.rowBg]);
   // ── B-ad05 (2026-09-17): USAGE CREDITS ARE VISIBLE BEFORE THEY ARE SPENT ──
   console.log('§1c THE CREDITS CHIP — the money icon + one word — on the member whose org bills pay-per-use past 100 % (dim) and the one billing it NOW (warning)');
-  check('Member D (overage present, not in use, vendor status not a rejection): the chip = the money icon + "Credits", dim state, the pay-per-use sentence in title AND aria-label (role img)', !!d.credits && d.credits.visible && d.credits.hasIcon && d.credits.iconW >= 8 && d.credits.word === 'Credits' && d.credits.text === 'Credits' && d.credits.state === 'allowed' && d.credits.role === 'img' && d.credits.aria === d.credits.title && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(d.credits.title), d.credits);
-  check('Member E (paid overage IN USE, $12.50 of $50 spent): the chip = the money icon + "Credits", in-use state, the sentence AND the money in title + aria-label — never on its face', !!e.credits && e.credits.visible && e.credits.hasIcon && e.credits.word === 'Credits' && e.credits.state === 'in-use' && e.credits.aria === e.credits.title && /^Using paid overage credits — /.test(e.credits.title) && /\$12\.50 \/ \$50\.00/.test(e.credits.title) && !/\$/.test(e.credits.text), e.credits);
-  check(`…each is INLINE on the identity line (centred on the name), adds no extra row line, and NOTHING credits-shaped sits in the usage cell (rowH ${d.rowH && d.rowH.toFixed(1)}, clusterRight ${d.clusterRight}, tailLine ${d.credits && d.credits.tailLine}/${e.credits && e.credits.tailLine}, font ${await evalJs('getComputedStyle(document.body).fontFamily')})`, !!d.credits && !!e.credits && d.credits.tailLine === true && e.credits.tailLine === true && d.extraLine === false && e.extraLine === false && rows.every((r) => r.inUseChip === false), [d, e]);
-  check('the chip\'s rect lies INSIDE its row and LEFT of the usage cell — it cannot push the donut / next-usable columns', [d, e].every((r) => r.credits && r.credits.left >= r.credits.rowL - 0.5 && r.credits.right <= r.credits.rowR + 0.5 && r.credits.top >= r.credits.rowT - 0.5 && r.credits.bottom <= r.credits.rowB + 0.5 && r.credits.right <= r.credits.cellLeft + 0.5), [d.credits, e.credits]);
+  check('Member D (overage present, not in use, vendor status not a rejection): the chip = the money icon + "Credits", dim state, the pay-per-use sentence in title AND aria-label (role img)', !!d.credits && gateOf(d.credits.visible) && gateOf(d.credits.hasIcon) && d.credits.iconW >= 8 && d.credits.word === 'Credits' && d.credits.text === 'Credits' && d.credits.state === 'allowed' && d.credits.role === 'img' && d.credits.aria === d.credits.title && verdictOf(/Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(d.credits.title)), d.credits);
+  check('Member E (paid overage IN USE, $12.50 of $50 spent): the chip = the money icon + "Credits", in-use state, the sentence AND the money in title + aria-label — never on its face', !!e.credits && gateOf(e.credits.visible) && gateOf(e.credits.hasIcon) && e.credits.word === 'Credits' && e.credits.state === 'in-use' && e.credits.aria === e.credits.title && gateOf(/^Using paid overage credits — /.test(e.credits.title)) && gateOf(/\$12\.50 \/ \$50\.00/.test(e.credits.title)) && !/\$/.test(e.credits.text), e.credits);
+  check(`…each is INLINE on the identity line (centred on the name), adds no extra row line, and NOTHING credits-shaped sits in the usage cell (rowH ${d.rowH && d.rowH.toFixed(1)}, clusterRight ${d.clusterRight}, tailLine ${d.credits && d.credits.tailLine}/${e.credits && e.credits.tailLine}, font ${await evalJs('getComputedStyle(document.body).fontFamily')})`, !!d.credits && !!e.credits && d.credits.tailLine === true && e.credits.tailLine === true && d.extraLine === false && e.extraLine === false && verdictOf(rows.every((r) => r.inUseChip === false)), [d, e]);
+  check('the chip\'s rect lies INSIDE its row and LEFT of the usage cell — it cannot push the donut / next-usable columns', verdictOf([d, e].every((r) => r.credits && r.credits.left >= r.credits.rowL - 0.5 && r.credits.right <= r.credits.rowR + 0.5 && r.credits.top >= r.credits.rowT - 0.5 && r.credits.bottom <= r.credits.rowB + 0.5 && r.credits.right <= r.credits.cellLeft + 0.5)), [d.credits, e.credits]);
   check('Member C (overage rejected / org_level_disabled) and every other row carry no chip', !c.credits && rows.filter((r) => r.credits).length === 2, rows.map((r) => [r.name, !!r.credits]));
   check('tone: the allowed chip is dim (its colour is not the name colour) and the in-use chip wears a DIFFERENT colour (the warning tone)', !!d.credits && !!e.credits && d.credits.color !== d.nameColor && e.credits.color !== d.credits.color && e.credits.bg !== d.credits.bg, [d.credits && d.credits.color, e.credits && e.credits.color, d.nameColor]);
-  check('E\'s credits chip does not make it a soon row (the green highlight is the two-soonest-reset mark, a different fact)', !e.soon && d.soon);
+  check('E\'s credits chip does not make it a soon row (the green highlight is the two-soonest-reset mark, a different fact)', !e.soon && verdictOf(d.soon));
   const nextRights = usageRows.map((r) => r.next.right);
   check(`the labels form a straight column: right edges aligned ±1px (spread ${(Math.max(...nextRights) - Math.min(...nextRights)).toFixed(1)}px over ${nextRights.length} rows)`, Math.max(...nextRights) - Math.min(...nextRights) <= 1);
-  check('the label cell keeps a fixed min-width (≥ 30px) and the 9px roster font', usageRows.every((r) => parseFloat(r.next.minW) >= 30 && /^(8|9|10)px$/.test(r.next.font)), usageRows.map((r) => [r.next.minW, r.next.font]));
+  check('the label cell keeps a fixed min-width (≥ 30px) and the 9px roster font', verdictOf(usageRows.every((r) => parseFloat(r.next.minW) >= 30 && /^(8|9|10)px$/.test(r.next.font))), usageRows.map((r) => [r.next.minW, r.next.font]));
   check('the existing per-donut compact tokens are untouched by the new label (A still reads 65m / 15h / 3d under its donuts)', a.cols.map((x) => x.eta).join(' ') === expectA.join(' '), a.cols.map((x) => x.eta));
   check(`row heights stay equal and ≤ 45 px with the label in (${usageRows.map((r) => r.rowH.toFixed(1)).join(' / ')})`, Math.max(...usageRows.map((r) => r.rowH)) - Math.min(...usageRows.map((r) => r.rowH)) < 0.5 && a.rowH <= 45);
-  check('the 30 s tick is armed on the open surface', await evalJs('!!app._agentsNextTick'));
+  check('the 30 s tick is armed on the open surface', verdictOf(await evalJs('!!app._agentsNextTick')));
   // the tick re-spells from the STAMPED instant — drive it with an injected clock instead of waiting
   const t35 = await evalJs(`(() => { app._retickNextLabels(document, Date.now() + 35 * 60 * 1000); return ${ROWS(LOCAL)}; })()`);
   const d35 = byId(t35, AD.id), a35 = byId(t35, A.id), e35 = byId(t35, AE.id);
-  check(`tick +35 min: D ≈ 5m, A ≈ 30m, E ≈ 19h25m; D and A still the two soonest`, /^[4-6]m$/.test(d35.next.text) && /^(29|30)m$/.test(a35.next.text) && /^19h2\dm$/.test(e35.next.text) && d35.soon && a35.soon && !e35.soon, [d35.next.text, a35.next.text, e35.next.text, t35.map((r) => [r.name, r.soon])]);
+  check(`tick +35 min: D ≈ 5m, A ≈ 30m, E ≈ 19h25m; D and A still the two soonest`, gateOf(/^[4-6]m$/.test(d35.next.text)) && gateOf(/^(29|30)m$/.test(a35.next.text)) && gateOf(/^19h2\dm$/.test(e35.next.text)) && gateOf(d35.soon) && gateOf(a35.soon) && !e35.soon, [d35.next.text, a35.next.text, e35.next.text, t35.map((r) => [r.name, r.soon])]);
   const t50 = await evalJs(`(() => { app._retickNextLabels(document, Date.now() + 50 * 60 * 1000); return ${ROWS(LOCAL)}; })()`);
   const d50 = byId(t50, AD.id), a50 = byId(t50, A.id), e50 = byId(t50, AE.id);
-  check('tick +50 min: D\'s reset has PASSED — its label goes blank and it leaves the highlight; A (≈ 15m) and E (≈ 19h10m) are now the two soonest', d50.next.text === '' && d50.next.ms == null && !d50.soon && /^1[4-5]m$/.test(a50.next.text) && a50.soon && /^19h(09|1\d)m$|^19h\dm$/.test(e50.next.text) && e50.soon && t50.filter((r) => r.soon).length === 2, [d50.next, a50.next.text, e50.next.text, t50.map((r) => [r.name, r.soon])]);
+  check('tick +50 min: D\'s reset has PASSED — its label goes blank and it leaves the highlight; A (≈ 15m) and E (≈ 19h10m) are now the two soonest', d50.next.text === '' && d50.next.ms == null && !d50.soon && gateOf(/^1[4-5]m$/.test(a50.next.text)) && gateOf(a50.soon) && gateOf(/^19h(09|1\d)m$|^19h\dm$/.test(e50.next.text)) && gateOf(e50.soon) && t50.filter((r) => r.soon).length === 2, [d50.next, a50.next.text, e50.next.text, t50.map((r) => [r.name, r.soon])]);
   // a passed countdown stays blank until the next REPAINT (the tick only re-spells stamped instants, it never
   // re-derives one) — so the roster is repainted from its data before the later legs read it
   await evalJs(`(() => { app._agentsRefreshHook(); return 1; })()`);
@@ -359,7 +359,7 @@ try {
     eCur.spend = { used: 20, limit: 50 }; eCur.fiveHour = { ...eCur.fiveHour, utilization: 0.35 }; eCur.fetchedAt = Date.now();
     fs.writeFileSync(eFile, JSON.stringify(eCur));
     const patched = await until(async () => evalJs(`(() => { const c = ${eChipSel}; const cell = document.querySelector('.agents-machine-sec[data-host=""] .acct-key-row[data-id="${AE.id}"] .acct-usage-cell'); return c && /\\$20\\.00/.test(c.title) && /: 35%/.test(cell?.innerHTML || '') ? { mark: c.__vsMark || null, title: c.title, aria: c.getAttribute('aria-label') } : null; })()`), 25000, 500);
-    check('the open roster PATCHES E\'s credits chip from the poll: the same node (marked before the repaint) now says $20.00 in title + aria-label, while the cell beside it repainted', marked && !!patched && patched.mark === 'kept' && patched.aria === patched.title, { marked, patched });
+    check('the open roster PATCHES E\'s credits chip from the poll: the same node (marked before the repaint) now says $20.00 in title + aria-label, while the cell beside it repainted', gateOf(marked) && !!patched && patched.mark === 'kept' && patched.aria === patched.title, { marked, patched });
     eCur.spend = { used: 12.5, limit: 50 }; eCur.fiveHour.utilization = 0.1; eCur.fetchedAt = Date.now(); fs.writeFileSync(eFile, JSON.stringify(eCur));
     const eBack = await until(async () => evalJs(`(() => { const c = ${eChipSel}; return c && /\\$12\\.50/.test(c.title) ? 1 : 0; })()`), 25000, 500);
     check('…and back to $12.50 when the disk does', !!eBack);
@@ -371,12 +371,12 @@ try {
   await sleep(500);
   const narrow = await evalJs(ROWS(LOCAL));
   const na = byId(narrow, A.id), nb = byId(narrow, B.id);
-  check('pill mode: the donut cluster is hidden and the pill shown (the swap is intact)', narrow.every((r) => !r.clusterVisible) && na.miniVisible && nb.miniVisible);
-  check(`Member A's pill = the tightest bucket (Fa 96%) + its compact eta ("${na.miniText}")`, /^Fa 96% · 3d$/.test((na.miniText || '').trim()), na.miniText);
-  check(`Member B's pill carries no countdown (empty windows): "${nb.miniText}"`, /^(5h|7d) 0%$/.test((nb.miniText || '').trim()), nb.miniText);
+  check('pill mode: the donut cluster is hidden and the pill shown (the swap is intact)', gateOf(narrow.every((r) => !r.clusterVisible)) && gateOf(na.miniVisible) && verdictOf(nb.miniVisible));
+  check(`Member A's pill = the tightest bucket (Fa 96%) + its compact eta ("${na.miniText}")`, verdictOf(/^Fa 96% · 3d$/.test((na.miniText || '').trim())), na.miniText);
+  check(`Member B's pill carries no countdown (empty windows): "${nb.miniText}"`, verdictOf(/^(5h|7d) 0%$/.test((nb.miniText || '').trim())), nb.miniText);
   const nd = byId(narrow, AD.id), ne = byId(narrow, AE.id);
-  check('pill mode: the per-account label is inside the hidden cluster, but the pill\'s tooltip carries it (D: next reset ≈ 40m; E: usable again ≈ 20h)', !nd.next.visible && /next reset in (39|40)m/.test(nd.miniTitle || '') && /usable again in (20h0m|19h5\dm)/.test(ne.miniTitle || ''), [nd.miniTitle, ne.miniTitle]);
-  check('pill mode: the row highlight survives the swap (D and A still marked)', nd.soon && byId(narrow, A.id).soon && !ne.soon, narrow.map((r) => [r.name, r.soon]));
+  check('pill mode: the per-account label is inside the hidden cluster, but the pill\'s tooltip carries it (D: next reset ≈ 40m; E: usable again ≈ 20h)', !nd.next.visible && gateOf(/next reset in (39|40)m/.test(nd.miniTitle || '')) && verdictOf(/usable again in (20h0m|19h5\dm)/.test(ne.miniTitle || '')), [nd.miniTitle, ne.miniTitle]);
+  check('pill mode: the row highlight survives the swap (D and A still marked)', gateOf(nd.soon) && gateOf(byId(narrow, A.id).soon) && !ne.soon, narrow.map((r) => [r.name, r.soon]));
   await evalJs(`(() => { app.sidebar.el.style.width = ''; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
 
   // ── 375×667: the mobile modal — under the DEFAULT font and under a WIDE one ──
@@ -392,8 +392,8 @@ try {
   const fontScript = font ? await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "*, html, body, .dialog, button, select, input { font-family: '${font}', sans-serif !important; }"; document.head.appendChild(st); });` }) : null;
   await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });
   await openPage();
-  if (font) check(`the wide-font control is in force (body font-family starts with "${font}")`, await evalJs(`getComputedStyle(document.body).fontFamily.startsWith('"${font}"') || getComputedStyle(document.body).fontFamily.startsWith("${font}")`), await evalJs('getComputedStyle(document.body).fontFamily'));
-  check('the page came up in mobile mode', await evalJs('app.isMobile === true'));
+  if (font) check(`the wide-font control is in force (body font-family starts with "${font}")`, verdictOf(await evalJs(`getComputedStyle(document.body).fontFamily.startsWith('"${font}"') || getComputedStyle(document.body).fontFamily.startsWith("${font}")`)), await evalJs('getComputedStyle(document.body).fontFamily'));
+  check('the page came up in mobile mode', verdictOf(await evalJs('app.isMobile === true')));
   await evalJs(`(() => { app._showAgentsDialog(); return 1; })()`);
   const MODAL = `document.querySelector('#agents-dialog-overlay .agents-dialog-body .agents-machine-sec[data-host=""]')`;
   const mrows = await until(async () => { const r = await evalJs(ROWS(MODAL)); return r && byId(r, A.id)?.cols?.length === 3 ? r : null; }, 20000, 300);
@@ -406,8 +406,8 @@ try {
     // (Re-check · Log in · Update · Rules & checks: its scratch HOME has no codex login) — at most three stand inline, the
     // rest are the «…»'s; the strip ends inside the section
     const strips = await evalJs(STRIPS(MODAL)), cx = strips && strips.find((r) => r.name === 'Codex');
-    check(`phone: no status row shows more than three buttons inline (${JSON.stringify(strips && strips.map((r) => [r.name, r.inline.length, r.folded.length, r.more]))})`, !!strips && strips.length >= 2 && strips.every((r) => r.inline.length <= 3), strips);
-    check(`phone: the Codex row's four actions fold beyond three — ${cx && cx.inline.join(' · ')} + «…» (${cx && cx.folded.join(', ')}); the strip ends inside the section (${cx && cx.right}/${cx && cx.secW})`, !!cx && cx.inline.length + cx.folded.length === 4 && cx.inline.length <= 3 && cx.more && cx.moreSvg && cx.moreName === 'More actions' && cx.folded.includes('Rules & checks') && cx.inline.includes('Log in') && cx.right <= cx.secW + 1, cx);
+    check(`phone: no status row shows more than three buttons inline (${JSON.stringify(strips && strips.map((r) => [r.name, r.inline.length, r.folded.length, r.more]))})`, !!strips && strips.length >= 2 && verdictOf(strips.every((r) => r.inline.length <= 3)), strips);
+    check(`phone: the Codex row's four actions fold beyond three — ${cx && cx.inline.join(' · ')} + «…» (${cx && cx.folded.join(', ')}); the strip ends inside the section (${cx && cx.right}/${cx && cx.secW})`, !!cx && cx.inline.length + cx.folded.length === 4 && cx.inline.length <= 3 && gateOf(cx.more) && gateOf(cx.moreSvg) && cx.moreName === 'More actions' && gateOf(cx.folded.includes('Rules & checks')) && gateOf(cx.inline.includes('Log in')) && cx.right <= cx.secW + 1, cx);
     if (font) {
       // CONTROL (the base's row) ON THE ROW IT NAMES — the Codex row, found by its name as §6 does (the FIRST row with a «…» was the
       // Codex row only while the modal's body stood 380 px: since B-16ab's `min(380px, 100%)` the section is the dialog's width and the
@@ -421,23 +421,23 @@ try {
     if (geom.dlgScrollW > geom.dlgClientW) console.log(`  NOTE (NEW since B-16ab's min(380px, 100%) body floor): the Agents modal's dialog scrolls sideways on a ${geom.vw}px phone (dialog ${geom.dlgW.toFixed(0)}px, scroll ${geom.dlgScrollW}/${geom.dlgClientW})`);
     const musage = mrows.filter((r) => r.cols.length > 0);
     const mode = ma.clusterVisible ? 'donut' : ma.miniVisible ? 'pill' : 'none';
-    check(`the ≤768px roster shows exactly one of the two usage forms per usage row (here: ${mode})`, mode !== 'none' && musage.length === 6 && musage.every((r) => (r.clusterVisible ? 1 : 0) + (r.miniVisible ? 1 : 0) === 1), mrows.map((r) => [r.name, r.clusterVisible, r.miniVisible]));
-    check('phone: the two soonest rows (D, A) are highlighted here too', byId(mrows, AD.id)?.soon && byId(mrows, A.id)?.soon && mrows.filter((r) => r.soon).length === 2, mrows.map((r) => [r.name, r.soon]));
+    check(`the ≤768px roster shows exactly one of the two usage forms per usage row (here: ${mode})`, mode !== 'none' && musage.length === 6 && verdictOf(musage.every((r) => (r.clusterVisible ? 1 : 0) + (r.miniVisible ? 1 : 0) === 1)), mrows.map((r) => [r.name, r.clusterVisible, r.miniVisible]));
+    check('phone: the two soonest rows (D, A) are highlighted here too', gateOf(byId(mrows, AD.id)?.soon) && gateOf(byId(mrows, A.id)?.soon) && mrows.filter((r) => r.soon).length === 2, mrows.map((r) => [r.name, r.soon]));
     if (mode === 'donut') {
       check('phone/donut: Member A carries the same three labels', ma.cols.map((x) => x.eta).join(' ') === expectA.join(' '), ma.cols.map((x) => x.eta));
-      check('phone/donut: Member B carries none', mb.cols.every((x) => x.eta === null));
+      check('phone/donut: Member B carries none', verdictOf(mb.cols.every((x) => x.eta === null)));
       check(`phone/donut: row heights equal and ≤ 45 px (${musage.map((r) => r.rowH.toFixed(1)).join(' / ')})`, Math.max(...musage.map((r) => r.rowH)) - Math.min(...musage.map((r) => r.rowH)) < 0.5 && ma.rowH <= 45);
     } else {
-      check(`phone/pill: Member A's pill = "Fa 96% · 3d" ("${ma.miniText}")`, /^Fa 96% · 3d$/.test((ma.miniText || '').trim()), ma.miniText);
-      check('phone/pill: Member B\'s pill has no countdown', /^(5h|7d) 0%$/.test((mb.miniText || '').trim()), mb.miniText);
-      check(`phone/pill: row heights ≤ 45 px (${musage.map((r) => r.rowH.toFixed(1)).join(' / ')})`, musage.every((r) => r.rowH <= 45));
+      check(`phone/pill: Member A's pill = "Fa 96% · 3d" ("${ma.miniText}")`, verdictOf(/^Fa 96% · 3d$/.test((ma.miniText || '').trim())), ma.miniText);
+      check('phone/pill: Member B\'s pill has no countdown', verdictOf(/^(5h|7d) 0%$/.test((mb.miniText || '').trim())), mb.miniText);
+      check(`phone/pill: row heights ≤ 45 px (${musage.map((r) => r.rowH.toFixed(1)).join(' / ')})`, verdictOf(musage.every((r) => r.rowH <= 45)));
     }
-    check('phone: the row-level countdown line is gone here too', mrows.every((r) => !r.resetLine));
+    check('phone: the row-level countdown line is gone here too', verdictOf(mrows.every((r) => !r.resetLine)));
     // SHRINK PRIORITY (2.369.129, owner "完全看不到账号名称了"): under pressure the ident
     // (email) ellipsizes first and the NAME keeps its full text — .128 had it the other
     // way round and every name in the modal collapsed to one letter.
     const prio = await evalJs(`(() => { const sec = ${MODAL}; const row = sec && sec.querySelector('.acct-key-row[data-id="${AD.id}"]'); if (!row) return null; const name = row.querySelector('.acct-key-name'), tail = row.querySelector('.acct-key-tail'); if (!name || !tail) return null; const savedTail = tail.textContent; tail.textContent = 'a.very.long.identity.address.for.pressure@subdomain.example-organization.com'; const m = () => ({ nameFull: name.scrollWidth <= name.clientWidth + 1, nameW: Math.round(name.getBoundingClientRect().width), tailCut: tail.scrollWidth > tail.clientWidth + 1, tailW: Math.round(tail.getBoundingClientRect().width), lineW: Math.round(row.querySelector('.acct-key-line').getBoundingClientRect().width) }); const line = row.querySelector('.acct-key-line'); const fixed = m(); /* 2.369.131: usage rows put the ident on its OWN line (grid), so the .128 weights alone no longer crush the name — the control re-creates the .128 shape: one flex line + the .128 weights */ line.style.display = 'flex'; name.style.flexShrink = '4'; tail.style.flexShrink = '1'; const swapped = m(); line.style.display = ''; name.style.flexShrink = ''; tail.style.flexShrink = ''; tail.textContent = savedTail; return { fixed, swapped, name: name.textContent, twoLines: Math.abs(tail.getBoundingClientRect().top - name.getBoundingClientRect().top) > 6 }; })()`);
-    check(`phone: under a 70-char ident the NAME "${prio && prio.name}" keeps its full text and the ident is the one that ellipsizes (${JSON.stringify(prio && prio.fixed)})`, !!prio && prio.fixed.nameFull && prio.fixed.tailCut, prio);
+    check(`phone: under a 70-char ident the NAME "${prio && prio.name}" keeps its full text and the ident is the one that ellipsizes (${JSON.stringify(prio && prio.fixed)})`, !!prio && gateOf(prio.fixed.nameFull) && verdictOf(prio.fixed.tailCut), prio);
     check(`NEGATIVE CONTROL: the .128 shape (one flex line, name 4 / tail 1) crushes the same name (${JSON.stringify(prio && prio.swapped)})`, !!prio && !prio.swapped.nameFull, prio);
     check('a usage row shows the ident on its OWN line under the name (2.369.131, owner: "把 email 放到第二行") — the name never competes with it', !!prio && prio.twoLines === true, prio);
     // THE RUNNER'S SHAPE (2.369.128): an npm-installed claude puts the ephemeral-install warning row in this section,
@@ -463,7 +463,7 @@ try {
     const wide = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "*, html, body, .dialog, button, select, input { font-family: 'DejaVu Sans', sans-serif !important; }"; document.head.appendChild(st); });` });
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
     await openPage();
-    check('wide font in force on the desktop pass', await evalJs(`/DejaVu Sans/.test(getComputedStyle(document.body).fontFamily)`), await evalJs('getComputedStyle(document.body).fontFamily'));
+    check('wide font in force on the desktop pass', verdictOf(await evalJs(`/DejaVu Sans/.test(getComputedStyle(document.body).fontFamily)`)), await evalJs('getComputedStyle(document.body).fontFamily'));
     // the rail item TOGGLES its panel and §1's choice persisted across the reload — open only when the section has no geometry yet
     await evalJs(`(() => { app.sidebar.toggle(true); return 1; })()`);
     for (let i = 0; i < 4; i++) { const w = await evalJs(`(() => { const sec = ${LOCAL}; return sec ? sec.clientWidth : 0; })()`); if (w > 0) break; await evalJs(`(() => { const it = document.querySelector('.rail-item[data-rail="agents"]'); if (!it) throw new Error('no agents rail item'); it.click(); return 1; })()`); await sleep(400); }
@@ -472,7 +472,7 @@ try {
     if (!wrows) { const dbg = await evalJs(`(() => { const sec = ${LOCAL}; const r = (${ROWS(LOCAL)}); return { sec: !!sec, secW: sec && sec.clientWidth, isMobile: app.isMobile, sidebarW: app.sidebar.el.getBoundingClientRect().width, rows: r && r.map((x) => [x.name, x.cols.length, x.clusterVisible, x.miniVisible]) }; })()`); console.log('  §4 DEBUG: ' + JSON.stringify(dbg)); }
     const wd = wrows && byId(wrows, AD.id);
     const we = wrows && byId(wrows, AE.id);
-    check(`wide font: Members D and E keep their credits chip INLINE with the name and left of the usage cell (rowH ${wd && wd.rowH && wd.rowH.toFixed(1)}, clusterRight ${wd && wd.clusterRight}, tailLine ${wd && wd.credits && wd.credits.tailLine})`, [wd, we].every((r) => !!r && !!r.credits && r.credits.visible && r.credits.tailLine === true && r.extraLine === false && r.credits.right <= r.credits.cellLeft + 0.5), [wd, we]);
+    check(`wide font: Members D and E keep their credits chip INLINE with the name and left of the usage cell (rowH ${wd && wd.rowH && wd.rowH.toFixed(1)}, clusterRight ${wd && wd.clusterRight}, tailLine ${wd && wd.credits && wd.credits.tailLine})`, verdictOf([wd, we].every((r) => !!r && !!r.credits && r.credits.visible && r.credits.tailLine === true && r.extraLine === false && r.credits.right <= r.credits.cellLeft + 0.5)), [wd, we]);
     const wsec = await evalJs(`(() => { const sec = ${LOCAL}; return sec ? { scrollW: sec.scrollWidth, clientW: sec.clientWidth } : null; })()`);
     check(`wide font: the roster section has no sideways overflow (${wsec && wsec.scrollW}/${wsec && wsec.clientW})`, !!wsec && wsec.clientW > 100 && wsec.scrollW <= wsec.clientW + 1, wsec);
     await shot('roster-1200x800-wide-font.png');
@@ -485,15 +485,15 @@ try {
   await openPage();
   await evalJs(`(() => { localStorage.setItem('vibespace.lang', 'zh'); return 1; })()`);
   await openPage();
-  check('the page is in zh', await evalJs(`document.querySelector('.rail-item[data-rail="agents"]') ? true : false`) && await evalJs(`localStorage.getItem('vibespace.lang') === 'zh'`));
+  check('the page is in zh', gateOf(await evalJs(`document.querySelector('.rail-item[data-rail="agents"]') ? true : false`)) && verdictOf(await evalJs(`localStorage.getItem('vibespace.lang') === 'zh'`)));
   await evalJs(`(() => { app.sidebar.toggle(true); return 1; })()`);
   for (let i = 0; i < 4; i++) { const w = await evalJs(`(() => { const sec = ${LOCAL}; return sec ? sec.clientWidth : 0; })()`); if (w > 0) break; await evalJs(`(() => { const it = document.querySelector('.rail-item[data-rail="agents"]'); if (!it) throw new Error('no agents rail item'); it.click(); return 1; })()`); await sleep(400); }
   await evalJs(`(() => { app.sidebar.el.style.width = '504px'; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
   const zrows = await until(async () => { const r = await evalJs(ROWS(LOCAL)); return r && byId(r, A.id)?.cols?.length === 3 && byId(r, AE.id)?.credits && byId(r, AD.id)?.clusterVisible ? r : null; }, 20000, 300);
   const zd = zrows && byId(zrows, AD.id), ze = zrows && byId(zrows, AE.id);
-  check('zh: D and E wear the chip with the money icon and the word 按量 (never the old sentence 正在使用付费溢出额度 / 按量信用额度)', !!zd && !!ze && [zd, ze].every((r) => r.credits.hasIcon && r.credits.word === '按量' && r.credits.text === '按量') && !zrows.some((r) => /正在使用付费溢出额度|按量信用额度/.test(r.credits ? r.credits.text : '')), zrows && zrows.map((r) => [r.name, r.credits && r.credits.text]));
-  check('zh: E\'s title AND aria-label = the zh sentence with the money; D\'s = the zh pay-per-use sentence', !!ze && /^正在使用付费溢出额度——/.test(ze.credits.title) && /\$12\.50 \/ \$50\.00/.test(ze.credits.title) && ze.credits.aria === ze.credits.title && !!zd && /^此组织已启用额外用量/.test(zd.credits.title) && zd.credits.aria === zd.credits.title, [ze && ze.credits.title, zd && zd.credits.title]);
-  check('zh: each chip lies inside its row, centred on the name line and LEFT of the usage cell', [zd, ze].every((r) => r && r.credits.left >= r.credits.rowL - 0.5 && r.credits.right <= r.credits.rowR + 0.5 && r.credits.right <= r.credits.cellLeft + 0.5 && r.credits.tailLine), [zd && zd.credits, ze && ze.credits]);
+  check('zh: D and E wear the chip with the money icon and the word 按量 (never the old sentence 正在使用付费溢出额度 / 按量信用额度)', !!zd && !!ze && gateOf([zd, ze].every((r) => r.credits.hasIcon && r.credits.word === '按量' && r.credits.text === '按量')) && !zrows.some((r) => /正在使用付费溢出额度|按量信用额度/.test(r.credits ? r.credits.text : '')), zrows && zrows.map((r) => [r.name, r.credits && r.credits.text]));
+  check('zh: E\'s title AND aria-label = the zh sentence with the money; D\'s = the zh pay-per-use sentence', !!ze && gateOf(/^正在使用付费溢出额度——/.test(ze.credits.title)) && gateOf(/\$12\.50 \/ \$50\.00/.test(ze.credits.title)) && ze.credits.aria === ze.credits.title && !!zd && gateOf(/^此组织已启用额外用量/.test(zd.credits.title)) && zd.credits.aria === zd.credits.title, [ze && ze.credits.title, zd && zd.credits.title]);
+  check('zh: each chip lies inside its row, centred on the name line and LEFT of the usage cell', verdictOf([zd, ze].every((r) => r && r.credits.left >= r.credits.rowL - 0.5 && r.credits.right <= r.credits.rowR + 0.5 && r.credits.right <= r.credits.cellLeft + 0.5 && r.credits.tailLine)), [zd && zd.credits, ze && ze.credits]);
   const zu = (zrows || []).filter((r) => r.cols.length > 0);
   const zNext = zu.map((r) => r.next.right), zAge = zu.map((r) => r.ageRight);
   check(`zh: the next-usable column is not pushed — the label cells' right edges (spread ${zNext.length ? (Math.max(...zNext) - Math.min(...zNext)).toFixed(1) : '?'}px) and the age cells' (spread ${zAge.length ? (Math.max(...zAge) - Math.min(...zAge)).toFixed(1) : '?'}px) are aligned ±1px over ${zu.length} rows, E's included`, zu.length === 6 && Math.max(...zNext) - Math.min(...zNext) <= 1 && Math.max(...zAge) - Math.min(...zAge) <= 1, zu.map((r) => [r.name, r.next.right, r.ageRight]));
@@ -542,7 +542,7 @@ try {
       const shown = m && typeof m.noteShown === 'number' ? m.noteShown - 2 : -1;   // «· » leads the note after a worded chip
       const roomy = !!m && m.w26 > 0 && m.boxW >= m.w26 + 14;
       check(`${lang} ${where}: the 60-character note is whole in the markup and its BOX decides — ${shown} of its characters shown in ${m ? m.boxW : '?'} px${roomy ? ' (room for more than 24)' : ''}${m && m.fullW > m.boxW + 0.5 ? ', the box\'s own ellipsis ending it' : ', all of it'}`,
-        !!m && m.noteText === '· ' + NOTE_G && (!roomy || shown > 24) && (m.fullW <= m.boxW + 0.5 ? shown >= 60 : (m.clips && shown < 60)), m);
+        !!m && m.noteText === '· ' + NOTE_G && (!roomy || shown > 24) && (m.fullW <= m.boxW + 0.5 ? shown >= 60 : (gateOf(m.clips) && shown < 60)), m);
       if (roomy) roomyAll++;
       if (roomy && !ctlDone) {
         ctlDone = true;
@@ -555,7 +555,7 @@ try {
       return roomy;
     };
     const judge = (lang, where, m) => {
-      check(`${lang} ${where}: the chip is whole inside its row (right ${m && m.chipR != null ? m.chipR.toFixed(1) : '?'} ≤ content ${m && m.contentR != null ? m.contentR.toFixed(1) : '?'}, scroll ${m && m.sw}/${m && m.cw}, mid+end hit-testable, before the note, DejaVu)`, whole(m), m);
+      check(`${lang} ${where}: the chip is whole inside its row (right ${m && m.chipR != null ? m.chipR.toFixed(1) : '?'} ≤ content ${m && m.contentR != null ? m.contentR.toFixed(1) : '?'}, scroll ${m && m.sw}/${m && m.cw}, mid+end hit-testable, before the note, DejaVu)`, verdictOf(whole(m)), m);
       check(`${lang} ${where}: if the line is short, the NOTE is what truncates (${m && m.clips ? 'clipped: note right ' + m.noteR.toFixed(1) + ' > box ' + m.boxR.toFixed(1) : 'nothing clipped'})`, !!m && (!m.clips || m.noteR > m.boxR - 0.5), m);
       return !!(m && m.clips);
     };
@@ -598,7 +598,7 @@ try {
       check(`${lang}: the fixture is under real pressure — the note truncates on at least one surface (${clipped})`, clipped > 0);
 
     }
-    check(`some real surface gives the 60-character note room for more than 24 of its characters, and they show (${roomyAll} surface(s) over zh / ja / en); the control ran there`, roomyAll > 0 && ctlDone);
+    check(`some real surface gives the 60-character note room for more than 24 of its characters, and they show (${roomyAll} surface(s) over zh / ja / en); the control ran there`, roomyAll > 0 && verdictOf(ctlDone));
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: dv.identifier });
     await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
   }
@@ -643,35 +643,35 @@ try {
   for (const lang of ['en', 'zh']) {
     const st = await openAgents({ phone: true, lang }), cx = st && st.find((r) => r.name === 'Codex');
     if (lang === 'en') phoneEn = st;
-    check(`${lang} · INSTALLED · 352: at most three buttons inline per row, the Codex row ${cx && cx.inline.length} + «…» (${cx && cx.folded.length} folded), no sideways overflow (${st && st.map((r) => r.right + '/' + r.secW).join(' ')})`, noSideways(st) && st.every((r) => r.inline.length <= 3) && !!cx && cx.more && cx.inline.length + cx.folded.length === 4 && cx.folded.length >= 1, st);
+    check(`${lang} · INSTALLED · 352: at most three buttons inline per row, the Codex row ${cx && cx.inline.length} + «…» (${cx && cx.folded.length} folded), no sideways overflow (${st && st.map((r) => r.right + '/' + r.secW).join(' ')})`, gateOf(noSideways(st)) && gateOf(st.every((r) => r.inline.length <= 3)) && !!cx && gateOf(cx.more) && cx.inline.length + cx.folded.length === 4 && cx.folded.length >= 1, st);
     await evalJs(`(() => { const sec = ${MODAL6}; const row = [...sec.querySelectorAll('.ob-backend:not(.acct-section)')].find((r) => (r.querySelector('b') || {}).textContent === 'Codex'); if (row) row.scrollIntoView({ block: 'center' }); return 1; })()`); await sleep(200);
     await shot(`roster-375-fold-${lang}.png`);
     const menu = await evalJs(`(async () => { const sec = ${MODAL6}; const row = [...sec.querySelectorAll('.ob-backend:not(.acct-section)')].find((r) => (r.querySelector('b') || {}).textContent === 'Codex'); const more = row && row.querySelector(':scope > .agent-actions > .row-more'); if (!more) return null; more.scrollIntoView({ block: 'center' }); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); more.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const m = document.querySelector('.context-menu.row-more-menu'); if (!m) return { open: false }; const mr = m.getBoundingClientRect(), br = more.getBoundingClientRect(), items = [...m.querySelectorAll('.context-menu-item')]; return { open: true, menus: document.querySelectorAll('.context-menu').length, items: items.map((i) => i.textContent), itemH: Math.min(...items.map((i) => i.getBoundingClientRect().height)), fontPx: Math.min(...items.map((i) => parseFloat(getComputedStyle(i).fontSize))), inView: mr.left >= 0 && mr.right <= innerWidth && mr.bottom <= innerHeight, below: mr.top >= br.bottom - 1 }; })()`);
-    check(`${lang} · «…» opens ONE menu listing the folded buttons by their own words (${JSON.stringify(menu)}) — 44 px rows, 16 px words, under the «…», inside the viewport`, !!menu && menu.open && menu.menus === 1 && !!cx && JSON.stringify(menu.items) === JSON.stringify(cx.folded) && menu.itemH >= 44 && menu.fontPx >= 16 && menu.inView && menu.below, menu);
+    check(`${lang} · «…» opens ONE menu listing the folded buttons by their own words (${JSON.stringify(menu)}) — 44 px rows, 16 px words, under the «…», inside the viewport`, !!menu && gateOf(menu.open) && menu.menus === 1 && !!cx && JSON.stringify(menu.items) === JSON.stringify(cx.folded) && menu.itemH >= 44 && menu.fontPx >= 16 && gateOf(menu.inView) && verdictOf(menu.below), menu);
     await shot(`roster-375-fold-menu-${lang}.png`);
     if (lang === 'en') {
       // «Rules & checks» from the «…»: its own menu opens where the «…» is (a folded button has no box of its own)
       const rules = await evalJs(`(async () => { const m = document.querySelector('.context-menu.row-more-menu'); const it = m && [...m.querySelectorAll('.context-menu-item')].find((i) => i.textContent === 'Rules & checks'); if (!it) return null; it.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const c = document.querySelector('.context-menu'); const sec = ${MODAL6}; const more = [...sec.querySelectorAll('.agent-actions > .row-more')].pop(); if (!c || !more) return { open: false }; const cr = c.getBoundingClientRect(), br = more.getBoundingClientRect(); return { open: true, more: !!c.classList.contains('row-more-menu'), items: [...c.querySelectorAll('.context-menu-item')].map((i) => i.textContent).slice(0, 6), dx: Math.round(cr.left - br.left), dy: Math.round(cr.top - br.bottom) }; })()`);
-      check(`en · the folded «Rules & checks» opens its checks menu from the «…» (${JSON.stringify(rules)})`, !!rules && rules.open && !rules.more && rules.items.length >= 1 && rules.items.some((w) => /…$/.test(w)) && Math.abs(rules.dy - 4) <= 2, rules);
+      check(`en · the folded «Rules & checks» opens its checks menu from the «…» (${JSON.stringify(rules)})`, !!rules && gateOf(rules.open) && !rules.more && rules.items.length >= 1 && gateOf(rules.items.some((w) => /…$/.test(w))) && Math.abs(rules.dy - 4) <= 2, rules);
       await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((m) => m.remove()); const sec = ${MODAL6}; [...sec.querySelectorAll('.agent-actions > .row-more')].pop()?.click(); return 1; })()`); // ?. — the base's row (the mutant) has no «…»: its reds stay by name, the leg runs on
     }
     const menuOpen = await evalJs(`!!document.querySelector('.context-menu.row-more-menu')`); // no «…» (the base's row) ⇒ no Esc: it would close the dialog
     if (menuOpen) for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
-    check(`${lang} · Esc closes the «…» menu and leaves the Agents dialog open`, menuOpen && !!(await until(async () => evalJs(`!document.querySelector('.context-menu.row-more-menu') && !!${MODAL6}`), 3000, 100)), await evalJs(`({ wasOpen: ${menuOpen}, menu: !!document.querySelector('.context-menu.row-more-menu'), dialog: !!${MODAL6} })`));
+    check(`${lang} · Esc closes the «…» menu and leaves the Agents dialog open`, gateOf(menuOpen) && !!(await until(async () => evalJs(`!document.querySelector('.context-menu.row-more-menu') && !!${MODAL6}`), 3000, 100)), await evalJs(`({ wasOpen: ${menuOpen}, menu: !!document.querySelector('.context-menu.row-more-menu'), dialog: !!${MODAL6} })`));
     const st320 = await at320(), cx320 = st320 && st320.find((r) => r.name === 'Codex');
-    check(`${lang} · INSTALLED · 320: at a 320 px section the verdict holds — at most three inline, no sideways overflow (Codex ${cx320 && cx320.inline.length} inline + ${cx320 && cx320.folded.length} folded; ${st320 && st320.map((r) => r.right + '/' + r.secW).join(' ')} — the WIDTH step is the scaled-text leg below)`, noSideways(st320, { section: false }) && st320.every((r) => r.inline.length <= 3) && !!cx320 && cx320.more && cx320.inline.length <= (cx ? cx.inline.length : 3), st320);
+    check(`${lang} · INSTALLED · 320: at a 320 px section the verdict holds — at most three inline, no sideways overflow (Codex ${cx320 && cx320.inline.length} inline + ${cx320 && cx320.folded.length} folded; ${st320 && st320.map((r) => r.right + '/' + r.secW).join(' ')} — the WIDTH step is the scaled-text leg below)`, gateOf(noSideways(st320, { section: false })) && gateOf(st320.every((r) => r.inline.length <= 3)) && !!cx320 && gateOf(cx320.more) && cx320.inline.length <= (cx ? cx.inline.length : 3), st320);
     // THE FOLD FOLLOWS THE TIER (r2): the dialog stays open while the viewport crosses phone → desktop → phone; the desktop
     // row is judged against a fresh desktop open (`desk`, below)
     const rot = await rotate({ phone: false });
     await shot(`roster-rotated-desktop-${lang}.png`);
     const back = await rotate({ phone: true }), bcx = back.strips && back.strips.find((r) => r.name === 'Codex');
-    check(`${lang} · rotated back to the phone on the open dialog: the row folds again — Codex ${bcx && bcx.inline.join(' · ')} + «…» (${bcx && bcx.folded.join(', ')}), at most three inline, no sideways overflow (host ${back.host})`, back.host === 'sheet' && noSideways(back.strips) && back.strips.every((r) => r.inline.length <= 3) && !!bcx && bcx.more && !!cx && JSON.stringify(bcx.inline) === JSON.stringify(cx.inline) && JSON.stringify(bcx.folded) === JSON.stringify(cx.folded), back);
+    check(`${lang} · rotated back to the phone on the open dialog: the row folds again — Codex ${bcx && bcx.inline.join(' · ')} + «…» (${bcx && bcx.folded.join(', ')}), at most three inline, no sideways overflow (host ${back.host})`, back.host === 'sheet' && gateOf(noSideways(back.strips)) && gateOf(back.strips.every((r) => r.inline.length <= 3)) && !!bcx && gateOf(bcx.more) && !!cx && JSON.stringify(bcx.inline) === JSON.stringify(cx.inline) && JSON.stringify(bcx.folded) === JSON.stringify(cx.folded), back);
     await shot(`roster-rotated-back-phone-${lang}.png`);
     const desk = await openAgents({ phone: false, lang }), dcx = desk && desk.find((r) => r.name === 'Codex');
-    check(`${lang} · INSTALLED · desktop: every button inline, no «…», no folded class (Codex ${dcx && dcx.inline.length}: ${dcx && dcx.classes.join(' | ')}; strip bytes #${desk && desk.map((r) => r.h).join(' #')})`, !!desk && desk.length >= 2 && desk.every((r) => !r.more && !r.foldedClass && r.folded.length === 0) && !!dcx && dcx.inline.length === 4 && JSON.stringify(dcx.classes) === JSON.stringify(['agent-btn cli-recheck', 'agent-btn primary', 'agent-btn', 'agent-btn']), desk);
+    check(`${lang} · INSTALLED · desktop: every button inline, no «…», no folded class (Codex ${dcx && dcx.inline.length}: ${dcx && dcx.classes.join(' | ')}; strip bytes #${desk && desk.map((r) => r.h).join(' #')})`, !!desk && desk.length >= 2 && gateOf(desk.every((r) => !r.more && !r.foldedClass && r.folded.length === 0)) && !!dcx && dcx.inline.length === 4 && JSON.stringify(dcx.classes) === JSON.stringify(['agent-btn cli-recheck', 'agent-btn primary', 'agent-btn', 'agent-btn']), desk);
     await shot(`roster-desktop-modal-${lang}.png`);
     const rcx = rot.strips && rot.strips.find((r) => r.name === 'Codex');
-    check(`${lang} · rotated to the DESKTOP on the open dialog: the base's inline bar, byte for byte — every button inline, no «…», no folded class, the strip bytes a fresh desktop open draws (#${rot.strips && rot.strips.map((r) => r.h).join(' #')} vs #${desk && desk.map((r) => r.h).join(' #')}; host ${rot.host})`, rot.host === 'window' && !!rot.strips && !!desk && rot.strips.length === desk.length && rot.strips.every((r, i) => !r.more && !r.foldedClass && r.folded.length === 0 && r.h === desk[i].h) && !!rcx && rcx.inline.length === 4, { rot, desk });
+    check(`${lang} · rotated to the DESKTOP on the open dialog: the base's inline bar, byte for byte — every button inline, no «…», no folded class, the strip bytes a fresh desktop open draws (#${rot.strips && rot.strips.map((r) => r.h).join(' #')} vs #${desk && desk.map((r) => r.h).join(' #')}; host ${rot.host})`, rot.host === 'window' && !!rot.strips && !!desk && rot.strips.length === desk.length && gateOf(rot.strips.every((r, i) => !r.more && !r.foldedClass && r.folded.length === 0 && r.h === desk[i].h)) && !!rcx && rcx.inline.length === 4, { rot, desk });
   }
   // THE ZOOM CASE (r2 — the division the fold's measure makes): a desktop at 150 % (body zoom 1.5: a button's rect is 1.5× its
   // layout px, the row's clientWidth is layout px) holds the dialog open and the viewport crosses into the phone. The class
@@ -689,7 +689,7 @@ try {
   const zr = await rotate({ phone: true });
   await until(async () => evalJs(`document.body.style.zoom === ''`), 3000, 100); await sleep(400);
   const zs = await evalJs(STRIPS(MODAL6)), zat = await evalJs('window.__tierAt');
-  check(`zoom: a desktop at 150 % (body zoom ${zoomed}) crossing into the phone is measured under the zoom it still wears (at the tier's signal ${JSON.stringify(zat)}) — rect ÷ uiScale keeps the fresh phone's verdict (${JSON.stringify(zs && zs.map((r) => [r.name, r.inline.length, r.folded.length]))} = ${JSON.stringify(phoneEn && phoneEn.map((r) => [r.name, r.inline.length, r.folded.length]))}; host ${zr.host})`, zoomed === '1.5' && !!zat && zat.zoom === '1.5' && zat.phone === true && zr.host === 'sheet' && !!zs && !!phoneEn && zs.length === phoneEn.length && zs.every((r, i) => JSON.stringify(r.inline) === JSON.stringify(phoneEn[i].inline) && JSON.stringify(r.folded) === JSON.stringify(phoneEn[i].folded)) && noSideways(zs), { zoomed, zat, zs, phoneEn });
+  check(`zoom: a desktop at 150 % (body zoom ${zoomed}) crossing into the phone is measured under the zoom it still wears (at the tier's signal ${JSON.stringify(zat)}) — rect ÷ uiScale keeps the fresh phone's verdict (${JSON.stringify(zs && zs.map((r) => [r.name, r.inline.length, r.folded.length]))} = ${JSON.stringify(phoneEn && phoneEn.map((r) => [r.name, r.inline.length, r.folded.length]))}; host ${zr.host})`, zoomed === '1.5' && !!zat && zat.zoom === '1.5' && zat.phone === true && zr.host === 'sheet' && !!zs && !!phoneEn && zs.length === phoneEn.length && gateOf(zs.every((r, i) => JSON.stringify(r.inline) === JSON.stringify(phoneEn[i].inline) && JSON.stringify(r.folded) === JSON.stringify(phoneEn[i].folded))) && verdictOf(noSideways(zs)), { zoomed, zat, zs, phoneEn });
   await evalJs(`(() => { localStorage.removeItem('vibespace.uiScale'); return 1; })()`);
   // A ROW THE WIDTH FOLDS (r2 — the browser's width step, not only the count's): the device's text scaled up (the strip's
   // buttons at 16 px for 12 — Android's largest text size) at a 320 px section. The Claude Code row holds THREE buttons, so
@@ -702,7 +702,7 @@ try {
   const wmenu = wrow ? await evalJs(`(async () => { const row = ${rowJs(wrow ? wrow.name : '')}; const more = row && row.querySelector(':scope > .agent-actions > .row-more'); if (!more) return null; more.scrollIntoView({ block: 'center' }); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); more.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const m = document.querySelector('.context-menu.row-more-menu'); const out = m ? [...m.querySelectorAll('.context-menu-item')].map((i) => i.textContent) : null; return out; })()`) : null;
   await shot('roster-320-width-fold-menu-en.png');
   await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((m) => m.remove()); return 1; })()`);
-  check(`width: the device's text scaled up at a 320 px section — the ${wrow && wrow.name} row holds ${wrow && wrow.inline.length + wrow.folded.length} buttons (the count folds none) and the WIDTH folds ${wrow && wrow.folded.join(', ')} into its «…», whose menu carries it (${JSON.stringify(wmenu)}); every strip inside its row (${sw && sw.map((r) => r.name + ' ' + r.inline.length + '+' + r.folded.length + ' ' + r.right + '/' + r.secW).join(' · ')})`, !!wrow && wrow.more && JSON.stringify(wmenu) === JSON.stringify(wrow.folded) && noSideways(sw, { section: false }) && sw.every((r) => r.inline.length <= 3), sw);
+  check(`width: the device's text scaled up at a 320 px section — the ${wrow && wrow.name} row holds ${wrow && wrow.inline.length + wrow.folded.length} buttons (the count folds none) and the WIDTH folds ${wrow && wrow.folded.join(', ')} into its «…», whose menu carries it (${JSON.stringify(wmenu)}); every strip inside its row (${sw && sw.map((r) => r.name + ' ' + r.inline.length + '+' + r.folded.length + ' ' + r.right + '/' + r.secW).join(' · ')})`, !!wrow && gateOf(wrow.more) && JSON.stringify(wmenu) === JSON.stringify(wrow.folded) && gateOf(noSideways(sw, { section: false })) && verdictOf(sw.every((r) => r.inline.length <= 3)), sw);
   const wctl = wrow ? await evalJs(`(() => { const sec = ${MODAL6}, row = ${rowJs(wrow ? wrow.name : '')}; const a = row && row.querySelector(':scope > .agent-actions'); if (!a) return null; const folded = [...a.querySelectorAll(':scope > .bar-folded')], more = a.querySelector(':scope > .row-more'); folded.forEach((b) => b.classList.remove('bar-folded')); if (more) more.style.display = 'none'; const out = { inline: a.querySelectorAll(':scope > button:not(.row-more)').length, rowScrollW: row.scrollWidth, rowClientW: row.clientWidth, right: Math.round(a.getBoundingClientRect().right - sec.getBoundingClientRect().left), secW: sec.clientWidth }; folded.forEach((b) => b.classList.add('bar-folded')); if (more) more.style.display = ''; return out; })()`) : null;
   check(`CONTROL: the same row with all ${wctl && wctl.inline} buttons back inline and no «…» overflows (row ${wctl && wctl.rowScrollW}/${wctl && wctl.rowClientW}, strip ${wctl && wctl.right}/${wctl && wctl.secW}) — the width step is load-bearing`, !!wctl && (wctl.rowScrollW > wctl.rowClientW + 1 || wctl.right > wctl.secW + 1), wctl);
   await evalJs(`(() => { const s = ${MODAL6}; if (s) s.style.width = ''; return 1; })()`);
@@ -734,7 +734,7 @@ try {
   const phidden = await evalJs(`(() => { const p = ${PANEL}; return !!p && p.isConnected && p.getBoundingClientRect().width === 0 && app.sidebar.el.classList.contains('rail-collapsed'); })()`);
   const pruns = [];
   for (let k = 0; k < 5; k++) { const done = await rerender(PANEL, popen.rows); pruns.push({ done, ...(await liveCount(PANEL)) }); }
-  check(`a render's listeners die with it — the rail panel of a COLLAPSED sidebar (hidden: ${phidden}) re-rendered five times: its ${popen.rows} rows' tier listeners + row observers stay FLAT (${spell(base, [popen, ...pruns])})`, phidden && popen.rows >= 2 && popen.win - base === popen.rows && popen.ro === popen.rows && pruns.every((c) => c.done && c.win === popen.win && c.ro === popen.ro), { base, popen, pruns });
+  check(`a render's listeners die with it — the rail panel of a COLLAPSED sidebar (hidden: ${phidden}) re-rendered five times: its ${popen.rows} rows' tier listeners + row observers stay FLAT (${spell(base, [popen, ...pruns])})`, gateOf(phidden) && popen.rows >= 2 && popen.win - base === popen.rows && popen.ro === popen.rows && verdictOf(pruns.every((c) => c.done && c.win === popen.win && c.ro === popen.ro)), { base, popen, pruns });
   await evalJs(`(() => { app.sidebar._railGo('folders'); return 1; })()`); await sleep(300);
   const pend = await liveCount(PANEL);
   check(`…and the panel's end (the rail goes to another panel) lets go of every one (${spell(base, [pend])})`, pend.win === base && pend.ro === 0, { base, pend });
@@ -745,7 +745,7 @@ try {
   const wmin = await evalJs(`(() => { const o = document.getElementById('agents-dialog-overlay'); const w = o && [...app.wm.windows.values()].find((x) => x.element.contains(o)); if (!w) return null; app.wm.minimize(w.id); return { minimized: !!w.isMinimized, hidden: getComputedStyle(w.element).display === 'none', connected: o.isConnected }; })()`);
   const wruns = [];
   for (let k = 0; k < 5; k++) { const done = await rerender(WIN, wopen.rows); wruns.push({ done, ...(await liveCount(WIN)) }); }
-  check(`…the same for a MINIMIZED Agents window (${JSON.stringify(wmin)}): five re-renders, its ${wopen.rows} rows' count FLAT (${spell(base, [wopen, ...wruns])})`, !!wmin && wmin.minimized && wmin.hidden && wmin.connected && wopen.rows >= 2 && wopen.win - base === wopen.rows && wopen.ro === wopen.rows && wruns.every((c) => c.done && c.win === wopen.win && c.ro === wopen.ro), { base, wopen, wmin, wruns });
+  check(`…the same for a MINIMIZED Agents window (${JSON.stringify(wmin)}): five re-renders, its ${wopen.rows} rows' count FLAT (${spell(base, [wopen, ...wruns])})`, !!wmin && gateOf(wmin.minimized) && gateOf(wmin.hidden) && gateOf(wmin.connected) && wopen.rows >= 2 && wopen.win - base === wopen.rows && wopen.ro === wopen.rows && verdictOf(wruns.every((c) => c.done && c.win === wopen.win && c.ro === wopen.ro)), { base, wopen, wmin, wruns });
   await evalJs(`(() => { const o = document.getElementById('agents-dialog-overlay'); const x = o && o.querySelector('.dialog-close'); if (x) x.click(); return 1; })()`); await sleep(300);
   const wend = { ...(await liveCount(WIN)), dialog: await evalJs(`!!document.getElementById('agents-dialog-overlay')`) };
   check(`…and its ✕ lets go of every one (${spell(base, [wend])}; dialog gone: ${!wend.dialog})`, !wend.dialog && wend.win === base && wend.ro === 0, { base, wend });
@@ -753,15 +753,15 @@ try {
   // the NONE shape: the hub re-boots over the same data/ with a login shell that finds no CLI
   { const old = srv; await new Promise((r) => { const t = setTimeout(() => { try { old.kill('SIGKILL'); } catch { } r(); }, 8000); old.once('exit', () => { clearTimeout(t); r(); }); old.kill('SIGTERM'); }); }
   srvEnv = { ...VNC_ENV, ...envFor('none') }; bootServer();
-  check('the hub re-boots with the NONE shape', await waitServer());
+  check('the hub re-boots with the NONE shape', verdictOf(await waitServer()));
   { const sh = await until(async () => { const v = await cliShape(); return shapeIs(v, 'none') ? v : null; }, 20000, 300);
     check(`THE FIXTURE'S SHAPE, never the box's: the hub's (scratch) login shell now finds no claude and no codex (${JSON.stringify(sh || await cliShape())})`, !!sh); }
   for (const lang of ['en', 'zh']) {
     const st = await openAgents({ phone: true, lang });
-    check(`${lang} · NONE · 352: the rows are the base's — Install · Re-check, nothing folded, no «…», no sideways overflow (${JSON.stringify(st && st.map((r) => [r.name, r.inline.length, r.folded.length, r.more]))})`, noSideways(st) && st.every((r) => !r.more && r.folded.length === 0 && r.inline.length <= 3) && ['Claude Code', 'Codex'].every((n) => (st.find((r) => r.name === n) || {}).inline?.length === 2), st);
+    check(`${lang} · NONE · 352: the rows are the base's — Install · Re-check, nothing folded, no «…», no sideways overflow (${JSON.stringify(st && st.map((r) => [r.name, r.inline.length, r.folded.length, r.more]))})`, gateOf(noSideways(st)) && gateOf(st.every((r) => !r.more && r.folded.length === 0 && r.inline.length <= 3)) && verdictOf(['Claude Code', 'Codex'].every((n) => (st.find((r) => r.name === n) || {}).inline?.length === 2)), st);
     if (lang === 'en') await shot('roster-375-none-en.png');
     const st320 = await at320();
-    check(`${lang} · NONE · 320: still nothing folded and no sideways overflow (${st320 && st320.map((r) => r.right + '/' + r.secW).join(' ')})`, noSideways(st320, { section: false }) && st320.every((r) => !r.more && r.folded.length === 0), st320);
+    check(`${lang} · NONE · 320: still nothing folded and no sideways overflow (${st320 && st320.map((r) => r.right + '/' + r.secW).join(' ')})`, gateOf(noSideways(st320, { section: false })) && verdictOf(st320.every((r) => !r.more && r.folded.length === 0)), st320);
   }
   await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
   const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resource/.test(e));
@@ -772,4 +772,4 @@ try {
   try { ws.close(); } catch {}
 }
 console.log(failed ? `\n${failed} FAILED` : '\nroster reset-eta test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

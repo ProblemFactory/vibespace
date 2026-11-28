@@ -24,48 +24,48 @@ import { fileURLToPath } from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf-8');
 
 console.log('① the faces are named for who drives them — labels at their sources, ids untouched');
 {
   const html = read('public/index.html');
-  ok(/<button id="btn-browser" class="toolbar-action">[\s\S]*?<span data-i18n>Web view<\/span><\/button>/.test(html), "toolbar #btn-browser reads 'Web view' (id unchanged)");
+  ok(verdictOf(/<button id="btn-browser" class="toolbar-action">[\s\S]*?<span data-i18n>Web view<\/span><\/button>/.test(html)), "toolbar #btn-browser reads 'Web view' (id unchanged)");
   const bw = read('src/lib/browser-window.js');
-  ok(/let startTitle = t\('Web view'\);/.test(bw) && /type: 'browser', label: 'Web view',/.test(bw) && /action: 'openBrowser'/.test(bw), "the web view's untitled window + kind label say 'Web view' (type browser, action openBrowser unchanged)");
-  ok(/registerCommand\(\{ id: 'browser\.open', title: 'Open a web view',/.test(read('src/lib/command-mode.js')), "command browser.open is titled 'Open a web view' (plain English like its siblings — wrapped in t() where rendered; id unchanged)");
+  ok(gateOf(/let startTitle = t\('Web view'\);/.test(bw)) && gateOf(/type: 'browser', label: 'Web view',/.test(bw)) && verdictOf(/action: 'openBrowser'/.test(bw)), "the web view's untitled window + kind label say 'Web view' (type browser, action openBrowser unchanged)");
+  ok(verdictOf(/registerCommand\(\{ id: 'browser\.open', title: 'Open a web view',/.test(read('src/lib/command-mode.js'))), "command browser.open is titled 'Open a web view' (plain English like its siblings — wrapped in t() where rendered; id unchanged)");
   const mn = read('src/lib/mobile-nav.js');
   const sheet = /_showCreateSheet\(\) \{([\s\S]*?)\n  \}/.exec(mn)?.[1] || '';
-  ok(/row\(UI_ICONS\.globe, t\('Web view'\), \(\) => app\.openBrowser\(\)\)/.test(sheet), "phone '+' sheet: the globe row is 'Web view'");
-  ok(/const APPS_ICON = getCommand\('desktopApps\.open'\)\?\.icon \|\| UI_ICONS\.monitor;/.test(sheet) && /if \(app\._desktopAppsAvailable\) items\.push\(row\(APPS_ICON, t\('Apps…'\), \(\) => runCommand\('desktopApps\.open', \{ app \}\)\)\);/.test(sheet), "phone '+' sheet: 'Apps…' (design 009 §B6: one word) gated on the desktop-apps probe, through the one command");
-  ok(/if \(app\._browserProfiles\) items\.push\(row\(UI_ICONS\.browserLive, t\('Agent browser'\), \(\) => this\._openAgentBrowser\(\)\)\);/.test(sheet), "phone '+' sheet: 'Agent browser' gated on the profile digest, on the window-with-a-dot");
+  ok(verdictOf(/row\(UI_ICONS\.globe, t\('Web view'\), \(\) => app\.openBrowser\(\)\)/.test(sheet)), "phone '+' sheet: the globe row is 'Web view'");
+  ok(gateOf(/const APPS_ICON = getCommand\('desktopApps\.open'\)\?\.icon \|\| UI_ICONS\.monitor;/.test(sheet)) && verdictOf(/if \(app\._desktopAppsAvailable\) items\.push\(row\(APPS_ICON, t\('Apps…'\), \(\) => runCommand\('desktopApps\.open', \{ app \}\)\)\);/.test(sheet)), "phone '+' sheet: 'Apps…' (design 009 §B6: one word) gated on the desktop-apps probe, through the one command");
+  ok(verdictOf(/if \(app\._browserProfiles\) items\.push\(row\(UI_ICONS\.browserLive, t\('Agent browser'\), \(\) => this\._openAgentBrowser\(\)\)\);/.test(sheet)), "phone '+' sheet: 'Agent browser' gated on the profile digest, on the window-with-a-dot");
   const pick = /_openAgentBrowser\(\) \{([\s\S]*?)\n  \}/.exec(mn)?.[1] || '';
-  ok(/app\.sessions\??\.get\??\.?\(app\.wm\.activeWindowId\)/.test(pick) && /s\.browserKey && !s\.host/.test(pick) && /openBrowserLive\(\{ sessionId: /.test(pick) && /_sheet\(/.test(pick) && /openBrowserProfiles\(\)/.test(pick),
+  ok(gateOf(/app\.sessions\??\.get\??\.?\(app\.wm\.activeWindowId\)/.test(pick)) && gateOf(/s\.browserKey && !s\.host/.test(pick)) && gateOf(/openBrowserLive\(\{ sessionId: /.test(pick)) && gateOf(/_sheet\(/.test(pick)) && verdictOf(/openBrowserProfiles\(\)/.test(pick)),
     "…the Agent browser row: the active session's live view when there is session context, else a session picker (every live local session holding a browser), else the Agent browser window");
   const sc = read('src/lib/session-card.js');
-  ok(/id: 'session\.pinBrowser', title: \(\) => tr\('Agent browser profile…'\)/.test(sc) && /id: 'session\.browserLive', title: \(\) => tr\('Agent browser — live view'\)/.test(sc) && /id: 'session\.browserHandback', title: \(\) => tr\('Hand the agent browser back'\)/.test(sc), 'the three card-menu commands carry the agent-browser names (command ids unchanged)');
+  ok(gateOf(/id: 'session\.pinBrowser', title: \(\) => tr\('Agent browser profile…'\)/.test(sc)) && gateOf(/id: 'session\.browserLive', title: \(\) => tr\('Agent browser — live view'\)/.test(sc)) && verdictOf(/id: 'session\.browserHandback', title: \(\) => tr\('Hand the agent browser back'\)/.test(sc)), 'the three card-menu commands carry the agent-browser names (command ids unchanged)');
   const sp = read('src/lib/session-props.js');
-  ok(/const brSec = section\(t\('Agent browser'\)\);/.test(sp) && /brBtn\.textContent = t\('Agent browser profile…'\);/.test(sp), "Session Properties: the section is 'Agent browser'");
+  ok(gateOf(/const brSec = section\(t\('Agent browser'\)\);/.test(sp)) && verdictOf(/brBtn\.textContent = t\('Agent browser profile…'\);/.test(sp)), "Session Properties: the section is 'Agent browser'");
   const ss = read('src/lib/settings-schema.js');
   const cats = [...ss.matchAll(/category: t\('([^']+)'\), liveApply: true/g)].map((m) => m[1]);
   ok(!/category: t\('Browser'\)/.test(ss) && ss.split("category: t('Agent browser')").length - 1 === 23, `Settings: the 23 agent-browser rows (window.realDesktopTargets moved to Desktop apps, 2.369.202) sit in category 'Agent browser' (none left in 'Browser'; ${cats.filter((c) => c === 'Agent browser').length} counted — 12 + MULTIVIEW's browser.defaultPerConversationCap / browser.idleReleaseAfterTurnMs + lane S4's browser.fitPageToView + 2026-09-27's browser.traceBytesPerProfile + B-6ae8's browser.humanKeepMs + lane headless-fallback's browser.noDisplayMode + lane browser-propose's browser.automationFlag + lane browser-resume's browser.keepConversationBrowser / keptBytesPerConversation / keptBytesTotal + lane browser-admin's browser.cli + lane browser-windows's browser.maxRunning + lane browser-swiftshader-cpu's browser.idlePaintFreeze − dc-browser-providers' browser.cloak.enabled − lane engine-spi-egress L3's two retired browser.cloak.* rows, the never-run container switch deleted 2.369.213 + lane engine-plugin's browser.defaultEngine + the exit check's browser.exitCheckUrl)`);
-  ok(/^  t\('Agent browser'\),$/m.test(ss) && !/^  t\('Browser'\),$/m.test(ss) && /categories: \[t\('Integration'\), t\('Channels'\), t\('Background Work'\), t\('Agent browser'\), t\('Desktop apps'\)\]/.test(ss), 'Settings: SETTINGS_CATEGORIES and the Services group name the renamed category');
-  ok(/'toolbar\.showBrowserButton': \{\s*type: 'boolean', default: true, label: t\('Show Web view button'\)/.test(ss) && /'browser\.isolateSessions'/.test(ss), "Settings: the toolbar row reads 'Show Web view button' (keys toolbar.showBrowserButton / browser.* unchanged)");
-  ok(/\{ id: 'btn-browser',\s+label: (?:tr\()?'Web view button'\)?,\s+hideKey: 'toolbar\.showBrowserButton'/.test(read('src/lib/customize-mode.js')), "customize mode names the element 'Web view button'");
-  ok(/check\(t\('Web view button'\), s\.get\('toolbar\.showBrowserButton'\)\)/.test(read('src/lib/app.js')), "the toolbar context menu's toggle reads 'Web view button'");
+  ok(gateOf(/^  t\('Agent browser'\),$/m.test(ss)) && !/^  t\('Browser'\),$/m.test(ss) && verdictOf(/categories: \[t\('Integration'\), t\('Channels'\), t\('Background Work'\), t\('Agent browser'\), t\('Desktop apps'\)\]/.test(ss)), 'Settings: SETTINGS_CATEGORIES and the Services group name the renamed category');
+  ok(gateOf(/'toolbar\.showBrowserButton': \{\s*type: 'boolean', default: true, label: t\('Show Web view button'\)/.test(ss)) && verdictOf(/'browser\.isolateSessions'/.test(ss)), "Settings: the toolbar row reads 'Show Web view button' (keys toolbar.showBrowserButton / browser.* unchanged)");
+  ok(verdictOf(/\{ id: 'btn-browser',\s+label: (?:tr\()?'Web view button'\)?,\s+hideKey: 'toolbar\.showBrowserButton'/.test(read('src/lib/customize-mode.js'))), "customize mode names the element 'Web view button'");
+  ok(verdictOf(/check\(t\('Web view button'\), s\.get\('toolbar\.showBrowserButton'\)\)/.test(read('src/lib/app.js'))), "the toolbar context menu's toggle reads 'Web view button'");
   const dl = read('src/lib/desktop-app-launcher.js');
-  ok(/you drive with your mouse and keyboard — agents cannot see it unless you share it\./.test(dl), "Apps dialog intro says who operates it: you, with mouse and keyboard; agents cannot see it unless you share it (desktop lane E, D1)");
-  ok(/escHtml\(row\.browser && !isLaunching && !unavailable \? `\$\{t\('Browser app'\)\} · \$\{sub\}` : sub\)/.test(dl), "Apps catalog card: 'Browser app ·' sub-label gated on row.browser (a startable browser row — a dimmed one keeps only its short reason, the B-bfe6 Browsers section's layout)");
-  ok(!/Settings → Browser'/.test(dl) && dl.split("t('Agents on your real desktop: off')").length - 1 === 1 && /settingsDoor\(app, \(d && d\.setting\) \|\| 'window\.realDesktopTargets'/.test(dl), "Apps dialog's desktop-consent line says the switch's state with ITS door («Turn on…» = the Desktop apps row) — one sentence, drawn on the footer line (said ONCE since design 009 §B3) and as the read-error fallback (lane ui-needs-a-button: never a menu path)");
+  ok(verdictOf(/you drive with your mouse and keyboard — agents cannot see it unless you share it\./.test(dl)), "Apps dialog intro says who operates it: you, with mouse and keyboard; agents cannot see it unless you share it (desktop lane E, D1)");
+  ok(verdictOf(/escHtml\(row\.browser && !isLaunching && !unavailable \? `\$\{t\('Browser app'\)\} · \$\{sub\}` : sub\)/.test(dl)), "Apps catalog card: 'Browser app ·' sub-label gated on row.browser (a startable browser row — a dimmed one keeps only its short reason, the B-bfe6 Browsers section's layout)");
+  ok(!/Settings → Browser'/.test(dl) && dl.split("t('Agents on your real desktop: off')").length - 1 === 1 && verdictOf(/settingsDoor\(app, \(d && d\.setting\) \|\| 'window\.realDesktopTargets'/.test(dl)), "Apps dialog's desktop-consent line says the switch's state with ITS door («Turn on…» = the Desktop apps row) — one sentence, drawn on the footer line (said ONCE since design 009 §B3) and as the read-error fallback (lane ui-needs-a-button: never a menu path)");
   const tv = read('src/lib/browser-trace-view.js');
-  ok(tv.split("t('action trace is off')").length - 1 === 2 && (tv.match(/settingsDoor\((?:view && view\.app|app), 'browser\.actionTrace'/g) || []).length === 3 && /\(Agent browser\)'\)/.test(tv), "the trace pointers carry the action trace switch's door (lane ui-needs-a-button pick 5: never a menu path) / name the Agent browser window");
+  ok(tv.split("t('action trace is off')").length - 1 === 2 && (tv.match(/settingsDoor\((?:view && view\.app|app), 'browser\.actionTrace'/g) || []).length === 3 && verdictOf(/\(Agent browser\)'\)/.test(tv)), "the trace pointers carry the action trace switch's door (lane ui-needs-a-button pick 5: never a menu path) / name the Agent browser window");
   const lw = read('src/lib/browser-live-window.js');
   const btr = read('src/browser-trace.js'); // lane live-input: the recording chip's words moved to PURE recordingChipWords
-  ok(/title: t\('Agent browser \(live\)'\), type: 'browser-live'/.test(lw) && /in Agent browser\.'\)/.test(btr) && /Click to open Agent browser/.test(btr) && /t\('Agent browser is not available'\)/.test(lw), "the live view: window title 'Agent browser (live)', its pointers name the Agent browser window");
+  ok(gateOf(/title: t\('Agent browser \(live\)'\), type: 'browser-live'/.test(lw)) && gateOf(/in Agent browser\.'\)/.test(btr)) && gateOf(/Click to open Agent browser/.test(btr)) && verdictOf(/t\('Agent browser is not available'\)/.test(lw)), "the live view: window title 'Agent browser (live)', its pointers name the Agent browser window");
   const rail = read('src/lib/sidebar-rail.js');
-  ok(/browser: 'Agent browser',/.test(rail) && /item\('browser', tr\('Agent browser'\), /.test(rail), "rail: the browser item and its header title say 'Agent browser' (rail id `browser` unchanged)");
+  ok(gateOf(/browser: 'Agent browser',/.test(rail)) && verdictOf(/item\('browser', tr\('Agent browser'\), /.test(rail)), "rail: the browser item and its header title say 'Agent browser' (rail id `browser` unchanged)");
   // ids NOT touched (layout replay reads ids)
-  ok(/type: 'browser-profiles', label: 'Agent browser', singleton: true/.test(tv) && /action: 'openBrowserProfiles'/.test(tv) && /action: 'openBrowserLive'/.test(lw) && /data-rail|b\.dataset\.rail = id/.test(rail), 'ids unchanged: browser-profiles / openBrowserProfiles / openBrowserLive / rail id');
+  ok(gateOf(/type: 'browser-profiles', label: 'Agent browser', singleton: true/.test(tv)) && gateOf(/action: 'openBrowserProfiles'/.test(tv)) && gateOf(/action: 'openBrowserLive'/.test(lw)) && verdictOf(/data-rail|b\.dataset\.rail = id/.test(rail)), 'ids unchanged: browser-profiles / openBrowserProfiles / openBrowserLive / rail id');
 }
 
 console.log('② the i18n census — every new key in zh AND ja; every retired key gone');
@@ -101,7 +101,7 @@ const ja = (await import('../src/lib/i18n-ja.js')).default;
   ok(!wrong.length, 'the tabled names carry the tabled words (faces §5.2 / D10)', wrong.join(' | '));
   const intros = Object.keys(zh).filter((k) => k.startsWith('Opens a graphical program from this machine'));
   const intro = intros[0];
-  ok(intros.length === 1 && /agents cannot see it unless you share it/.test(intro) && ja[intro] && /共享/.test(zh[intro]) && /agent/.test(zh[intro]) && /エージェント/.test(ja[intro]) && /共有/.test(ja[intro]), "the Apps dialog's intro (who operates it) is translated in both, saying agents cannot see it unless you share it (lane E) — the retired wording is gone");
+  ok(intros.length === 1 && gateOf(/agents cannot see it unless you share it/.test(intro)) && gateOf(ja[intro]) && gateOf(/共享/.test(zh[intro])) && gateOf(/agent/.test(zh[intro])) && gateOf(/エージェント/.test(ja[intro])) && verdictOf(/共有/.test(ja[intro])), "the Apps dialog's intro (who operates it) is translated in both, saying agents cannot see it unless you share it (lane E) — the retired wording is gone");
   // retired: absent from both unless a source still says it
   const RETIRED = ['Browser profiles', 'Browser profiles…', 'Browser (live)', 'Browser profile…', 'Live browser view', 'Hand back the browser', 'Show Browser button', 'Browser button',
     'Open this URL in the embedded browser', 'Off — turn it on in Settings → Browser', 'action trace is off (Settings → Browser)', 'The action trace is OFF (Settings → Browser → Action trace).',
@@ -115,7 +115,7 @@ const ja = (await import('../src/lib/i18n-ja.js')).default;
   console.log(`  (retired keys a source still says, kept: ${stillSaid.join(' | ') || 'none'})`);
   ok(!stillSaid.some((k) => k !== 'Browser'), 'no retired NAME is still said anywhere (only the bare word "Browser" may survive, for its other uses)', stillSaid.join(' | '));
   // NEGATIVE CONTROL: the detector sees a live t() spelling and ignores a comment mention
-  ok(new RegExp(`\\bt\\('Web view'[,)]`).test("x = t('Web view');") && !said('Browser profiles') , 'NEGATIVE CONTROL: the census recognises a live t() call; the retired name has none left');
+  ok(gateOf(new RegExp(`\\bt\\('Web view'[,)]`).test("x = t('Web view');")) && !said('Browser profiles') , 'NEGATIVE CONTROL: the census recognises a live t() call; the retired name has none left');
 }
 
 console.log('③ the mockup-parity control — docs/mockups/browser-faces copied intact');
@@ -128,19 +128,19 @@ console.log('③ the mockup-parity control — docs/mockups/browser-faces copied
   const shots = idx.map((e) => { try { return JSON.parse(read(`${dir}/${e.png.replace(/\.png$/, '.json')}`)); } catch { return null; } });
   const green = idx.filter((e, i) => judge(e, shots[i]));
   ok(idx.length === 12 && green.length === 12, `index.json: 12/12 shots drawn with every shot's control undrawn (${green.length}/${idx.length})`);
-  ok(['a', 'b', 'c'].every((d) => idx.filter((e) => e.dir === d).length === 4) && ['direction-a.html', 'direction-b.html', 'direction-c.html', 'build.mjs', 'shoot.mjs'].every((f) => fs.existsSync(path.join(repo, dir, f))), 'three directions × (desktop zh/en/ja + phone zh), the three HTML files and both scripts present');
+  ok(gateOf(['a', 'b', 'c'].every((d) => idx.filter((e) => e.dir === d).length === 4)) && verdictOf(['direction-a.html', 'direction-b.html', 'direction-c.html', 'build.mjs', 'shoot.mjs'].every((f) => fs.existsSync(path.join(repo, dir, f)))), 'three directions × (desktop zh/en/ja + phone zh), the three HTML files and both scripts present');
   const planted = idx[0] && { ...idx[0], faces: idx[0].faces.map((f) => ({ ...f, light: 0, colours: 1 })) };
   const plantedShot = shots[0] && { ...shots[0], control: { ...shots[0].control, painted: true } };
-  ok(!!planted && judge(idx[0], shots[0]) && !judge(planted, shots[0]) && !judge(idx[0], plantedShot), 'NEGATIVE CONTROL: an undrawn face, or a painted control, fails the same predicate');
+  ok(!!planted && gateOf(judge(idx[0], shots[0])) && !judge(planted, shots[0]) && !judge(idx[0], plantedShot), 'NEGATIVE CONTROL: an undrawn face, or a painted control, fails the same predicate');
 }
 
 console.log('④ the design doc records the choice');
 for (const f of ['docs/design-browser-faces.zh.md', 'docs/design-browser-faces.md']) {
-  ok(/SHIPPED \(B\), 2\.369\.168/.test(read(f)), `${f}: §5.1 carries 'SHIPPED (B), 2.369.168'`);
+  ok(verdictOf(/SHIPPED \(B\), 2\.369\.168/.test(read(f))), `${f}: §5.1 carries 'SHIPPED (B), 2.369.168'`);
 }
 
 console.log('⑤ the gate');
-ok(/\{ name: 'test-browser-faces', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs')), 'ci.mjs carries test-browser-faces in the fast tier');
+ok(verdictOf(/\{ name: 'test-browser-faces', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs'))), 'ci.mjs carries test-browser-faces in the fast tier');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

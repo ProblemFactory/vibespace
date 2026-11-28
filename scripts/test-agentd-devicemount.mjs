@@ -24,7 +24,7 @@ process.env.VIBESPACE_AGENTD_ROOT = path.join(tmp, 'agentd');
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // fixture folder with a subdir + a file with known ranged content
@@ -81,12 +81,12 @@ console.log('— PROPFIND listings through the tunnel (rclone webdav backend sha
   const r = await httpThroughTunnel(sf.port, '/', { Depth: '1' }, 'PROPFIND');
   const xml = r.body.toString('utf8');
   check('root PROPFIND served (207 + entries)', r.status === 207
-    && /<D:displayname>hello.txt<\/D:displayname>/.test(xml)
-    && /<D:href>\/sub\/<\/D:href>/.test(xml) && /<D:collection\/>/.test(xml), JSON.stringify(xml.slice(0, 240)));
+    && gateOf(/<D:displayname>hello.txt<\/D:displayname>/.test(xml))
+    && gateOf(/<D:href>\/sub\/<\/D:href>/.test(xml)) && verdictOf(/<D:collection\/>/.test(xml)), JSON.stringify(xml.slice(0, 240)));
   const rs = await httpThroughTunnel(sf.port, '/sub/', { Depth: '1' }, 'PROPFIND');
-  check('subdirectory PROPFIND served', rs.status === 207 && /<D:displayname>nested.txt<\/D:displayname>/.test(rs.body.toString()), JSON.stringify(rs.body.toString().slice(0, 160)));
+  check('subdirectory PROPFIND served', rs.status === 207 && verdictOf(/<D:displayname>nested.txt<\/D:displayname>/.test(rs.body.toString())), JSON.stringify(rs.body.toString().slice(0, 160)));
   const opt = await httpThroughTunnel(sf.port, '/', {}, 'OPTIONS');
-  check('OPTIONS advertises DAV', opt.status === 200 && String(opt.headers.dav || '').includes('1'), JSON.stringify(opt.headers.dav));
+  check('OPTIONS advertises DAV', opt.status === 200 && verdictOf(String(opt.headers.dav || '').includes('1')), JSON.stringify(opt.headers.dav));
   const dirGet = await httpThroughTunnel(sf.port, '/sub/');
   check('GET on a directory refused (list via PROPFIND)', dirGet.status === 403, String(dirGet.status));
 }
@@ -102,7 +102,7 @@ console.log('— ranged GET (the VFS read pattern) —');
 {
   const r = await httpThroughTunnel(sf.port, '/hello.txt', { Range: 'bytes=10-19' });
   const expect = Buffer.from(CONTENT).subarray(10, 20);
-  check('206 partial content, exact 10 bytes', r.status === 206 && r.body.equals(expect), `got ${r.body.length}b status ${r.status}`);
+  check('206 partial content, exact 10 bytes', r.status === 206 && verdictOf(r.body.equals(expect)), `got ${r.body.length}b status ${r.status}`);
   const cr = r.headers['content-range'];
   check('Content-Range header correct', cr === `bytes 10-19/${Buffer.byteLength(CONTENT)}`, JSON.stringify(cr));
 }
@@ -119,7 +119,7 @@ console.log('— unserve-folder frees the device port —');
   await sleep(300);
   let gone = false;
   try { const r = await httpThroughTunnel(sf.port, '/'); gone = !r.body.length || r.status >= 500; } catch { gone = true; }
-  check('folder server torn down (port no longer serves)', gone, 'still served after unserve');
+  check('folder server torn down (port no longer serves)', verdictOf(gone), 'still served after unserve');
 }
 
 endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT);
@@ -127,4 +127,4 @@ dm.stop();
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall device-folder-mount chain tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

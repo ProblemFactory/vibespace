@@ -39,7 +39,7 @@ const { WebSocket, WebSocketServer } = require('ws');
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -112,7 +112,7 @@ console.log('— ① browserFactFor + browserFactWords: every combination ⇒ ON
   // the words' tooltip carries the ids (never the face), the verbatim failure, the pin and the last use
   const failed = BF.browserFactFor(sess({ pinId: WORK }), view({ pin: { profileId: WORK, at: 50 }, own: { state: 'failed', lastError: 'the browser did not start: SingletonLock: File exists' } }));
   const tw = W(failed).tooltip;
-  ok(/ids: bp-00000001 · bk-0000000a/.test(tw) && /Why it did not start: the browser did not start: SingletonLock/.test(tw) && /^Using: work — could not start/.test(tw) && /Pinned: work/.test(tw), '① the tooltip carries what the face does not: the failure verbatim, the pin, and the ids', tw);
+  ok(gateOf(/ids: bp-00000001 · bk-0000000a/.test(tw)) && gateOf(/Why it did not start: the browser did not start: SingletonLock/.test(tw)) && gateOf(/^Using: work — could not start/.test(tw)) && verdictOf(/Pinned: work/.test(tw)), '① the tooltip carries what the face does not: the failure verbatim, the pin, and the ids', tw);
   // the digest: every printed field moves it, a clock never does
   const base = BF.browserFactFor(sess({ pinId: WORK, active: WORK }), view({ pin: { profileId: WORK, at: 50 }, attachments: [{ profileId: WORK, label: 'work', isDefault: true }], browsers: { [WORK]: { state: 'ready' } }, live: WORK }));
   const renamed = BF.browserFactFor(sess({ pinId: WORK, active: WORK }), view({ profiles: [{ id: WORK, label: 'Work account' }], pin: { profileId: WORK, at: 50 }, attachments: [{ profileId: WORK, label: 'Work account', isDefault: true }], browsers: { [WORK]: { state: 'ready' } }, live: WORK }));
@@ -124,7 +124,7 @@ console.log('— ① browserFactFor + browserFactWords: every combination ⇒ ON
   // the words for a t() — the keys are what a translation sees (English-string-as-key)
   const seen = []; const tSpy = (s, p) => { seen.push(s); return s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? p[k] : m)); };
   BF.browserFactWords(failed, tSpy);
-  ok(seen.includes('pinned {p} · running {r} — {why}') && seen.includes('{p} could not start — another browser has it open') && seen.includes('no profile (temporary browser)'), '① the words go through the caller\'s t() with English keys (the dictionaries translate them)');
+  ok(gateOf(seen.includes('pinned {p} · running {r} — {why}')) && gateOf(seen.includes('{p} could not start — another browser has it open')) && verdictOf(seen.includes('no profile (temporary browser)')), '① the words go through the caller\'s t() with English keys (the dictionaries translate them)');
 }
 
 // ═══ ② liveFollowPlan ═══
@@ -158,13 +158,13 @@ console.log('— ③ deletePinnedVerdict · the receipt book · the credit rules
   const v0 = BF.deletePinnedVerdict({ label: 'work', pinnedBy: [] });
   const v1 = BF.deletePinnedVerdict({ label: 'work', pinnedBy: [{ browserKey: KEY, name: 'Second chat' }, { browserKey: 'bk-0000000b', name: 'Lark test' }, { browserKey: KEY, name: 'Second chat' }] });
   const v2 = BF.deletePinnedVerdict({ label: 'work', pinnedBy: [{ browserKey: KEY }], unpin: true });
-  ok(v0.ok && !v1.ok && v1.code === 'pinned' && v1.count === 2 && /2 conversations use "work" as their pin — unpin them first/.test(v1.error) && v2.ok && v2.unpin.length === 1, '③ a pinned profile is refused `pinned` with the count (keys, not rows) and the names; with unpin it proceeds', JSON.stringify(v1));
+  ok(gateOf(v0.ok) && !v1.ok && v1.code === 'pinned' && v1.count === 2 && gateOf(/2 conversations use "work" as their pin — unpin them first/.test(v1.error)) && gateOf(v2.ok) && v2.unpin.length === 1, '③ a pinned profile is refused `pinned` with the count (keys, not rows) and the names; with unpin it proceeds', JSON.stringify(v1));
   const b = S.receiptBook();
   const r1 = S.noteInputSent(b, 1000), r2 = S.noteInputSent(b, 1001), r3 = S.noteInputSent(b, 1002);
   S.noteInputReceipt(b, { rid: r1, ok: true });
   ok(b.delivered === 1 && b.failing === null && b.pending.size === 2, '③ a receipt settles its record (delivered)');
   S.noteInputReceipt(b, { rid: r2, ok: false, code: 'browser_refused', error: 'x' });
-  ok(b.failing && b.failing.code === 'browser_refused' && b.failed === 1, '③ a failed receipt makes the book FAILING (the bar says "not delivered")');
+  ok(gateOf(b.failing) && b.failing.code === 'browser_refused' && b.failed === 1, '③ a failed receipt makes the book FAILING (the bar says "not delivered")');
   ok(S.sweepInputReceipts(b, 1002 + S.INPUT_RECEIPT_MS - 1) === 0 && S.sweepInputReceipts(b, 1002 + S.INPUT_RECEIPT_MS + 1) === 1 && b.failing.code === 'no_answer' && b.pending.size === 0, `③ a record with no receipt in ${S.INPUT_RECEIPT_MS} ms is NOT DELIVERED (no_answer)`);
   ok(!S.noteInputReceipt(b, { rid: r3, ok: true }) && b.failing.code === 'no_answer', '③ a late / duplicate receipt changes nothing');
   const r4 = S.noteInputSent(b, 5000); S.noteInputReceipt(b, { rid: r4, ok: true });
@@ -174,17 +174,17 @@ console.log('— ③ deletePinnedVerdict · the receipt book · the credit rules
   const q = [{ at: 100 }, { at: 900 }, { at: 1000 }];
   const t1 = M.takeCredit(q, 100 + M.INPUT_CREDIT_MS + 50);
   ok(t1.expired.length === 1 && t1.credit === null && q.length === 2, '③ an expired credit leaves (its waiter is told); a live one is spent only by the Input.* it was minted for');
-  ok(M.takeCredit([], 0).credit === null && M.isInputMethod('Input.dispatchKeyEvent') && !M.isInputMethod('Page.reload'), '③ only Input.* spends a credit');
+  ok(M.takeCredit([], 0).credit === null && gateOf(M.isInputMethod('Input.dispatchKeyEvent')) && !M.isInputMethod('Page.reload'), '③ only Input.* spends a credit');
   // VERIFY S2 (2026-09-26): a credit is BOUND to the CDP call its record becomes — the fields 0.38.1 relays verbatim (measured)
   {
     const click = { type: 'input_mouse', eventType: 'mousePressed', x: 10, y: 20, button: 'left', clickCount: 1, modifiers: 0 };
     const key = { type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 0, text: 'a' };
     const touch = { type: 'input_touch', eventType: 'touchStart', touchPoints: [{ x: 60, y: 70 }] };
     const ec = M.creditExpectation(click), ek = M.creditExpectation(key), et = M.creditExpectation(touch);
-    ok(ec && ec.method === 'Input.dispatchMouseEvent' && ec.params.type === 'mousePressed' && ec.params.x === 10 && ec.params.button === 'left' && ek.method === 'Input.dispatchKeyEvent' && ek.params.text === 'a' && ek.params.windowsVirtualKeyCode === 65 && et.method === 'Input.dispatchTouchEvent' && et.params.touchPoints.length === 1, '③ creditExpectation = the CDP call the record becomes (method by kind, params.type = eventType, the fields the record carries)');
+    ok(gateOf(ec) && ec.method === 'Input.dispatchMouseEvent' && ec.params.type === 'mousePressed' && ec.params.x === 10 && ec.params.button === 'left' && ek.method === 'Input.dispatchKeyEvent' && ek.params.text === 'a' && ek.params.windowsVirtualKeyCode === 65 && et.method === 'Input.dispatchTouchEvent' && et.params.touchPoints.length === 1, '③ creditExpectation = the CDP call the record becomes (method by kind, params.type = eventType, the fields the record carries)');
     ok(M.creditExpectation({ type: 'config', maxFps: 5 }) === null && M.creditExpectation(null) === null && M.creditExpectation({ type: 'input_mouse' }) === null, '③ a record that becomes no Input.* call has no expectation (not creditable)');
     const asRelayed = (m) => ({ id: 1, method: m.method, params: { deltaX: 0, deltaY: 0, ...m.params } }); // the stream server's defaults ride along
-    ok(M.creditMatches(ec, asRelayed(ec)) && M.creditMatches(ek, { method: 'Input.dispatchKeyEvent', params: { ...ek.params } }) && M.creditMatches(et, { method: 'Input.dispatchTouchEvent', params: { modifiers: 0, ...et.params } }), '③ the relayed call matches its record (extra default params tolerated)');
+    ok(gateOf(M.creditMatches(ec, asRelayed(ec))) && gateOf(M.creditMatches(ek, { method: 'Input.dispatchKeyEvent', params: { ...ek.params } })) && verdictOf(M.creditMatches(et, { method: 'Input.dispatchTouchEvent', params: { modifiers: 0, ...et.params } })), '③ the relayed call matches its record (extra default params tolerated)');
     ok(!M.creditMatches(ec, { method: 'Input.dispatchMouseEvent', params: { ...ec.params, x: 999 } }) && !M.creditMatches(ec, { method: 'Input.dispatchKeyEvent', params: ec.params }) && !M.creditMatches(ec, { method: 'Input.insertText', params: { text: 'x' } }) && !M.creditMatches(ek, { method: 'Input.dispatchKeyEvent', params: { ...ek.params, text: 'b', key: 'b' } }) && !M.creditMatches(ek, { method: 'Input.dispatchKeyEvent', params: { type: 'keyDown' } }) && !M.creditMatches(null, asRelayed(ec)), '③ a different point, key, method, a bare type, or no expectation at all never matches');
     // verify r2 (2026-09-26): the credit is bound to the TAB the user is looking at too — an Input.* spends it only on a
     // PAGE session the lease was handed whose target IS that tab (measured 0.38.1: every dispatch rides a page sessionId)
@@ -192,21 +192,21 @@ console.log('— ③ deletePinnedVerdict · the receipt book · the credit rules
     const on = (sid, method, params) => ({ id: 1, sessionId: sid, method, params });
     const ekT = M.creditExpectation(key, { targetId: 'T1' }), ecT = M.creditExpectation(click, { targetId: 'T1' });
     ok(ekT.targetId === 'T1' && M.creditExpectation(key).targetId === null && M.creditExpectation(key, { targetId: '' }).targetId === null, '③ r2: the expectation names the tab the user is looking at (null when the stream did not name it)');
-    ok(M.creditSessionOk(ekT, 'S1', 'T1') && !M.creditSessionOk(ekT, 'S2', 'T2') && !M.creditSessionOk(ekT, 'S9', undefined) && !M.creditSessionOk(ekT, 'SB', null) && !M.creditSessionOk(ekT, null, 'T1') && M.creditSessionOk(M.creditExpectation(key), 'S2', 'T2') && !M.creditSessionOk(M.creditExpectation(key), 'S9', undefined), '③ r2: a page session of the lease on the credit\'s tab spends it; another tab, an unhanded session, the browser session, no session never do; a credit naming no tab takes any handed page session');
+    ok(gateOf(M.creditSessionOk(ekT, 'S1', 'T1')) && !M.creditSessionOk(ekT, 'S2', 'T2') && !M.creditSessionOk(ekT, 'S9', undefined) && !M.creditSessionOk(ekT, 'SB', null) && !M.creditSessionOk(ekT, null, 'T1') && gateOf(M.creditSessionOk(M.creditExpectation(key), 'S2', 'T2')) && !M.creditSessionOk(M.creditExpectation(key), 'S9', undefined), '③ r2: a page session of the lease on the credit\'s tab spends it; another tab, an unhanded session, the browser session, no session never do; a credit naming no tab takes any handed page session');
     const q = [{ at: 0, expect: ecT }, { at: 0, expect: ekT }];
     const t1 = M.takeCredit(q, 10, { msg: on('S1', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope });
-    ok(t1.credit && t1.credit.expect === ekT && q.length === 1 && q[0].expect === ecT, '③ takeCredit spends the MATCHING credit, not the head');
+    ok(gateOf(t1.credit) && t1.credit.expect === ekT && q.length === 1 && q[0].expect === ecT, '③ takeCredit spends the MATCHING credit, not the head');
     const t2 = M.takeCredit(q, 10, { msg: on('S1', 'Input.dispatchMouseEvent', { ...ec.params, x: 999 }), sessionTarget: scope });
     ok(t2.credit === null && q.length === 1, '③ an Input.* matching no credit takes none (the agent\'s own click burns nothing)');
     const t3 = M.takeCredit([{ at: 0, expect: ecT }, { at: 5000, expect: ekT }], 5000, { msg: on('S1', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope });
-    ok(t3.expired.length === 1 && t3.expired[0].expect === ecT && t3.credit && t3.credit.expect === ekT, '③ an expired credit leaves wherever it sits and its waiter is told');
+    ok(t3.expired.length === 1 && t3.expired[0].expect === ecT && gateOf(t3.credit) && t3.credit.expect === ekT, '③ an expired credit leaves wherever it sits and its waiter is told');
     const q2 = [{ at: 0, expect: ekT }];
     const miss = [on('S2', 'Input.dispatchKeyEvent', ek.params), on('S9', 'Input.dispatchKeyEvent', ek.params), on('SB', 'Input.dispatchKeyEvent', ek.params), { id: 1, method: 'Input.dispatchKeyEvent', params: ek.params }].map((m) => M.takeCredit(q2, 10, { msg: m, sessionTarget: scope }).credit);
-    ok(miss.every((c) => c === null) && q2.length === 1, '③ r2: the exact key on ANOTHER tab of the lease, on a session never handed out, on the browser session, or with no session spends nothing (the agent\'s mirror burns nothing)');
+    ok(gateOf(miss.every((c) => c === null)) && q2.length === 1, '③ r2: the exact key on ANOTHER tab of the lease, on a session never handed out, on the browser session, or with no session spends nothing (the agent\'s mirror burns nothing)');
     ok(M.takeCredit(q2, 10, { msg: on('S1', 'Input.dispatchKeyEvent', ek.params) }).credit === null && q2.length === 1 && M.takeCredit(q2, 10, { msg: on('S1', 'Input.dispatchKeyEvent', ek.params), sessionTarget: () => { throw new Error('x'); } }).credit === null, '③ r2: FAIL CLOSED — no session→tab reader (or one that throws) spends nothing');
-    ok(M.takeCredit(q2, 10, { msg: on('S1', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope }).credit && q2.length === 0, '③ r2: …and the same key on the user\'s own tab spends it');
+    ok(gateOf(M.takeCredit(q2, 10, { msg: on('S1', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope }).credit) && q2.length === 0, '③ r2: …and the same key on the user\'s own tab spends it');
     const q3 = [{ at: 0, expect: M.creditExpectation(key) }];
-    ok(M.takeCredit(q3, 10, { msg: on('S2', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope }).credit && M.takeCredit([{ at: 0, expect: M.creditExpectation(key) }], 10, { msg: on('S9', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope }).credit === null, '③ r2: a credit that names no tab (a stream server whose tabs carry no targetId) takes any handed page session, never an unhanded one');
+    ok(gateOf(M.takeCredit(q3, 10, { msg: on('S2', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope }).credit) && M.takeCredit([{ at: 0, expect: M.creditExpectation(key) }], 10, { msg: on('S9', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope }).credit === null, '③ r2: a credit that names no tab (a stream server whose tabs carry no targetId) takes any handed page session, never an unhanded one');
   }
   // VERIFY r3 (2026-09-26): a matching call on ANOTHER tab MARKS the credit (never burns it); an expired credit says what was seen
   {
@@ -217,7 +217,7 @@ console.log('— ③ deletePinnedVerdict · the receipt book · the credit rules
     const ek = M.creditExpectation(key), ekT = M.creditExpectation(key, { targetId: 'T1' }), ec = M.creditExpectation(click);
     const q4 = [{ at: 0, expect: ekT }];
     const t = M.takeCredit(q4, 10, { msg: on('S2', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope });
-    ok(t.credit === null && Array.isArray(t.otherTab) && t.otherTab.length === 1 && t.otherTab[0] === q4[0] && q4.length === 1, '③ r3: the exact key on ANOTHER tab spends nothing and is reported as otherTab — the mediator MARKS it, the queue keeps it');
+    ok(t.credit === null && gateOf(Array.isArray(t.otherTab)) && t.otherTab.length === 1 && t.otherTab[0] === q4[0] && q4.length === 1, '③ r3: the exact key on ANOTHER tab spends nothing and is reported as otherTab — the mediator MARKS it, the queue keeps it');
     ok(M.takeCredit(q4, 10, { msg: on('S1', 'Input.dispatchKeyEvent', ek.params), sessionTarget: scope }).credit === t.otherTab[0] && q4.length === 0, '③ r3: …and the user\'s own dispatch on their tab still spends the marked credit (a hostile mirror never costs the user their key)');
     ok(M.takeCredit([{ at: 0, expect: ekT }], 10, { msg: on('S1', 'Input.dispatchMouseEvent', { ...ec.params, x: 999 }), sessionTarget: scope }).otherTab.length === 0 && M.takeCredit([], 10).otherTab.length === 0, '③ r3: a call matching no credit marks nothing');
     ok(M.creditExpiryReceipt({ otherTab: true }).code === 'other_tab' && M.creditExpiryReceipt({ spent: true }).code === 'no_reply' && M.creditExpiryReceipt({ spent: true, otherTab: true }).code === 'no_reply' && M.creditExpiryReceipt({}).code === 'not_dispatched' && M.creditExpiryReceipt(null).code === 'not_dispatched', '③ r3: an expired credit says what was seen — no_reply (spent, the browser never answered: a hidden tab), other_tab (a matching call refused on another tab), else not_dispatched');
@@ -235,7 +235,7 @@ console.log('— ③ deletePinnedVerdict · the receipt book · the credit rules
     const g1 = S.takeoverAnchorStep(a0, { activeTarget: 'T2', now: 1000 + S.TAKEOVER_ANCHOR_GRACE_MS });
     ok(g1.target === 'T2' && g1.switched === null && g1.at === 1000, `③ r3: a tabs record within the first ${S.TAKEOVER_ANCHOR_GRACE_MS} ms re-anchors silently (the in-flight switch that raced the takeover — measured: the daemon's tabs record lands 11–45 ms after its switch, ahead of its first dispatch)`);
     const sw = S.takeoverAnchorStep(a0, { activeTarget: 'T2', now: 1000 + S.TAKEOVER_ANCHOR_GRACE_MS + 1 });
-    ok(sw.target === 'T1' && sw.switched && sw.switched.from === 'T1' && sw.switched.to === 'T2' && sw.switched.at === 1000 + S.TAKEOVER_ANCHOR_GRACE_MS + 1, '③ r3: a tabs record naming another tab after that marks the takeover SWITCHED (from → to)');
+    ok(sw.target === 'T1' && gateOf(sw.switched) && sw.switched.from === 'T1' && sw.switched.to === 'T2' && sw.switched.at === 1000 + S.TAKEOVER_ANCHOR_GRACE_MS + 1, '③ r3: a tabs record naming another tab after that marks the takeover SWITCHED (from → to)');
     ok(S.takeoverAnchorStep(sw, { activeTarget: 'T1', now: 3000 }).switched === null && S.takeoverAnchorStep(sw, { activeTarget: null, now: 3000 }) === sw && S.takeoverAnchorStep(sw, { activeTarget: 'T3', now: 3000 }).switched.to === 'T3' && S.takeoverAnchorStep(a0, { activeTarget: 'T1', now: 9000 }) === a0, '③ r3: the anchor\'s own tab coming back clears the mark; a record naming no tab judges nothing; a further switch re-names the destination; the same tab changes nothing');
     ok(S.takeoverAnchorStep(S.takeoverAnchor(null, 1), { activeTarget: 'T9', now: 9000 }).target === 'T9' && S.takeoverAnchorStep(null, { activeTarget: 'T9', now: 1 }) === null && S.takeoverAnchorStep('x', { activeTarget: 'T9', now: 1 }) === null, '③ r3: an anchor with no tab yet adopts the first named one (a takeover already on when the relay is born); no anchor stays none');
     // VERIFY r4 (2026-09-27): THE GRACE IS A MEASURED CONSTANT — 3 × the p99 of the CLI-to-`tabs`-record latency (scripts/measure-anchor-grace.mjs,
@@ -243,11 +243,11 @@ console.log('— ③ deletePinnedVerdict · the receipt book · the credit rules
     ok(S.TABS_RECORD_LATENCY_P99_MS >= 20.37 && S.TAKEOVER_ANCHOR_GRACE_MS === Math.ceil(3 * S.TABS_RECORD_LATENCY_P99_MS) && S.TAKEOVER_ANCHOR_GRACE_MS <= 100, `③ r4: the grace is 3 × the measured p99 (${S.TABS_RECORD_LATENCY_P99_MS} ms ⇒ ${S.TAKEOVER_ANCHOR_GRACE_MS} ms), at most 100 ms — lowering the p99 or growing the grace needs a new measurement`);
     ok(S.takeoverAnchorStep(a0, { activeTarget: 'T2', now: 1000 + 63 }).switched !== null && S.takeoverAnchorStep(a0, { activeTarget: 'T2', now: 1000 + 62 }).switched === null, '③ r4: a record 63 ms into the takeover is a switch (refused); at 62 ms it is the in-flight one (followed)');
     const rc = S.tabSwitchedReceipt(sw);
-    ok(rc.ok === false && rc.code === 'tab_switched' && rc.from === 'T1' && rc.to === 'T2' && /hand back and take over again/.test(rc.error) && S.tabSwitchedReceipt(null).code === 'tab_switched', '③ r3: the receipt names the switch and the way out'); }
+    ok(rc.ok === false && rc.code === 'tab_switched' && rc.from === 'T1' && rc.to === 'T2' && gateOf(/hand back and take over again/.test(rc.error)) && S.tabSwitchedReceipt(null).code === 'tab_switched', '③ r3: the receipt names the switch and the way out'); }
   // VERIFY S2: an attachment whose profile record is gone (a lease outliving its record) never puts its raw id on the face
   { const f = BF.browserFactFor({ browserKey: KEY, pinId: null, pinOrigin: null, active: 'bp-0000gone', variant: 'D', remote: false }, { profiles: [], pin: null, attachments: [{ profileId: 'bp-0000gone', alias: 'x', label: '', isDefault: true }], browsers: {}, own: null, input: null, live: '', now: 1 });
-    ok(f.using.id === 'bp-0000gone' && f.using.label === null && W(f).line === 'a profile' && noRawId(W(f).line), '③ an attachment with no record left: the face says "a profile", the id only in the tooltip', JSON.stringify({ line: W(f).line, tip: W(f).tooltip })); }
-  ok(M.creditReceipt({ id: 1, result: {} }).ok && M.creditReceipt({ id: 1, error: { message: 'boom' } }).code === 'browser_refused' && M.creditReceipt(null).code === 'no_reply', '③ the receipt is the browser\'s own reply');
+    ok(f.using.id === 'bp-0000gone' && f.using.label === null && W(f).line === 'a profile' && verdictOf(noRawId(W(f).line)), '③ an attachment with no record left: the face says "a profile", the id only in the tooltip', JSON.stringify({ line: W(f).line, tip: W(f).tooltip })); }
+  ok(gateOf(M.creditReceipt({ id: 1, result: {} }).ok) && M.creditReceipt({ id: 1, error: { message: 'boom' } }).code === 'browser_refused' && M.creditReceipt(null).code === 'no_reply', '③ the receipt is the browser\'s own reply');
 }
 
 // ═══ ④ the REAL keeper + the ONE unpin ═══
@@ -265,31 +265,31 @@ console.log('— ④ the REAL keeper: factFor, the pinned delete, the unpin, the
   k.setPin(KEY, work.id, { origin: 'chosen' });
   const s1 = { _browserKey: KEY, _browserProfileId: work.id, _browserPinOrigin: 'chosen', _browserVariant: 'D', webuiName: 'Second chat' };
   const f1 = k.factFor(BF.sessionFactsOf(s1));
-  ok(f1 && f1.pinned && f1.pinned.label === 'work' && f1.using.kind === 'own' && f1.using.label === 'work' && W(f1).line === 'work', '④ factFor over the real registry: pinned work, its own browser opens it, the line is "work"', JSON.stringify(f1));
+  ok(gateOf(f1) && gateOf(f1.pinned) && f1.pinned.label === 'work' && f1.using.kind === 'own' && f1.using.label === 'work' && W(f1).line === 'work', '④ factFor over the real registry: pinned work, its own browser opens it, the line is "work"', JSON.stringify(f1));
   ok(k.pinnedBy(work.id).length === 1 && k.pinnedBy(pers.id).length === 0, '④ pinnedBy names the conversation pinning a profile');
   let threw = null; try { k.removeProfile(work.id); } catch (e) { threw = e; }
-  ok(threw && threw.code === 'pinned' && threw.pinnedCount === 1 && k.profile(work.id), '④ removing a PINNED profile is refused `pinned` (the record stays)', threw && threw.message);
+  ok(gateOf(threw) && threw.code === 'pinned' && threw.pinnedCount === 1 && verdictOf(k.profile(work.id)), '④ removing a PINNED profile is refused `pinned` (the record stays)', threw && threw.message);
   // the ONE unpin over a live session, through the routes module (the pin route's own path)
   const R = require('../src/routes/browser.js');
   const persisted = [], notices = [], repoints = [];
   const active = new Map([['sess-1', s1]]);
   R.setup({ keeper: k, activeSessions: active, persistPin: (s, id, o) => persisted.push({ id, o }), notice: (sid, s, n) => notices.push(n), browserEnv: () => ({ repointPin: (bk, dir) => { repoints.push({ bk, dir }); return { ok: true }; } }) });
   const g = R.pinGuardFor(work.id, false);
-  ok(g && g.code === 'pinned' && g.count === 1 && g.names.includes('Second chat'), '④ the route\'s guard counts the conversation and names it', JSON.stringify(g));
+  ok(gateOf(g) && g.code === 'pinned' && g.count === 1 && verdictOf(g.names.includes('Second chat')), '④ the route\'s guard counts the conversation and names it', JSON.stringify(g));
   const u = R.unpinProfile(work.id);
   ok(u.cleared === 1 && u.sessions[0] === 'sess-1' && s1._browserProfileId === null && s1._browserPinOrigin === 'harness', '④ unpin: the live session\'s own record is cleared', JSON.stringify({ u, pin: s1._browserProfileId }));
   // integration 2.369.192: under owner ruling A a live conversation's env never names a profile's directory (a pin is a
   // default ATTACHMENT), so the unpin re-points nothing ONTO a directory — any re-point there is is OFF one (dir null)
-  ok(persisted.some((p) => p.id === null) && repoints.every((r) => r.dir === null) && notices.some((n) => n.kind === 'browser-pin' && n.was === 'work'), '④ …its meta is persisted, its env never left on a directory (never an empty profile recreated at the old path), the agent is told "work → none"', JSON.stringify({ persisted, repoints, notices }));
+  ok(gateOf(persisted.some((p) => p.id === null)) && gateOf(repoints.every((r) => r.dir === null)) && verdictOf(notices.some((n) => n.kind === 'browser-pin' && n.was === 'work')), '④ …its meta is persisted, its env never left on a directory (never an empty profile recreated at the old path), the agent is told "work → none"', JSON.stringify({ persisted, repoints, notices }));
   const rm = k.removeProfile(work.id, { unpin: true });
   const f2 = k.factFor(BF.sessionFactsOf(s1));
-  ok(rm.removed === work.id && !k.profile(work.id) && f2.differs === 'pin_cleared' && W(f2).line === 'work was deleted — its pin was cleared · running nothing' && noRawId(W(f2).line), '④ the profile goes; the conversation\'s fact says "work was deleted — its pin was cleared" (no raw id, no dangling pin)', JSON.stringify(f2));
+  ok(rm.removed === work.id && !k.profile(work.id) && f2.differs === 'pin_cleared' && W(f2).line === 'work was deleted — its pin was cleared · running nothing' && verdictOf(noRawId(W(f2).line)), '④ the profile goes; the conversation\'s fact says "work was deleted — its pin was cleared" (no raw id, no dangling pin)', JSON.stringify(f2));
   // a stopped conversation's pin (no live session) is cleared in the keeper with the same mark
   const KEY_B = 'bk-0000000b';
   k.setPin(KEY_B, pers.id, { origin: 'chosen' });
   R.unpinProfile(pers.id);
   const markB = k._reg().pins[KEY_B];
-  ok(markB && markB.profileId === null && markB.cleared && markB.cleared.label === 'Personal' && repoints.some((r) => r.bk === KEY_B && r.dir === null), '④ a stopped conversation\'s pin: cleared in the keeper (with its mark) and its env re-pointed');
+  ok(gateOf(markB) && markB.profileId === null && gateOf(markB.cleared) && markB.cleared.label === 'Personal' && verdictOf(repoints.some((r) => r.bk === KEY_B && r.dir === null)), '④ a stopped conversation\'s pin: cleared in the keeper (with its mark) and its env re-pointed');
   // the boot heal: a live session whose pin names a profile that is gone
   const s2 = { _browserKey: 'bk-0000000c', _browserProfileId: 'bp-0000dead', _browserPinOrigin: 'chosen', _browserVariant: 'D', webuiName: 'Old chat' };
   active.set('sess-2', s2);
@@ -300,18 +300,18 @@ console.log('— ④ the REAL keeper: factFor, the pinned delete, the unpin, the
   // B-160d ⑤ CONTROL: the base's words (a labelless mark named "a deleted profile") say the word twice — the row above can go red
   { const MU5 = mutantCopies('browser-fact-words', REPO); const fsrc = fs.readFileSync(path.join(REPO, 'src/browser-fact.js'), 'utf8');
     const L5 = "    case 'pin_cleared': why = fact.pinCleared && fact.pinCleared.label ? t('{p} was deleted — its pin was cleared', { p: fact.pinCleared.label }) : t('the pinned profile was deleted — its pin was cleared'); break;";
-    ok(fsrc.includes(L5), 'B-160d ⑤ control setup: the pin_cleared words are found');
+    ok(verdictOf(fsrc.includes(L5)), 'B-160d ⑤ control setup: the pin_cleared words are found');
     const BF0 = MU5.load('src/browser-fact.js', editAnchor(fsrc, L5, "    case 'pin_cleared': why = t('{p} was deleted — its pin was cleared', { p: fact.pinCleared && fact.pinCleared.label ? fact.pinCleared.label : t('a deleted profile') }); break;", "src/browser-fact.js"), 'twice');
     const l0 = BF0.browserFactWords(after).line;
-    ok(/a deleted profile was deleted/.test(l0) && W(after).line !== l0, 'B-160d ⑤ CONTROL: the base\'s words say "' + l0 + '"');
+    ok(gateOf(/a deleted profile was deleted/.test(l0)) && W(after).line !== l0, 'B-160d ⑤ CONTROL: the base\'s words say "' + l0 + '"');
     // B-160d ③ / ④ — ALREADY FIXED ON THE BASE (OWNER RULING A, 2026-09-26), pinned here: a create never starts a browser (the
     // pin opens at the agent's first bare command) and no spawn is handed a pinned directory (so no own browser sits on the
     // deleted profile's cookies after a delete + unpin)
     const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), bkey = fs.readFileSync(path.join(REPO, 'src/server/browser-key.js'), 'utf8');
-    ok(!/\.(attach|start)\(\s*\{?\s*profileId/.test(wc) && !/keeper\(\)\??\.(attach|start)\(/.test(wc) && /cwd, pinnedDir: null,/.test(wc) && /pinnedDir: null \}\); \}/.test(bkey), 'B-160d ③/④ (fixed on the base by ruling A): the create path starts no browser and both env compositions pass pinnedDir: null');
-    for (const r of copiesCensus(MU5.files, MU5.dir, REPO, { label: 'B-160d ⑤ control: ' })) ok(r.pass, r.name, r.detail); }
+    ok(!/\.(attach|start)\(\s*\{?\s*profileId/.test(wc) && !/keeper\(\)\??\.(attach|start)\(/.test(wc) && gateOf(/cwd, pinnedDir: null,/.test(wc)) && verdictOf(/pinnedDir: null \}\); \}/.test(bkey)), 'B-160d ③/④ (fixed on the base by ruling A): the create path starts no browser and both env compositions pass pinnedDir: null');
+    for (const r of copiesCensus(MU5.files, MU5.dir, REPO, { label: 'B-160d ⑤ control: ' })) ok(verdictOf(r.pass), r.name, r.detail); }
   // the keeper's view: the own browser's last verb is stamped (pin_pending ends at the agent's next command)
-  ok(typeof k.factView === 'function' && k.factView(KEY).pin && k.factView(KEY).now > 0, '④ factView is the one registry read the fact is computed over');
+  ok(typeof k.factView === 'function' && gateOf(k.factView(KEY).pin) && k.factView(KEY).now > 0, '④ factView is the one registry read the fact is computed over');
   // THE DELETE ROUTE over the real router: leased first (no unpin for a removal that cannot happen), then pinned, then unpin
   {
     const express = require('express');
@@ -326,7 +326,7 @@ console.log('— ④ the REAL keeper: factFor, the pinned delete, the unpin, the
     ok(r0.status === 409 && r0.json.code === 'leased' && s3._browserProfileId === team.id && k.pinnedBy(team.id).length === 1, '④ DELETE of a LEASED + pinned profile: refused `leased` FIRST — the pin is untouched (never an unpin for a removal that cannot happen)', JSON.stringify(r0));
     k._reg().leases = k._reg().leases.filter((l) => l.profileId !== team.id);
     const r1 = await call('DELETE', `/api/browser/profiles/${team.id}`);
-    ok(r1.status === 409 && r1.json.code === 'pinned' && r1.json.count === 1 && r1.json.names.includes('Third chat'), '④ DELETE without unpin: 409 `pinned` with the count and the name (the UI\'s question)', JSON.stringify(r1));
+    ok(r1.status === 409 && r1.json.code === 'pinned' && r1.json.count === 1 && verdictOf(r1.json.names.includes('Third chat')), '④ DELETE without unpin: 409 `pinned` with the count and the name (the UI\'s question)', JSON.stringify(r1));
     const r2 = await call('DELETE', `/api/browser/profiles/${team.id}?unpin=1`);
     ok(r2.status === 200 && r2.json.removed === team.id && r2.json.unpinned === 1 && s3._browserProfileId === null && W(k.factFor(BF.sessionFactsOf(s3))).line === 'Team was deleted — its pin was cleared · running nothing', '④ DELETE ?unpin=1: removed, 1 pin cleared, the conversation\'s fact says so', JSON.stringify(r2));
     await new Promise((r) => srv.close(() => r()));
@@ -399,7 +399,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
     w.v.send(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', rid: 2 }));
     await until(() => w.receipt(1) && w.receipt(2), 4000);
     ok(w.receipt(1)?.ok === true && w.receipt(1)?.via === 'browser' && w.receipt(2)?.ok === true && chromeSaw.filter((x) => /^Input\./.test(x)).length === 2, '⑤ while the user DRIVES a mediated browser, their click and key reach Chrome (on the bridge\'s credits) and each is RECEIPTED by Chrome\'s own reply (via browser)', JSON.stringify({ r: w.got.filter((m) => m.type === 'input-receipt'), chromeSaw }));
-    ok(w.upSaw.filter((m) => /^input_/.test(m.type)).every((m) => m.rid === undefined), '⑤ the stream server received the records WITHOUT the view\'s rid');
+    ok(verdictOf(w.upSaw.filter((m) => /^input_/.test(m.type)).every((m) => m.rid === undefined)), '⑤ the stream server received the records WITHOUT the view\'s rid');
     // an Input.* with NO credit while the user drives (an agent driving the scoped url directly) ⇒ still refused
     chromeSaw.length = 0; w.cdpReplies.length = 0;
     w.cdp.send(JSON.stringify({ id: 9001, method: 'Input.dispatchKeyEvent', params: { type: 'keyDown' } }));
@@ -420,7 +420,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
       other.send(JSON.stringify({ id: 9103, method: 'Input.dispatchKeyEvent', params: { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13, modifiers: 0 } }));
       await until(() => w.cdpReplies.some((r) => r.id === 9101) && w.cdpReplies.some((r) => r.id === 9102) && otherReplies.some((r) => r.id === 9103), 3000);
       const codes = [9101, 9102].map((i) => M.refusalCodeOf(w.cdpReplies.find((r) => r.id === i))).concat(M.refusalCodeOf(otherReplies.find((r) => r.id === 9103)));
-      ok(codes.every((c) => c === 'browser_interrupted') && !chromeSaw.length, '⑤ FENCE: while the user\'s click waits on the stream server, the agent\'s own click / insertText / an Enter from a second socket of the lease are all refused browser_interrupted and reach no Chrome (' + codes.join(',') + ')', JSON.stringify({ codes, chromeSaw }));
+      ok(gateOf(codes.every((c) => c === 'browser_interrupted')) && !chromeSaw.length, '⑤ FENCE: while the user\'s click waits on the stream server, the agent\'s own click / insertText / an Enter from a second socket of the lease are all refused browser_interrupted and reach no Chrome (' + codes.join(',') + ')', JSON.stringify({ codes, chromeSaw }));
       w.hold(false);
       await until(() => w.receipt(11), 4000);
       ok(w.receipt(11)?.ok === true && w.receipt(11)?.via === 'browser' && chromeSaw.filter((x) => /^Input\./.test(x)).length === 1, '⑤ …and the user\'s own click then lands on its credit and is receipted (the agent burnt nothing)', JSON.stringify({ r: w.receipt(11), chromeSaw }));
@@ -475,7 +475,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
       const n1 = w.upSaw.length;
       w.v.send(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 's', code: 'KeyS', windowsVirtualKeyCode: 83, modifiers: 0, text: 's', rid: 53 }));
       await until(() => w.receipt(53), 3000);
-      ok(w.receipt(53)?.ok === false && w.receipt(53)?.code === 'tab_switched' && w.receipt(53)?.error && /hand back and take over again/.test(w.receipt(53).error) && w.upSaw.length === n1 && !chromeSaw.length, '⑤ r3 SWITCH: the stream naming another active tab while the user drives ⇒ their next key is answered tab_switched and NEVER forwarded (the stream server saw no record, Chrome nothing)', JSON.stringify({ r: w.receipt(53), forwarded: w.upSaw.length - n1, chromeSaw }));
+      ok(w.receipt(53)?.ok === false && w.receipt(53)?.code === 'tab_switched' && gateOf(w.receipt(53)?.error) && gateOf(/hand back and take over again/.test(w.receipt(53).error)) && w.upSaw.length === n1 && !chromeSaw.length, '⑤ r3 SWITCH: the stream naming another active tab while the user drives ⇒ their next key is answered tab_switched and NEVER forwarded (the stream server saw no record, Chrome nothing)', JSON.stringify({ r: w.receipt(53), forwarded: w.upSaw.length - n1, chromeSaw }));
       w.v.send(JSON.stringify({ type: 'handback' })); await until(() => w.mode() && w.mode().mode === 'watch', 3000);
       w.v.send(JSON.stringify({ type: 'takeover' })); await until(() => w.mode() && w.mode().mode === 'takeover' && w.mode().mine, 3000);
       w.dispatchOn('S-T2'); chromeSaw.length = 0;
@@ -490,20 +490,20 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
       chromeMode = 'silent'; chromeSaw.length = 0;
       w.v.send(JSON.stringify({ type: 'input_mouse', eventType: 'mousePressed', x: 30, y: 30, button: 'left', clickCount: 1, modifiers: 0, rid: 55 }));
       await until(() => chromeSaw.some((x) => x === 'Input.dispatchMouseEvent'), 3000); await sleep(M.INPUT_CREDIT_MS + 500);
-      ok(chromeSaw.some((x) => x === 'Input.dispatchMouseEvent') && !w.receipt(55), `⑤ r3 a credit SPENT on a dispatch Chrome has not answered is not settled "never asked" at ${M.INPUT_CREDIT_MS + 100} ms (it waits for the browser; the view's own 1.5 s sweep says no_answer)`, JSON.stringify({ r: w.receipt(55), chromeSaw }));
+      ok(gateOf(chromeSaw.some((x) => x === 'Input.dispatchMouseEvent')) && !w.receipt(55), `⑤ r3 a credit SPENT on a dispatch Chrome has not answered is not settled "never asked" at ${M.INPUT_CREDIT_MS + 100} ms (it waits for the browser; the view's own 1.5 s sweep says no_answer)`, JSON.stringify({ r: w.receipt(55), chromeSaw }));
       chromeMode = 'ok';
     }
     chromeMode = 'error';
     w.v.send(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 'b', code: 'KeyB', rid: 3 }));
     await until(() => w.receipt(3), 4000);
-    ok(w.receipt(3) && w.receipt(3).ok === false && w.receipt(3).code === 'browser_refused', '⑤ Chrome refusing the dispatch ⇒ the receipt says NOT DELIVERED (browser_refused)', JSON.stringify(w.receipt(3)));
+    ok(gateOf(w.receipt(3)) && w.receipt(3).ok === false && w.receipt(3).code === 'browser_refused', '⑤ Chrome refusing the dispatch ⇒ the receipt says NOT DELIVERED (browser_refused)', JSON.stringify(w.receipt(3)));
     chromeMode = 'ok';
     // watch mode: an input from a viewer that does not drive is answered, never silent
     w.v.send(JSON.stringify({ type: 'handback' }));
     await until(() => w.got.some((m) => m.type === 'mode' && m.mode === 'watch'), 3000);
     w.v.send(JSON.stringify({ type: 'input_mouse', eventType: 'mousePressed', x: 1, y: 1, button: 'left', clickCount: 1, rid: 4 }));
     await until(() => w.receipt(4), 3000);
-    ok(w.receipt(4) && w.receipt(4).ok === false && w.receipt(4).code === 'watch-mode', '⑤ an input sent in Watch mode is answered not delivered (watch-mode)');
+    ok(gateOf(w.receipt(4)) && w.receipt(4).ok === false && w.receipt(4).code === 'watch-mode', '⑤ an input sent in Watch mode is answered not delivered (watch-mode)');
     await w.close();
   }
   // (b) CONTROL — as shipped before S2: no credit. Chrome never sees the user's input (the mediator's paused fence
@@ -514,7 +514,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
     w.v.send(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', rid: 1 }));
     await until(() => w.receipt(1), 3000); await sleep(300);
     const refused = w.cdpReplies.some((r) => M.refusalCodeOf(r) === 'browser_interrupted');
-    ok(w.receipt(1)?.via === 'stream' && !chromeSaw.some((x) => /^Input\./.test(x)) && refused, '⑤ CONTROL (no credit, the pre-S2 bridge): the user\'s key never reaches Chrome — the mediator refused it browser_interrupted — while the bridge could only say "written" (the study\'s silent loss)', JSON.stringify({ receipt: w.receipt(1), chromeSaw, refused }));
+    ok(w.receipt(1)?.via === 'stream' && !chromeSaw.some((x) => /^Input\./.test(x)) && verdictOf(refused), '⑤ CONTROL (no credit, the pre-S2 bridge): the user\'s key never reaches Chrome — the mediator refused it browser_interrupted — while the bridge could only say "written" (the study\'s silent loss)', JSON.stringify({ receipt: w.receipt(1), chromeSaw, refused }));
     await w.close();
   }
   // (c) CONTROL — a mediator copy WITHOUT the credit rule: the credit is never spent ⇒ the receipt says NOT DELIVERED
@@ -522,19 +522,19 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
     const MUT = mutantCopies('browser-fact', REPO);
     const src = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
     const needle = "if (M.isInputMethod(msg.method) && g.credits && g.credits.length) {";
-    ok(src.includes(needle), '⑤ control setup: the credit admission is found in src/server/cdp-mediator.js');
+    ok(verdictOf(src.includes(needle)), '⑤ control setup: the credit admission is found in src/server/cdp-mediator.js');
     const mutMed = MUT.load('src/server/cdp-mediator.js', editAnchor(src, needle, 'if (false) {', "src/server/cdp-mediator.js"), 'nocredit');
     const w = await mkWorld(mutMed);
     chromeSaw.length = 0;
     w.v.send(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', rid: 1 }));
     await until(() => w.receipt(1), 4000);
-    ok(w.receipt(1) && w.receipt(1).ok === false && ['not_dispatched', 'browser_refused'].includes(w.receipt(1).code) && !chromeSaw.some((x) => /^Input\./.test(x)), `⑤ CONTROL (a mediator without the credit rule): the key is refused — and the receipt SAYS not delivered (${w.receipt(1) && w.receipt(1).code}), never silence`, JSON.stringify(w.receipt(1)));
+    ok(gateOf(w.receipt(1)) && w.receipt(1).ok === false && gateOf(['not_dispatched', 'browser_refused'].includes(w.receipt(1).code)) && !chromeSaw.some((x) => /^Input\./.test(x)), `⑤ CONTROL (a mediator without the credit rule): the key is refused — and the receipt SAYS not delivered (${w.receipt(1) && w.receipt(1).code}), never silence`, JSON.stringify(w.receipt(1)));
     await w.close();
     // (d) CONTROL — the mediator as built before the verify round (the HEAD credit, whatever the call): the agent's own
     //     click during the takeover spends the user's credit and lands, and the user's key is refused browser_interrupted
     {
       const needle2 = "const tc = M.takeCredit(g.credits, now(), { msg, sessionTarget: (sid) => g.scope.sessions.get(sid) });";
-      ok(src.includes(needle2), '⑤ control setup: the bound takeCredit is found in src/server/cdp-mediator.js');
+      ok(verdictOf(src.includes(needle2)), '⑤ control setup: the bound takeCredit is found in src/server/cdp-mediator.js');
       const mutHead = MUT.load('src/server/cdp-mediator.js', editAnchor(src, needle2, 'const tc = { credit: g.credits.shift(), expired: [] };', "src/server/cdp-mediator.js"), 'headcredit');
       const w = await mkWorld(mutHead);
       chromeSaw.length = 0; w.cdpReplies.length = 0;
@@ -546,7 +546,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
       w.hold(false);
       await until(() => w.receipt(21), 4000); await sleep(200);
       const agentLanded = chromeSaw.some((x) => x === 'Input.dispatchMouseEvent'); const userLanded = chromeSaw.some((x) => x === 'Input.dispatchKeyEvent');
-      ok(agentLanded && !userLanded && w.receipt(21)?.ok === true, '⑤ CONTROL (the head-credit mediator): the agent\'s click lands during the takeover, the user\'s key is refused, and the receipt says delivered — the attack the bound credit closes', JSON.stringify({ chromeSaw, r: w.receipt(21) }));
+      ok(gateOf(agentLanded) && !userLanded && w.receipt(21)?.ok === true, '⑤ CONTROL (the head-credit mediator): the agent\'s click lands during the takeover, the user\'s key is refused, and the receipt says delivered — the attack the bound credit closes', JSON.stringify({ chromeSaw, r: w.receipt(21) }));
       await w.close();
     }
     // (e) CONTROL — the r1 binding (the call's method + params, NOT its tab: any handed session answers the credit's
@@ -554,7 +554,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
     //     on T2, the user's Enter is refused, and the receipt says delivered (verify r2 on the real 0.38.1)
     {
       const needle3 = "sessionTarget: (sid) => g.scope.sessions.get(sid)";
-      ok(src.includes(needle3), '⑤ control setup: the session→tab read is found in src/server/cdp-mediator.js');
+      ok(verdictOf(src.includes(needle3)), '⑤ control setup: the session→tab read is found in src/server/cdp-mediator.js');
       const mutR1 = MUT.load('src/server/cdp-mediator.js', editAnchor(src, needle3, "sessionTarget: (sid) => (g.scope.sessions.has(sid) ? ((g.credits[0] && g.credits[0].expect.targetId) || 'T1') : undefined)", "src/server/cdp-mediator.js"), 'r1credit');
       const w = await mkWorld(mutR1);
       const other = new WebSocket(w.grantUrl); const otherReplies = []; other.on('message', (d) => otherReplies.push(JSON.parse(d))); await new Promise((r, e) => { other.on('open', r); other.on('error', e); });
@@ -567,7 +567,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
       await until(() => otherReplies.some((r) => r.id === 9401), 3000);
       const stolen = !otherReplies.find((r) => r.id === 9401).error && chromeSaw.filter((x) => /^Input\./.test(x)).length === 1;
       w.hold(false); await until(() => w.receipt(41), 4000); await sleep(200);
-      ok(stolen && chromeSaw.filter((x) => /^Input\./.test(x)).length === 1 && w.receipt(41)?.ok === true, '⑤ CONTROL (the r1 binding): the agent\'s mirrored Enter on its OWN tab lands, the user\'s Enter is refused, and the receipt says delivered — the theft the tab-bound credit closes', JSON.stringify({ chromeSaw, r: w.receipt(41), reply: otherReplies.find((r) => r.id === 9401) }));
+      ok(gateOf(stolen) && chromeSaw.filter((x) => /^Input\./.test(x)).length === 1 && w.receipt(41)?.ok === true, '⑤ CONTROL (the r1 binding): the agent\'s mirrored Enter on its OWN tab lands, the user\'s Enter is refused, and the receipt says delivered — the theft the tab-bound credit closes', JSON.stringify({ chromeSaw, r: w.receipt(41), reply: otherReplies.find((r) => r.id === 9401) }));
       other.close(); await w.close();
     }
     // (f) CONTROL (verify r3) — a bridge copy WITHOUT the takeover anchor: the daemon's `tab <n>` while the user drives is
@@ -575,7 +575,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
     {
       const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
       const needleB = "      if (v.forward && relay.anchor && relay.anchor.switched) { receipt(S.tabSwitchedReceipt(relay.anchor)); return; }";
-      ok(bsrc.includes(needleB), '⑤ control setup: the anchor refusal is found in src/server/browser-stream.js');
+      ok(verdictOf(bsrc.includes(needleB)), '⑤ control setup: the anchor refusal is found in src/server/browser-stream.js');
       const mutBS = MUT.load('src/server/browser-stream.js', editAnchor(bsrc, needleB, '', "src/server/browser-stream.js"), 'noanchor');
       const w = await mkWorld(MED, { BSmod: mutBS });
       await sleep(S.TAKEOVER_ANCHOR_GRACE_MS + 100);
@@ -585,7 +585,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
       ok(w.receipt(61)?.ok === true && chromeSaw.filter((x) => /^Input\./.test(x)).length === 1, '⑤ CONTROL (a bridge without the anchor): the agent\'s switch is followed — the user\'s key lands on the agent\'s tab and the receipt says delivered (the hole the anchor closes)', JSON.stringify({ r: w.receipt(61), chromeSaw }));
       await w.close();
     }
-    for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑤ controls: ' })) ok(c.pass, c.name, c.detail);
+    for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑤ controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
   }
   await new Promise((r) => chrome.close(() => r()));
 }
@@ -618,22 +618,22 @@ function censusOf(file, text) {
   const readsFact = SURFACES.filter((f) => !/browserFact|browserFactWords|browserPinSummaryHtml|_browserProfile\.words|\{ fact: f, words: w \}/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
   ok(readsFact.length === 0, '⑥ every surface reads the fact (browserFact / browserFactWords)', readsFact.join(', '));
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  ok(/browserFact: \(\(\) => \{ try \{ return s\._browserKey && browserKeeper\?\.factFor \? browserKeeper\.factFor\(require\('\.\/src\/browser-fact\.js'\)\.sessionFactsOf\(s\)\)/.test(srv), '⑥ the active-sessions payload publishes `browserFact` computed by the keeper (the ONE choke point)');
+  ok(verdictOf(/browserFact: \(\(\) => \{ try \{ return s\._browserKey && browserKeeper\?\.factFor \? browserKeeper\.factFor\(require\('\.\/src\/browser-fact\.js'\)\.sessionFactsOf\(s\)\)/.test(srv)), '⑥ the active-sessions payload publishes `browserFact` computed by the keeper (the ONE choke point)');
   const payloadLine = srv.split('\n').find((l) => l.includes('browserFact: (() =>')) || '';
   ok(payloadLine.indexOf('browserFact: (() =>') < (payloadLine.indexOf('//') === -1 ? Infinity : payloadLine.indexOf('//')), '⑥ …and the key sits BEFORE the line\'s `//` comment (code after a mid-line // is a comment — the 2.369.134 lesson)');
   const sb = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
-  ok(/browserFact: \{ digest: \(v\) => \(v && typeof v === 'object' \? String\(v\.digest \|\| ''\) : ''\) \}/.test(sb), '⑥ LIVE_SESSION_FACTS carries the fact with a STRING digest (the card re-renders when it moves)');
+  ok(verdictOf(/browserFact: \{ digest: \(v\) => \(v && typeof v === 'object' \? String\(v\.digest \|\| ''\) : ''\) \}/.test(sb)), '⑥ LIVE_SESSION_FACTS carries the fact with a STRING digest (the card re-renders when it moves)');
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/browserKeeper\.onChange\(/.test(wiring) && /if \(moved\) \{ try \{ broadcastActiveSessions/.test(wiring), '⑥ a registry change re-publishes active-sessions only when a fact digest moved');
+  ok(gateOf(/browserKeeper\.onChange\(/.test(wiring)) && verdictOf(/if \(moved\) \{ try \{ broadcastActiveSessions/.test(wiring)), '⑥ a registry change re-publishes active-sessions only when a fact digest moved');
   // CONTROL: a patched copy of chat-view.js that derives its own answer from the raw pair again is caught
   const MUT = mutantCopies('browser-fact-census', REPO);
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   const anchor = "    const fact = row.browserFact || null;";
-  ok(cv.includes(anchor), '⑥ control setup: the chip\'s fact read is found in chat-view.js');
+  ok(verdictOf(cv.includes(anchor)), '⑥ control setup: the chip\'s fact read is found in chat-view.js');
   const mutPath = MUT.write('src/lib/chat-view.js', editAnchor(cv, anchor, anchor + "\n    const pinnedOwn = row.browserProfileId || ''; const activeOwn = row.browserProfileActive;", "src/lib/chat-view.js"), 'derives');
   const caught = censusOf('chat-view (patched copy)', fs.readFileSync(mutPath, 'utf8'));
   ok(caught.length === 2, `⑥ CONTROL: a chat-view copy that reads browserProfileId / browserProfileActive again is caught (${caught.length} finding(s))`, caught.join('\n'));
-  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑥ controls: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑥ controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ═══ ⑦ THE KEYLESS FACT (B-f7ab) ═══
@@ -646,16 +646,16 @@ console.log('— ⑦ the keyless fact: "no browser yet" where the first browser 
   const w = BF.browserFactWords(f);
   ok(f.key === '' && f.keyless === true && f.using.kind === 'none' && f.using.state === 'not-started' && !f.live && !f.differs && !f.pinned && typeof f.digest === 'string' && f.digest.length > 0,
     '⑦ keylessFact: no key, nothing in use, nothing live, nothing pinned — a string digest (the sidebar\'s LIVE_SESSION_FACTS row re-renders when the key arrives)', JSON.stringify(f));
-  ok(w.line === 'no browser yet' && w.name === 'no browser yet' && w.state === 'not started yet' && w.show === false && w.amber === false && /first browser command gets one, no restart needed/.test(w.tooltip) && noRawId(w.tooltip) && !/predates/.test(w.tooltip + w.line),
+  ok(w.line === 'no browser yet' && w.name === 'no browser yet' && w.state === 'not started yet' && w.show === false && w.amber === false && gateOf(/first browser command gets one, no restart needed/.test(w.tooltip)) && gateOf(noRawId(w.tooltip)) && !/predates/.test(w.tooltip + w.line),
     '⑦ its words: "no browser yet", the tooltip says the first browser command gets one (no restart), never "predates", no raw id; show false (the status-bar chip stays hidden — it needs a key)', JSON.stringify(w));
   const translated = BF.browserFactWords(f, (x) => '<' + x + '>');
-  ok(translated.line === '<no browser yet>' && /^<This session has no browser yet/.test(translated.tooltip), '⑦ every word goes through the caller\'s t() (literal keys — the extractor finds them)');
+  ok(translated.line === '<no browser yet>' && verdictOf(/^<This session has no browser yet/.test(translated.tooltip)), '⑦ every word goes through the caller\'s t() (literal keys — the extractor finds them)');
   ok(f.digest !== BF.factDigest(BF.browserFactFor({ browserKey: KEY, variant: 'D', remote: false }, { profiles: PROFILES, now: 1 })), '⑦ the keyless digest differs from the first real fact (the key\'s arrival moves every surface)');
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  ok(/sessionFactsOf\(s\)\) : \(browserKeys\?\.keylessFactOf\?\.\(s\) \|\| null\); \} catch \{ return null; \} \}\)\(\),/.test(srv), '⑦ the active-sessions payload publishes the keyless fact for a session with no key (the late-key engine decides where one is on its way)');
+  ok(verdictOf(/sessionFactsOf\(s\)\) : \(browserKeys\?\.keylessFactOf\?\.\(s\) \|\| null\); \} catch \{ return null; \} \}\)\(\),/.test(srv)), '⑦ the active-sessions payload publishes the keyless fact for a session with no key (the late-key engine decides where one is on its way)');
   const stream = require('../src/browser-stream.js');
   const nk = stream.streamTargetFor({ browserKey: '' });
-  ok(nk.code === 'no-key' && /no browser yet/.test(nk.error) && !/predates/.test(nk.error), '⑦ the live view of such a session says "no browser yet" too (a view never starts a browser nor mints a key)', nk.error);
+  ok(nk.code === 'no-key' && gateOf(/no browser yet/.test(nk.error)) && !/predates/.test(nk.error), '⑦ the live view of such a session says "no browser yet" too (a view never starts a browser nor mints a key)', nk.error);
 }
 
 // ═══ ⑧ lane browser-resume B (§3.9): WHAT IS KEPT rides THE fact — the Resume every surface offers reads it here ═══
@@ -664,23 +664,23 @@ console.log('— ⑧ lane browser-resume B: the kept fact, ownResumable, the sto
   const view = (o = {}) => ({ profiles: PROFILES, pin: null, attachments: [], browsers: {}, own: { profileId: 'bp-00000009', state: 'stopped' }, input: null, live: '', now: 1000000, ...o });
   const sess = (o = {}) => ({ browserKey: KEY, pinId: null, pinOrigin: null, active: '', variant: 'D', remote: false, ...o });
   const kf = BF.browserFactFor(sess(), view({ kept: { tabs: 3, kind: 'full', stoppedWhy: 'turn-idle', restoreBy: 'auto', handedBack: false, waiting: 0 } }));
-  ok(kf.own && kf.own.kept && kf.own.kept.tabs === 3 && kf.own.kept.kind === 'full' && kf.own.kept.why === 'turn-idle' && BF.ownResumable(kf), '⑧ a stopped own browser with 3 kept tabs: `own.kept` rides the fact and it is resumable', JSON.stringify(kf.own));
+  ok(gateOf(kf.own) && gateOf(kf.own.kept) && kf.own.kept.tabs === 3 && kf.own.kept.kind === 'full' && kf.own.kept.why === 'turn-idle' && verdictOf(BF.ownResumable(kf)), '⑧ a stopped own browser with 3 kept tabs: `own.kept` rides the fact and it is resumable', JSON.stringify(kf.own));
   const running = BF.browserFactFor(sess(), view({ own: { profileId: 'bp-00000009', state: 'ready' }, kept: { tabs: 3, kind: 'full' } }));
   const none = BF.browserFactFor(sess(), view({ kept: null }));
   const empty = BF.browserFactFor(sess(), view({ kept: { tabs: 0, kind: 'tabs-only' } }));
   const loginsOnly = BF.browserFactFor(sess(), view({ kept: { tabs: 0, kind: 'full' } }));
   const remote = BF.browserFactFor(sess({ remote: true }), view({ kept: { tabs: 3, kind: 'full' } }));
-  ok(!BF.ownResumable(running) && !BF.ownResumable(none) && !BF.ownResumable(empty) && BF.ownResumable(loginsOnly) && !BF.ownResumable(remote) && !BF.ownResumable(null), '⑧ ownResumable: never while it runs, never with nothing kept (no directory, no tab), never for a session on another machine; its logins alone are enough');
+  ok(!BF.ownResumable(running) && !BF.ownResumable(none) && !BF.ownResumable(empty) && gateOf(BF.ownResumable(loginsOnly)) && !BF.ownResumable(remote) && !BF.ownResumable(null), '⑧ ownResumable: never while it runs, never with nothing kept (no directory, no tab), never for a session on another machine; its logins alone are enough');
   ok(kf.digest !== none.digest && kf.digest !== BF.browserFactFor(sess(), view({ kept: { tabs: 3, kind: 'full', restoreBy: 'user' } })).digest && BF.browserFactFor(sess(), view({ kept: { tabs: 3, kind: 'full', restoreBy: 'user' } })).digest !== BF.browserFactFor(sess(), view({ kept: { tabs: 3, kind: 'full', restoreBy: 'user', handedBack: true } })).digest, '⑧ the digest moves with what is kept (a Forget, a Resume, a hand-back re-render every surface)');
   const words = BF.keptLineWords(kf);
   const fenced = BF.keptLineWords(BF.browserFactFor(sess(), view({ kept: { tabs: 2, kind: 'fenced' } })));
-  ok(/3 tab\(s\) and its logins are kept/.test(words) && /fenced to allowed domains/.test(fenced) && /its logins are kept/.test(BF.keptLineWords(loginsOnly)) && BF.keptLineWords(none) === '', '⑧ the stopped line says what is kept (tabs + logins / tabs only because fenced / logins only); nothing kept ⇒ no line', [words, fenced]);
-  ok(/^<Stopped/.test(BF.keptLineWords(kf, (x) => '<' + x + '>')), '⑧ …through the caller\'s t() (literal keys)');
+  ok(gateOf(/3 tab\(s\) and its logins are kept/.test(words)) && gateOf(/fenced to allowed domains/.test(fenced)) && gateOf(/its logins are kept/.test(BF.keptLineWords(loginsOnly))) && BF.keptLineWords(none) === '', '⑧ the stopped line says what is kept (tabs + logins / tabs only because fenced / logins only); nothing kept ⇒ no line', [words, fenced]);
+  ok(verdictOf(/^<Stopped/.test(BF.keptLineWords(kf, (x) => '<' + x + '>'))), '⑧ …through the caller\'s t() (literal keys)');
   const kb = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  ok(/let kept = null; if \(B\.isBrowserKey\(bk\)\) \{ try \{ const ks = keptStore\(\); kept = ks \? ks\.brief\(bk\) : null; \}/.test(kb) && /browsers, own, input, live, now: now\(\), stuck, kept \};/.test(kb), '⑧ the keeper\'s factView reads the kept store\'s brief (the ONE fact — no surface reads the store itself)');
+  ok(gateOf(/let kept = null; if \(B\.isBrowserKey\(bk\)\) \{ try \{ const ks = keptStore\(\); kept = ks \? ks\.brief\(bk\) : null; \}/.test(kb)) && verdictOf(/browsers, own, input, live, now: now\(\), stuck, kept \};/.test(kb)), '⑧ the keeper\'s factView reads the kept store\'s brief (the ONE fact — no surface reads the store itself)');
   const lw = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
   const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
-  ok(/if \(ref === EPHEMERAL_REF \|\| \(!ref && !st\.target && f && f\.using && f\.using\.kind === 'own'\)\) return ownResumable\(f\);/.test(lw) && /if \(!fact \|\| fact\.key !== key \|\| !ownResumable\(fact\)\) return false;/.test(cr), '⑧ the live view\'s Resume and the chat end card\'s Resume both ask ownResumable over THE fact (no second derivation)');
+  ok(gateOf(/if \(ref === EPHEMERAL_REF \|\| \(!ref && !st\.target && f && f\.using && f\.using\.kind === 'own'\)\) return ownResumable\(f\);/.test(lw)) && verdictOf(/if \(!fact \|\| fact\.key !== key \|\| !ownResumable\(fact\)\) return false;/.test(cr)), '⑧ the live view\'s Resume and the chat end card\'s Resume both ask ownResumable over THE fact (no second derivation)');
 }
 
 // ═══ ⑨ B-70af: a tab the KEEPER admits out of band is announced to the lease's driver ═══
@@ -700,7 +700,7 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
   M.withhold(wh, { method: 'Target.targetInfoChanged', params: { targetInfo: { targetId: 'T9', type: 'page', url: 'https://a.test/' } } });
   M.withhold(wh, { method: 'Page.frameNavigated', params: { frame: { id: 'F' } } });
   const r1 = M.replayOnAdmit(wh, 'T9'), r2 = M.replayOnAdmit(wh, 'T9');
-  ok(r1 && r1.method === 'Target.targetCreated' && r1.params.targetInfo.url === 'https://a.test/' && r2 === null && wh.size === 0, '⑨ PURE: a withheld tab is replayed ONCE, as its latest info; another event is not kept', JSON.stringify({ r1, r2, size: wh.size }));
+  ok(gateOf(r1) && r1.method === 'Target.targetCreated' && r1.params.targetInfo.url === 'https://a.test/' && r2 === null && wh.size === 0, '⑨ PURE: a withheld tab is replayed ONCE, as its latest info; another event is not kept', JSON.stringify({ r1, r2, size: wh.size }));
   M.withhold(wh, { method: 'Target.targetCreated', params: { targetInfo: { targetId: 'T11', type: 'page', url: 'about:blank' } } });
   M.withhold(wh, { method: 'Target.targetDestroyed', params: { targetId: 'T11' } });
   ok(M.replayOnAdmit(wh, 'T11') === null, '⑨ PURE: a tab destroyed before its admission is never replayed');
@@ -772,7 +772,7 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     const MUT = mutantCopies('browser-fact-70af', REPO);
     const src = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
     const needle = 'if (!g || !targetId) return false; admitInto(g, targetId); return true; }';
-    ok(src.includes(needle), '⑨ control setup: the out-of-band admission is found in src/server/cdp-mediator.js');
+    ok(verdictOf(src.includes(needle)), '⑨ control setup: the out-of-band admission is found in src/server/cdp-mediator.js');
     const w9 = await world9(MUT.load('src/server/cdp-mediator.js', editAnchor(src, needle, 'if (!g || !targetId) return false; M.admitTarget(g.scope, targetId); return true; }', "src/server/cdp-mediator.js"), 'noreplay'));
     announce('Target.targetCreated', 'T9'); await w9.settle(); w9.med.admitTarget(WORK, KEY, 'T9'); await w9.settle();
     ok(w9.created('T9') === 0, '⑨ CONTROL (an admission without the replay — the release): the driver never hears its tab (the bind\'s «No tab with target id»)');
@@ -780,7 +780,7 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     // CONTROL (the adversarial read's must-fix) — a replay that ignores what the scope already holds: the lease's own tab told TWICE
     const srcR = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8');
     const needleR = "return wasInScope ? null : { method: 'Target.targetCreated', params: { targetInfo: seen } };";
-    ok(srcR.includes(needleR), '⑨ control setup: the in-scope rule is found in src/browser-mediation.js');
+    ok(verdictOf(srcR.includes(needleR)), '⑨ control setup: the in-scope rule is found in src/browser-mediation.js');
     const mrPath = MUT.write('src/browser-mediation.js', editAnchor(srcR, needleR, "return { method: 'Target.targetCreated', params: { targetInfo: seen } };", "src/browser-mediation.js"), 'replay-always');
     const medSrc = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
     const medNeedle = "const M = require('../browser-mediation.js');";
@@ -791,10 +791,10 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     await w9r.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: [tcR], mode: M.SCOPE_MODE }); await w9r.settle();
     ok(w9r.created(tcR) === 2, '⑨ CONTROL (a replay that ignores the scope): the lease\'s own tab is told TWICE — the in-scope rule is what keeps it once', String(w9r.created(tcR)));
     await w9r.close();
-    for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑨ controls: ' })) ok(c.pass, c.name, c.detail);
+    for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑨ controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
     // 主开发's readers (00:15Z): the replay and the upstream's events go through ONE after-filter (the live-fill fence, its masking, the trace taint)
     const medNow = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
-    ok(medNow.includes('    const deliverEvent = (evIn, raw = null) => {') && medNow.includes('      deliverEvent(ev, ev === msg ? String(data) : null);') && medNow.includes('if (ev && c.deliver) c.deliver(ev);') && medNow.includes('    conn.deliver = (ev) => deliverEvent(ev);') && medNow.split('!M.liveFillEventAllowed(ev, evTid)').length === 2,
+    ok(gateOf(medNow.includes('    const deliverEvent = (evIn, raw = null) => {')) && gateOf(medNow.includes('      deliverEvent(ev, ev === msg ? String(data) : null);')) && gateOf(medNow.includes('if (ev && c.deliver) c.deliver(ev);')) && gateOf(medNow.includes('    conn.deliver = (ev) => deliverEvent(ev);')) && medNow.split('!M.liveFillEventAllowed(ev, evTid)').length === 2,
       '⑨ the replay is delivered through the SAME after-filter as every upstream event (deliverEvent — one copy of the live-fill fence), never a writer of its own');
   }
   await new Promise((r) => chrome9.close(() => r()));
@@ -838,17 +838,17 @@ console.log('— ⑩ B-9584 (B) r2497: the place reader rides the mediator\'s gr
   };
   const okWire = (o) => ROADS.every((m) => JSON.stringify(o[m]) === JSON.stringify(['place_held', 'place_held', 'place_held'])) && o.upSawGeo.length === 0;
   const w0 = await wire(MEDp);
-  ok(okWire(w0), `⑩ r2497 (1) the mediator's own grant with the keeper's place reader: an agent's clear of a tab's position, the location permission set and granted in a context of its own — REFUSED by name (place_held) on the mediated road AND the scoped one, none reaching the browser ${JSON.stringify(w0)}`, JSON.stringify(w0));
+  ok(verdictOf(okWire(w0)), `⑩ r2497 (1) the mediator's own grant with the keeper's place reader: an agent's clear of a tab's position, the location permission set and granted in a context of its own — REFUSED by name (place_held) on the mediated road AND the scoped one, none reaching the browser ${JSON.stringify(w0)}`, JSON.stringify(w0));
   ok(medSrc.split(judgeA).length === 2, '⑩ control setup: the judge call that hands the reader is spelled once in src/server/cdp-mediator.js');
   const mutM = MUTP.load('src/server/cdp-mediator.js', editAnchor(medSrc, judgeA, "      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg, g.scope) : M.judge(msg, g.scope, { paused: credit ? false : paused, browser: conn.browser });", 'src/server/cdp-mediator.js'), 'no-place-reader');
   const w1 = await wire(mutM);
   ok(!okWire(w1), `⑩ RED — the reader taken out of the judge call: the clear and the permission are ADMITTED on both roads (an agent clears a listed site's position) ${JSON.stringify(w1)}`, JSON.stringify(w1));
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const grants = ksrc.split('await mediator.grantFor({').length - 1, withPlace = ksrc.split(', place: () => placeKindFor(p.id) });').length - 1;
-  ok(grants === 3 && withPlace === 3 && /function placeKindFor\(pid\) \{ \{ const r = runningPlaceKind\(pid\); if \(r !== undefined\) return r; \} try \{ const p = profile\(String\(pid \|\| ''\)\); if \(!p\) return null; const g = ENV\.resolveEnvironment\(p\.environment, ENV\.keptExitOf\(p\)\)\.geolocation; return g \? g\.kind : null;/.test(ksrc),
+  ok(grants === 3 && withPlace === 3 && verdictOf(/function placeKindFor\(pid\) \{ \{ const r = runningPlaceKind\(pid\); if \(r !== undefined\) return r; \} try \{ const p = profile\(String\(pid \|\| ''\)\); if \(!p\) return null; const g = ENV\.resolveEnvironment\(p\.environment, ENV\.keptExitOf\(p\)\)\.geolocation; return g \? g\.kind : null;/.test(ksrc)),
     `⑩ r2497 (1) PIN: the keeper's ${grants} grants each hand the place reader (${withPlace} of them), and the reader is the running browser's location kind, else the profile's own (r2767 (a))`, { grants, withPlace });
-  for (const c of copiesCensus(MUTP.files, MUTP.dir, REPO, { label: '⑩ controls: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUTP.files, MUTP.dir, REPO, { label: '⑩ controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -72,7 +72,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -122,9 +122,9 @@ console.log('① PURE src/stash-summary.js');
   ok(w.head === '6 notices are waiting for this agent’s next turn' && w.parts.join(', ') === 'a channel receipt, 2 job results, 2 messages from Ada, a message from Bo' && w.button === 'Hand over now' && w.cost === 'starts a turn',
     'stashSummaryWords: the head, one part per group, the button, the cost', w);
   const one = S.stashSummaryWords(S.summarize({ msg: [{ source: 'agent', kind: 'notification', fromName: 'VibeSpace browser' }] }), tEn, { billed: false });
-  ok(one.head === '1 notice is waiting for this agent’s next turn' && one.parts.join() === 'a browser handback' && one.cost === 'joins the running turn' && /joins the turn already running; if that turn cannot take it, it runs as its own billed turn right after/.test(one.title), 'one notice in the singular; the free lane says its MECHANISM ("joins the running turn") and the title carries the caveat (verify r4: the wrapper may refuse the fold)');
+  ok(one.head === '1 notice is waiting for this agent’s next turn' && one.parts.join() === 'a browser handback' && one.cost === 'joins the running turn' && verdictOf(/joins the turn already running; if that turn cannot take it, it runs as its own billed turn right after/.test(one.title)), 'one notice in the singular; the free lane says its MECHANISM ("joins the running turn") and the title carries the caveat (verify r4: the wrapper may refuse the fold)');
   const all = ['channel-receipt', 'channel', 'job', 'handback', 'window-request', 'notice', 'peer'];
-  ok(all.every((k) => S.partWords({ kind: k, n: 1, label: 'X' }, tEn).startsWith('a ') && /^3 /.test(S.partWords({ kind: k, n: 3, label: 'X' }, tEn))) && S.partWords({ kind: 'peer', n: 1, label: null }, tEn) === 'a message from another agent',
+  ok(gateOf(all.every((k) => S.partWords({ kind: k, n: 1, label: 'X' }, tEn).startsWith('a ') && /^3 /.test(S.partWords({ kind: k, n: 3, label: 'X' }, tEn)))) && S.partWords({ kind: 'peer', n: 1, label: null }, tEn) === 'a message from another agent',
     'every kind has a singular and a plural; a nameless peer is "another agent"');
   ok(S.stashSummaryWords(null, tEn) === null, 'no fact ⇒ no words');
   // ①d THE DETAILS (the owner, 2026-09-28: "现在是完全看不了这个细节了嘛? 包括在聊天框里 queue 的时候也没法展开看细节"): the fact
@@ -133,10 +133,10 @@ console.log('① PURE src/stash-summary.js');
   const pv = S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'Bo', ts: 50, text: '\n  second line first?\nno — the first non-empty line\n' }, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', ts: 30, text: 'VibeSpace (this workspace, not another agent) reports:\nyour draft to Ops was approved' }], jobs: [{ jobName: 'nightly', ts: 40, text: 'x'.repeat(200) }] });
   ok(pv.previews.length === 3 && pv.previewsHeld === 0 && pv.previews.map((x) => x.at).join() === '30,40,50'
     && pv.previews[0].kind === 'channel-receipt' && pv.previews[0].head === 'your draft to Ops was approved'
-    && pv.previews[1].kind === 'job' && pv.previews[1].label === 'nightly' && pv.previews[1].head.length === 140 && pv.previews[1].head.endsWith('…')
+    && pv.previews[1].kind === 'job' && pv.previews[1].label === 'nightly' && pv.previews[1].head.length === 140 && gateOf(pv.previews[1].head.endsWith('…'))
     && pv.previews[2].kind === 'peer' && pv.previews[2].label === 'Bo' && pv.previews[2].head === 'second line first?',
     'previews: oldest first, the first non-empty line (the ladder\'s own head skipped), cut at 140 with an ellipsis, a job named by its job, a peer by its name', pv.previews);
-  ok(S.previewWords(pv.previews[0], tEn) === 'a channel receipt · your draft to Ops was approved' && S.previewWords(pv.previews[1], tEn).startsWith('Background Work · nightly · xxx') && S.previewWords(pv.previews[2], tEn) === 'a message from Bo · second line first?'
+  ok(S.previewWords(pv.previews[0], tEn) === 'a channel receipt · your draft to Ops was approved' && gateOf(S.previewWords(pv.previews[1], tEn).startsWith('Background Work · nightly · xxx')) && S.previewWords(pv.previews[2], tEn) === 'a message from Bo · second line first?'
     && S.previewWords({ kind: 'notice', head: '' }, tEn) === 'a VibeSpace notice',
     'previewWords: the kind (or the job / the peer by name) · the head; no head ⇒ the kind alone');
   const many = S.summarize({ msg: Array.from({ length: 15 }, (_, i) => ({ source: 'agent', kind: 'peer', fromName: 'P' + i, ts: 100 + i, text: 'm' + i })) });
@@ -145,7 +145,7 @@ console.log('① PURE src/stash-summary.js');
     'previewDigest moves with a head; summaryDigest keeps its shape (the card hint prints no preview)');
   ok(S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'Bo' }] }).previews[0].head === '' , 'an entry without text previews as its kind alone (no throw)');
   const hf = S.handoverFacts(S.handoverCardText(2, 'from "Ada": hi\n\nfrom "Bo": there'));
-  ok(hf && hf.title.key === '{n} waiting notice(s) handed over' && hf.title.params.n === 2 && hf.body === 'from "Ada": hi\n\nfrom "Bo": there' && hf.foldLabel.key === 'Show the {n} notice(s)' && hf.foldLabel.params.n === 2,
+  ok(gateOf(hf) && hf.title.key === '{n} waiting notice(s) handed over' && hf.title.params.n === 2 && hf.body === 'from "Ada": hi\n\nfrom "Bo": there' && hf.foldLabel.key === 'Show the {n} notice(s)' && hf.foldLabel.params.n === 2,
     'handoverFacts reads the card text handoverCardText wrote: the title = the head in the device\'s words, the body = the notices, the expander names how many', hf);
   ok(S.handoverFacts('2 waiting notices handed over') === null && S.handoverFacts('') === null && S.handoverFacts('from "Ada": 2 waiting notice(s) handed over') === null, 'any other text ⇒ null (the generic card rules apply)');
   const NS = require(path.join(REPO, 'src/notification-senders.js'));
@@ -190,7 +190,7 @@ const job = (id, name) => ({ id, name, state: 'done' });
   await sleep(60);
   const f1 = R.view.summaryFor(R.s);
   ok(R.hooks.deliver === 2 && R.hooks.jobs === 1 && R.published.length === 1, `every stash write fires its store's hook; the re-publish is debounced to ONE (${R.published.length})`, R.hooks);
-  ok(f1 && f1.count === 3 && f1.items.map((i) => i.kind).join() === 'channel-receipt,job,peer', 'the session\'s `stash` fact counts BOTH stores', f1);
+  ok(gateOf(f1) && f1.count === 3 && f1.items.map((i) => i.kind).join() === 'channel-receipt,job,peer', 'the session\'s `stash` fact counts BOTH stores', f1);
   ok(S.stashSummaryWords(f1, tEn).line === '3 notices are waiting for this agent’s next turn: a channel receipt, a job result, a message from Ada', 'the strip\'s numbers follow the fact');
   // a notice that lands WHILE the hand-over is delivering must keep waiting
   const post0 = R.posts.length;
@@ -198,13 +198,13 @@ const job = (id, name) => ({ id, name, state: 'done' });
   const h = R.view.handOver('w1', { pressed: PRESS });
   R.deliver.stashFor(R.CID, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'arrived during the hand-over' });
   const r = await h;
-  ok(r.ok && r.delivered === 3 && R.posts.length === post0 + 1, 'HAND OVER: ONE injection', r);
+  ok(gateOf(r.ok) && r.delivered === 3 && R.posts.length === post0 + 1, 'HAND OVER: ONE injection', r);
   const text = R.posts[R.posts.length - 1] || '';
-  ok(/edited and sent/.test(text) && /can you look at the deploy/.test(text) && /finished: 3 files/.test(text) && /nightly/.test(text) && /^VibeSpace \(this workspace, not another agent\) reports:/.test(text),
+  ok(gateOf(/edited and sent/.test(text)) && gateOf(/can you look at the deploy/.test(text)) && gateOf(/finished: 3 files/.test(text)) && gateOf(/nightly/.test(text)) && verdictOf(/^VibeSpace \(this workspace, not another agent\) reports:/.test(text)),
     '…holding every stashed item from both stores, under the VibeSpace head (kind notification)', text.slice(0, 400));
   ok(R.ledger.length === 1 && R.ledger[0] === 'stash-handover', 'ONE ledger row, under `stash-handover`', R.ledger);
   const f2 = R.view.summaryFor(R.s);
-  ok(f2 && f2.count === 1 && f2.items[0].label === 'Bo' && R.jm.peekNotifs(R.CID).length === 0 && r.remaining && r.remaining.count === 1, 'the stashes are emptied of what was DELIVERED; the notice that arrived meanwhile keeps waiting', f2);
+  ok(gateOf(f2) && f2.count === 1 && f2.items[0].label === 'Bo' && R.jm.peekNotifs(R.CID).length === 0 && gateOf(r.remaining) && r.remaining.count === 1, 'the stashes are emptied of what was DELIVERED; the notice that arrived meanwhile keeps waiting', f2);
   // the next user message: the injection route's drain empties the fact without the button
   R.deliver.drainStash(R.CID);
   ok(R.view.summaryFor(R.s) === null, 'the next user message\'s drain (drainStash at the injection) clears the fact — no button involved');
@@ -217,7 +217,7 @@ const job = (id, name) => ({ id, name, state: 'done' });
   R.deliver.stashFor(R.CID, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: 'a message in Ops' });
   R.jm._stashNotif(R.CID, job('j2', 'build'), { what: 'failed' }, 'spend cap');
   const r = await R.view.handOver('w1');
-  ok(!r.ok && r.code === 'spend_refused' && r.why === 'hour-cap' && /hour-cap/.test(r.error), 'a spend refusal is answered BY NAME', r);
+  ok(!r.ok && r.code === 'spend_refused' && r.why === 'hour-cap' && verdictOf(/hour-cap/.test(r.error)), 'a spend refusal is answered BY NAME', r);
   ok(R.posts.length === 0 && R.ledger.length === 0 && R.deliver.stashEntries(R.CID).length === 1 && R.jm.peekNotifs(R.CID).length === 1 && R.view.summaryFor(R.s).count === 2, '…nothing was posted or charged, and BOTH stashes are exactly as they were');
   ok((await R.view.handOver('nobody')).code === 'no_session', 'an unknown session ⇒ no_session');
 }
@@ -234,7 +234,7 @@ console.log('②b verify: one hand-over in flight, the claim against the injecti
   ok(R.view.inFlight(R.CID) === true, 'a hand-over awaiting the ladder is IN FLIGHT for its conversation');
   R.release(); await sleep(5); R.release(); await sleep(5);
   const [r1, r2] = await Promise.all([p1, p2]);
-  ok(r1.ok && r1.delivered === 2 && !r2.ok && r2.code === 'in_flight' && R.posts.length === 1 && R.ledger.length === 1 && R.posts.filter((t) => /msg-1/.test(t)).length === 1,
+  ok(gateOf(r1.ok) && r1.delivered === 2 && !r2.ok && r2.code === 'in_flight' && R.posts.length === 1 && R.ledger.length === 1 && R.posts.filter((t) => /msg-1/.test(t)).length === 1,
     'TWO concurrent hand-overs: ONE post, ONE ledger row, the second refused `in_flight` by name (was: two copies, two rows)', { r1, r2, posts: R.posts.length, ledger: R.ledger });
   ok(R.view.inFlight(R.CID) === false && (await R.view.handOver('w1')).code === 'nothing_waiting', 'settled ⇒ no longer in flight; a third click finds nothing waiting');
 }
@@ -252,7 +252,7 @@ console.log('②b verify: one hand-over in flight, the claim against the injecti
   R.release();
   const r = await p;
   const copies = R.posts.filter((t) => /receipt-X/.test(t)).length + (renderMsgStash(drainedMsg).text.includes('receipt-X') ? 1 : 0);
-  ok(r.ok && r.delivered === 2 && copies === 1 && R.ledger.length === 1 && R.deliver.stashEntries(R.CID).length === 0 && R.jm.peekNotifs(R.CID).length === 0 && R.deliver.claimedCount(R.CID) === 0,
+  ok(gateOf(r.ok) && r.delivered === 2 && copies === 1 && R.ledger.length === 1 && R.deliver.stashEntries(R.CID).length === 0 && R.jm.peekNotifs(R.CID).length === 0 && R.deliver.claimedCount(R.CID) === 0,
     'the receipt reaches the agent ONCE (was: the injection AND the hand-over each carried it), ONE row, the claim released', { r, copies, ledger: R.ledger });
 }
 {
@@ -269,7 +269,7 @@ console.log('②b verify: one hand-over in flight, the claim against the injecti
   C.deliver.stashFor(C.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'hi' });
   const fc = C.view.summaryFor(C.s);
   const rc = await C.view.handOver('w1');
-  ok(fc.billed === true && rc.ok && C.ledger.length === 1, 'a claude session MID-TURN: the fact says billed (its inbox queues the message as its own turn) — and the ladder does charge', { billed: fc.billed, ledger: C.ledger });
+  ok(fc.billed === true && gateOf(rc.ok) && C.ledger.length === 1, 'a claude session MID-TURN: the fact says billed (its inbox queues the message as its own turn) — and the ladder does charge', { billed: fc.billed, ledger: C.ledger });
   const X = rig({ backend: 'codex', streaming: true });
   X.deliver.stashFor(X.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'hi' });
   ok(X.view.summaryFor(X.s).billed === false && X.view.billedFor({ backend: 'codex', _isStreaming: false }) === true && X.view.billedFor({ backend: 'claude', _isStreaming: false }) === true,
@@ -282,14 +282,14 @@ console.log('②b verify: one hand-over in flight, the claim against the injecti
   const r = await R.view.handOver('w1');
   const text = R.posts[0] || '';
   const spill = path.join(R.dir, 'job-notifications-read', R.CID.replace(/[^\w-]/g, '_') + '.md');
-  ok(r.ok && r.delivered === 12 && /Full untruncated history: /.test(text) && fs.existsSync(spill) && /result-5/.test(fs.readFileSync(spill, 'utf8')), 'more than two job results: the untruncated history is spilled to the read file and the delivered text names it (the injection\'s rule)', { delivered: r.delivered, spill: fs.existsSync(spill) });
+  ok(gateOf(r.ok) && r.delivered === 12 && gateOf(/Full untruncated history: /.test(text)) && gateOf(fs.existsSync(spill)) && verdictOf(/result-5/.test(fs.readFileSync(spill, 'utf8'))), 'more than two job results: the untruncated history is spilled to the read file and the delivered text names it (the injection\'s rule)', { delivered: r.delivered, spill: fs.existsSync(spill) });
 }
 {
   // HELD: a wrapper that predates mid-turn steering is not "unreachable"
   const R = rig({ deliverOverride: (d) => ({ ...d, deliverToConversation: async () => ({ ok: false, lane: 'rpc-queue', refused: 'wrapper-no-steer', reason: 'this session\'s agent predates notification steering' }) }) });
   R.deliver.stashFor(R.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'hi' });
   const r = await R.view.handOver('w1');
-  ok(!r.ok && r.code === 'held_for_next_turn' && /predates/.test(r.error) && R.deliver.stashEntries(R.CID).length === 1 && R.deliver.claimedCount(R.CID) === 0 && SH.STATUS.held_for_next_turn === 409 && SH.STATUS.in_flight === 409,
+  ok(!r.ok && r.code === 'held_for_next_turn' && gateOf(/predates/.test(r.error)) && R.deliver.stashEntries(R.CID).length === 1 && R.deliver.claimedCount(R.CID) === 0 && SH.STATUS.held_for_next_turn === 409 && SH.STATUS.in_flight === 409,
     'a `wrapper-no-steer` refusal answers `held_for_next_turn` (the notices ride the next prompt), the stash intact, the claim released; both new codes are 409', r);
 }
 
@@ -314,7 +314,7 @@ console.log('③ the route');
     const c = await post('/api/sessions/w1/stash/hand-over', page);
     const d = await post('/api/sessions/w1/stash/hand-over', page);
     const e = await post('/api/sessions/zz/stash/hand-over', page);
-    ok(c.status === 200 && c.body.ok && c.body.delivered === 1 && d.status === 409 && d.body.code === 'nothing_waiting' && e.status === 404, 'the cookie POST hands over; a second is nothing_waiting 409; an unknown session 404', { c: c.body, d: d.status, e: e.status });
+    ok(c.status === 200 && gateOf(c.body.ok) && c.body.delivered === 1 && d.status === 409 && d.body.code === 'nothing_waiting' && e.status === 404, 'the cookie POST hands over; a second is nothing_waiting 409; an unknown session 404', { c: c.body, d: d.status, e: e.status });
   } finally { srv.close(); }
 }
 
@@ -351,7 +351,7 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
     'a fact ⇒ the strip shows the head, the parts, the button and its cost', strip.el.textContent);
   const c0 = created;
   strip.set(S.summarize({ msg: [{ source: 'channel-receipt', kind: 'notification' }], jobs: [{}] }), { turn: 'running' });
-  ok(created === c0 && ['chat-stash-head', 'chat-stash-parts', 'chat-stash-go', 'chat-stash-cost'].map(q).every((n, i) => n === nodes[i]) && q('chat-stash-head').textContent === '2 notices are waiting for this agent’s next turn' && q('chat-stash-cost').textContent === ' · joins the running turn',
+  ok(created === c0 && gateOf(['chat-stash-head', 'chat-stash-parts', 'chat-stash-go', 'chat-stash-cost'].map(q).every((n, i) => n === nodes[i])) && q('chat-stash-head').textContent === '2 notices are waiting for this agent’s next turn' && q('chat-stash-cost').textContent === ' · joins the running turn',
     'the numbers change IN PLACE (no node created, the same nodes); a running turn (no fact word) says "joins the running turn" — the money word is never blank (verify r4)');
   // verify: the COST is the fact's word — a running claude turn still "starts a turn"; the turn alone is the fallback
   strip.set({ ...S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'Ada' }] }), billed: true }, { turn: 'running' });
@@ -366,9 +366,9 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
   const fd = S.summarize({ msg: [{ source: 'channel-receipt', kind: 'notification', ts: 1, text: 'VibeSpace (this workspace, not another agent) reports:\nyour draft was approved' }, { source: 'agent', kind: 'peer', fromName: 'Ada', ts: 2, text: 'ping <b>bold</b>' }], jobs: [{ jobName: 'nightly', ts: 3, text: 'done' }] });
   strip.set(fd, { turn: 'idle' });
   const more = q('chat-stash-more'), dl = q('chat-stash-list');
-  ok(more && more.textContent === 'Details' && more.attrs['aria-expanded'] === 'false' && dl && dl.hidden === true && strip.state().detailsOpen === false, 'the strip offers "Details", the list is closed');
+  ok(gateOf(more) && more.textContent === 'Details' && more.attrs['aria-expanded'] === 'false' && gateOf(dl) && dl.hidden === true && strip.state().detailsOpen === false, 'the strip offers "Details", the list is closed');
   const rows0 = dl.querySelectorAll('chat-stash-row');
-  ok(rows0.length === 3 && rows0[0].textContent === 'a channel receipt · your draft was approved' && rows0[1].textContent === 'a message from Ada · ping <b>bold</b>' && rows0[2].textContent === 'Background Work · nightly · done' && rows0.every((r) => r._html === undefined),
+  ok(rows0.length === 3 && rows0[0].textContent === 'a channel receipt · your draft was approved' && rows0[1].textContent === 'a message from Ada · ping <b>bold</b>' && rows0[2].textContent === 'Background Work · nightly · done' && verdictOf(rows0.every((r) => r._html === undefined)),
     'one row per waiting entry, oldest first, each written as TEXT (a peer\'s markup stays words)', rows0.map((r) => r.textContent));
   more.listeners.click[0]({ stopPropagation() { } });
   ok(more.textContent === 'Hide details' && more.attrs['aria-expanded'] === 'true' && dl.hidden === false && strip.state().detailsOpen === true, 'a click opens the list and the button says "Hide details"');
@@ -379,13 +379,13 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
   ok(dl.querySelectorAll('chat-stash-row').length === 1 && dl.querySelector('chat-stash-row').textContent === 'a message from Ada · ping' && dl.hidden === false, 'the list follows the fact (one entry left) and stays open');
   strip.set(S.summarize({ msg: Array.from({ length: 14 }, (_, i) => ({ source: 'agent', kind: 'peer', fromName: 'P', ts: i, text: 'm' + i })) }), { turn: 'idle' });
   const rowsM = dl.querySelectorAll('chat-stash-row');
-  ok(rowsM.length === 13 && rowsM[12].textContent === '2 more are waiting, not previewed' && rowsM[12].classList.contains('chat-stash-row-more'), '14 waiting ⇒ 12 rows + a last row naming the 2 not previewed');
+  ok(rowsM.length === 13 && rowsM[12].textContent === '2 more are waiting, not previewed' && verdictOf(rowsM[12].classList.contains('chat-stash-row-more')), '14 waiting ⇒ 12 rows + a last row naming the 2 not previewed');
   more.listeners.click[0]({ stopPropagation() { } });
   ok(dl.hidden === true && more.textContent === 'Details', 'a second click closes the list');
   strip.set(null);
   ok(strip.el.hidden === true, 'the fact clears ⇒ the strip is hidden');
-  ok(/^Not handed over — the spend check refused this turn without saying why/.test(SS.handOverRefusalText({ code: 'spend_refused' })) && /could not be reached/.test(SS.handOverRefusalText({ code: 'unreachable' })) && SS.handOverRefusalText({ error: 'boom' }) === 'Hand-over failed: boom'
-    && /already in progress/.test(SS.handOverRefusalText({ code: 'in_flight' })) && /predates mid-turn notifications/.test(SS.handOverRefusalText({ code: 'held_for_next_turn' })),
+  ok(gateOf(/^Not handed over — the spend check refused this turn without saying why/.test(SS.handOverRefusalText({ code: 'spend_refused' }))) && gateOf(/could not be reached/.test(SS.handOverRefusalText({ code: 'unreachable' }))) && SS.handOverRefusalText({ error: 'boom' }) === 'Hand-over failed: boom'
+    && gateOf(/already in progress/.test(SS.handOverRefusalText({ code: 'in_flight' }))) && verdictOf(/predates mid-turn notifications/.test(SS.handOverRefusalText({ code: 'held_for_next_turn' }))),
     'a refusal is SAID in the device\'s words, by its code (incl. in_flight and held_for_next_turn)');
   // lane owner-press-attended (R2): THE MEASURED 429 BODY — userW's 00:47:34 PT press on account acct-1 (cap 30, the next slot
   // 08:21:33Z): said WITH its facts and its door. The pre-fix strip said the fact-less sentence for it (no account, no cap,
@@ -397,9 +397,9 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
     ok(w.door === 'spending' && w.text === 'Not handed over — acct-1 has used its 30 turns nobody typed this hour; the next frees at 01:21 AM (in 34 min). The notices keep waiting.',
       'R2 the measured 429 body is SAID: the account (acct-1), the cap (30), the next free slot in the VIEWER\'s zone (01:21 AM PT — the hub said 8:21:33 AM, its UTC, unnamed) and in how long — with the door to Settings → Spending', JSON.stringify(w));
     const sz = S.handOverRefusalWords(body, tEn, { now, locale: 'zh-CN', timeZone: 'Asia/Shanghai' });
-    ok(/the next frees at 16:21 \(in 34 min\)/.test(sz.text), 'R2 …the same instant in another viewer\'s zone and locale (16:21 in Shanghai) — the hub\'s clock is the fact, the zone is the rendering', sz.text);
+    ok(verdictOf(/the next frees at 16:21 \(in 34 min\)/.test(sz.text)), 'R2 …the same instant in another viewer\'s zone and locale (16:21 in Shanghai) — the hub\'s clock is the fact, the zone is the rendering', sz.text);
     const strip = SS.handOverRefusalText(body, { now });
-    ok(/\bacct-1\b/.test(strip) && /\b30\b/.test(strip) && /\(in 34 min\)/.test(strip), 'R2 …and the strip\'s own export speaks it (account, cap, minutes)', strip);
+    ok(gateOf(/\bacct-1\b/.test(strip)) && gateOf(/\b30\b/.test(strip)) && verdictOf(/\(in 34 min\)/.test(strip)), 'R2 …and the strip\'s own export speaks it (account, cap, minutes)', strip);
     const pre = S.handOverRefusalWords({ code: 'spend_refused' }, tEn, { now });
     // r3 (accept-r2 claim 0): a body with NO why is not a cap (the hub sends one when the authorizer itself threw) — it
     // says the check refused without saying why, never the pre-fix «the limit … is reached», and names no Spending door
@@ -411,28 +411,28 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
     ok(threw.text === 'Not handed over — the spend check failed and refused this turn: “spend authorizer failed: settings store unreadable” (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [stash] and [deliver] lines record it.' && threw.door === null && !/\[spend\]/.test(threw.text),
       'r4 the authorizer threw: the reply\'s `error` is SAID (quoted) and the pointer names the [stash] / [deliver] lines written for it — never a [spend] line nobody writes', threw.text);
     const ctl = S.handOverRefusalWords({ code: 'spend_refused', error: 'x\u0007\n'.repeat(3) + 'y'.repeat(400) }, tEn, { now });
-    ok(!/[\u0000-\u001f]/.test(ctl.text) && /“x x x y{190,200}”/.test(ctl.text), 'r4 …the reason is belted: control characters become spaces, 200 characters at most', ctl.text);
+    ok(!/[\u0000-\u001f]/.test(ctl.text) && verdictOf(/“x x x y{190,200}”/.test(ctl.text)), 'r4 …the reason is belted: control characters become spaces, 200 characters at most', ctl.text);
     const day = S.handOverRefusalWords({ ...body, why: 'day-cap', cap: 200, retryAfter: Date.parse('2026-10-29T07:00:00Z') }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
     const inst = S.handOverRefusalWords({ ...body, why: 'instance-cap', cap: 800, identity: null }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
     const over = S.handOverRefusalWords({ ...body, why: 'overage-in-use', cap: null, retryAfter: 0 }, tEn, { now });
     const out = S.handOverRefusalWords({ ...body, why: 'identity-cannot-serve', cap: null, retryAfter: 0 }, tEn, { now });
     const zero = S.handOverRefusalWords({ ...body, cap: 0, retryAfter: 0 }, tEn, { now });
-    ok(/in 24 hours; the next frees at Thu 12:00 AM \(in 23 h 13 min\)/.test(day.text) && day.door === 'spending' && /this instance has used its 800/.test(inst.text) && inst.door === 'spending'
-      && /acct-1 is billing paid overage/.test(over.text) && over.door === 'spending' && /acct-1 cannot sign requests right now/.test(out.text) && out.door === 'usage' && /switched off for acct-1/.test(zero.text) && zero.door === 'spending',
+    ok(gateOf(/in 24 hours; the next frees at Thu 12:00 AM \(in 23 h 13 min\)/.test(day.text)) && day.door === 'spending' && gateOf(/this instance has used its 800/.test(inst.text)) && inst.door === 'spending'
+      && gateOf(/acct-1 is billing paid overage/.test(over.text)) && over.door === 'spending' && gateOf(/acct-1 cannot sign requests right now/.test(out.text)) && out.door === 'usage' && gateOf(/switched off for acct-1/.test(zero.text)) && zero.door === 'spending',
       'R2 every refusal that remains after the attended law has its own words — another day names its weekday; overage and a cap of 0 («switched off») carry the Settings door, a signed-out account the Usage window (r2)', JSON.stringify([day.text, inst.text, over.text, out.text, zero.text]));
     const src = read('src/lib/stash-strip.js');
-    ok(/if \(!r \|\| r\.error \|\| !r\.ok\) \{ showRefusal\(r\); return; \}/.test(src) && /w\.door === 'spending' && settings && typeof settings\.open === 'function' \? \{ label: t\('Open Settings → Spending'\), run: \(\) => \(row && app && typeof app\.openSettingAt === 'function' \? app\.openSettingAt\(row\) : settings\.open\(\{ category: t\('Spending'\) \}\)\) \}/.test(src),
+    ok(gateOf(/if \(!r \|\| r\.error \|\| !r\.ok\) \{ showRefusal\(r\); return; \}/.test(src)) && verdictOf(/w\.door === 'spending' && settings && typeof settings\.open === 'function' \? \{ label: t\('Open Settings → Spending'\), run: \(\) => \(row && app && typeof app\.openSettingAt === 'function' \? app\.openSettingAt\(row\) : settings\.open\(\{ category: t\('Spending'\) \}\)\) \}/.test(src)),
       'R2 the strip\'s refusal toast carries the door: «Open Settings → Spending» opens the Settings window on the refused ceiling\'s ROW (lane setting-doors pick 1: spendRowOf over the refusal\'s why), else on its Spending section');
     // r2: THE SAME TABLE AS THE NOTICE (accept-r1 finding 1 + attack 2): no body with no identity says «the limit is reached»
     // unless the refusal WAS a cap; an instant already PAST is said «free now — press again», never «(in 1 min)»
     const noId = (why) => S.handOverRefusalWords({ ...body, why, identity: null, cap: null, retryAfter: 0 }, tEn, { now }).text;
     const past = S.handOverRefusalWords({ ...body, retryAfter: now - 7.5 * 60e3 }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
-    ok(/could not tell which account/.test(noId('identity-unknown')) && /the account this turn would bill cannot sign requests/.test(noId('identity-cannot-serve')) && /has reached its spend control/.test(noId('spend-control-reached'))
-      && /is on paid overage/.test(noId('overage-in-use')) && /refused this turn \(weird\)/.test(noId('weird')) && ['identity-unknown', 'identity-cannot-serve', 'spend-control-reached', 'overage-in-use', 'weird'].every((w) => !/limit for turns nobody typed is reached/.test(noId(w))),
+    ok(gateOf(/could not tell which account/.test(noId('identity-unknown'))) && gateOf(/the account this turn would bill cannot sign requests/.test(noId('identity-cannot-serve'))) && gateOf(/has reached its spend control/.test(noId('spend-control-reached')))
+      && gateOf(/is on paid overage/.test(noId('overage-in-use'))) && gateOf(/refused this turn \(weird\)/.test(noId('weird'))) && verdictOf(['identity-unknown', 'identity-cannot-serve', 'spend-control-reached', 'overage-in-use', 'weird'].every((w) => !/limit for turns nobody typed is reached/.test(noId(w)))),
       'r2 a refusal whose body names no account has its own words per why — never «the limit is reached» unless it WAS a cap', JSON.stringify(['identity-unknown', 'identity-cannot-serve', 'weird'].map(noId)));
     ok(past.text === 'Not handed over — acct-1 has used its 30 turns nobody typed this hour; the next is free now — press again. The notices keep waiting.' && !/\(in /.test(past.text),
       'r2 a retryAfter already 7.5 min PAST is said «the next is free now — press again» (base: «the next frees at 12:40 AM (in 1 min)»)', past.text);
-    ok(/w\.door === 'usage' && app && typeof app\.openUsage === 'function' \? \{ label: t\('Open Usage'\), run: \(\) => app\.openUsage\(\) \}/.test(src), 'r2 a signed-out (or unnamed) account\'s toast opens the Usage window — its door');
+    ok(verdictOf(/w\.door === 'usage' && app && typeof app\.openUsage === 'function' \? \{ label: t\('Open Usage'\), run: \(\) => app\.openUsage\(\) \}/.test(src)), 'r2 a signed-out (or unnamed) account\'s toast opens the Usage window — its door');
   }
   // the card hint
   const list = new El('div');
@@ -440,7 +440,7 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
   const state = new El('span'); state.className = 'sess-state-chip'; card.appendChild(state); list.appendChild(card);
   SS.patchStashHints(list, [{ id: 'w1', stash: f3 }]);
   const hint = card.querySelector('.sess-stash-chip');
-  ok(hint && hint.querySelector('.chip-text').textContent === '3 waiting' && /a channel receipt/.test(hint.dataset.tip) && card.children[1] === hint, 'the card gains "3 waiting" after its state chip (the tooltip names them)');
+  ok(gateOf(hint) && hint.querySelector('.chip-text').textContent === '3 waiting' && gateOf(/a channel receipt/.test(hint.dataset.tip)) && card.children[1] === hint, 'the card gains "3 waiting" after its state chip (the tooltip names them)');
   SS.patchStashHints(list, [{ id: 'w1', stash: S.summarize({ jobs: [{}] }) }]);
   ok(card.querySelector('.sess-stash-chip') === hint && hint.querySelector('.chip-text').textContent === '1 waiting', 'a change patches the SAME chip');
   SS.patchStashHints(list, [{ id: 'w1', stash: null }]);
@@ -492,14 +492,14 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   R.deliver.stashFor(R.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'msg-A' }); R.deliver.flush();
   R.jm._stashNotif(R.CID, job('j1', 'nightly'), { what: 'done-A' }, 'not reachable'); R.jm._save();
   const p = R.view.handOver('w1'); await sleep(5);
-  ok(R.diskMsg().length === 1 && /^ho-/.test(R.diskMsg()[0].ho) && R.diskJobs().length === 1 && R.diskJobs()[0].ho === R.diskMsg()[0].ho, 'before the post leaves, BOTH stores on disk carry the entries stamped with the hand-over\'s id (was: an in-memory claim)', { msg: R.diskMsg(), jobs: R.diskJobs() });
+  ok(R.diskMsg().length === 1 && gateOf(/^ho-/.test(R.diskMsg()[0].ho)) && R.diskJobs().length === 1 && R.diskJobs()[0].ho === R.diskMsg()[0].ho, 'before the post leaves, BOTH stores on disk carry the entries stamped with the hand-over\'s id (was: an in-memory claim)', { msg: R.diskMsg(), jobs: R.diskJobs() });
   const st = R.view.settle(3000);                 // what SIGTERM's shutdown does now: wait for the flight
   let settled = false; st.then(() => { settled = true; });
   await sleep(20);
   ok(settled === false, 'the shutdown\'s settle() is still waiting while the post is on its way');
   R.release();
   const n = await st; const r = await p;
-  ok(n === 1 && r.ok && r.delivered === 2 && /\(hand-over ho-[a-z0-9]+-[a-z0-9]+\)/.test(R.posts[0]) && R.diskMsg().length === 0 && R.diskJobs().length === 0,
+  ok(n === 1 && gateOf(r.ok) && r.delivered === 2 && gateOf(/\(hand-over ho-[a-z0-9]+-[a-z0-9]+\)/.test(R.posts[0])) && R.diskMsg().length === 0 && R.diskJobs().length === 0,
     'the post lands ⇒ settle() resolves, the drain of BOTH stores is on disk at once, the frame carries the hand-over id', { n, r, disk: [R.diskMsg().length, R.diskJobs().length] });
   R.deliver.flush(); R.jm.shutdown();
   const N = rig2({ dir: R.dir, boot: true });     // the next server over the same data dir
@@ -528,7 +528,7 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   R.deliver.stashFor(R.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'now' }); R.deliver.flush();
   R.jm._stashNotif(R.CID, job('j3', 'x'), { what: 'now-j' }, 'not reachable'); R.jm._save();
   const r = await R.view.handOver('w1');
-  ok(r.ok && r.delivered === 2 && R.diskMsg().length === 0 && R.diskJobs().length === 0, 'right after the hand-over resolves, neither store on disk holds the delivered entries (a SIGKILL here re-delivers nothing)');
+  ok(gateOf(r.ok) && r.delivered === 2 && R.diskMsg().length === 0 && R.diskJobs().length === 0, 'right after the hand-over resolves, neither store on disk holds the delivered entries (a SIGKILL here re-delivers nothing)');
   // the injection route's full drain persists at once too (the same class: a drained injection + a kill = a duplicate)
   R.deliver.stashFor(R.CID, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'inj' }); R.deliver.flush();
   R.deliver.drainStash(R.CID);
@@ -547,7 +547,7 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   ok(R.deliver.stashEntries(R.CID).length === 60 && R.deliver.claimedCount(R.CID) === 30 && !R.deliver.stashEntries(R.CID).some((e) => e.text === 'newest'), 'the cap counts the UNCLAIMED entries: 30 claimed + 30 unclaimed wait (the first newcomer fell off as the oldest unclaimed), no claimed entry evicted');
   R.release(); const r = await p;
   const left = R.deliver.stashEntries(R.CID);
-  ok(r.ok && r.delivered === 30 && /full-0[\s\S]*full-29/.test(R.posts[0]) && left.length === 30 && left[0].text === 'new-0' && !left.some((e) => e.ho) && R.view._delivered.get(r.id).msg.length === 30 && R.deliver.drainStash(R.CID).length === 30,
+  ok(gateOf(r.ok) && r.delivered === 30 && gateOf(/full-0[\s\S]*full-29/.test(R.posts[0])) && left.length === 30 && left[0].text === 'new-0' && !left.some((e) => e.ho) && R.view._delivered.get(r.id).msg.length === 30 && R.deliver.drainStash(R.CID).length === 30,
     'every claimed entry was in the frame AND is counted delivered (30 — was 0 for the same shape), the record keeps all 30 originals; the 30 newcomers survive unclaimed and the next drain takes them', { delivered: r.delivered, left: left.length });
 }
 {
@@ -558,7 +558,7 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   R.jm._stashNotif(R.CID, job('j5', 'hourly'), { what: 'landed mid-flight' }, 'not reachable');   // a finalize whose delivery fell to the stash
   R.release(); const r = await p;
   const left = R.jm.peekNotifs(R.CID);
-  ok(r.ok && r.delivered === 1 && /first/.test(R.posts[0]) && !/landed mid-flight/.test(R.posts[0]) && left.length === 1 && left[0].text === 'landed mid-flight' && !left[0].ho && R.jm.drainNotifs(R.CID).length === 1,
+  ok(gateOf(r.ok) && r.delivered === 1 && gateOf(/first/.test(R.posts[0])) && !/landed mid-flight/.test(R.posts[0]) && left.length === 1 && left[0].text === 'landed mid-flight' && !left[0].ho && R.jm.drainNotifs(R.CID).length === 1,
     'a job result stashed while the hand-over is in flight stays unclaimed, is not in the frame, and the next drain takes it');
 }
 {
@@ -568,13 +568,13 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   const p1 = R.view.handOver('w1'); await sleep(25);   // past the rig's 10 ms re-publish debounce
   const f = R.view.summaryFor(R.s);
   const p2 = await R.view.handOver('w1');
-  ok(!p2.ok && p2.code === 'in_flight' && /^ho-/.test(p2.id) && p2.since > 0 && /already in progress \(ho-/.test(p2.error) && f.inFlight === true && R.published.length >= 1,
+  ok(!p2.ok && p2.code === 'in_flight' && gateOf(/^ho-/.test(p2.id)) && p2.since > 0 && gateOf(/already in progress \(ho-/.test(p2.error)) && f.inFlight === true && R.published.length >= 1,
     'the second client\'s click is refused naming the in-flight hand-over (id + since); the fact it received says inFlight (a re-publish at the start)', { p2, inFlight: f.inFlight });
   const strip = SS.createStashStrip({ sessionId: 'w1' }); strip.set(f, { turn: 'idle' });
   const go = strip.el.querySelector('.chat-stash-go');
   ok(go.disabled === true && strip.el.querySelector('.chat-stash-go-label').textContent === 'Handing over…' && go.title === 'A hand-over is on its way', 'the second client\'s strip: the button waits ("Handing over…", disabled) — no live button that answers 409');
   R.release(); const r1 = await p1; await sleep(30);
-  ok(r1.ok && r1.id === p2.id && R.view.summaryFor(R.s) === null && R.view.inFlight(R.CID) === false, 'after: the same id delivered once, the fact clears for every client, nothing in flight');
+  ok(gateOf(r1.ok) && r1.id === p2.id && R.view.summaryFor(R.s) === null && R.view.inFlight(R.CID) === false, 'after: the same id delivered once, the fact clears for every client, nothing in flight');
   strip.set(R.view.summaryFor(R.s)); ok(strip.el.hidden === true, '…and the second client\'s strip hides on that fact');
 }
 {
@@ -585,7 +585,7 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   const p = R.view.handOver('w1'); await sleep(5);
   R.sessions.delete('w1');                          // the kill path: activeSessions.delete
   R.release(); const r = await p;
-  ok(r.ok && r.delivered === 2 && R.deliver.claimedCount(R.CID) === 0 && R.view.inFlight(R.CID) === false && R.deliver.stashEntries(R.CID).length === 0 && R.jm.peekNotifs(R.CID).length === 0,
+  ok(gateOf(r.ok) && r.delivered === 2 && R.deliver.claimedCount(R.CID) === 0 && R.view.inFlight(R.CID) === false && R.deliver.stashEntries(R.CID).length === 0 && R.jm.peekNotifs(R.CID).length === 0,
     'killed while the post was on its way and the post LANDED: drained, the claim released, nothing in flight (the ladder is bounded — postToPeer 5 s, the daemon op 15 s — so the finally always runs)');
   const Q = rig2({ deferPost: true });
   Q.deliver.stashFor(Q.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'kill-fail' });
@@ -595,7 +595,7 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   ok(!rq.ok && rq.code === 'unreachable' && Q.deliver.claimedCount(Q.CID) === 0 && !Q.deliver.stashEntries(Q.CID)[0].ho && Q.diskMsg().length === 1 && !Q.diskMsg()[0].ho && Q.releases.length === 1 && Q.deliver.drainStash(Q.CID).length === 1,
     'killed and the post FAILED: the claim is released (memory + disk), the hold given back, the entry waits for the conversation\'s next resume', rq);
   const pm = read('src/peer-messaging.js'), ac = read('src/agentd/client.js');
-  ok(/function postToPeer\(peer, text, \{ timeoutMs = POST_TIMEOUT_MS \}/.test(pm) && /const POST_TIMEOUT_MS = 5000;/.test(pm) && /const POST_BOUND_MS = POST_TIMEOUT_MS \+ WRITE_GRACE_MS \+ FLUSH_GRACE_MS;/.test(pm) && /op: 'peer-post', cid, text, timeoutMs: 15000/.test(ac) && /deviceBounded \? hosts\.deviceBounded\(hid, 6000\)/.test(read('src/server/conversation-deliver.js')),
+  ok(gateOf(/function postToPeer\(peer, text, \{ timeoutMs = POST_TIMEOUT_MS \}/.test(pm)) && gateOf(/const POST_TIMEOUT_MS = 5000;/.test(pm)) && gateOf(/const POST_BOUND_MS = POST_TIMEOUT_MS \+ WRITE_GRACE_MS \+ FLUSH_GRACE_MS;/.test(pm)) && gateOf(/op: 'peer-post', cid, text, timeoutMs: 15000/.test(ac)) && verdictOf(/deviceBounded \? hosts\.deviceBounded\(hid, 6000\)/.test(read('src/server/conversation-deliver.js'))),
     'PIN: every rung the hand-over can await is bounded (a claim can never be stranded by a post that never answers)');
 }
 {
@@ -606,20 +606,20 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   R.jm._stashNotif(R.CID, job('j7', 'nightly'), { what: 'done-7' }, 'not reachable');
   const before = R.view.summaryFor(R.s);
   const r = await R.view.handOver('w1');
-  ok(r.ok && r.lane === 'rpc-queue' && r.delivered === 5 && R.frames.length === 1 && R.frames[0].kind === 'notification' && R.view.summaryFor(R.s) === null && R.ledger.length === 1,
+  ok(gateOf(r.ok) && r.lane === 'rpc-queue' && r.delivered === 5 && R.frames.length === 1 && R.frames[0].kind === 'notification' && R.view.summaryFor(R.s) === null && R.ledger.length === 1,
     'a codex session (idle): the frame went down the rpc lane, one row, both stores emptied', r);
   // the wrapper answers ok:false (a turn/start error, a Stop that dropped it, a queue removal) echoing the frame's text
   R.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'turn/start failed', text: R.frames[0].text, fromName: R.frames[0].fromName, kind: 'notification' } });
   const after = R.view.summaryFor(R.s);
-  ok(after && after.count === 5 && S.summaryDigest(after) === S.summaryDigest(before) && R.jm.peekNotifs(R.CID).length === 1 && R.jm.peekNotifs(R.CID)[0].text === 'done-7' && R.deliver.stashEntries(R.CID).map((e) => e.text).join() === 'receipt-0,receipt-1,receipt-2,hi',
+  ok(gateOf(after) && after.count === 5 && S.summaryDigest(after) === S.summaryDigest(before) && R.jm.peekNotifs(R.CID).length === 1 && R.jm.peekNotifs(R.CID)[0].text === 'done-7' && R.deliver.stashEntries(R.CID).map((e) => e.text).join() === 'receipt-0,receipt-1,receipt-2,hi',
     'the REAL consumer restores the ORIGINAL five: three receipts + a message from Ada in the ladder\'s store (their own order), the job result in ITS store — the strip says the same five it said before (was: "1 VibeSpace notice")', { after, before });
-  ok(R.deliver.stashEntries(R.CID).every((e) => !e.ho) && R.diskMsg().length === 4 && R.diskJobs().length === 1, 'restored entries carry no claim, on disk in both stores');
+  ok(gateOf(R.deliver.stashEntries(R.CID).every((e) => !e.ho)) && R.diskMsg().length === 4 && R.diskJobs().length === 1, 'restored entries carry no claim, on disk in both stores');
   // the same frame a second time (a Stop AND a queue removal both echo it) restores nothing twice; a foreign frame is stashed as itself
   R.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'dropped by Stop', text: R.frames[0].text, fromName: R.frames[0].fromName, kind: 'notification' } });
   ok(R.view.summaryFor(R.s).count === 5 && R.deliver.restoreFrame(R.CID, R.frames[0].text) === 5, 'the same frame echoed twice restores once — the second echo is handled, never a blob of the copy (the memory is spent, the record marked)');
   R.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'x', text: 'a peer message that was never a hand-over', fromName: 'Bo', kind: 'peer' } });
   const f6 = R.view.summaryFor(R.s);
-  ok(f6.count === 6 && f6.items.some((i) => i.kind === 'peer' && i.label === 'Bo'), 'a frame that names no hand-over is re-stashed as itself (the consumer\'s rule before r2, unchanged)');
+  ok(f6.count === 6 && verdictOf(f6.items.some((i) => i.kind === 'peer' && i.label === 'Bo')), 'a frame that names no hand-over is re-stashed as itself (the consumer\'s rule before r2, unchanged)');
   ok(R.deliver.restoreFrame(R.CID, 'nothing here') === 0 && R.deliver.restoreFrame('other-cid', R.frames[0].text) === 0, 'restoreFrame: no tag ⇒ 0; a tag for another conversation ⇒ 0 (never restored across conversations)');
 }
 {
@@ -647,7 +647,7 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
     const got = { billed: f.billed, reachable: f.reachable, code: r.ok ? 'ok' : r.code, lane: r.lane || undefined, ledger: R.ledger.length, steered: R.frames[0] ? undefined : undefined, released: R.releases.length };
     const exp = { billed: row.billed, reachable: row.reachable, code: row.code, lane: row.lane, ledger: row.ledger, released: row.released };
     const pass = got.billed === exp.billed && got.reachable === exp.reachable && got.code === exp.code && (exp.lane === undefined || got.lane === exp.lane) && got.ledger === exp.ledger && (exp.released === undefined || got.released === exp.released) && (row.steered === undefined || r.steered === row.steered);
-    ok(pass, `TABLE ${row.name}: billed=${exp.billed} reachable=${exp.reachable} → ${exp.code}${exp.lane ? '/' + exp.lane : ''}, ledger rows ${exp.ledger}`, { got, r });
+    ok(verdictOf(pass), `TABLE ${row.name}: billed=${exp.billed} reachable=${exp.reachable} → ${exp.code}${exp.lane ? '/' + exp.lane : ''}, ledger rows ${exp.ledger}`, { got, r });
   }
   const Sh = rig2({ backend: 'shell', cid: null, inbox: false });
   ok(Sh.view.summaryFor(Sh.s) === null && (await Sh.view.handOver('w1')).code === 'no_conversation', 'TABLE a shell terminal: no conversation ⇒ no fact (no strip), a hand-over is no_conversation');
@@ -670,7 +670,7 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   const strip = SS.createStashStrip({ sessionId: 'w1' }); strip.set(f, { turn: 'idle' });
   ok(strip.el.querySelector('.chat-stash-cost').textContent === ' · starts a turn' && strip.el.querySelector('.chat-stash-held').textContent === '3 more are held for the next hand-over' && strip.el.querySelector('.chat-stash-held').hidden === false, 'the strip prints it: the money word on the button, the held count beside it (r4: its own node, so the phone can fold it without folding the money word)');
   const r = await R.view.handOver('w1');
-  ok(r.ok && r.delivered === 6 && r.held === 3 && S.handedOverWords(r, tEn) === 'Handed over 6 waiting notice(s); 3 more are still held — hand over again or send a message', 'the result and the toast name the rest (never "Handed over 6" alone)', r);
+  ok(gateOf(r.ok) && r.delivered === 6 && r.held === 3 && S.handedOverWords(r, tEn) === 'Handed over 6 waiting notice(s); 3 more are still held — hand over again or send a message', 'the result and the toast name the rest (never "Handed over 6" alone)', r);
   const f2 = R.view.summaryFor(R.s);
   ok(f2.count === 3 && f2.held === 0 && (await R.view.handOver('w1')).delivered === 3 && R.view.summaryFor(R.s) === null, 'after: 3 waiting, none held; a second hand-over carries them');
   ok(S.stashSummaryWords(S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'A' }] }), tEn, { held: 1 }).held === '1 more is held for the next hand-over' && S.handedOverWords({ delivered: 2, held: 0 }, tEn) === 'Handed over 2 waiting notice(s)', 'the singular; no rest ⇒ the plain toast');
@@ -699,11 +699,11 @@ async function peerTagLeg(R, label, { echoKind = 'peer', whole = false } = {}) {
 {
   const steerCaps = { peerMessage: true, inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all'] };
   const L = await peerTagLeg(rig2({ backend: 'codex', inbox: false, sidecar: steerCaps }));
-  ok(L.ok && L.bo === true && L.resurrected === 0, 'a PEER frame quoting a remembered hand-over\'s tag, handed back: Bo\'s message is stashed as ITSELF and nothing already delivered comes back (was: 3 resurrected, Bo lost)', L);
+  ok(gateOf(L.ok) && L.bo === true && L.resurrected === 0, 'a PEER frame quoting a remembered hand-over\'s tag, handed back: Bo\'s message is stashed as ITSELF and nothing already delivered comes back (was: 3 resurrected, Bo lost)', L);
   const L0 = await peerTagLeg(rig2({ backend: 'codex', inbox: false, sidecar: steerCaps }), null, { echoKind: null });
-  ok(L0.ok && L0.bo === true && L0.resurrected === 0, '…and on an older wrapper that echoes no kind, the text equality alone holds (r3\'s layer, judged with r4\'s stripped)', L0);
+  ok(gateOf(L0.ok) && L0.bo === true && L0.resurrected === 0, '…and on an older wrapper that echoes no kind, the text equality alone holds (r3\'s layer, judged with r4\'s stripped)', L0);
   const LW = await peerTagLeg(rig2({ backend: 'codex', inbox: false, sidecar: steerCaps }), null, { whole: true });
-  ok(LW.ok && LW.bo === true && LW.resurrected === 0, 'r4: a PEER frame that IS the hand-over\'s exact text (an agent quoted the whole frame to a peer), handed back: the wrapper says it went as a peer ⇒ stashed as itself, nothing resurrected', LW);
+  ok(gateOf(LW.ok) && LW.bo === true && LW.resurrected === 0, 'r4: a PEER frame that IS the hand-over\'s exact text (an agent quoted the whole frame to a peer), handed back: the wrapper says it went as a peer ⇒ stashed as itself, nothing resurrected', LW);
   // the hand-over's own frame still restores (r2's rule kept), and the record remembers the exact text the ladder wrote
   const R = rig2({ backend: 'codex', inbox: false, sidecar: steerCaps });
   R.deliver.stashFor(R.CID, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'receipt-own' });
@@ -722,7 +722,7 @@ async function peerTagLeg(R, label, { echoKind = 'peer', whole = false } = {}) {
   Q.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'x', text: Q.frames[0].text, fromName: Q.frames[0].fromName, kind: 'notification' } });
   const one = Q.deliver.stashEntries(Q.CID).map((e) => e.text);
   Q.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'x', text: Q.frames[0].text, fromName: Q.frames[0].fromName, kind: 'notification' } });
-  ok(one.length === 1 && /only/.test(one[0]) && Q.deliver.stashEntries(Q.CID).length === 1, 'a record with no originals left: the first echo keeps the frame as one notice (was: dropped), the second adds nothing', { one: one.map((t) => t.slice(0, 50)), n: Q.deliver.stashEntries(Q.CID).length });
+  ok(one.length === 1 && gateOf(/only/.test(one[0])) && Q.deliver.stashEntries(Q.CID).length === 1, 'a record with no originals left: the first echo keeps the frame as one notice (was: dropped), the second adds nothing', { one: one.map((t) => t.slice(0, 50)), n: Q.deliver.stashEntries(Q.CID).length });
 }
 {
   // THE DOOR: server.js shutdown() closes first, then waits — a press during the wait is refused by name
@@ -733,10 +733,10 @@ async function peerTagLeg(R, label, { echoKind = 'peer', whole = false } = {}) {
   const st = R.view.settle(2000);
   R.deliver.stashFor(R.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'm2' });
   const r2 = await R.view.handOver('w1');
-  ok(!r2.ok && r2.code === 'restarting' && /restarting/.test(r2.error) && SH.STATUS.restarting === 503 && R.view.isClosed() === true, 'after close(): a press is refused `restarting` (503) by name', r2);
+  ok(!r2.ok && r2.code === 'restarting' && gateOf(/restarting/.test(r2.error)) && SH.STATUS.restarting === 503 && R.view.isClosed() === true, 'after close(): a press is refused `restarting` (503) by name', r2);
   R.release(); const r1 = await p1; const k = await st;
-  ok(r1.ok && k === 1 && R.view.inFlightCount() === 0 && R.diskMsg().length === 1 && R.diskMsg()[0].text === 'm2' && !R.diskMsg()[0].ho, 'the awaited hand-over settled; at exit nothing is in flight and m2 waits unstamped on disk (the next boot releases nothing)', { r1, k, disk: R.diskMsg() });
-  ok(/^Not handed over — the server is restarting/.test(SS.handOverRefusalText({ code: 'restarting' })), 'the strip says it in plain words');
+  ok(gateOf(r1.ok) && k === 1 && R.view.inFlightCount() === 0 && R.diskMsg().length === 1 && R.diskMsg()[0].text === 'm2' && !R.diskMsg()[0].ho, 'the awaited hand-over settled; at exit nothing is in flight and m2 waits unstamped on disk (the next boot releases nothing)', { r1, k, disk: R.diskMsg() });
+  ok(verdictOf(/^Not handed over — the server is restarting/.test(SS.handOverRefusalText({ code: 'restarting' }))), 'the strip says it in plain words');
 }
 
 // ═══ ②e VERIFY r4 — the cap never evicts a claimed entry; the hand-over memory outlives the process and a long turn; the money word is on the button ═══
@@ -753,7 +753,7 @@ console.log('②e verify r4: the cap under claim (both stores), the memory on di
   R.jm._stashNotif(R.CID, job('k30', 'k30'), { what: 'k-result-30' }, 'not reachable');
   ok(R.jm.peekNotifs(R.CID).length === 32 && !R.jm.peekNotifs(R.CID).some((n) => n.text === 'k-result-0') && R.jm.peekNotifs(R.CID).filter((n) => n.ho).length === 2, 'the 31st unclaimed arrival evicts the oldest UNCLAIMED job result, never a stamped one');
   R.release(); const r = await p;
-  ok(r.ok && r.delivered === 2 && /result-1[\s\S]*result-2/.test(R.posts[0]) && R.view._delivered.get(r.id).jobs.length === 2 && R.jm.peekNotifs(R.CID).length === 30 && !R.jm.peekNotifs(R.CID).some((n) => n.ho),
+  ok(gateOf(r.ok) && r.delivered === 2 && gateOf(/result-1[\s\S]*result-2/.test(R.posts[0])) && R.view._delivered.get(r.id).jobs.length === 2 && R.jm.peekNotifs(R.CID).length === 30 && !R.jm.peekNotifs(R.CID).some((n) => n.ho),
     'delivered = 2 (the press counts what the agent received — was 0), the record keeps both originals, the 30 newcomers wait unclaimed', { delivered: r.delivered, left: R.jm.peekNotifs(R.CID).length });
   // the echo restores both job results into a store that already holds 30: no cap on a restore (they are the oldest — a cap would have evicted exactly them)
   R.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'dropped by Stop before it was delivered', text: R.posts[0], fromName: 'VibeSpace notices', kind: 'notification' } });
@@ -768,14 +768,14 @@ console.log('②e verify r4: the cap under claim (both stores), the memory on di
   const r = await R.view.handOver('w1');
   const frameText = R.frames[0].text;
   const memFile = path.join(R.dir, SH.DELIVERED_FILE);
-  ok(r.ok && r.delivered === 6 && fs.existsSync(memFile) && JSON.parse(fs.readFileSync(memFile, 'utf8'))[r.id].text === frameText && JSON.parse(fs.readFileSync(memFile, 'utf8'))[r.id].msg.length === 5,
+  ok(gateOf(r.ok) && r.delivered === 6 && gateOf(fs.existsSync(memFile)) && JSON.parse(fs.readFileSync(memFile, 'utf8'))[r.id].text === frameText && JSON.parse(fs.readFileSync(memFile, 'utf8'))[r.id].msg.length === 5,
     'a delivered hand-over\'s record (its exact frame text + both stores\' originals) is on disk at once, in data/' + SH.DELIVERED_FILE, { file: fs.existsSync(memFile) });
   R.deliver.flush(); R.jm.shutdown();
   const N = rig2({ dir: R.dir, boot: true, backend: 'codex', streaming: true, sidecar: { peerMessage: true, inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all'] }, inbox: false, dataDir: true });
   ok(N.view._delivered.size === 1 && N.deliver.releasedAtBoot.length === 0 && (N.jm.releasedAtBoot || []).length === 0, 'the next server reads the record back (nothing to release: the drain was on disk — the ideal boot, no duplicate)');
   N.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'dropped by Stop before it was delivered', text: frameText, fromName: 'VibeSpace notices', kind: 'notification' } });
   const f = N.view.summaryFor(N.s);
-  ok(f && f.count === 6 && f.items.map((i) => i.kind + ':' + i.n).join() === 'channel:5,job:1' && N.deliver.stashEntries(N.CID).filter((e) => /^lark-/.test(e.text)).length === 5 && N.jm.peekNotifs(N.CID).length === 1 && !N.deliver.stashEntries(N.CID).some((e) => /hand-over ho-/.test(e.text)),
+  ok(gateOf(f) && f.count === 6 && f.items.map((i) => i.kind + ':' + i.n).join() === 'channel:5,job:1' && N.deliver.stashEntries(N.CID).filter((e) => /^lark-/.test(e.text)).length === 5 && N.jm.peekNotifs(N.CID).length === 1 && !N.deliver.stashEntries(N.CID).some((e) => /hand-over ho-/.test(e.text)),
     'the frame handed back AFTER the restart restores its 6 ORIGINALS, each as itself (was: "1 VibeSpace notice" — 400 chars of a 4 KB frame at the next injection, the job result gone from its store)', f);
   ok(N.deliver.restoreFrame(N.CID, frameText) === 6 && JSON.parse(fs.readFileSync(memFile, 'utf8'))[r.id].restored === 6, 'a second echo (a Stop AND a queue removal) is handled by the persisted mark, never a copy');
   // the TTL outlives a long turn; the count bounds the file
@@ -790,11 +790,11 @@ console.log('②e verify r4: the cap under claim (both stores), the memory on di
   const asNotice = renderMsgStash([{ source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: long, ts: 1 }]);
   const asPeer = renderMsgStash([{ source: 'agent', kind: 'peer', fromName: 'Ada', text: long, ts: 1 }]);
   const short = renderMsgStash([{ source: 'agent', kind: 'notification', fromName: 'Background Work · nightly', text: 'finished: 3 files', ts: 1 }]);
-  ok(/lark-5/.test(asNotice.text) && asNotice.text.length > 3000 && !/clipped/.test(asNotice.text), 'a long NOTIFICATION entry (a frame the wrapper handed back) renders as a BLOCK — every line reaches the agent (was: 400 chars)', asNotice.text.length);
+  ok(gateOf(/lark-5/.test(asNotice.text)) && asNotice.text.length > 3000 && !/clipped/.test(asNotice.text), 'a long NOTIFICATION entry (a frame the wrapper handed back) renders as a BLOCK — every line reaches the agent (was: 400 chars)', asNotice.text.length);
   ok(!/lark-5/.test(asPeer.text) && asPeer.text.length < 700, 'a PEER entry with the same text is still a 400-char line (a peer\'s words are never widened by their length)');
-  ok(/reports: \[Background Work · nightly\] finished: 3 files$/.test(short.text) && !/\n\(/.test(short.text), 'a short notification stays a line');
+  ok(gateOf(/reports: \[Background Work · nightly\] finished: 3 files$/.test(short.text)) && !/\n\(/.test(short.text), 'a short notification stays a line');
   const huge = renderMsgStash([{ source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: 'frame (hand-over ho-zz-2):\n' + 'y'.repeat(9000), ts: 1 }]);
-  ok(/\(… clipped\)/.test(huge.text) && Buffer.byteLength(huge.text) < 4400, 'a block beyond the block budget (4 KiB) is clipped WITH its clip named, never in silence');
+  ok(gateOf(/\(… clipped\)/.test(huge.text)) && Buffer.byteLength(huge.text) < 4400, 'a block beyond the block budget (4 KiB) is clipped WITH its clip named, never in silence');
 }
 {
   // ── THE ECHO'S OWN KIND: a PEER frame that IS the text of a remembered hand-over restores nothing ──
@@ -820,22 +820,22 @@ console.log('②e verify r4: the cap under claim (both stores), the memory on di
     const w = S.stashSummaryWords(f, tEn, { billed: f.billed, inFlight: f.inFlight, held: f.held, reachable: f.reachable });
     const r = await R.view.handOver('w1');
     R.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ...row.v } });
-    ok(r.ok && f.billed === false && w.cost === 'joins the running turn' && /if that turn cannot take it, it runs as its own billed turn right after/.test(w.title) && R.ledger.length === row.rows,
+    ok(gateOf(r.ok) && f.billed === false && w.cost === 'joins the running turn' && gateOf(/if that turn cannot take it, it runs as its own billed turn right after/.test(w.title)) && R.ledger.length === row.rows,
       `codex MID-TURN, ${row.what}: the button said the MECHANISM ("joins the running turn"), the title the caveat; ledger rows ${row.rows} (was: no word at all, and the refused fold billed unannounced)`, { cost: w.cost, ledger: R.ledger });
   }
   const B = rig2({ backend: 'claude' });
   B.deliver.stashFor(B.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'row' });
   const wb = S.stashSummaryWords(B.view.summaryFor(B.s), tEn, { billed: true });
-  ok(wb.cost === 'starts a turn' && /starts a billed turn/.test(wb.title), 'a billed lane says "starts a turn" — the money word is never blank on either lane');
+  ok(wb.cost === 'starts a turn' && verdictOf(/starts a billed turn/.test(wb.title)), 'a billed lane says "starts a turn" — the money word is never blank on either lane');
   // THE PHONE: the money word is on the BUTTON and the ≤768px rule folds only the parts and the held count
   const css = read('public/chat.css');
   const phone = css.match(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ ([^}]*)\}/g).filter((m) => /chat-stash/.test(m));
-  ok(phone.length === 1 && /\.chat-stash-parts, \.chat-stash-held \{ display: none; \}/.test(phone[0]) && !/chat-stash-cost/.test(phone[0]) && !/chat-stash-go\b[^{]*\{[^}]*display: none/.test(phone[0]),
+  ok(phone.length === 1 && gateOf(/\.chat-stash-parts, \.chat-stash-held \{ display: none; \}/.test(phone[0])) && !/chat-stash-cost/.test(phone[0]) && !/chat-stash-go\b[^{]*\{[^}]*display: none/.test(phone[0]),
     'the phone rule hides the parts and the held count and NEVER the money word on the button (was: `.chat-stash-cost { display: none }` — a press that bills said nothing where it was pressed)', phone);
   const strip = SS.createStashStrip({ sessionId: 'w1' });
   strip.set({ ...S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'Ada' }] }), billed: true, held: 2 }, { turn: 'idle' });
   const go = strip.el.querySelector('.chat-stash-go');
-  ok(go.children.some((c) => c.className === 'chat-stash-cost' && c.textContent === ' · starts a turn') && strip.el.querySelector('.chat-stash-held').parentNode === strip.el && strip.el.querySelector('.chat-stash-held').textContent === '2 more are held for the next hand-over',
+  ok(gateOf(go.children.some((c) => c.className === 'chat-stash-cost' && c.textContent === ' · starts a turn')) && strip.el.querySelector('.chat-stash-held').parentNode === strip.el && strip.el.querySelector('.chat-stash-held').textContent === '2 more are held for the next hand-over',
     'the money word is a child of the button; the held count is its own node beside it');
 }
 {
@@ -847,14 +847,14 @@ console.log('②e verify r4: the cap under claim (both stores), the memory on di
   R.jm._stashNotif(R.CID, job('j1', 'nightly'), { what: 'door-job' }, 'not reachable');
   const d = await R.deliver.deliverToConversation(R.CID, 'a jobs finalize during the wait', { kind: 'notification', spendReason: 'job-notification' });
   const h = await R.view.handOver('w1');
-  ok(R.deliver.stashEntries(R.CID).length === 1 && R.jm.peekNotifs(R.CID).length === 1 && d.ok && d.lane === 'message' && !h.ok && h.code === 'restarting' && SH.STATUS.restarting === 503,
+  ok(R.deliver.stashEntries(R.CID).length === 1 && R.jm.peekNotifs(R.CID).length === 1 && gateOf(d.ok) && d.lane === 'message' && !h.ok && h.code === 'restarting' && SH.STATUS.restarting === 503,
     'after close(): a stash write, a jobs stash and a ladder delivery all still work (the door is the hand-over\'s alone); the press answers `restarting` 503', { d, h });
 }
 {
   // ── THE WRAPPER'S ECHO IS THE FRAME, BY SOURCE: every ok:false emitter carries the text it was handed, unsliced, and the reader is raw-mode ──
   const cw = read('data/bin/codex-chat-wrapper.js');
   const falses = [...cw.matchAll(/emitTaskEvent\('peer_message_result', \{ ok: false,[^\n]*/g)].map((m) => m[0]);
-  ok(falses.length === 3 && falses.every((l) => /\{ ok: false, reason: [^,]+, text(: known\.text)?,/.test(l) && !/slice|substr|trim\(\)/.test(l)) && /if \(process\.stdin\.isTTY\) process\.stdin\.setRawMode\(true\);/.test(cw) && /const text = String\(msg\.text \|\| ''\);\n\s+if \(!text\.trim\(\)\) return;/.test(cw),
+  ok(falses.length === 3 && gateOf(falses.every((l) => /\{ ok: false, reason: [^,]+, text(: known\.text)?,/.test(l) && !/slice|substr|trim\(\)/.test(l))) && gateOf(/if \(process\.stdin\.isTTY\) process\.stdin\.setRawMode\(true\);/.test(cw)) && verdictOf(/const text = String\(msg\.text \|\| ''\);\n\s+if \(!text\.trim\(\)\) return;/.test(cw)),
     'the codex wrapper: all three ok:false echoes carry the frame text unsliced (noteQueued keeps it whole), stdin is raw-mode (no canonical-line truncation), the text is stored as handed (measured byte-equal over a real pty for CRLF / trailing newlines / bidi / 12 KiB / a 72 KiB JSON line / lone surrogates)', falses);
 }
 
@@ -897,7 +897,7 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   const H = routesRig({ backend: 'claude' });
   H.deliver.stashFor(H.cid, { source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: frame6 });
   const tc = H.get('/api/agent/task-context');
-  ok(Buffer.byteLength(tc, 'utf-8') + 2 + Buffer.byteLength(frame6, 'utf-8') > AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN && !/context trimmed to stay inline/.test(tc) && !tc.includes('### Messages that arrived') && H.deliver.stashCount(H.cid) === 1 && H.cards.length === 0 && H.logs.some((l) => /1 stashed message\(s\) wait for the next prompt — \d+ B do not fit the \d+ B left under the inline cap/.test(l)),
+  ok(Buffer.byteLength(tc, 'utf-8') + 2 + Buffer.byteLength(frame6, 'utf-8') > AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN && !/context trimmed to stay inline/.test(tc) && !tc.includes('### Messages that arrived') && H.deliver.stashCount(H.cid) === 1 && H.cards.length === 0 && verdictOf(H.logs.some((l) => /1 stashed message\(s\) wait for the next prompt — \d+ B do not fit the \d+ B left under the inline cap/.test(l))),
     'a resume\'s SessionStart (two groups\' full context — less room left than the frame needs) + a 4 KiB handed-back frame: the frame WAITS whole (still in its store, no card yet) and the log names the sizes (was: drained, then capInline cut five of six notices off the tail, the card showing all six)', { bytes: Buffer.byteLength(tc, 'utf-8'), store: H.deliver.stashCount(H.cid), logs: H.logs });
   const p1 = H.get('/api/agent/prompt-context');
   ok(ends(p1) === 6 && !/context trimmed/.test(p1) && H.deliver.stashCount(H.cid) === 0 && H.cards.length === 1, 'the next (quiet) prompt carries all six notices whole and the store empties — one card', { ends: ends(p1), store: H.deliver.stashCount(H.cid) });
@@ -911,20 +911,20 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   Q.get('/api/agent/task-context');
   for (let k = 0; k < 3; k++) Q.deliver.stashFor(Q.cid, { source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: frame6.replace(/END-/g, `K${k}-`), ts: 1000 + k });
   const q1 = Q.get('/api/agent/prompt-context');
-  ok(q1.includes('K2-5') && !q1.includes('K0-5') && /\(2 older message\(s\) held for your next turn\)/.test(q1) && Q.deliver.stashCount(Q.cid) === 2 && Q.deliver.stashEntries(Q.cid).map((e) => e.ts).join() === '1000,1001',
+  ok(gateOf(q1.includes('K2-5')) && !q1.includes('K0-5') && gateOf(/\(2 older message\(s\) held for your next turn\)/.test(q1)) && Q.deliver.stashCount(Q.cid) === 2 && Q.deliver.stashEntries(Q.cid).map((e) => e.ts).join() === '1000,1001',
     'three 4 KiB blocks on a quiet prompt: the newest rides, the two older wait IN THEIR STORE with their own ts (taken by identity — nothing re-stashed)');
   // ── a claimed entry (a hand-over in flight) is never the injection\'s ──
   const rel = Q.deliver.claimStash(Q.cid, Q.deliver.stashEntries(Q.cid).slice(0, 1), 'ho-t-1');
   const q2 = Q.get('/api/agent/prompt-context');
-  ok(q2.includes('K1-5') && !q2.includes('K0-5') && Q.deliver.stashCount(Q.cid) === 1 && Q.deliver.claimedCount(Q.cid) === 1, 'a claimed entry (a hand-over on its way) is left to the hand-over; the unclaimed one drains'); rel();
+  ok(gateOf(q2.includes('K1-5')) && !q2.includes('K0-5') && Q.deliver.stashCount(Q.cid) === 1 && Q.deliver.claimedCount(Q.cid) === 1, 'a claimed entry (a hand-over on its way) is left to the hand-over; the unclaimed one drains'); rel();
   // ── the jobs digest holds the same way when its budget does not fit ──
   const J = routesRig({ backend: 'claude', groups: 4 });   // four groups' full context ≈ 9.5 KB: less than the digest's 900 B is left
   for (let i = 0; i < 4; i++) J.jm._stashNotif(J.cid, { id: 'j' + i, name: 'nightly', state: 'done' }, { what: 'result-' + i }, 'not reachable');
   const jt = J.get('/api/agent/task-context');
-  ok(!jt.includes('vibespace-jobs-missed-while-away') && J.jm.peekNotifs(J.cid).length === 4 && J.logs.some((l) => /4 stashed notification\(s\) wait for the next prompt/.test(l)) && !fs.existsSync(path.join(J.dir, 'job-notifications-read')),
+  ok(!jt.includes('vibespace-jobs-missed-while-away') && J.jm.peekNotifs(J.cid).length === 4 && gateOf(J.logs.some((l) => /4 stashed notification\(s\) wait for the next prompt/.test(l))) && !fs.existsSync(path.join(J.dir, 'job-notifications-read')),
     'the jobs digest: four results wait when the 900 B digest does not fit a four-group resume\'s context (no spill file written for a drain that did not happen)', { left: J.jm.peekNotifs(J.cid).length, logs: J.logs });
   const jp = J.get('/api/agent/prompt-context');
-  ok(jp.includes('vibespace-jobs-missed-while-away') && jp.includes('result-3') && J.jm.peekNotifs(J.cid).length === 0, '…and ride the next prompt');
+  ok(gateOf(jp.includes('vibespace-jobs-missed-while-away')) && gateOf(jp.includes('result-3')) && J.jm.peekNotifs(J.cid).length === 0, '…and ride the next prompt');
   // the constants the helpers reason with are the producers\' own
   ok(AR.JOBS_DIGEST_BUDGET === 900 && Buffer.byteLength(renderNotifStash(Array.from({ length: 40 }, (_, i) => ({ jobId: 'j' + i, jobName: 'n', text: 'x'.repeat(200), ts: 1 }))), 'utf-8') <= AR.JOBS_DIGEST_BUDGET && AR.roomUnderCap(0) === AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN && AR.INLINE_CAP === 9600,
     'JOBS_DIGEST_BUDGET is job-model\'s own default (40 entries render under it); the room is INLINE_CAP (9600) minus the group reports\' 64 B margin');
@@ -943,15 +943,15 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   const before = logs.length;
   const v2 = SH.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: dir, log: L });
   const kept = [...v2._delivered.keys()];
-  ok(kept.length === 50 && !kept.some((k) => k.startsWith('ho-spent')) && kept.filter((k) => k.startsWith('ho-live')).length === 49 && !kept.includes('ho-live-0') && kept.includes('ho-new') && logs.slice(before).filter((l) => /^W \[stash\] hand-over ho-live-0 \(c, 1 originals\) forgotten by the 50-record bound/.test(l)).length === 1,
+  ok(kept.length === 50 && !kept.some((k) => k.startsWith('ho-spent')) && kept.filter((k) => k.startsWith('ho-live')).length === 49 && !kept.includes('ho-live-0') && gateOf(kept.includes('ho-new')) && logs.slice(before).filter((l) => /^W \[stash\] hand-over ho-live-0 \(c, 1 originals\) forgotten by the 50-record bound/.test(l)).length === 1,
     '56 records over the 50 bound: the five SPENT go first (they hold no originals), then the oldest LIVE one — named in the log with its originals count (was: FIFO, silent)', { kept: kept.length, logs: logs.slice(before) });
   fs.writeFileSync(memFile, JSON.stringify(obj).slice(0, 40));
   const b2 = logs.length;
   const v3 = SH.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: dir, log: L });
-  ok(v3._delivered.size === 0 && logs.slice(b2).length === 1 && /^W \[stash\] stash-handover\.json did not parse \(.*\) — held while its bytes are copied aside; then it starts empty/.test(logs[b2]), 'a torn file: empty memory, SAID by name (was: a silent catch) — since r3003 (c) the family\'s hold says it: its bytes copied aside first', logs.slice(b2));
+  ok(v3._delivered.size === 0 && logs.slice(b2).length === 1 && verdictOf(/^W \[stash\] stash-handover\.json did not parse \(.*\) — held while its bytes are copied aside; then it starts empty/.test(logs[b2])), 'a torn file: empty memory, SAID by name (was: a silent catch) — since r3003 (c) the family\'s hold says it: its bytes copied aside first', logs.slice(b2));
   const b3 = logs.length;
-  ok(v3.restoreHandedOver('c', 'frame (hand-over ho-gone-1)') === 0 && logs.slice(b3).length === 1 && /a frame names hand-over ho-gone-1, which this hub no longer remembers/.test(logs[b3]), 'an echo naming a hand-over the memory lacks answers 0 (the frame is kept as one notice) and SAYS so by id (was: silent)', logs.slice(b3));
-  ok(!fs.existsSync(path.join(dir, 'nowhere')) && SH.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: path.join(dir, 'nowhere'), log: L }) && logs.length === b3 + 1, 'an ABSENT file is a first boot: nothing said');
+  ok(v3.restoreHandedOver('c', 'frame (hand-over ho-gone-1)') === 0 && logs.slice(b3).length === 1 && verdictOf(/a frame names hand-over ho-gone-1, which this hub no longer remembers/.test(logs[b3])), 'an echo naming a hand-over the memory lacks answers 0 (the frame is kept as one notice) and SAYS so by id (was: silent)', logs.slice(b3));
+  ok(!fs.existsSync(path.join(dir, 'nowhere')) && gateOf(SH.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: path.join(dir, 'nowhere'), log: L })) && logs.length === b3 + 1, 'an ABSENT file is a first boot: nothing said');
 }
 {
   // ── r5 NEGATIVE CONTROLS ──
@@ -963,7 +963,7 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   const H = routesRig({ backend: 'claude', routesMod: NoFit });
   H.deliver.stashFor(H.cid, { source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: frame6 });
   const tc = H.get('/api/agent/task-context');
-  ok(/context trimmed to stay inline/.test(tc) && ends(tc) < 6 && H.deliver.stashCount(H.cid) === 0 && H.cards.length === 1 && !H.get('/api/agent/prompt-context').includes('END-'),
+  ok(gateOf(/context trimmed to stay inline/.test(tc)) && ends(tc) < 6 && H.deliver.stashCount(H.cid) === 0 && H.cards.length === 1 && !H.get('/api/agent/prompt-context').includes('END-'),
     `CONTROL the fit check removed: the resume drains the frame, capInline cuts it (${ends(tc)} of 6 notices reach the agent), the card shows all six and the next prompt carries nothing (②f can go red)`, { ends: ends(tc) });
   const sh = read('src/server/stash-handover.js');
   const a2 = '    if (delivered.size > DELIVERED_MAX) for (const [id, rec] of delivered) { if (delivered.size <= DELIVERED_MAX) break; if (rec.restored && !held(rec)) { delivered.delete(id); n++; } }\n';   // the moved2 cure 2: a record still holding a put-back's copy is never the spent one
@@ -978,8 +978,8 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   const Junk = MUT5.load('src/server/stash-handover.js', editAnchor(sh, a3, ') { delivered.set(id, { ...rec,', "src/server/stash-handover.js"), 'junk-at');
   fs.writeFileSync(path.join(dir, SH.DELIVERED_FILE), JSON.stringify({ 'ho-junk': { cid: 'c', text: 't', msg: [], jobs: [], at: 'yesterday' } }));
   const j = Junk.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: dir, log: { log() {}, warn() {} } });
-  ok(j._delivered.has('ho-junk'), 'CONTROL the numeric-instant gate removed: the junk record is loaded (②f can go red)');
-  for (const c of copiesCensus(MUT5.files, MUT5.dir, REPO, { minCopies: 3, label: '②f ' })) ok(c.pass, c.name, c.detail);
+  ok(verdictOf(j._delivered.has('ho-junk')), 'CONTROL the numeric-instant gate removed: the junk record is loaded (②f can go red)');
+  for (const c of copiesCensus(MUT5.files, MUT5.dir, REPO, { minCopies: 3, label: '②f ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ═══ ②g VERIFY r6 — what rides AFTER the drains is counted BEFORE them; the render's rows-only budget; the cap's eviction is said ═══
@@ -1058,7 +1058,7 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
   const rowBytes = rows.text.split('\n').filter((l) => l.startsWith('- [')).reduce((a, l) => a + B(l) + 1, 0);
   const room = rowBytes + 20;   // the rows fit, the head (65 B) + the hint (~90 B) do not
   const txt = AR.drainStashUnderCap(fake, 'c', AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN - room, () => {});
-  ok(txt && store.length === 1 && store[0].text.startsWith('L0 ') && B(txt) + 2 <= room && /\(1 older message\(s\) held for your next turn\)/.test(txt), 'the helper: five lines whose ROWS fit a room the head + hint overshoot ⇒ the oldest waits, four ride under the room (was: all five waited)', { left: store.length, bytes: B(txt), room });
+  ok(gateOf(txt) && store.length === 1 && gateOf(store[0].text.startsWith('L0 ')) && B(txt) + 2 <= room && verdictOf(/\(1 older message\(s\) held for your next turn\)/.test(txt)), 'the helper: five lines whose ROWS fit a room the head + hint overshoot ⇒ the oldest waits, four ride under the room (was: all five waited)', { left: store.length, bytes: B(txt), room });
 }
 {
   // the jobs digest + the jobs UPDATE after it (≤ 600 B, its marker advanced at render): a preamble + the 5 KB diff put the
@@ -1090,7 +1090,7 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
     for (let i = 0; i < 33; i++) H.deliver.stashFor(H.cid, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: `lark-${i}`, ts: 1000 + i });
     for (let i = 0; i < 32; i++) H.jm._stashNotif(H.cid, { id: 'j' + i, name: 'n', state: 'done' }, { what: 'r' }, 'x');
     const ev = H.dlogs.filter((l) => /oldest waiting entr(y|ies) fell off the 30-entry cap/.test(l)), jv = H.dlogs.filter((l) => /oldest waiting notification\(s\) fell off the 30-entry cap/.test(l));
-    ok(H.deliver.stashCount(H.cid) === 30 && ev.length === 3 && /channel:channel 1970-01-01T00:00:01\.000Z\) — never delivered/.test(ev[0]) && !ev.some((l) => l.includes('Channels · Lark')) && H.jm.peekNotifs(H.cid).length === 30 && jv.length === 2 && /\(j0 /.test(jv[0]),
+    ok(H.deliver.stashCount(H.cid) === 30 && ev.length === 3 && gateOf(/channel:channel 1970-01-01T00:00:01\.000Z\) — never delivered/.test(ev[0])) && !ev.some((l) => l.includes('Channels · Lark')) && H.jm.peekNotifs(H.cid).length === 30 && jv.length === 2 && verdictOf(/\(j0 /.test(jv[0])),
       'the cap: 33 arrivals into the ladder\'s store and 32 into the jobs store — each eviction is one log line naming the conversation, the entry (source + KIND — a peer by its sender, never a label VibeSpace composed from a record: lane-redact verify r8 — instant / job id) and "never delivered" (was: silent, the strip\'s count at the cap)', { ev, jv });
   } finally { H.done(); }
 }
@@ -1104,10 +1104,10 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
     H.deliver.stashFor(H.cid, blk(0));
     let heldLines = 0, carried0 = false;
     for (let t = 1; t <= 12; t++) { H.deliver.stashFor(H.cid, blk(t)); const c = H.get('/api/agent/prompt-context'); if (/\(1 older message\(s\) held for your next turn\)/.test(c)) heldLines++; if (/END-0\b/.test(c)) carried0 = true; }
-    ok(!carried0 && heldLines === 12 && H.deliver.stashCount(H.cid) === 1 && H.deliver.stashEntries(H.cid)[0].ts === 1000 && H.dlogs.every((l) => !/fell off/.test(l)),
+    ok(!carried0 && heldLines === 12 && H.deliver.stashCount(H.cid) === 1 && H.deliver.stashEntries(H.cid)[0].ts === 1000 && verdictOf(H.dlogs.every((l) => !/fell off/.test(l))),
       'starvation is by design and visible: one 4 KiB block arriving per prompt keeps the OLDEST block waiting for 12 prompts (newest-first), every prompt tells the agent "1 older held", the store keeps it (no eviction under the cap)');
     const q1 = H.get('/api/agent/prompt-context');
-    ok(/END-0\b/.test(q1) && H.deliver.stashCount(H.cid) === 0, '…and the first quiet prompt carries it');
+    ok(gateOf(/END-0\b/.test(q1)) && H.deliver.stashCount(H.cid) === 0, '…and the first quiet prompt carries it');
   } finally { H.done(); }
   // the hand-over over eight 4 KiB blocks: three presses, newest first, `held` named each time
   const R = rig();
@@ -1128,7 +1128,7 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
     const left = H.deliver.stashEntries(H.cid);
     const stale = left.slice(); H.deliver.drainStash(H.cid); H.deliver.stashFor(H.cid, same());
     ok(e.length === 3 && e[0] !== e[1] && one.length === 1 && one[0] === e[1] && left[0] === e[0] && left[1] === e[2] && H.deliver.drainStash(H.cid, new Set(stale)).length === 0 && H.deliver.stashCount(H.cid) === 1
-      && !/await|\.then\(/.test(AR.drainStashUnderCap.toString()) && /drainStash\(cid, new Set\(pm\.shown\.filter\(\(e\) => !e\._retry\)\)\)/.test(AR.drainStashUnderCap.toString()),   // lane notify-retry: the take skips the PARKED views (those leave through retryTake, same tick)
+      && !/await|\.then\(/.test(AR.drainStashUnderCap.toString()) && verdictOf(/drainStash\(cid, new Set\(pm\.shown\.filter\(\(e\) => !e\._retry\)\)\)/.test(AR.drainStashUnderCap.toString())),   // lane notify-retry: the take skips the PARKED views (those leave through retryTake, same tick)
       'identity: three identical-byte entries are three objects, a Set take of one leaves the other two (by reference), a stale peek takes nothing new; the helper is synchronous between its peek and its take');
   } finally { H.done(); }
   // THE ORDER: the tools intro (the agent\'s contract for the vibespace-* verbs) rides FIRST — a full stash never pushes it out
@@ -1142,12 +1142,12 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
     X.store.update(X.gid, { archived: true });   // no group ⇒ the baseline intro on the codex first prompt
     for (let i = 0; i < 6; i++) X.deliver.stashFor(X.cid, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: `lark-${i} ` + 'z'.repeat(3900), ts: 1000 + i });
     const c0 = X.get('/api/agent/prompt-context');   // the intro alone is ~6.4 KB with every tool on: a 4 KiB block does not fit beside it and WAITS (no card) — it never displaces the intro
-    ok(c0.startsWith('<vibespace-user-instructions>') && afterPre(c0).startsWith('<vibespace-session-tools>') && !c0.includes('### Messages that arrived') && X.cards.length === 0 && X.deliver.stashCount(X.cid) === 6, 'the order: the tools intro rides whole (right after the rule-sized preamble) on the codex first prompt and six 4 KiB blocks wait behind it (no card, the store full)');
+    ok(gateOf(c0.startsWith('<vibespace-user-instructions>')) && gateOf(afterPre(c0).startsWith('<vibespace-session-tools>')) && !c0.includes('### Messages that arrived') && X.cards.length === 0 && X.deliver.stashCount(X.cid) === 6, 'the order: the tools intro rides whole (right after the rule-sized preamble) on the codex first prompt and six 4 KiB blocks wait behind it (no card, the store full)');
     for (let i = 0; i < 6; i++) X.deliver.stashFor(X.cid, { source: 'agent', kind: 'peer', fromName: 'Ada', text: `m${i} ` + 'y'.repeat(300), ts: 3000 + i });
     X.s._toolsIntroSeen = false; X.s._preambleSeen = undefined;   // the same first-prompt shape again, with six 300-char lines waiting newest
     const cRaw = X.get('/api/agent/prompt-context'), c = afterPre(cRaw);
     const i0 = c.indexOf('<vibespace-session-tools>'), i1 = c.indexOf('</vibespace-session-tools>'), i2 = c.indexOf('### Messages that arrived');
-    ok(i0 >= 0 && i1 > i0 && i2 > i1 && (i0 === 0 || c.startsWith('(If this arrives wrapped in <persisted-output>')) && !/context trimmed/.test(c) && B(cRaw) <= AR.INLINE_CAP && X.cards.length === 6 && c.includes('m5 ') && c.includes('m0 ') && X.deliver.stashCount(X.cid) === 6,
+    ok(i0 >= 0 && i1 > i0 && i2 > i1 && (i0 === 0 || gateOf(c.startsWith('(If this arrives wrapped in <persisted-output>'))) && !/context trimmed/.test(c) && B(cRaw) <= AR.INLINE_CAP && X.cards.length === 6 && gateOf(c.includes('m5 ')) && gateOf(c.includes('m0 ')) && X.deliver.stashCount(X.cid) === 6,
       'the order: the tools intro rides whole before the stash (the six lines that fit; the six blocks still wait) on the codex first prompt — only the oversize belt\'s one rescue line may precede it — under the cap', { bytes: B(c), head: c.slice(0, 80), cards: X.cards.length });
   } finally { X.done(); }
   // THE REAL HOOK: data/bin/vibespace-hook.mjs hands the route\'s answer to the CLI byte for byte at the cap (9 600 < the 10 000 B measured inline bound)
@@ -1169,7 +1169,7 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
   // r7 form: `committed()` without the rescue reserve and the tail decided so far = r5's blind side again
   const NoTail = MUT6.load('src/agent-routes.js', editAnchor(ar, a1, "    const committed = () => B(parts.join('\\n\\n')) + pendingPreambleBytes(s) + (extraBlock ? B(extraBlock) + 2 : 0) + 0 * (rescueReserve() + tailHeld);\n", "src/agent-routes.js"), 'no-tail');
   const t1 = tailSweep(NoTail);
-  ok(t1.trimmed > 100 && t1.cut >= 1 && t1.noticeCut >= 1 && t1.nudgeCut > 100 && t1.firstCut && !t1.firstCut.whole,
+  ok(t1.trimmed > 100 && t1.cut >= 1 && t1.noticeCut >= 1 && t1.nudgeCut > 100 && gateOf(t1.firstCut) && !t1.firstCut.whole,
     `CONTROL the tail uncounted: capInline trims ${t1.trimmed} of 800 fills — the nudge ${t1.nudgeCut}×, the CONSUMED status notice ${t1.noticeCut}× (lost), a DRAINED entry ${t1.cut}× (its card shown, its store empty) (②g can go red)`, { ...t1, firstCut: t1.firstCut && { P: t1.firstCut.P, q: t1.firstCut.q, bytes: t1.firstCut.bytes } });
   const a2 = "  while (need > room && pm.shown.length > 1) {\n";
   if (!ar.includes(a2)) throw new Error('mutation anchor missing: shrink');
@@ -1188,7 +1188,7 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
   for (let i = 0; i < 33; i++) qd.stashFor('c', { source: 'channel', kind: 'notification', fromName: 'L', text: 'x', ts: 1000 + i });
   ok(qd.stashCount('c') === 30 && qlogs.length === 0, 'CONTROL the eviction log removed: three entries fall off in silence (②g can go red)');
   try { fs.rmSync(dir, { recursive: true }); } catch { }
-  for (const c of copiesCensus(MUT6.files, MUT6.dir, REPO, { minCopies: 3, label: '②g ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUT6.files, MUT6.dir, REPO, { minCopies: 3, label: '②g ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ═══ ②h VERIFY r7 — the CENSUS of producers; consume-then-cut from the HEAD; the codex SessionStart door; the hook names its event; the order; the boot ═══
@@ -1298,7 +1298,7 @@ function producerCensus(src) {
   const ar = read('src/agent-routes.js');
   const c = producerCensus(ar);
   ok(c.sites.length >= 14 && c.undecided.length === 0 && c.sites.filter((x) => x.cls === 'head').length >= 5 && c.sites.filter((x) => x.cls === 'drain').length === 2
-    && ['intro', 'MANAGER_INTRO', 'u.text', 'nudgeBlock'].every((d) => c.decided.includes(d)) && c.sites.some((x) => x.cls === 'reserved') && c.sites.filter((x) => x.cls === 'decided').length >= 3 && c.sites.some((x) => x.cls === 'counted') && c.sites.some((x) => x.cls === 'last') && c.sites.some((x) => x.cls === 'alone') && c.sites.some((x) => x.cls === 'held first'),
+    && gateOf(['intro', 'MANAGER_INTRO', 'u.text', 'nudgeBlock'].every((d) => c.decided.includes(d))) && gateOf(c.sites.some((x) => x.cls === 'reserved')) && c.sites.filter((x) => x.cls === 'decided').length >= 3 && gateOf(c.sites.some((x) => x.cls === 'counted')) && gateOf(c.sites.some((x) => x.cls === 'last')) && gateOf(c.sites.some((x) => x.cls === 'alone')) && verdictOf(c.sites.some((x) => x.cls === 'held first')),
     `CENSUS prompt-context: ${c.sites.length} append sites — every one is head (counted by parts.join), a drain, decided by fits()/the notice prefix rule before the drains, the counted per-turn extra, the reserved rescue line, the last section, the alone reminder or the held line (first, its room held); none undecided`, c.sites);
   // RED CONTROL (lane bl-windows): the held line WITHOUT its room held (the tailHeld sum taken out, through anchored) — the census names it UNDECIDED
   const noRoom = producerCensus(anchored(ar, '    if (heldLine) tailHeld += B(heldLine) + 2;\n', '', 'the held line\'s room'));
@@ -1306,17 +1306,17 @@ function producerCensus(src) {
   // the consumers: each stamp / consume sits INSIDE its fit decision (source), on both routes
   const pc = ar.slice(ar.indexOf("app.get('/api/agent/prompt-context'"), ar.indexOf("app.get('/api/agent/stop-check'"));
   const tc = ar.slice(ar.indexOf("app.get('/api/agent/task-context'"), ar.indexOf("app.get('/api/agent/prompt-context'"));
-  ok((pc.match(/sessionStatus\.consumeNotices\(k\)/g) || []).length === 1 && (pc.match(/sessionStatus\.consumeNotices\(k, byKey\.get\(k\)\)/g) || []).length === 1 && /if \(taken\) \{/.test(pc) && /sessionStatus\.pendingNotices\(k\)/.test(pc) && /consumeNotices\(key, count = null\)/.test(read('src/session-status.js'))
-    && (pc.match(/s\._jobsEventsSeenTs = u\.lastTs/g) || []).length === 2 && /if \(!u\.text\) s\._jobsEventsSeenTs = u\.lastTs;/.test(pc) && /else if \(fits\(u\.text\)\) \{ jobsUpdate = u\.text; tailHeld \+= B\(u\.text\) \+ 2; carry\.stage\('jobs-update', \(\) => \{ if \(!\(Number\(s\._jobsEventsSeenTs\) > u\.lastTs\)\) s\._jobsEventsSeenTs = u\.lastTs; \}\); \}/.test(pc)
-    && /if \(fits\(MANAGER_INTRO\)\) \{ parts\.push\(MANAGER_INTRO\); carry\.stage\('manager-intro', \(\) => \{ s\._mgrIntroSeen = true; \}\); \}/.test(pc) && /if \(intro && fits\(intro\)\) \{ parts\.push\(intro\); carry\.stage\('tools-intro', \(\) => \{ s\._toolsIntroSeen = true; \}\); \}/.test(pc)
-    && /if \(intro && fitsHere\(intro\)\) \{ context = context \? context \+ '\\n\\n' \+ intro : intro; carry\.stage\('tools-intro', \(\) => \{ s\._toolsIntroSeen = true; \}\); \}/.test(tc) && /if \(fitsHere\(MANAGER_INTRO\)\) \{ context = context \? context \+ '\\n\\n' \+ MANAGER_INTRO : MANAGER_INTRO; carry\.stage\('manager-intro', \(\) => \{ s\._mgrIntroSeen = true; \}\); \}/.test(tc)
+  ok((pc.match(/sessionStatus\.consumeNotices\(k\)/g) || []).length === 1 && (pc.match(/sessionStatus\.consumeNotices\(k, byKey\.get\(k\)\)/g) || []).length === 1 && gateOf(/if \(taken\) \{/.test(pc)) && gateOf(/sessionStatus\.pendingNotices\(k\)/.test(pc)) && gateOf(/consumeNotices\(key, count = null\)/.test(read('src/session-status.js')))
+    && (pc.match(/s\._jobsEventsSeenTs = u\.lastTs/g) || []).length === 2 && gateOf(/if \(!u\.text\) s\._jobsEventsSeenTs = u\.lastTs;/.test(pc)) && gateOf(/else if \(fits\(u\.text\)\) \{ jobsUpdate = u\.text; tailHeld \+= B\(u\.text\) \+ 2; carry\.stage\('jobs-update', \(\) => \{ if \(!\(Number\(s\._jobsEventsSeenTs\) > u\.lastTs\)\) s\._jobsEventsSeenTs = u\.lastTs; \}\); \}/.test(pc))
+    && gateOf(/if \(fits\(MANAGER_INTRO\)\) \{ parts\.push\(MANAGER_INTRO\); carry\.stage\('manager-intro', \(\) => \{ s\._mgrIntroSeen = true; \}\); \}/.test(pc)) && gateOf(/if \(intro && fits\(intro\)\) \{ parts\.push\(intro\); carry\.stage\('tools-intro', \(\) => \{ s\._toolsIntroSeen = true; \}\); \}/.test(pc))
+    && gateOf(/if \(intro && fitsHere\(intro\)\) \{ context = context \? context \+ '\\n\\n' \+ intro : intro; carry\.stage\('tools-intro', \(\) => \{ s\._toolsIntroSeen = true; \}\); \}/.test(tc)) && gateOf(/if \(fitsHere\(MANAGER_INTRO\)\) \{ context = context \? context \+ '\\n\\n' \+ MANAGER_INTRO : MANAGER_INTRO; carry\.stage\('manager-intro', \(\) => \{ s\._mgrIntroSeen = true; \}\); \}/.test(tc))
     && (pc.match(/s\._mgrIntroSeen = true/g) || []).length === 1 && (tc.match(/s\._mgrIntroSeen = true/g) || []).length === 1 && (pc.match(/s\._toolsIntroSeen = true/g) || []).length === 1 && (tc.match(/s\._toolsIntroSeen = true/g) || []).length === 1,
     'CONSUMERS: the notices are PEEKED and the fitting PREFIX consumed by count (the master switch\'s consume-and-drop is the other site); the jobs marker moves only when the update rides (or says nothing); the manager intro and the tools intro are stamped only inside fits()/fitsHere() — on both routes');
-  ok(/if \(!honoursSessionStart\(s\)\) return res\.json\(\{ success: true, context: '' \}\);/.test(tc) && /if \(hookOriginated\(req\) && !hookOutputHonoured\(hit\[0\]\)\) return res\.json\(\{ success: true, context: '' \}\);/.test(pc) && pc.indexOf('hookOriginated(req)') < pc.indexOf('integrationOnMaster()'),
+  ok(gateOf(/if \(!honoursSessionStart\(s\)\) return res\.json\(\{ success: true, context: '' \}\);/.test(tc)) && gateOf(/if \(hookOriginated\(req\) && !hookOutputHonoured\(hit\[0\]\)\) return res\.json\(\{ success: true, context: '' \}\);/.test(pc)) && pc.indexOf('hookOriginated(req)') < pc.indexOf('integrationOnMaster()'),
     'THE DOORS: task-context answers empty for a harness that ignores SessionStart output; prompt-context answers empty to a hook-originated call on a session the wrapper delivers to — before the master switch (which consumes-and-drops)');
   // the task-context route's own appends: the intro / manager (fitsHere), the preamble (first), the drains (fit-or-wait), the digest (fitDigest)
   const tcSites = [...tc.matchAll(/context = context \? context \+ '\\n\\n' \+ (\w+) : (\w+);/g)].map((m) => m[1]);
-  ok(JSON.stringify(tcSites) === JSON.stringify(['intro', 'MANAGER_INTRO', 'missed', 'dig', 'pmText']) && /let context = \(typeof tasks\.unreadHookLine === 'function' && tasks\.unreadHookLine\(\)\) \|\| '';/.test(tc) && /context = withPre\.length \? withPre\.join\('\\n\\n'\) : context;/.test(tc) && /drainNotifsUnderCap\(jm, deliver, caller\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc) && /jm\.digestFor\(caller, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes\)/.test(tc) && /drainStashUnderCap\(deliver, caller2\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc),
+  ok(JSON.stringify(tcSites) === JSON.stringify(['intro', 'MANAGER_INTRO', 'missed', 'dig', 'pmText']) && gateOf(/let context = \(typeof tasks\.unreadHookLine === 'function' && tasks\.unreadHookLine\(\)\) \|\| '';/.test(tc)) && gateOf(/context = withPre\.length \? withPre\.join\('\\n\\n'\) : context;/.test(tc)) && gateOf(/drainNotifsUnderCap\(jm, deliver, caller\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc)) && gateOf(/jm\.digestFor\(caller, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes\)/.test(tc)) && verdictOf(/drainStashUnderCap\(deliver, caller2\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc)),
     `CENSUS task-context: the context begins with the held line (lane bl-windows: the Task Groups store held unread — so every fit test counts it); the appends are the tools intro and the manager intro (fitsHere), the two drains (fit-or-wait) and the digest (fitDigest yields) — each against the context so far; the preamble is prepended first`, tcSites);
 }
 {
@@ -1327,10 +1327,10 @@ function producerCensus(src) {
     H.notice('status-override'); H.notice('browser-takeover'); H.events(8);
     const c1 = H.get('/api/agent/prompt-context');
     const w1 = { bytes: B(c1), trimmed: /context trimmed/.test(c1), noticeIn: c1.includes('<system-reminder>'), updateIn: c1.includes('</vibespace-jobs-update>'), pending: H.sessionStatus.pendingNotices(H.key).length, seenTs: H.s._jobsEventsSeenTs, wait: H.logs.filter((l) => /waits? for the next prompt/.test(l)).map((l) => l.replace(/^\[\w+\] \S+: /, '').slice(0, 60)) };
-    ok(!w1.trimmed && w1.bytes <= AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN && !w1.noticeIn && w1.updateIn && w1.pending === 2 && w1.seenTs > 0 && w1.wait.length === 1 && /2 of 2 pending notice\(s\) wait/.test(w1.wait[0]),
+    ok(!w1.trimmed && w1.bytes <= AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN && !w1.noticeIn && gateOf(w1.updateIn) && w1.pending === 2 && w1.seenTs > 0 && w1.wait.length === 1 && verdictOf(/2 of 2 pending notice\(s\) wait/.test(w1.wait[0])),
       'the restart\'s first prompt (two groups\' full context + a preamble sized by rule: the jobs update fits, the first notice needs twice the room left): the two persisted notices do not fit — they WAIT UNCONSUMED (was: consumed, the takeover notice cut mid-sentence), the update rides, nothing trimmed, the wait said', w1);
     const c2 = H.get('/api/agent/prompt-context');
-    ok((c2.match(/<\/system-reminder>/g) || []).length === 2 && /took over your browser/.test(c2) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/context trimmed/.test(c2) && !c2.includes('</vibespace-jobs-update>'),
+    ok((c2.match(/<\/system-reminder>/g) || []).length === 2 && gateOf(/took over your browser/.test(c2)) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/context trimmed/.test(c2) && !c2.includes('</vibespace-jobs-update>'),
       '…the next prompt carries both notices whole (the takeover\'s "wait for the handback" among them) and consumes them; the update does not repeat');
   } finally { H.done(); }
   // (b) three groups: the head alone passes the cap (accepted — the group markers advance, the trim names show --full); every consumer waits
@@ -1339,9 +1339,9 @@ function producerCensus(src) {
     T.notice('status-override'); T.events(8);
     const c1 = T.get('/api/agent/prompt-context');
     const w = { trimmed: /context trimmed/.test(c1), pending: T.sessionStatus.pendingNotices(T.key).length, seenTs: T.s._jobsEventsSeenTs, groupsSeen: Object.keys(T.s._groupSeenAt).length, waits: T.logs.filter((l) => /waits? for the next prompt/.test(l)).length };
-    ok(w.trimmed && w.pending === 1 && w.seenTs === undefined && w.groupsSeen === 3 && w.waits === 2, 'three groups + a preamble sized 400 B past the cap (the head trimmed by design): the notice and the jobs update both wait UNCONSUMED — the marker has not moved, the queue is whole (was: both consumed and cut)', w);
+    ok(gateOf(w.trimmed) && w.pending === 1 && w.seenTs === undefined && w.groupsSeen === 3 && w.waits === 2, 'three groups + a preamble sized 400 B past the cap (the head trimmed by design): the notice and the jobs update both wait UNCONSUMED — the marker has not moved, the queue is whole (was: both consumed and cut)', w);
     const c2 = T.get('/api/agent/prompt-context');
-    ok(/<\/system-reminder>/.test(c2) && c2.includes('</vibespace-jobs-update>') && c2.includes('item-0') && /\+\d+ more — vibespace-job list/.test(c2) && T.sessionStatus.pendingNotices(T.key).length === 0 && T.s._jobsEventsSeenTs > 0 && !/context trimmed/.test(c2), '…the next (quiet) prompt carries the notice and the update (whole under its own 600 B budget: the first lines + "+N more"), and consumes them', { bytes: B(c2) });
+    ok(gateOf(/<\/system-reminder>/.test(c2)) && gateOf(c2.includes('</vibespace-jobs-update>')) && gateOf(c2.includes('item-0')) && gateOf(/\+\d+ more — vibespace-job list/.test(c2)) && T.sessionStatus.pendingNotices(T.key).length === 0 && T.s._jobsEventsSeenTs > 0 && !/context trimmed/.test(c2), '…the next (quiet) prompt carries the notice and the update (whole under its own 600 B budget: the first lines + "+N more"), and consumes them', { bytes: B(c2) });
   } finally { T.done(); }
   // (c) the manager intro on both routes: two groups leave no room — it waits UNSTAMPED, rides the next prompt whole
   for (const route of ['/api/agent/task-context', '/api/agent/prompt-context']) {
@@ -1349,8 +1349,8 @@ function producerCensus(src) {
     try {
       const c1 = M.get(route); const seen1 = M.s._mgrIntroSeen;
       const c2 = M.get('/api/agent/prompt-context');
-      ok(!c1.includes('<vibespace-group-manager>') && !/context trimmed/.test(c1) && seen1 !== true && M.logs.some((l) => /the manager intro \(\d+ B\) waits/.test(l)), `${route}: the manager intro does not fit beside two groups' context — not pushed, NOT stamped, the wait said (was: stamped seen, cut mid-verb)`, { in: c1.includes('<vibespace-group-manager>'), seen1, trimmed: /context trimmed/.test(c1) });
-      ok(c2.includes('</vibespace-group-manager>') && M.s._mgrIntroSeen === true && !/context trimmed/.test(c2), '…and rides the next prompt whole, stamped then', { seen: M.s._mgrIntroSeen });
+      ok(!c1.includes('<vibespace-group-manager>') && !/context trimmed/.test(c1) && seen1 !== true && verdictOf(M.logs.some((l) => /the manager intro \(\d+ B\) waits/.test(l))), `${route}: the manager intro does not fit beside two groups' context — not pushed, NOT stamped, the wait said (was: stamped seen, cut mid-verb)`, { in: c1.includes('<vibespace-group-manager>'), seen1, trimmed: /context trimmed/.test(c1) });
+      ok(gateOf(c2.includes('</vibespace-group-manager>')) && M.s._mgrIntroSeen === true && !/context trimmed/.test(c2), '…and rides the next prompt whole, stamped then', { seen: M.s._mgrIntroSeen });
     } finally { M.done(); }
   }
   // (d) the tools intro beside a preamble sized to leave half of it (no group): the intro waits unstamped, the preamble rides; the next prompt carries the intro whole
@@ -1359,15 +1359,15 @@ function producerCensus(src) {
     try {
       const c1 = P.get(first); const seen1 = P.s._toolsIntroSeen;
       const c2 = P.get('/api/agent/prompt-context');
-      ok(c1.includes('</vibespace-user-instructions>') && !c1.includes('<vibespace-session-tools>') && seen1 !== true && !/context trimmed/.test(c1) && P.logs.some((l) => /the tools intro \(\d+ B\) waits/.test(l)),
+      ok(gateOf(c1.includes('</vibespace-user-instructions>')) && !c1.includes('<vibespace-session-tools>') && seen1 !== true && !/context trimmed/.test(c1) && verdictOf(P.logs.some((l) => /the tools intro \(\d+ B\) waits/.test(l))),
         `${backend} ${first.split('/').pop()}: a preamble sized by rule (cap − head − half the intro) + the intro cross the cap — the preamble rides, the intro WAITS unstamped (was: the intro's tail cut, stamped seen)`, { seen1, bytes: B(c1) });
-      ok(c2.startsWith('<vibespace-session-tools>') && c2.includes('</vibespace-session-tools>') && P.s._toolsIntroSeen === true && !/context trimmed/.test(c2), '…the next prompt carries the intro whole and stamps it');
+      ok(gateOf(c2.startsWith('<vibespace-session-tools>')) && gateOf(c2.includes('</vibespace-session-tools>')) && P.s._toolsIntroSeen === true && !/context trimmed/.test(c2), '…the next prompt carries the intro whole and stamps it');
     } finally { P.done(); }
   }
   // (e) a 2 000-char preamble: both fit — one prompt, unchanged (2 400 until the 2.369.202 integration: the Design window's
   // intro line + lane browser-recipes' login clause grew the intro to ~6.9 KB; a 2 400-char preamble now WAITS the intro, (d)'s rule)
   const Q = rigR7({ backend: 'codex', groups: 0, settings: { 'agents.injectPreamble': 'p'.repeat(2000) } });
-  try { const c = Q.get('/api/agent/prompt-context'); ok(c.includes('</vibespace-user-instructions>') && c.includes('</vibespace-session-tools>') && Q.s._toolsIntroSeen === true && !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN, 'a 2 000-char preamble + the intro fit one prompt (unchanged)'); } finally { Q.done(); }
+  try { const c = Q.get('/api/agent/prompt-context'); ok(gateOf(c.includes('</vibespace-user-instructions>')) && gateOf(c.includes('</vibespace-session-tools>')) && Q.s._toolsIntroSeen === true && !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN, 'a 2 000-char preamble + the intro fit one prompt (unchanged)'); } finally { Q.done(); }
 }
 {
   // CONTROL (lane prompt-budget, 2.369.227): the rule pressure is load-bearing and follows the head. The literal (d) used
@@ -1377,12 +1377,12 @@ function producerCensus(src) {
   const PC = '/api/agent/prompt-context';
   const waits = (routesMod, settings) => { const P = rigR7({ backend: 'codex', groups: 0, routesMod, settings }); try { const c1 = P.get(PC); return c1.includes('</vibespace-user-instructions>') && !c1.includes('<vibespace-session-tools>') && P.s._toolsIntroSeen !== true && !/context trimmed/.test(c1); } finally { P.done(); } };
   const literal = { 'agents.injectPreamble': 'p'.repeat(3000) };
-  ok(waits(AR, introFill('codex', PC)) && !waits(AR, literal), 'CONTROL the old literal (a 3 000-char preamble) beside the halved intro: the intro rides — the "waits" judge goes RED; the rule-sized fill holds it');
+  ok(gateOf(waits(AR, introFill('codex', PC))) && !waits(AR, literal), 'CONTROL the old literal (a 3 000-char preamble) beside the halved intro: the intro rides — the "waits" judge goes RED; the rule-sized fill holds it');
   let oldSrc = null; try { oldSrc = require('node:child_process').execFileSync('git', ['-C', REPO, 'show', '189aadbb0:src/agent-routes.js'], { encoding: 'utf-8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { oldSrc = null; }
   if (oldSrc) {
     const OLD = mutantCopies('stash-strip-old-intro', REPO).load('src/agent-routes.js', oldSrc, 'old-intro');
     const big = B(OLD.sessionToolsIntro({ status: true, ask: true, task: true, jobs: true }, {}));
-    ok(big > 6000 && waits(OLD, literal) && waits(OLD, introFill('codex', PC, OLD)), `CONTROL …on the base's module (the old ${big} B intro restored) the literal and the rule-sized fill both make it wait (the rule follows the head)`);
+    ok(big > 6000 && gateOf(waits(OLD, literal)) && verdictOf(waits(OLD, introFill('codex', PC, OLD))), `CONTROL …on the base's module (the old ${big} B intro restored) the literal and the rule-sized fill both make it wait (the rule follows the head)`);
   } else console.log('  (old-intro control SKIPPED: `git show 189aadbb0` is not available in this checkout)');
 }
 {
@@ -1396,10 +1396,10 @@ function producerCensus(src) {
     ok(ss === '' && H.deliver.stashCount(H.cid) === 3 && H.jm.peekNotifs(H.cid).length === 1 && H.cards.length === 0 && H.sessionStatus.pendingNotices(H.key).length === 1 && !H.s._groupSeenAt,
       'codex SessionStart (task-context): an EMPTY answer — nothing rendered, drained, stamped or consumed (was: three channel messages + a job result drained into a 7.6 KB answer the app-server drops, four cards shown)');
     const p1 = H.get('/api/agent/prompt-context');   // the wrapper's first prompt — the delivery
-    ok(['END-0', 'END-1', 'END-2', 'result-1'].every((t) => p1.includes(t)) && p1.includes('<vibespace-task-context>') && H.deliver.stashCount(H.cid) === 0 && H.cards.length === 4, '…the wrapper\'s first prompt carries the full context, all three messages and the job result (four cards)');
+    ok(gateOf(['END-0', 'END-1', 'END-2', 'result-1'].every((t) => p1.includes(t))) && gateOf(p1.includes('<vibespace-task-context>')) && H.deliver.stashCount(H.cid) === 0 && H.cards.length === 4, '…the wrapper\'s first prompt carries the full context, all three messages and the job result (four cards)');
   } finally { H.done(); }
   const K = rigR7({ backend: 'claude', groups: 1, n: 5 });
-  try { K.deliver.stashFor(K.cid, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: 'lark END-0', ts: 1000 }); const ss = K.get('/api/agent/task-context'); ok(ss.includes('<vibespace-task-context>') && ss.includes('END-0') && K.deliver.stashCount(K.cid) === 0, 'claude SessionStart is unchanged: the context and the stash ride it'); } finally { K.done(); }
+  try { K.deliver.stashFor(K.cid, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: 'lark END-0', ts: 1000 }); const ss = K.get('/api/agent/task-context'); ok(gateOf(ss.includes('<vibespace-task-context>')) && gateOf(ss.includes('END-0')) && K.deliver.stashCount(K.cid) === 0, 'claude SessionStart is unchanged: the context and the stash ride it'); } finally { K.done(); }
 }
 {
   // ── 4. THE HOOK NAMES ITS EVENT; A DEAD CALL TOUCHES NOTHING ──
@@ -1411,15 +1411,15 @@ function producerCensus(src) {
     H.notice('browser-takeover'); H.events(1);
     const hook = H.get('/api/agent/prompt-context', { 'x-vibespace-hook-event': 'UserPromptSubmit' });   // the app-server's hook ~100 ms later, output dropped
     const next = H.get('/api/agent/prompt-context');   // turn 3, the wrapper
-    ok(hook === '' && H.cards.length === 1 && ['END-W', 'took over your browser', 'item-0'].every((t) => next.includes(t)) && H.deliver.stashCount(H.cid) === 0 && H.sessionStatus.pendingNotices(H.key).length === 0,
+    ok(hook === '' && H.cards.length === 1 && gateOf(['END-W', 'took over your browser', 'item-0'].every((t) => next.includes(t))) && H.deliver.stashCount(H.cid) === 0 && H.sessionStatus.pendingNotices(H.key).length === 0,
       'codex chat: the hook\'s UserPromptSubmit call answers EMPTY and touches nothing — the peer line, the takeover notice and the job event that arrived in the window ride the wrapper\'s next call (was: drained by the hook into nothing)', { hook: hook.length, next: next.length });
     const again = H.get('/api/agent/prompt-context', { 'x-vibespace-hook-event': 'UserPromptSubmit' });
-    ok(again === '' && wrapper.includes('<vibespace-reminder>'), 'a hook call with nothing waiting is empty too; the wrapper\'s quiet call keeps its reminder');
+    ok(again === '' && verdictOf(wrapper.includes('<vibespace-reminder>')), 'a hook call with nothing waiting is empty too; the wrapper\'s quiet call keeps its reminder');
   } finally { H.done(); }
   const T = rigR7({ backend: 'codex', groups: 1, n: 5, mode: 'terminal' });
-  try { const a = T.get('/api/agent/prompt-context', { 'x-vibespace-hook-event': 'UserPromptSubmit' }); ok(a.includes('<vibespace-task-context>'), 'a codex TERMINAL session (no wrapper stands in) keeps the hook path'); } finally { T.done(); }
+  try { const a = T.get('/api/agent/prompt-context', { 'x-vibespace-hook-event': 'UserPromptSubmit' }); ok(verdictOf(a.includes('<vibespace-task-context>')), 'a codex TERMINAL session (no wrapper stands in) keeps the hook path'); } finally { T.done(); }
   const C = rigR7({ backend: 'claude', groups: 1, n: 5 });
-  try { C.get('/api/agent/task-context'); C.notice('status-override'); const a = C.get('/api/agent/prompt-context', { 'x-vibespace-hook-event': 'UserPromptSubmit' }); C.notice('status-override'); const b = C.get('/api/agent/prompt-context'); ok(a === b && /<\/system-reminder>/.test(a), 'claude: the header changes nothing — the same answer with and without it'); } finally { C.done(); }
+  try { C.get('/api/agent/task-context'); C.notice('status-override'); const a = C.get('/api/agent/prompt-context', { 'x-vibespace-hook-event': 'UserPromptSubmit' }); C.notice('status-override'); const b = C.get('/api/agent/prompt-context'); ok(a === b && verdictOf(/<\/system-reminder>/.test(a)), 'claude: the header changes nothing — the same answer with and without it'); } finally { C.done(); }
   // the REAL hook script sends the header (both events), and the generator's template is the tracked file
   const http = require('node:http'); const { spawn } = require('node:child_process');
   const seen = [];
@@ -1477,7 +1477,7 @@ function producerCensus(src) {
     && orderOf(now.diff).join(' → ') === '<vibespace-reminder> → <vibespace-jobs-missed-while-away> → <vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
     && orderOf(now.quiet).join(' → ') === '<vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
     && orderOf(now.manager).join(' → ') === '<vibespace-reminder> → <vibespace-user-instructions> → <vibespace-task-context> → <vibespace-group-manager> → <vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
-    && now.reminder.startsWith('<vibespace-reminder>') && Object.values(now).every((c) => !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP),
+    && gateOf(now.reminder.startsWith('<vibespace-reminder>')) && verdictOf(Object.values(now).every((c) => !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP)),
     'THE ORDER: extra → preamble → cwd notice → context/diff → tools/manager intro → jobs missed → jobs update → stash → notices → nudge — on the full, diff, quiet, manager and reminder shapes (= r5\'s own order at 280ccd2e, frozen 2026-11-01, but the manager\'s jobs-missed: r6\'s fit); nothing trimmed', Object.fromEntries(Object.entries(now).map(([k, c]) => [k, orderOf(c).join(' → ')])));
   // r5's own module (280ccd2e, lane channel-jump verify r5, 2026-09-27 — a LANE-BRANCH commit, never on master) drew the SAME section
   // order as THE ORDER pin above on the full / diff / quiet / reminder shapes, and on the manager shape the same order plus its
@@ -1492,7 +1492,7 @@ function producerCensus(src) {
   // ── 6. THE BOOT: the stores load synchronously at create, before the server listens and before any session is restored ──
   const sj = read('server.js');
   const iDeliver = sj.indexOf("const deliver = require('./src/server/conversation-deliver.js').create("), iView = sj.indexOf("const stashView = require('./src/server/stash-handover.js').create("), iListen = sj.indexOf('hub.listen(PORT, HOST'), iRestore = sj.indexOf('restoreSessions();', iListen);
-  ok(iDeliver > 0 && iView > iDeliver && iListen > iView && iRestore > iListen && /  if \(file\) \{\n    let read = null;\n    try \{ read = \{ text: fs\.readFileSync\(file, 'utf-8'\) \}; \} catch \(error\) \{ read = \{ error \}; \}/.test(read('src/server/stash-handover.js')),
+  ok(iDeliver > 0 && iView > iDeliver && iListen > iView && iRestore > iListen && verdictOf(/  if \(file\) \{\n    let read = null;\n    try \{ read = \{ text: fs\.readFileSync\(file, 'utf-8'\) \}; \} catch \(error\) \{ read = \{ error \}; \}/.test(read('src/server/stash-handover.js'))),
     'THE BOOT ORDER: the ladder\'s stash and the hand-over memory are read synchronously at create, both before hub.listen (the one-port front, lane https-tailscale), and restoreSessions runs inside the listen callback — a first prompt at boot+1 s finds either a restored session (drained once, persisted synchronously) or no session (401, nothing touched)');
   // a restored session: the stash on disk from a previous process, the first prompt drains it ONCE, the second carries nothing
   const H = rigR7({ groups: 1, n: 5 });
@@ -1501,10 +1501,10 @@ function producerCensus(src) {
     H.deliver.flush(); const file = path.join(H.dir, 'msg-stash.json'); const onDisk = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
     // a NEW process over the same data dir: the stores re-read the disk
     const d2 = CD.create({ dataDir: H.dir, activeSessions: H.sessions, serverSetting: () => undefined, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: () => {}, log: () => {} });
-    ok(onDisk.includes('END-R') && d2.stashCount(H.cid) === 1, 'the entry is on disk before any prompt (the stash write is synchronous), and a new process over the same dir loads it');
+    ok(gateOf(onDisk.includes('END-R')) && d2.stashCount(H.cid) === 1, 'the entry is on disk before any prompt (the stash write is synchronous), and a new process over the same dir loads it');
     const p1 = H.get('/api/agent/prompt-context'), p2 = H.get('/api/agent/prompt-context');
     const left = (JSON.parse(fs.readFileSync(file, 'utf-8'))[H.cid] || []).length;
-    ok(p1.includes('END-R') && !p2.includes('END-R') && H.deliver.stashCount(H.cid) === 0 && left === 0, 'the first prompt drains it once and the drain is on disk at once (no debounce on a drain); the second prompt carries nothing', { left });
+    ok(gateOf(p1.includes('END-R')) && !p2.includes('END-R') && H.deliver.stashCount(H.cid) === 0 && left === 0, 'the first prompt drains it once and the drain is on disk at once (no debounce on a drain); the second prompt carries nothing', { left });
   } finally { H.done(); }
 }
 {
@@ -1516,7 +1516,7 @@ function producerCensus(src) {
   if (!ar.includes(a1)) throw new Error('mutation anchor missing: stash push');
   const extraSrc = editAnchor(ar, a1, a1 + "        parts.push('<vibespace-r7-uncounted>' + 'u'.repeat(700) + '</vibespace-r7-uncounted>');\n", "src/agent-routes.js");
   const c = producerCensus(extraSrc);
-  ok(c.undecided.length === 1 && /vibespace-r7-uncounted/.test(c.undecided[0].arg), 'CONTROL an uncounted producer appended after the drains: the census names it UNDECIDED (②h can go red)', c.undecided);
+  ok(c.undecided.length === 1 && verdictOf(/vibespace-r7-uncounted/.test(c.undecided[0].arg)), 'CONTROL an uncounted producer appended after the drains: the census names it UNDECIDED (②h can go red)', c.undecided);
   const Extra = MUT7.load('src/agent-routes.js', extraSrc, 'uncounted');
   const t0 = tailSweep(Extra, [3000]);
   ok(t0.trimmed > 100, `CONTROL …and the sweep shows it: ${t0.trimmed} of 400 fills trimmed by capInline`, t0);
@@ -1526,28 +1526,28 @@ function producerCensus(src) {
   const Early = MUT7.load('src/agent-routes.js', editAnchor(ar, a2, "      taken = queue.length;   // every notice consumed whether it fits or not (r6's form)\n      if (taken) {\n        const byKey = new Map();\n", "src/agent-routes.js"), 'consume-first');
   const H = rigR7({ groups: 2, n: 25, routesMod: Early, settings: restartSettings() });
   try { H.notice('status-override'); H.notice('browser-takeover'); H.events(8); const c1 = H.get('/api/agent/prompt-context'); const c2 = H.get('/api/agent/prompt-context');
-    ok(/context trimmed/.test(c1) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/took over your browser/.test(c1) && !/took over your browser/.test(c2), 'CONTROL the notices consumed before their fit: the restart\'s first prompt is trimmed, the takeover notice is consumed and gone from both prompts (②h can go red)'); } finally { H.done(); }
+    ok(gateOf(/context trimmed/.test(c1)) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/took over your browser/.test(c1) && !/took over your browser/.test(c2), 'CONTROL the notices consumed before their fit: the restart\'s first prompt is trimmed, the takeover notice is consumed and gone from both prompts (②h can go red)'); } finally { H.done(); }
   // (iii) the manager intro stamped before its fit
   const a3 = "      if (fits(MANAGER_INTRO)) { parts.push(MANAGER_INTRO); carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }";
   if (!ar.includes(a3)) throw new Error('mutation anchor missing: manager fit');
   const Mgr = MUT7.load('src/agent-routes.js', editAnchor(ar, a3, "      if (true) { parts.push(MANAGER_INTRO); carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }", "src/agent-routes.js"), 'manager-unfit');
   const M = rigR7({ groups: 2, n: 25, manager: true, settings: managerSettings('/api/agent/prompt-context'), routesMod: Mgr });
-  try { const c1 = M.get('/api/agent/prompt-context'); const c2 = M.get('/api/agent/prompt-context'); ok(/context trimmed/.test(c1) && !c1.includes('</vibespace-group-manager>') && M.s._mgrIntroSeen === true && !c2.includes('<vibespace-group-manager>'), 'CONTROL the manager intro stamped before its fit: cut mid-verb on the first prompt, never again (②h can go red)'); } finally { M.done(); }
+  try { const c1 = M.get('/api/agent/prompt-context'); const c2 = M.get('/api/agent/prompt-context'); ok(gateOf(/context trimmed/.test(c1)) && !c1.includes('</vibespace-group-manager>') && M.s._mgrIntroSeen === true && !c2.includes('<vibespace-group-manager>'), 'CONTROL the manager intro stamped before its fit: cut mid-verb on the first prompt, never again (②h can go red)'); } finally { M.done(); }
   // (iv) the codex SessionStart door removed: the stash drains into the dropped answer
   const a4 = "    if (!honoursSessionStart(s)) return res.json({ success: true, context: '' });\n";
   if (!ar.includes(a4)) throw new Error('mutation anchor missing: SessionStart door');
   const NoDoor = MUT7.load('src/agent-routes.js', editAnchor(ar, a4, "    if (false && !honoursSessionStart(s)) return res.json({ success: true, context: '' });\n", "src/agent-routes.js"), 'no-ss-door');
   const X = rigR7({ backend: 'codex', groups: 1, n: 5, routesMod: NoDoor });
   try { for (let i = 0; i < 3; i++) X.deliver.stashFor(X.cid, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: `lark-${i} END-${i}`, ts: 1000 + i }); const ss = X.get('/api/agent/task-context'); const p1 = X.get('/api/agent/prompt-context');
-    ok(ss.includes('END-2') && X.deliver.stashCount(X.cid) === 0 && X.cards.length === 3 && !p1.includes('END-2'), 'CONTROL the SessionStart door removed: codex\'s SessionStart drains all three into the answer the app-server drops, three cards, the wrapper\'s first prompt carries none (②h can go red)'); } finally { X.done(); }
+    ok(gateOf(ss.includes('END-2')) && X.deliver.stashCount(X.cid) === 0 && X.cards.length === 3 && !p1.includes('END-2'), 'CONTROL the SessionStart door removed: codex\'s SessionStart drains all three into the answer the app-server drops, three cards, the wrapper\'s first prompt carries none (②h can go red)'); } finally { X.done(); }
   // (v) the hook door removed: the hook's dead call drains the window's arrival
   const a5 = "  if (hookOriginated(req) && !hookOutputHonoured(hit[0])) return res.json({ success: true, context: '' });\n";
   if (!ar.includes(a5)) throw new Error('mutation anchor missing: hook door');
   const NoHook = MUT7.load('src/agent-routes.js', editAnchor(ar, a5, "  if (false && hookOriginated(req) && !hookOutputHonoured(hit[0])) return res.json({ success: true, context: '' });\n", "src/agent-routes.js"), 'no-hook-door');
   const Y = rigR7({ backend: 'codex', groups: 1, n: 5, routesMod: NoHook });
   try { Y.get('/api/agent/prompt-context'); Y.get('/api/agent/prompt-context'); Y.deliver.stashFor(Y.cid, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'in the window END-W', ts: 2001 }); const hook = Y.get('/api/agent/prompt-context', { 'x-vibespace-hook-event': 'UserPromptSubmit' }); const next = Y.get('/api/agent/prompt-context');
-    ok(hook.includes('END-W') && !next.includes('END-W') && Y.deliver.stashCount(Y.cid) === 0, 'CONTROL the hook door removed: the hook\'s call drains the window\'s arrival, the wrapper\'s next call carries nothing (②h can go red)'); } finally { Y.done(); }
-  for (const c of copiesCensus(MUT7.files, MUT7.dir, REPO, { minCopies: 5, label: '②h ' })) ok(c.pass, c.name, c.detail);
+    ok(gateOf(hook.includes('END-W')) && !next.includes('END-W') && Y.deliver.stashCount(Y.cid) === 0, 'CONTROL the hook door removed: the hook\'s call drains the window\'s arrival, the wrapper\'s next call carries nothing (②h can go red)'); } finally { Y.done(); }
+  for (const c of copiesCensus(MUT7.files, MUT7.dir, REPO, { minCopies: 5, label: '②h ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ═══ ②i VERIFY r8 — every queued notice record is a POSITION: a record this build cannot render (a kind a newer build wrote before a rollback) at the head of the queue ═══
@@ -1558,9 +1558,9 @@ console.log('②i verify r8: an unrenderable notice at the head of the queue is 
   try {
     seedUnknown(H); H.notice('browser-takeover'); H.notice('status-override');
     const p1 = H.get('/api/agent/prompt-context'); const p2 = H.get('/api/agent/prompt-context');
-    ok(/took over your browser/.test(p1) && /manually changed/.test(p1) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/took over your browser|manually changed/.test(p2),
+    ok(gateOf(/took over your browser/.test(p1)) && gateOf(/manually changed/.test(p1)) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/took over your browser|manually changed/.test(p2),
       'an unrenderable record at the head: the takeover AND the status-override ride the first prompt whole, the queue is empty, the second prompt carries neither (was: the count landed on the unknown record — the status-override slid to the next prompt)', { p1: p1.length, left: H.sessionStatus.pendingNotices(H.key).length });
-    ok(H.warns.some((w) => /unknown kind "browser-future-kind"/.test(w)), 'the dropped record is named in the log (kind + "cannot be rendered by this build")', H.warns);
+    ok(verdictOf(H.warns.some((w) => /unknown kind "browser-future-kind"/.test(w))), 'the dropped record is named in the log (kind + "cannot be rendered by this build")', H.warns);
     seedUnknown(H); const p3 = H.get('/api/agent/prompt-context');
     ok(!/<system-reminder>/.test(p3) && H.sessionStatus.pendingNotices(H.key).length === 0, 'a queue of ONLY an unrenderable record: consumed (the record does not poison the key), nothing rides');
   } finally { H.done(); }
@@ -1574,9 +1574,9 @@ console.log('②i verify r8: an unrenderable notice at the head of the queue is 
   try {
     seedUnknown(K); K.notice('browser-takeover'); K.notice('status-override');
     const p1 = K.get('/api/agent/prompt-context'); const p2 = K.get('/api/agent/prompt-context');
-    ok(/took over your browser/.test(p1) && !/manually changed/.test(p1) && /manually changed/.test(p2), 'CONTROL the unrenderable record skipped from the queue: the status-override the fit admitted slides to the second prompt (②i can go red)');
+    ok(gateOf(/took over your browser/.test(p1)) && !/manually changed/.test(p1) && verdictOf(/manually changed/.test(p2)), 'CONTROL the unrenderable record skipped from the queue: the status-override the fit admitted slides to the second prompt (②i can go red)');
   } finally { K.done(); }
-  for (const c of copiesCensus(MUT8.files, MUT8.dir, REPO, { minCopies: 1, label: '②i ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUT8.files, MUT8.dir, REPO, { minCopies: 1, label: '②i ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ═══ ②j VERIFY r8 — THE EXACTLY-ONCE WALK: random producers × random head sizes × random callers × restarts, on the REAL routes ═══
@@ -1644,8 +1644,8 @@ console.log('②j verify r8: a seeded walk over both routes — every stash entr
   if (!arw.includes(aw)) throw new Error('mutation anchor missing: notice fit (walk)');
   const EarlyW = MUT8b.load('src/agent-routes.js', editAnchor(arw, aw, "      taken = queue.length;\n      if (taken) {\n        const byKey = new Map();\n", "src/agent-routes.js"), 'consume-first-walk');
   const ctl = walk(EarlyW, 8, 500);
-  ok(ctl.fails > 0 && ctl.why.some((w) => /CONSUMED BUT NOT IN THE ANSWER|a notice cut/.test(w)), `CONTROL the notices consumed before their fit: the same walk finds ${ctl.fails} violation(s) (②j can go red)`, ctl.why);
-  for (const c of copiesCensus(MUT8b.files, MUT8b.dir, REPO, { minCopies: 1, label: '②j ' })) ok(c.pass, c.name, c.detail);
+  ok(ctl.fails > 0 && verdictOf(ctl.why.some((w) => /CONSUMED BUT NOT IN THE ANSWER|a notice cut/.test(w))), `CONTROL the notices consumed before their fit: the same walk finds ${ctl.fails} violation(s) (②j can go red)`, ctl.why);
+  for (const c of copiesCensus(MUT8b.files, MUT8b.dir, REPO, { minCopies: 1, label: '②j ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ═══ ②k GROUP MESSAGES WAITING (lane group-report-card; the owner, 2026-09-28: "怎么在那个对话里看不到你发了消息？") ═══
@@ -1676,10 +1676,10 @@ console.log('②k group messages waiting for the next turn: the fact reads the e
   await sleep(60);
   ok(pendingHits > hits0 && published.length >= 1, `a post into a member's group tells the strip (onPending → ONE debounced re-publish of the session list: ${published.length})`, { pendingHits, published: published.length });
   const f = view.summaryFor(sB);
-  ok(f && f.count === 1 && f.items.length === 1 && f.items[0].kind === 'group' && f.items[0].label === 'alpha' && f.reachable === false,
+  ok(gateOf(f) && f.count === 1 && f.items.length === 1 && f.items[0].kind === 'group' && f.items[0].label === 'alpha' && f.reachable === false,
     'the fact counts the waiting GROUP message (kind group, by its sender) — and `reachable: false`: a hand-over carries the stash, never a group report', f);
   const w = S.stashSummaryWords(f, tEn, { reachable: f.reachable });
-  ok(w.line === '1 notice is waiting for this agent’s next turn: a group message from alpha' && w.noButton === 'they ride the next turn' && /^Group messages ride this agent’s next turn, whoever starts it — your message, a notification, a reply receipt — or at once when a member @mentions it$/.test(w.title) && w.cost === null,
+  ok(w.line === '1 notice is waiting for this agent’s next turn: a group message from alpha' && w.noButton === 'they ride the next turn' && gateOf(/^Group messages ride this agent’s next turn, whoever starts it — your message, a notification, a reply receipt — or at once when a member @mentions it$/.test(w.title)) && w.cost === null,
     'the words: "a group message from alpha", no button — "they ride the next turn", the title says how it arrives', w);
   const pv = ge.reportsForTurn(B, { preview: true });
   const pv2 = ge.reportsForTurn(B, { preview: true });
@@ -1703,7 +1703,7 @@ console.log('②k group messages waiting for the next turn: the fact reads the e
   // B-c198 (the owner 2026-10-02): "they ride the next turn" while the agent is MID-TURN was false — a message typed
   // into a running turn is folded into it with no UserPromptSubmit, so the report waits for the turn after; the words say so
   strip.set(f, { turn: 'running' });
-  ok(q('chat-stash-nobutton').textContent === 'this agent is mid-turn — they ride the next turn, after this one ends' && /^This agent is mid-turn — a message typed into a running turn carries no group message/.test(q('chat-stash-nobutton').title),
+  ok(q('chat-stash-nobutton').textContent === 'this agent is mid-turn — they ride the next turn, after this one ends' && verdictOf(/^This agent is mid-turn — a message typed into a running turn carries no group message/.test(q('chat-stash-nobutton').title)),
     'B-c198: MID-TURN the strip says the agent is mid-turn and the messages ride the next turn after this one ends (lane stash-any-turn: a turn of any origin)', strip.el.textContent);
   // verify r1: `waiting` (the harness's requires_action — paused on a permission or a question) is INSIDE the turn: the
   // user's answer continues it with no UserPromptSubmit, so "your next message" was false there too
@@ -1721,18 +1721,18 @@ console.log('②k group messages waiting for the next turn: the fact reads the e
   ok(q('chat-stash-go').hidden === false && q('chat-stash-held').hidden === false && q('chat-stash-held').textContent === '1 group message rides the next turn',
     '…the button stays, and the strip says the group message rides the next turn (a hand-over carries only the stash)', strip.el.textContent);
   const r = await view.handOver('w1');
-  ok(r.ok === false && r.code === 'unreachable' && view.summaryFor(sB).items.some((i) => i.kind === 'group'), 'a hand-over never touches the group report (it stays waiting)', r);
+  ok(r.ok === false && r.code === 'unreachable' && verdictOf(view.summaryFor(sB).items.some((i) => i.kind === 'group')), 'a hand-over never touches the group report (it stays waiting)', r);
   // the report is handed to B's turn ⇒ it leaves the fact, its card is drawn
   const rep = ge.reportsForTurn(B);
   await ge.commitReports(B, rep.marks);
   await sleep(40);
   const f3 = view.summaryFor(sB);
-  ok(f3 && f3.count === 1 && f3.items[0].kind === 'peer' && cards.filter((c) => c.kind === 'group').length === 1, 'the report committed into B\'s turn: the group message leaves the fact (its card went through the ladder\'s door)', { f3, cards });
+  ok(gateOf(f3) && f3.count === 1 && f3.items[0].kind === 'peer' && cards.filter((c) => c.kind === 'group').length === 1, 'the report committed into B\'s turn: the group message leaves the fact (its card went through the ladder\'s door)', { f3, cards });
   // a pending fork carries B's id — its strip is not B's
   const fork = { name: 'fork of One', backend: 'claude', backendSessionId: B, claudeSessionId: B, mode: 'chat', _forkRequested: true, _forkSourceId: B };
   await ge.post({ group: made.group.id, from: A, text: 'one more' });
   const ff = view.summaryFor(fork), fb = view.summaryFor(sB);
-  ok(!(ff && ff.items.some((i) => i.kind === 'group')) && fb.items.some((i) => i.kind === 'group'), 'a PENDING FORK (it carries its parent\'s id) shows none of the parent\'s group messages; the parent does', { ff, fb });
+  ok(!(ff && ff.items.some((i) => i.kind === 'group')) && verdictOf(fb.items.some((i) => i.kind === 'group')), 'a PENDING FORK (it carries its parent\'s id) shows none of the parent\'s group messages; the parent does', { ff, fb });
   // CONTROL: a hand-over module whose fact leaves the groups out — the strip never names them
   const MUTG = mutantCopies('stash-strip-grp', REPO);
   const src = read('src/server/stash-handover.js');
@@ -1743,8 +1743,8 @@ console.log('②k group messages waiting for the next turn: the fact reads the e
   deliver.drainStash(B);
   const strip2 = SS.createStashStrip({ sessionId: 'w1' });
   strip2.set(view2.summaryFor(sB), { turn: 'idle' });
-  ok(strip2.el.hidden === true && view.summaryFor(sB).items.some((i) => i.kind === 'group'), 'CONTROL a fact without the group preview: a group message waits and the strip NEVER appears (②k can go red)');
-  for (const c of copiesCensus(MUTG.files, MUTG.dir, REPO, { minCopies: 1, label: '②k ' })) ok(c.pass, c.name, c.detail);
+  ok(strip2.el.hidden === true && verdictOf(view.summaryFor(sB).items.some((i) => i.kind === 'group')), 'CONTROL a fact without the group preview: a group message waits and the strip NEVER appears (②k can go red)');
+  for (const c of copiesCensus(MUTG.files, MUTG.dir, REPO, { minCopies: 1, label: '②k ' })) ok(verdictOf(c.pass), c.name, c.detail);
   try { deliver.flush(); } catch { }
   store.close();
 }
@@ -1849,7 +1849,7 @@ console.log('⑤ negative controls (patched scratch copies)');
     await R9.view.handOver('w1');
     R9.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'boom', text: R9.posts[0], fromName: 'VibeSpace notices', kind: 'notification' } });
     const f9 = R9.view.summaryFor(R9.s);
-    ok(f9 && f9.count === 1 && f9.items[0].kind === 'notice' && R9.jm.peekNotifs(R9.CID).length === 0, 'CONTROL the restorer removed: the wrapper\'s ok:false frame is re-stashed as ONE notice — "1 notice" for four, the job result gone from its store (②c can go red)', f9);
+    ok(gateOf(f9) && f9.count === 1 && f9.items[0].kind === 'notice' && R9.jm.peekNotifs(R9.CID).length === 0, 'CONTROL the restorer removed: the wrapper\'s ok:false frame is re-stashed as ONE notice — "1 notice" for four, the job result gone from its store (②c can go red)', f9);
   }
   // `held` dropped from the result: the toast hides the rest
   const anchor10 = "      const out = { ok: true, id, delivered: tookMsg.length + tookJobs.length, held, lane";   // lane lg-store-writes (the census cure, finding 11): the answer is built once, then sent at the drain's landing
@@ -1883,9 +1883,9 @@ console.log('⑤ negative controls (patched scratch copies)');
     // judged on an OLD wrapper's echo (no kind): r4's kind gate is stripped from r3's control (a new guard layer is
     // taken out of the old layer's control, or the old control proves nothing)
     const L = await peerTagLeg(rig2({ backend: 'codex', inbox: false, sidecar: steerCaps, handoverModule: TagOnly }), null, { echoKind: null });
-    ok(L.ok && L.bo === false && L.resurrected === 3, 'CONTROL the frame keyed on its tag alone: a peer\'s quoted tag resurrects the three delivered entries and Bo\'s message is lost (②d can go red)', L);
+    ok(gateOf(L.ok) && L.bo === false && L.resurrected === 3, 'CONTROL the frame keyed on its tag alone: a peer\'s quoted tag resurrects the three delivered entries and Bo\'s message is lost (②d can go red)', L);
     const Lk = await peerTagLeg(rig2({ backend: 'codex', inbox: false, sidecar: steerCaps, handoverModule: TagOnly }));
-    ok(Lk.ok && Lk.bo === true && Lk.resurrected === 0, '…the same mutant under a wrapper that echoes `kind`: r4\'s gate alone still refuses the peer frame (the layers are independent)', Lk);
+    ok(gateOf(Lk.ok) && Lk.bo === true && Lk.resurrected === 0, '…the same mutant under a wrapper that echoes `kind`: r4\'s gate alone still refuses the peer frame (the layers are independent)', Lk);
   }
   // r4: the echo's kind gate removed — a peer frame that IS the exact frame text resurrects the delivered entries
   const anchor14 = "    if (meta && meta.kind === 'peer') {";
@@ -1894,7 +1894,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   {
     const steerCaps = { peerMessage: true, inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all'] };
     const L = await peerTagLeg(rig2({ backend: 'codex', inbox: false, sidecar: steerCaps, handoverModule: NoKind }), null, { whole: true });
-    ok(L.ok && L.bo === false && L.resurrected === 3, 'CONTROL r4 the kind gate removed: a peer\'s verbatim copy of the frame resurrects the three delivered entries and the peer\'s message is lost (②d/②e can go red)', L);
+    ok(gateOf(L.ok) && L.bo === false && L.resurrected === 3, 'CONTROL r4 the kind gate removed: a peer\'s verbatim copy of the frame resurrects the three delivered entries and the peer\'s message is lost (②d/②e can go red)', L);
   }
   // the door removed: a press during the shutdown's wait starts a hand-over nobody waits for
   const anchor13 = "    if (closed) return { ok: false, code: 'restarting',";
@@ -1909,7 +1909,7 @@ console.log('⑤ negative controls (patched scratch copies)');
     R13.deliver.stashFor(R13.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'ctl-door-2' });
     const q2 = R13.view.handOver('w1'); await sleep(5);
     const k = await st;
-    ok(k === 1 && R13.view.inFlightCount() === 1 && R13.diskMsg().length === 1 && /^ho-/.test(R13.diskMsg()[0].ho), 'CONTROL the door removed: settle() answered 1 while a second hand-over is in flight with its stamp on disk — the exit would leave it (②d can go red)', { k, inFlight: R13.view.inFlightCount(), disk: R13.diskMsg() });
+    ok(k === 1 && R13.view.inFlightCount() === 1 && R13.diskMsg().length === 1 && verdictOf(/^ho-/.test(R13.diskMsg()[0].ho)), 'CONTROL the door removed: settle() answered 1 while a second hand-over is in flight with its stamp on disk — the exit would leave it (②d can go red)', { k, inFlight: R13.view.inFlightCount(), disk: R13.diskMsg() });
     R13.release(); await q2;
   }
   // ── r4 controls ──
@@ -1925,7 +1925,7 @@ console.log('⑤ negative controls (patched scratch copies)');
     for (let i = 0; i < 30; i++) R15.deliver.stashFor(R15.CID, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'new-' + i });
     const claimedLeft = R15.deliver.claimedCount(R15.CID);
     R15.release(); const r15 = await q15;
-    ok(claimedLeft === 0 && r15.ok && r15.delivered === 0 && /old-4/.test(R15.posts[0]) && R15.view._delivered.get(r15.id).msg.length === 0 && S.handedOverWords(r15, tEn) === 'Handed over 0 waiting notice(s)',
+    ok(claimedLeft === 0 && gateOf(r15.ok) && r15.delivered === 0 && gateOf(/old-4/.test(R15.posts[0])) && R15.view._delivered.get(r15.id).msg.length === 0 && S.handedOverWords(r15, tEn) === 'Handed over 0 waiting notice(s)',
       'CONTROL the cap over the whole store: 30 arrivals evict the 5 claimed entries, the frame carried them, the press says "Handed over 0", the record keeps no originals (②c/②e can go red)', { claimedLeft, r15 });
   }
   // ②c THE .195 MERGE — lane channel-withdraw's `evicted` event rides THIS cap and nothing else: the entries it carries
@@ -1952,7 +1952,7 @@ console.log('⑤ negative controls (patched scratch copies)');
     ok(JSON.stringify(m.evicted) === JSON.stringify(['new-0']) && !m.anyClaimed && m.total === 35 && m.claimed === 5 && JSON.stringify(m.restore) === JSON.stringify(['stashed']) && m.afterRestore === 35,
       `②c the .195 merge: 31 ref'd arrivals over 5 CLAIMED entries evict ONE entry, the oldest unclaimed (${JSON.stringify(m.evicted)}), and \`evicted\` names only it; the claimed five stay (${m.claimed}); the hand-over's frame put back is ONE \`stashed\` and nothing trimmed (${m.afterRestore} queued)`, m);
     const mc = evictRig(CapAll);
-    ok(mc.anyClaimed, `CONTROL the cap over the whole store: its \`evicted\` names a claimed entry (${JSON.stringify(mc.evicted.slice(0, 6))}) — a receipt the hand-over carries would read "not delivered" (②c can go red)`, mc);
+    ok(verdictOf(mc.anyClaimed), `CONTROL the cap over the whole store: its \`evicted\` names a claimed entry (${JSON.stringify(mc.evicted.slice(0, 6))}) — a receipt the hand-over carries would read "not delivered" (②c can go red)`, mc);
   }
   // the delivered memory not persisted: the echo after a restart restores nothing — the frame is one notice
   const anchor16 = "    try { fs.writeFileSync(file + '.tmp', JSON.stringify(Object.fromEntries(delivered))); fs.renameSync(file + '.tmp', file); }";
@@ -1968,7 +1968,7 @@ console.log('⑤ negative controls (patched scratch copies)');
     const N16 = rig2({ dir: R16.dir, boot: true, backend: 'codex', streaming: true, sidecar: steerCaps, inbox: false, dataDir: true, handoverModule: NoPersist });
     N16.feedCodex({ type: 'event_msg', payload: { type: 'peer_message_result', ok: false, reason: 'dropped by Stop before it was delivered', text: R16.frames[0].text, fromName: 'VibeSpace notices', kind: 'notification' } });
     const f16 = N16.view.summaryFor(N16.s);
-    ok(r16.ok && r16.delivered === 4 && !fs.existsSync(path.join(R16.dir, SH.DELIVERED_FILE)) && f16 && f16.count === 1 && f16.items[0].kind === 'notice' && N16.jm.peekNotifs(N16.CID).length === 0,
+    ok(gateOf(r16.ok) && r16.delivered === 4 && !fs.existsSync(path.join(R16.dir, SH.DELIVERED_FILE)) && gateOf(f16) && f16.count === 1 && f16.items[0].kind === 'notice' && N16.jm.peekNotifs(N16.CID).length === 0,
       'CONTROL the memory in-process only: after the restart the frame comes back as ONE notice, the job result gone from its store (②e can go red)', f16);
   }
   // the block render removed: a long notification is a 400-char line again
@@ -1985,16 +1985,16 @@ console.log('⑤ negative controls (patched scratch copies)');
   {
     const oldCss = read('public/chat.css').replace('@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-stash-parts, .chat-stash-held { display: none; }', '@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-stash-parts, .chat-stash-cost { display: none; }');
     const phone = oldCss.match(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ ([^}]*)\}/g).filter((m) => /chat-stash/.test(m));
-    ok(phone.length === 1 && /chat-stash-cost/.test(phone[0]), 'CONTROL the pre-r4 phone rule (`.chat-stash-cost { display: none }`) is what the ②e pin refuses');
+    ok(phone.length === 1 && verdictOf(/chat-stash-cost/.test(phone[0])), 'CONTROL the pre-r4 phone rule (`.chat-stash-cost { display: none }`) is what the ②e pin refuses');
   }
-  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 17, label: '⑤ ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 17, label: '⑤ ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ═══ ⑥ WIRING PINS ═══
 console.log('⑥ wiring pins');
 {
   const sv = read('server.js');
-  ok(/stash: stashFactOf\(s\),/.test(sv) && /onStashChange: \(\) => \{ try \{ stashView\.changed\(\); \} catch \{ \} \}/.test(sv) && /onStash: \(\) => \{ try \{ stashView\.changed\(\); \} catch \{ \} \}/.test(sv) && /stashView\.register\(app\);/.test(sv),
+  ok(gateOf(/stash: stashFactOf\(s\),/.test(sv)) && gateOf(/onStashChange: \(\) => \{ try \{ stashView\.changed\(\); \} catch \{ \} \}/.test(sv)) && gateOf(/onStash: \(\) => \{ try \{ stashView\.changed\(\); \} catch \{ \} \}/.test(sv)) && verdictOf(/stashView\.register\(app\);/.test(sv)),
     'server.js: the payload carries `stash`, both stores\' hooks re-publish, the route is registered');
   const cd = read('src/server/conversation-deliver.js'), jb = read('src/jobs.js');
   // the jobs stash BY SITE (the stores chain's hosted red, 主开发 05:26Z — never loosened): every site that changes a conversation's held
@@ -2020,7 +2020,7 @@ console.log('⑥ wiring pins');
     return { per, entrySays, says, vias, ok: rows.every((x) => x && x.say + x.via === 1) && entrySays === 1 && says === 1 + direct && vias === through };
   };
   const live = sitesOf(jb);
-  ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && /stashEntries,/.test(cd) && live.ok && Object.keys(SAYS).length === 7 && /peekNotifs\(cid\)/.test(jb),
+  ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && gateOf(/stashEntries,/.test(cd)) && gateOf(live.ok) && Object.keys(SAYS).length === 7 && verdictOf(/peekNotifs\(cid\)/.test(jb)),
     'the ladder\'s stash and the jobs stash each say every write, every drain and every restore — the jobs stash by site: the write, the drain, the restore and the drop at the drain through its ONE entry point (r972), the merge at the lift, the records\' read again and the boot\'s announce of the conversations owed a wake (their strips show what the boot read) directly — once each, seven in all', live);
   {
     // CONTROLS (line 148's side cure; r2071): the by-site count refuses a say the table does not name — directly or through the entry
@@ -2028,14 +2028,14 @@ console.log('⑥ wiring pins');
     const direct = anchored(jb, '  noteHandedOver(cid, text) { ', '  noteHandedOver(cid, text) { try { this.d.onStash?.(cid); } catch { } ', 'line 148: an unnamed say');
     const via = anchored(jb, '  noteHandedOver(cid, text) { ', '  noteHandedOver(cid, text) { this._notifsChanged(cid); ', 'r2071: an unnamed entry call');
     const mute = anchored(jb, ENTRY + '\n    try { this.d.onStash?.(cid); } catch { }\n', ENTRY + '\n', 'r2071: the entry point mute');
-    ok(live.ok && !sitesOf(direct).ok && !sitesOf(via).ok && !sitesOf(mute).ok, 'CONTROLS: a say the table does not name (here in noteHandedOver) — directly, or through the entry point — is red, and so is an entry point that no longer says: the pin names every site', { direct: sitesOf(direct).says, via: sitesOf(via).vias, mute: sitesOf(mute).entrySays });
+    ok(gateOf(live.ok) && !sitesOf(direct).ok && !sitesOf(via).ok && !sitesOf(mute).ok, 'CONTROLS: a say the table does not name (here in noteHandedOver) — directly, or through the entry point — is red, and so is an entry point that no longer says: the pin names every site', { direct: sitesOf(direct).says, via: sitesOf(via).vias, mute: sitesOf(mute).entrySays });
   }
   const sh = read('src/server/stash-handover.js');
-  ok(/claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush\b/.test(cd) && /claimNotifs\(cid, entries, id = null\) \{/.test(jb) && /releases\.push\(d\.claimStash\(cid, shownStashed, id\)\)/.test(sh) && /releases\.push\(d\.claimRetry\(cid, shownParked, id\)\)/.test(sh) && /releases\.push\(jm\.claimNotifs\(cid, jobs, id\)\)/.test(sh),
+  ok(gateOf(/claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush\b/.test(cd)) && gateOf(/claimNotifs\(cid, entries, id = null\) \{/.test(jb)) && gateOf(/releases\.push\(d\.claimStash\(cid, shownStashed, id\)\)/.test(sh)) && gateOf(/releases\.push\(d\.claimRetry\(cid, shownParked, id\)\)/.test(sh)) && verdictOf(/releases\.push\(jm\.claimNotifs\(cid, jobs, id\)\)/.test(sh)),
     'verify: every store exposes the claim door and the hand-over claims through each, BY ID (released in its finally) — the ladder\'s stash, its retry park (lane notify-retry) and the jobs stash');
   // the .195 merge: the claim's write is judged (a failed one is logged by name — withdraw's checklist ⑧) and a by-id
   // drain also emits withdraw's `drained` with what it TOOK; both still write through at once
-  ok(/for \(const e of mine\) e\.ho = tag;\n(?:\s*\/\/[^\n]*\n)*\s*if \(mine\.length && !writeStashNow\(\)\) log\(/.test(cd) && /if \(took\.length\) \{ writeStashNow\(\); stashChanged\(cid\); emitStash\('drained', cid, took\); \}/.test(cd) && /delete stash\[cid\]; writeStashNow\(\); stashChanged\(cid\);/.test(cd),   // (the jobs store's half is judged BY BEHAVIOUR below — 主开发 r215: a pin on a local's name never matched)
+  ok(gateOf(/for \(const e of mine\) e\.ho = tag;\n(?:\s*\/\/[^\n]*\n)*\s*if \(mine\.length && !writeStashNow\(\)\) log\(/.test(cd)) && gateOf(/if \(took\.length\) \{ writeStashNow\(\); stashChanged\(cid\); emitStash\('drained', cid, took\); \}/.test(cd)) && verdictOf(/delete stash\[cid\]; writeStashNow\(\); stashChanged\(cid\);/.test(cd)),   // (the jobs store's half is judged BY BEHAVIOUR below — 主开发 r215: a pin on a local's name never matched)
     'verify r2: the claim is the entry\'s own `ho` stamp written to disk at once in BOTH stores, and every drain persists at once (the ladder\'s store and the jobs store)');
   {   // verify r2's JOBS-STORE half BY BEHAVIOUR (主开发 r215): a claim and a drain are ON DISK before the call returns — the save that
       // ends in the waited landing, the drain's reply carrying it as landed — read RAW (no flush). RED: a save that only marks the file
@@ -2058,26 +2058,26 @@ console.log('⑥ wiring pins');
       return { entries: entries.length, stamped: atClaim.includes('"ho-r2b"'), landed: !!(drained && drained.landed), goneOnDisk: !atDrain.includes('a kept result') };
     };
     const g = r2b(JobManager, 'real');
-    ok(g.entries === 1 && g.stamped && g.landed && g.goneOnDisk, 'verify r2 (the jobs store, BY BEHAVIOUR): the claim\'s `ho` stamp is ON DISK when claimNotifs returns, and the drain is on disk when drainNotifs returns — its reply says landed (read raw, no flush)', g);
+    ok(g.entries === 1 && gateOf(g.stamped) && gateOf(g.landed) && verdictOf(g.goneOnDisk), 'verify r2 (the jobs store, BY BEHAVIOUR): the claim\'s `ho` stamp is ON DISK when claimNotifs returns, and the drain is on disk when drainNotifs returns — its reply says landed (read raw, no flush)', g);
     const SAVE_A = "return this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)');";
     const gx = r2b(mutantCopies('stash-strip-r2b', REPO).load('src/jobs.js', anchored(JSRC, SAVE_A, "return { ok: true, why: null };   /* MUTANT: the save only marks the file dirty */", 'notifs-save-marks-only'), 'notifs-marks-only').JobManager, 'red');
     ok(!gx.stamped || !gx.goneOnDisk, 'CONTROL (a notifications save that only marks the file dirty, in a copy): the claim\'s stamp is not on disk when the hand-over\'s post leaves (red)', gx);
   }
-  ok(/deliver\.registerFrameRestorer\(\(cid, text, meta\) => stashView\.restoreHandedOver\(cid, text, meta\)\)/.test(sv) && /stashView\.settle\(maxMs\)/.test(read('src/server/exit-settle.js')) && /settleInFlight\(\{ stashView, deliver, n, m \}\)\.finally\(shutdownNow\)/.test(sv) && /function shutdown\(\)[\s\S]{0,700}stashView\.inFlightCount\(\)/.test(sv) && /renderNotifStash: require\('\.\/src\/job-model\.js'\)\.renderNotifStash, dataDir: path\.join\(__dirname, 'data'\) \}\); stashView\.register\(app\);/.test(sv),
+  ok(gateOf(/deliver\.registerFrameRestorer\(\(cid, text, meta\) => stashView\.restoreHandedOver\(cid, text, meta\)\)/.test(sv)) && gateOf(/stashView\.settle\(maxMs\)/.test(read('src/server/exit-settle.js'))) && gateOf(/settleInFlight\(\{ stashView, deliver, n, m \}\)\.finally\(shutdownNow\)/.test(sv)) && gateOf(/function shutdown\(\)[\s\S]{0,700}stashView\.inFlightCount\(\)/.test(sv)) && verdictOf(/renderNotifStash: require\('\.\/src\/job-model\.js'\)\.renderNotifStash, dataDir: path\.join\(__dirname, 'data'\) \}\); stashView\.register\(app\);/.test(sv)),
     'verify r2: server.js registers the hand-over restorer on the ladder (r4: with the echo\'s kind) and the shutdown waits for a hand-over in flight before it exits; r4: the view gets the data dir (the delivered memory on disk)');
-  ok(/function shutdown\(\)[\s\S]{0,700}stashView\.close\(\); n = stashView\.inFlightCount\(\)/.test(sv) && /text: vibespaceNoticeText\(frame\) \}\);/.test(sh) && /if \(typeof rec\.text === 'string'\) return echoed\.trim\(\) === rec\.text\.trim\(\);/.test(sh) && /if \(!sameFrame\(rec, echoed\)\) \{/.test(sh),   // the lane-redact merge: the exact-text rule lives in sameFrame (a cleared record keeps its frame's digest)
+  ok(gateOf(/function shutdown\(\)[\s\S]{0,700}stashView\.close\(\); n = stashView\.inFlightCount\(\)/.test(sv)) && gateOf(/text: vibespaceNoticeText\(frame\) \}\);/.test(sh)) && gateOf(/if \(typeof rec\.text === 'string'\) return echoed\.trim\(\) === rec\.text\.trim\(\);/.test(sh)) && verdictOf(/if \(!sameFrame\(rec, echoed\)\) \{/.test(sh)),   // the lane-redact merge: the exact-text rule lives in sameFrame (a cleared record keeps its frame's digest)
     'verify r3: the shutdown shuts the door BEFORE it counts and waits; the delivered record keeps the exact frame text and the restore requires it');
   const ce = read('src/server/stdout/codex-events.js'), ae = read('src/server/stdout/acp-events.js');
-  ok(/restored = deliverRef\?\.restoreFrame\?\.\(cid, String\(msg\.payload\.text\), \{ kind: msg\.payload\.kind \|\| null, fromName: msg\.payload\.fromName \|\| null \}\)[\s\S]{0,320}if \(!restored\) \{\n\s+try \{ if \(cid\) deliverRef\?\.stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.payload\.kind \|\| null/.test(ce) && /restored = deliverRef\?\.restoreFrame\?\.\(cid, String\(msg\.text\), \{ kind: msg\.peerKind \|\| null, fromName: msg\.fromName \|\| null \}\)[\s\S]{0,320}if \(!restored\) \{\n\s+try \{ if \(cid\) deliverRef\?\.stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.peerKind \|\| null/.test(ae) && !/deliverRef\s*\(/.test(ce.replace(/\/\/.*$/gm, '')),
+  ok(gateOf(/restored = deliverRef\?\.restoreFrame\?\.\(cid, String\(msg\.payload\.text\), \{ kind: msg\.payload\.kind \|\| null, fromName: msg\.payload\.fromName \|\| null \}\)[\s\S]{0,320}if \(!restored\) \{\n\s+try \{ if \(cid\) deliverRef\?\.stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.payload\.kind \|\| null/.test(ce)) && gateOf(/restored = deliverRef\?\.restoreFrame\?\.\(cid, String\(msg\.text\), \{ kind: msg\.peerKind \|\| null, fromName: msg\.fromName \|\| null \}\)[\s\S]{0,320}if \(!restored\) \{\n\s+try \{ if \(cid\) deliverRef\?\.stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.peerKind \|\| null/.test(ae)) && !/deliverRef\s*\(/.test(ce.replace(/\/\/.*$/gm, '')),
     'verify r2: both stdout consumers ask the ladder to restore a hand-over\'s frame BEFORE the re-stash (property access on the lazy ref, the codex + acp twins alike; r4: the echo\'s own kind rides along; r3772: and its sender label, for a frame kept while the memory is held)');
-  ok(/stash: \{ digest: null \},/.test(read('src/lib/sidebar.js')) && /patchStashHints\(this\.listEl, msg\.sessions\)/.test(read('src/lib/sidebar.js')) && /stashHintChip\(s\.stash\)/.test(read('src/lib/session-card.js')), 'LIVE_SESSION_FACTS carries `stash` (carried-only), the sidebar patches the hint in place, the card draws it at build');
+  ok(gateOf(/stash: \{ digest: null \},/.test(read('src/lib/sidebar.js'))) && gateOf(/patchStashHints\(this\.listEl, msg\.sessions\)/.test(read('src/lib/sidebar.js'))) && verdictOf(/stashHintChip\(s\.stash\)/.test(read('src/lib/session-card.js'))), 'LIVE_SESSION_FACTS carries `stash` (carried-only), the sidebar patches the hint in place, the card draws it at build');
   const ci = read('src/lib/chat-input.js'), cv = read('src/lib/chat-view.js');
-  ok(/\.chat-stash-go\[hidden\], \.chat-stash-nobutton\[hidden\], \.chat-stash-held\[hidden\] \{ display: none; \}/.test(read('public/chat.css')), 'verify r2: the strip\'s no-button sentence, the hidden button and the held count have their own display rules (no global .hidden)');
-  ok(/inputArea\.append\(this\._stashStrip\.el, this\._queueStrip,/.test(ci) && /setStash\(summary, opts = \{\}\) \{ this\._stashArgs = \[summary, opts\]; this\._stashStrip\?\.set\(summary \|\| null, \{ \.\.\.opts, steers: this\._sendModes\(\)\.enterDoor === 'steer' \}\); \}/.test(ci) && /if \(caps && this\._stashArgs\) this\.setStash\(\.\.\.this\._stashArgs\);/.test(ci) && /this\._chatInput\?\.setStash\?\.\(this\._stashFact\.stash, \{ turn: this\._stashFact\.turn \}\);/.test(cv),
+  ok(verdictOf(/\.chat-stash-go\[hidden\], \.chat-stash-nobutton\[hidden\], \.chat-stash-held\[hidden\] \{ display: none; \}/.test(read('public/chat.css'))), 'verify r2: the strip\'s no-button sentence, the hidden button and the held count have their own display rules (no global .hidden)');
+  ok(gateOf(/inputArea\.append\(this\._stashStrip\.el, this\._queueStrip,/.test(ci)) && gateOf(/setStash\(summary, opts = \{\}\) \{ this\._stashArgs = \[summary, opts\]; this\._stashStrip\?\.set\(summary \|\| null, \{ \.\.\.opts, steers: this\._sendModes\(\)\.enterDoor === 'steer' \}\); \}/.test(ci)) && gateOf(/if \(caps && this\._stashArgs\) this\.setStash\(\.\.\.this\._stashArgs\);/.test(ci)) && verdictOf(/this\._chatInput\?\.setStash\?\.\(this\._stashFact\.stash, \{ turn: this\._stashFact\.turn \}\);/.test(cv)),
     'the strip sits ABOVE the queue strip; ChatView feeds it from its own row of every active-sessions payload; B-02a3: the composer adds its own Enter door (`steers`) and re-sends it when the wrapper\'s door changes');
   ok(!/\.innerHTML\s*=(?!\s*UI_ICONS\.)/.test(read('src/lib/stash-strip.js')) && (read('src/lib/stash-strip.js').match(/\.innerHTML\s*=/g) || []).length === 2, 'stash-strip assigns innerHTML ONLY the library\'s own icons (every string is textContent)');
   const A = require(path.join(REPO, 'src/spend-authorizer.js'));
-  ok(A.SPEND_REASONS['stash-handover'] && A.SPEND_REASONS['stash-handover'].turn === true && /file: 'src\/server\/stash-handover\.js', prim: 'deliver-ladder'/.test(read('scripts/test-spend-paths.mjs')) && require(path.join(REPO, 'src/notification-senders.js')).NOTIFICATION_SENDERS.includes('VibeSpace notices'),
+  ok(gateOf(A.SPEND_REASONS['stash-handover']) && A.SPEND_REASONS['stash-handover'].turn === true && gateOf(/file: 'src\/server\/stash-handover\.js', prim: 'deliver-ladder'/.test(read('scripts/test-spend-paths.mjs'))) && verdictOf(require(path.join(REPO, 'src/notification-senders.js')).NOTIFICATION_SENDERS.includes('VibeSpace notices')),
     'SPEND_REASONS declares stash-handover (a turn), the spend census names the site, the sender list names its voice');
   const load = (f) => { const m = new Set(); for (const ln of read(f).split('\n')) { const r = ln.match(/^  ("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'): /); if (r) m.add(new Function('return ' + r[1])()); } return m; };
   const zh = load('src/lib/i18n-zh.js'), ja = load('src/lib/i18n-ja.js');
@@ -2134,7 +2134,7 @@ console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door
   const fh = view.summaryFor(sB); strip.set(fh, { turn: 'running', steers: true }); const remoteHidden = press().hidden;
   const rh = await view.handOverGroups('w1', { pressed: PRESS });
   delete sB.host;
-  ok(fh && fh.groupHandover === false && remoteHidden === true && rh.code === 'not_steerable' && typed.length === 0, 'a remote conversation: the fact says no group press, the strip draws none, the door refuses «not_steerable» and writes nothing', { fh: fh && fh.groupHandover, remoteHidden, rh: rh.code });
+  ok(gateOf(fh) && fh.groupHandover === false && remoteHidden === true && rh.code === 'not_steerable' && typed.length === 0, 'a remote conversation: the fact says no group press, the strip draws none, the door refuses «not_steerable» and writes nothing', { fh: fh && fh.groupHandover, remoteHidden, rh: rh.code });
   // (2) THE DOOR — handed: the frame goes through THE typing path (origin group-handover), the attended reason is asked first,
   // and the wrapper's word «handed» settles it (the marks move, the cards draw, the messages leave the strip)
   const p1 = view.handOverGroups('w1', { pressed: PRESS });
@@ -2142,8 +2142,8 @@ console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door
   const pend1 = sB._groupHandover;
   if (pend1 && typeof pend1.said === 'function') pend1.said('handed');
   const r1 = await p1; await sleep(40);
-  ok(r1.ok === true && r1.delivered === 2 && typed.length === 1 && typed[0].o.origin === 'group-handover' && /^The user handed over, into this turn, the group messages that were waiting for your next turn \(group hand-over gh-/.test(typed[0].text)
-    && /They are messages posted in your groups — not words the user typed to you here/.test(typed[0].text) && /the deploy is blocked/.test(typed[0].text) && spent.join() === 'authorize:group-handover' && groupsWaiting() === 0 && cards.filter((c) => c.kind === 'group').length === 2,
+  ok(r1.ok === true && r1.delivered === 2 && typed.length === 1 && typed[0].o.origin === 'group-handover' && gateOf(/^The user handed over, into this turn, the group messages that were waiting for your next turn \(group hand-over gh-/.test(typed[0].text))
+    && gateOf(/They are messages posted in your groups — not words the user typed to you here/.test(typed[0].text)) && gateOf(/the deploy is blocked/.test(typed[0].text)) && spent.join() === 'authorize:group-handover' && groupsWaiting() === 0 && cards.filter((c) => c.kind === 'group').length === 2,
     'the door: the report headed as handed-over group messages goes by the typing path\'s group-handover origin, the spend authorizer is asked under the ATTENDED reason first, and the wrapper\'s «handed» settles it (2 cards, nothing left waiting)', { r1, typed: typed.map((x) => x.o), spent, left: groupsWaiting() });
   pend1 && pend1.said('own-turn');
   ok(spent.join() === 'authorize:group-handover,note:group-handover' && sB._groupHandover === null, 'the one edge: the CLI ran it as a turn of its own ⇒ the ATTENDED tally (note under group-handover), and the hand-over is done', spent);
@@ -2200,7 +2200,7 @@ console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door
   await ge.post({ group: made.group.id, from: A, text: 'one for the unwired door' }); await sleep(30);
   const H0 = hubDoor(SVsrc.replace(unwiredKey, ''));
   const r0 = await H0.v.handOverGroups('w1', { pressed: PRESS });
-  ok(r0.ok === false && r0.code === 'spend_refused' && /not wired/.test(r0.error) && H0.typedHub.length === 0,
+  ok(r0.ok === false && r0.code === 'spend_refused' && gateOf(/not wired/.test(r0.error)) && H0.typedHub.length === 0,
     'RED CONTROL the hub building the door WITHOUT its guard (869399b5c\'s line): every press refused «not wired», nothing written', r0);
   sB._groupHandover = null;
   // (5) THE TYPING PATH — the REAL sender: written only mid-turn, no Stop settling, the Enter door steers; the frame carries no
@@ -2242,13 +2242,13 @@ console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door
   const cx = cards.length, wx = groupsWaiting();
   await view.handOverGroups('w1', { pressed: PRESS }); await sleep(40);
   ok(cards.length > cx && wx > 0 && groupsWaiting() === 0, 'RED CONTROL a door that settles at the write (no wrapper word) draws the cards and moves the marks anyway — leg (3) goes red', { cards: cards.length - cx, waitingBefore: wx, after: groupsWaiting() });
-  for (const c of copiesCensus(MUTGH.files, MUTGH.dir, REPO, { minCopies: 1, label: 'B-02a3 ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUTGH.files, MUTGH.dir, REPO, { minCopies: 1, label: 'B-02a3 ' })) ok(verdictOf(c.pass), c.name, c.detail);
   // THE WIRING: the consumer hands the wrapper's id-less words to the hand-over; the route is a person's press; the attended reason
   const CS = read('src/server/stdout/claude-stream-json.js'), SV = read('server.js');
-  ok(CS.includes("if (msg.type === 'input_handover' && Array.isArray(msg.msg_ids) && !msg.msg_ids.length && typeof msg.state === 'string' && session._groupHandover && typeof session._groupHandover.said === 'function') { try { session._groupHandover.said(msg.state); } catch { } }")
-    && /app\.post\('\/api\/sessions\/:id\/stash\/hand-over-groups', async \(req, res\) => \{\n\s+try \{\n\s+if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(shSrc) && SV.includes("getSendUserInput: () => sendUserInput") && SV.includes("getSpendGuard: () => spendGuard") && (() => { const SA = require(path.join(REPO, 'src/spend-authorizer.js')).SPEND_REASONS; return !!(SA['group-handover'] && SA['group-handover'].attended === true && SA['group-handover'].turn === true); })(),
+  ok(gateOf(CS.includes("if (msg.type === 'input_handover' && Array.isArray(msg.msg_ids) && !msg.msg_ids.length && typeof msg.state === 'string' && session._groupHandover && typeof session._groupHandover.said === 'function') { try { session._groupHandover.said(msg.state); } catch { } }"))
+    && gateOf(/app\.post\('\/api\/sessions\/:id\/stash\/hand-over-groups', async \(req, res\) => \{\n\s+try \{\n\s+if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(shSrc)) && gateOf(SV.includes("getSendUserInput: () => sendUserInput")) && gateOf(SV.includes("getSpendGuard: () => spendGuard")) && verdictOf((() => { const SA = require(path.join(REPO, 'src/spend-authorizer.js')).SPEND_REASONS; return !!(SA['group-handover'] && SA['group-handover'].attended === true && SA['group-handover'].turn === true); })()),
     'the wiring: claude-stream-json tells the hand-over the wrapper\'s words on a frame with no message id; the route refuses every bearer before it mints the press; server.js hands the door THE typing path on its existing line; the reason is declared attended');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

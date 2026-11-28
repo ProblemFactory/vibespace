@@ -100,7 +100,7 @@ import { scratch } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 const CHART = path.join(REPO, 'deploy/helm/vibespace-user');
 const BASE_SHA = 'b924041f';            // 2.369.199 — the last chart before the volume form
@@ -176,13 +176,13 @@ console.log('N0 the API law, judged with no helm (a stand-in for helm: Helm 3\'s
   const s3 = await standIn('v3'), s3w = await standIn('v3-write'), s4 = await standIn('v4'), s4w = await standIn('v4-write');
   await law.close();
   const ranAll = [s3, s3w, s4, s4w].every((s) => s.status === 0 && /NOTES:/.test(s.notes));
-  ok(ranAll && s3.seen.length === 4 && s3.seen.every((x) => DISCOVERY.test(x)) && s4.seen.length === 0 && s3w.seen.includes(WRITE) && s4w.seen.includes(WRITE),
+  ok(gateOf(ranAll) && s3.seen.length === 4 && gateOf(s3.seen.every((x) => DISCOVERY.test(x))) && s4.seen.length === 0 && gateOf(s3w.seen.includes(WRITE)) && verdictOf(s4w.seen.includes(WRITE)),
     `the stand-in's plants took first: Helm 3's four discovery GETs (${s3.seen.join(', ')}), Helm 4's nothing (${s4.seen.length} requests), the write after each (${s3w.seen.includes(WRITE)} / ${s4w.seen.includes(WRITE)})`,
     JSON.stringify([s3, s3w, s4, s4w].map((s) => ({ status: s.status, err: s.err, seen: s.seen }))));
   const g3 = apiVerdict(s3.seen, 3), g4 = apiVerdict(s4.seen, 4), r3 = apiVerdict(s3w.seen, 3), r4 = apiVerdict(s4w.seen, 4), old4 = apiVerdict(s4.seen, 3);
   ok(!g3.length && !g4.length, 'the law is GREEN on both behaviours: Helm 3\'s discovery reads and Helm 4\'s zero requests', JSON.stringify({ g3, g4 }));
-  ok(r3.some((x) => x.includes(WRITE)) && r4.some((x) => x.includes(WRITE)), `the law is RED with a write planted, under either major, the write named (${r4.join('; ')})`, JSON.stringify({ r3, r4 }));
-  ok(old4.some((x) => /asked no discovery read/.test(x)), `Helm 4's empty list judged by Helm 3's premise is red by name: the 26.04 red this law replaces (${old4.join('; ')})`);
+  ok(gateOf(r3.some((x) => x.includes(WRITE))) && verdictOf(r4.some((x) => x.includes(WRITE))), `the law is RED with a write planted, under either major, the write named (${r4.join('; ')})`, JSON.stringify({ r3, r4 }));
+  ok(verdictOf(old4.some((x) => /asked no discovery read/.test(x))), `Helm 4's empty list judged by Helm 3's premise is red by name: the 26.04 red this law replaces (${old4.join('; ')})`);
 }
 
 const hv = spawnSync('helm', ['version', '--short'], { encoding: 'utf-8' });
@@ -243,7 +243,7 @@ const rA = render(CHART, A);
 const vA = volumeVerdict(rA, { release: REL_OV });
 ok(!vA.length, `the volume form: no preset env, VIBESPACE_PRESETS_DIR, a read-only mount (no subPath), two optional sources with their items${vA.length ? ' — ' + vA.join('; ') : ''}`);
 const sA = dataOf(rA, REL_OV);
-ok(sA.gdriveClients && JSON.parse(sA.gdriveClients)[0].key === 'org1' && JSON.parse(sA.integrations)[0].key === 'jarvis' && !Object.keys(secretNamed(rA, REL_OV).stringData).length, `the blocks are the OVERRIDE in ${REL_OV}, keys gdriveClients / integrations under data: (base64) — never stringData`);
+ok(gateOf(sA.gdriveClients) && JSON.parse(sA.gdriveClients)[0].key === 'org1' && JSON.parse(sA.integrations)[0].key === 'jarvis' && !Object.keys(secretNamed(rA, REL_OV).stringData).length, `the blocks are the OVERRIDE in ${REL_OV}, keys gdriveClients / integrations under data: (base64) — never stringData`);
 const relA = secretNamed(rA, 'vibespace-alice');
 ok(!['gdriveClients', 'integrations', 'gdriveClientSecret'].some((k) => k in relA.stringData || k in relA.data), 'the release Secret carries no preset key under the volume form');
 ok(!/GOCSPX-|lark-alice-secret/.test(docOf(rA, 'Deployment')), 'no credential in the Deployment (every value is in the Secret)');
@@ -257,7 +257,7 @@ const rC = render(CHART, C);
 const vC = volumeVerdict(rC, { release: REL_OV });
 ok(!vC.length, `the same volume — the cluster Secret reaches a new user with no block of her own${vC.length ? ' — ' + vC.join('; ') : ''}`);
 const sC = stringData(docOf(rC, 'Secret'));
-ok(!('gdriveClients' in sC) && !('integrations' in sC) && !('gdriveClientSecret' in sC) && /^data: \{\}$/m.test(secretDocs(rC).find((d) => d.includes(REL_OV)) || ''), 'her own Secrets carry no preset key — the override Secret renders data: {} (optional:true projects nothing for it)');
+ok(!('gdriveClients' in sC) && !('integrations' in sC) && !('gdriveClientSecret' in sC) && verdictOf(/^data: \{\}$/m.test(secretDocs(rC).find((d) => d.includes(REL_OV)) || '')), 'her own Secrets carry no preset key — the override Secret renders data: {} (optional:true projects nothing for it)');
 
 console.log('D the legacy single client');
 const rD = render(CHART, D);
@@ -269,9 +269,9 @@ ok(!volumeVerdict(rD, { release: REL_OV }).length, 'and the volume form, no env'
 console.log('E presets.volume=false ⇒ the env form');
 const rE = render(CHART, A, ['--set', 'presets.volume=false']);
 const dE = docOf(rE, 'Deployment');
-ok(envNames(dE).includes('VIBESPACE_GDRIVE_CLIENTS') && envNames(dE).includes('VIBESPACE_INTEGRATIONS') && !envNames(dE).includes('VIBESPACE_PRESETS_DIR') && !/name: presets/.test(dE), 'the env form: both secretKeyRef env vars, no presets volume, no VIBESPACE_PRESETS_DIR');
+ok(gateOf(envNames(dE).includes('VIBESPACE_GDRIVE_CLIENTS')) && gateOf(envNames(dE).includes('VIBESPACE_INTEGRATIONS')) && !envNames(dE).includes('VIBESPACE_PRESETS_DIR') && !/name: presets/.test(dE), 'the env form: both secretKeyRef env vars, no presets volume, no VIBESPACE_PRESETS_DIR');
 const rED = render(CHART, D, ['--set', 'presets.volume=false']);
-ok(envNames(docOf(rED, 'Deployment')).includes('VIBESPACE_GDRIVE_CLIENT_ID') && 'gdriveClientSecret' in stringData(docOf(rED, 'Secret')), 'the env form keeps the legacy single pair as it was (CLIENT_ID env + gdriveClientSecret key)');
+ok(gateOf(envNames(docOf(rED, 'Deployment')).includes('VIBESPACE_GDRIVE_CLIENT_ID')) && 'gdriveClientSecret' in stringData(docOf(rED, 'Secret')), 'the env form keeps the legacy single pair as it was (CLIENT_ID env + gdriveClientSecret key)');
 {
   const have = spawnSync('git', ['-C', REPO, 'cat-file', '-e', `${BASE_SHA}^{commit}`], { env: gitEnvFrom(process.env) }).status === 0;
   if (!have) console.log(`  … SKIP the byte comparison with the pre-lane chart: ${BASE_SHA} is not in this checkout's history (a shallow clone)`);
@@ -282,7 +282,7 @@ ok(envNames(docOf(rED, 'Deployment')).includes('VIBESPACE_GDRIVE_CLIENT_ID') && 
     const baseChart = path.join(baseDir, 'deploy/helm/vibespace-user');
     for (const [name, v] of [['A', A], ['C', C], ['D', D]]) ok(render(baseChart, v) === noProbes(noEph(render(CHART, v, ['--set', 'presets.volume=false']))), `presets.volume=false renders ${name} BYTE-IDENTICAL to the ${BASE_SHA} chart, J's ephemeral-storage lines and R's probe block aside (an operator who opts out sees no other change)`);
     const diffA = render(baseChart, A) !== rA;
-    ok(diffA, `(and the default render of A differs from ${BASE_SHA} — the switch is real)`);
+    ok(verdictOf(diffA), `(and the default render of A differs from ${BASE_SHA} — the switch is real)`);
   }
 }
 
@@ -343,7 +343,7 @@ const A2 = { ...A, gdrive: { clients: [] } };   // the migration step: the legac
   const u = upgrade([CHART, A], [CHART, A2]);
   ok(u.before.join() === 'gdriveClients,integrations' && u.after.join() === 'integrations', `this chart: gdrive.clients dropped ⇒ gdriveClients LEAVES the override Secret and override/ (before ${u.before.join()} · after ${u.after.join()})`);
   const all = upgrade([CHART, A], [CHART, C]);
-  ok(all.after.length === 0 && all.live.has(REL_OV) && !Object.keys(all.live.get(REL_OV)).length, 'every block dropped ⇒ the override Secret is empty, nothing projected under override/');
+  ok(all.after.length === 0 && gateOf(all.live.has(REL_OV)) && !Object.keys(all.live.get(REL_OV)).length, 'every block dropped ⇒ the override Secret is empty, nothing projected under override/');
   ok(upgrade([CHART, C], [CHART, A]).after.join() === 'gdriveClients,integrations', '(and the other way: a block added later reaches override/)');
 }
 {
@@ -354,7 +354,7 @@ const A2 = { ...A, gdrive: { clients: [] } };   // the migration step: the legac
     spawnSync('tar', ['-x', '-C', preDir], { input: execFileSync('git', ['-C', REPO, 'archive', PRE_FIX_SHA, 'deploy/helm/vibespace-user'], { env: gitEnvFrom(process.env), maxBuffer: 16 << 20 }) });
     const PRE = path.join(preDir, 'deploy/helm/vibespace-user');
     const repro = upgrade([PRE, A], [PRE, A2]);
-    ok(repro.after.includes('gdriveClients'), `the model REPRODUCES B-8145 on the ${PRE_FIX_SHA} chart: gdrive.clients dropped, gdriveClients still projected to override/ (after: ${repro.after.join()})`);
+    ok(verdictOf(repro.after.includes('gdriveClients')), `the model REPRODUCES B-8145 on the ${PRE_FIX_SHA} chart: gdrive.clients dropped, gdriveClients still projected to override/ (after: ${repro.after.join()})`);
     const mig = upgrade([PRE, A], [CHART, A2]);
     ok(mig.after.join() === 'integrations', `a release on the ${PRE_FIX_SHA} chart upgraded to this one: override/ follows the new values (after: ${mig.after.join()})`);
     const left = mig.live.get('vibespace-alice') || {};
@@ -393,16 +393,16 @@ const say = (b) => (b.length ? ' — ' + b.join('; ') : '');
     const preDir = path.join(ROOT, 'preappsys'); fs.mkdirSync(preDir, { recursive: true });
     spawnSync('tar', ['-x', '-C', preDir], { input: execFileSync('git', ['-C', REPO, 'archive', PRE_APPSYS_SHA, 'deploy/helm/vibespace-user'], { env: gitEnvFrom(process.env), maxBuffer: 16 << 20 }) });
     const PRE = path.join(preDir, 'deploy/helm/vibespace-user');
-    ok([A, C, D].every((v) => render(PRE, v) === older(render(CHART, v))), `off renders A, C, D BYTE-IDENTICAL to the ${PRE_APPSYS_SHA} chart, J's ephemeral-storage lines, L's fleet.json items and R's probe block aside — a release that never sets it sees no other change on upgrade`);
+    ok(verdictOf([A, C, D].every((v) => render(PRE, v) === older(render(CHART, v)))), `off renders A, C, D BYTE-IDENTICAL to the ${PRE_APPSYS_SHA} chart, J's ephemeral-storage lines, L's fleet.json items and R's probe block aside — a release that never sets it sees no other change on upgrade`);
     const noComments = (o) => o.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
     const shapes = [['fuse', ['--set', 'fuse.enabled=true']], ['cephfs', ['--set', 'cephfs.mons=10.0.0.1', '--set', 'cephfs.secret=k']], ['tun', ['--set', 'tun.enabled=true']]];
-    ok(shapes.every(([, x]) => noComments(render(PRE, C, x)) === noComments(older(render(CHART, C, x)))), `fuse / cephfs / tun alone render as the ${PRE_APPSYS_SHA} chart did, comment lines, R's probe block, J's ephemeral-storage lines and L's fleet.json items aside (the shared securityContext essay grew)`);
+    ok(verdictOf(shapes.every(([, x]) => noComments(render(PRE, C, x)) === noComments(older(render(CHART, C, x))))), `fuse / cephfs / tun alone render as the ${PRE_APPSYS_SHA} chart did, comment lines, R's probe block, J's ephemeral-storage lines and L's fleet.json items aside (the shared securityContext essay grew)`);
   }
   const rOn = render(CHART, C, ON);
   const vOn = appSysVerdict(rOn, { on: true, caps: ['SYS_ADMIN'] });
   ok(!vOn.length, `on: VIBESPACE_APP_SYSTEM "1" + capabilities.add [SYS_ADMIN] + AppArmor Unconfined, no seccompProfile — the $sysadmin branch forced without fuse or cephfs${say(vOn)}`);
   const vFuse = appSysVerdict(render(CHART, C, [...ON, '--set', 'fuse.enabled=true']), { on: true, caps: ['SYS_ADMIN'] });
-  ok(!vFuse.length && /github\.com\/fuse: 1/.test(depOf(render(CHART, C, [...ON, '--set', 'fuse.enabled=true']))), `on + fuse: ONE SYS_ADMIN (no duplicate), one AppArmor override, the fuse device still requested${say(vFuse)}`);
+  ok(!vFuse.length && verdictOf(/github\.com\/fuse: 1/.test(depOf(render(CHART, C, [...ON, '--set', 'fuse.enabled=true'])))), `on + fuse: ONE SYS_ADMIN (no duplicate), one AppArmor override, the fuse device still requested${say(vFuse)}`);
   const vCeph = appSysVerdict(render(CHART, C, [...ON, '--set', 'cephfs.mons=10.0.0.1', '--set', 'cephfs.secret=k']), { on: true, caps: ['SYS_ADMIN'] });
   ok(!vCeph.length, `on + cephfs: ONE SYS_ADMIN${say(vCeph)}`);
   const vTun = appSysVerdict(render(CHART, C, [...ON, '--set', 'tun.enabled=true']), { on: true, caps: ['SYS_ADMIN', 'NET_ADMIN'] });
@@ -452,7 +452,7 @@ const cpuMem = (out) => { const r = resourcesOf(out); return [r.requests.cpu, r.
   const dev = render(CHART, C, ['--set', 'fuse.enabled=true', '--set', 'tun.enabled=true', '--set', 'tun.mode=device-plugin']);
   const lim = resourcesOf(dev).limits;
   ok(!ephVerdict(dev).length && lim['github.com/fuse'] === '1' && lim['squat.ai/tun'] === '1', `the fuse / tun device limits stay beside it (limits: ${Object.keys(lim).join(', ')})`);
-  ok(!/^\s+priorityClassName:/m.test(depOf(rC)) && /^ {6}priorityClassName: vs-interactive$/m.test(depOf(render(CHART, C, ['--set', 'priorityClassName=vs-interactive']))), 'priorityClassName: empty (the default) ⇒ no field (the cluster default); set ⇒ the pod spec carries it');
+  ok(!/^\s+priorityClassName:/m.test(depOf(rC)) && verdictOf(/^ {6}priorityClassName: vs-interactive$/m.test(depOf(render(CHART, C, ['--set', 'priorityClassName=vs-interactive'])))), 'priorityClassName: empty (the default) ⇒ no field (the cluster default); set ⇒ the pod spec carries it');
   const have = spawnSync('git', ['-C', REPO, 'cat-file', '-e', `${PRE_EPH_SHA}^{commit}`], { env: gitEnvFrom(process.env) }).status === 0;
   if (!have) console.log(`  … SKIP the whole-diff comparison with the ${PRE_EPH_SHA} chart: not in this checkout's history (a shallow clone)`);
   else {
@@ -475,9 +475,9 @@ const preJ = chartCopy('noeph-values', (s) => s.replace(', ephemeral-storage: "2
   const readme = fs.readFileSync(path.join(REPO, 'deploy/README.md'), 'utf-8');
   const sets = [...readme.matchAll(/--set (resources\.(requests|limits)\.ephemeral-storage)=(\S+)/g)];
   const want = { requests: EPH.req, limits: EPH.lim };
-  ok(sets.length === 2 && sets.every((m) => want[m[2]] === m[3]) && new Set(sets.map((m) => m[2])).size === 2, `the README's recipe names both keys with the values.yaml defaults (${sets.map((m) => m[1] + '=' + m[3]).join(' ') || 'none found'})`);
+  ok(sets.length === 2 && gateOf(sets.every((m) => want[m[2]] === m[3])) && new Set(sets.map((m) => m[2])).size === 2, `the README's recipe names both keys with the values.yaml defaults (${sets.map((m) => m[1] + '=' + m[3]).join(' ') || 'none found'})`);
   const vReuse = ephVerdict(render(preJ, C));
-  ok(bothMissing(vReuse), `--reuse-values ALONE on a release from the chart before J renders no ephemeral-storage — the trap the recipe answers (${vReuse.join('; ') || 'rendered both'})`);
+  ok(verdictOf(bothMissing(vReuse)), `--reuse-values ALONE on a release from the chart before J renders no ephemeral-storage — the trap the recipe answers (${vReuse.join('; ') || 'rendered both'})`);
   const vRecipe = ephVerdict(render(preJ, C, sets.flatMap((m) => ['--set', `${m[1]}=${m[3]}`])));
   ok(!vRecipe.length, `--reuse-values + the README's two --set renders both${say(vRecipe)}`);
   ok(!ephVerdict(render(CHART, C)).length, '(and a release replayed WITHOUT --reuse-values — its own values over this chart — gets the defaults by itself)');
@@ -522,30 +522,30 @@ console.log('P the fleet\'s custom browser kernel (customBrowser.* → override/
   const def = render(CHART, C), off = render(CHART, { ...C, customBrowser: { ...CB, enabled: false } }), on = render(CHART, { ...C, customBrowser: CB });
   const fOn = fleetOf(on);
   ok(fleetOf(def) === undefined && fleetOf(off) === undefined && off === def, 'customBrowser off (the default, or enabled:false with every other field set) renders NOTHING — byte-identical to the chart without it');
-  ok(fOn && JSON.stringify(Object.keys(fOn)) === '["browserEngine"]' && fOn.browserEngine.plugin === 'vibespace.custom-browser' && fOn.browserEngine.default === true && fOn.browserEngine.source.git === CB.source.git && fOn.browserEngine.source.ref === PIN && fOn.browserEngine.preinstall === true && fOn.browserEngine.kernel.url === CB.kernel.url && fOn.browserEngine.kernel.sha256 === SHA,
+  ok(gateOf(fOn) && JSON.stringify(Object.keys(fOn)) === '["browserEngine"]' && fOn.browserEngine.plugin === 'vibespace.custom-browser' && fOn.browserEngine.default === true && fOn.browserEngine.source.git === CB.source.git && fOn.browserEngine.source.ref === PIN && fOn.browserEngine.preinstall === true && fOn.browserEngine.kernel.url === CB.kernel.url && fOn.browserEngine.kernel.sha256 === SHA,
     'enabled ⇒ the override Secret\'s fleet = {browserEngine: {plugin, default, preinstall, source (a full sha pinned), kernel}} — ONE key beside the relay page', JSON.stringify(fOn));
   const noPre = fleetOf(render(CHART, { ...C, customBrowser: { ...CB, preinstall: false } }));
-  ok(noPre && noPre.browserEngine.preinstall === false && PL.parseFleet(noPre).browserEngine.preinstall === false && PL.parseFleet(fOn).browserEngine.preinstall === true, 'lane engine-distribution: customBrowser.preinstall renders as fleet.json browserEngine.preinstall (true ⇒ the boot job downloads the kernel right away; false ⇒ at its first use) — the app\'s reader takes it');
+  ok(gateOf(noPre) && noPre.browserEngine.preinstall === false && PL.parseFleet(noPre).browserEngine.preinstall === false && PL.parseFleet(fOn).browserEngine.preinstall === true, 'lane engine-distribution: customBrowser.preinstall renders as fleet.json browserEngine.preinstall (true ⇒ the boot job downloads the kernel right away; false ⇒ at its first use) — the app\'s reader takes it');
   ok(depOf(on) === depOf(def) && !envNames(depOf(on)).some((e) => /BROWSER|ENGINE|KERNEL/.test(e)) && !secretNamed(on, 'vibespace-alice').stringData.fleet, 'no env, no release-Secret key: the Deployment BYTE-IDENTICAL to the render without it (a flip never rolls the pod — the server re-reads fleet.json live)');
   const both = fleetOf(render(CHART, { ...C, presets: { relayUrl: RELAY }, customBrowser: { enabled: true } }));
   const relayOnly = dataOf(render(CHART, { ...C, presets: { relayUrl: RELAY } }), REL_OV).fleet;
-  ok(both && both.relayUrl === RELAY && both.browserEngine && both.browserEngine.default === false && relayOnly === JSON.stringify({ relayUrl: RELAY }), 'beside a relay page: both keys (default:false = the kernel is offered, not the default); a relay alone renders the SAME bytes as before this lane', JSON.stringify({ both, relayOnly }));
+  ok(gateOf(both) && both.relayUrl === RELAY && gateOf(both.browserEngine) && both.browserEngine.default === false && relayOnly === JSON.stringify({ relayUrl: RELAY }), 'beside a relay page: both keys (default:false = the kernel is offered, not the default); a relay alone renders the SAME bytes as before this lane', JSON.stringify({ both, relayOnly }));
   const parsed = PL.parseFleet(fOn);
   const pol = ENGN.defaultEngineOf({ fleet: parsed.browserEngine }), polOwn = ENGN.defaultEngineOf({ own: 'default', fleet: parsed.browserEngine });
   const canon = (v) => (v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',')}}` : JSON.stringify(v)); // helm's toJson sorts keys
   ok(canon(parsed.browserEngine) === canon(fOn.browserEngine) && pol.value === 'plugin:vibespace.custom-browser' && pol.source === 'fleet' && polOwn.source === 'user', 'the rendered key round-trips through the app\'s own reader (preset-layers parseFleet) into THE policy: the kernel the default, «set by the cluster preset» — a user\'s own value still wins');
   ok(render(CHART, { ...C, customBrowser: CB }, ['--set', 'presets.volume=false']) === render(CHART, C, ['--set', 'presets.volume=false']), 'presets.volume=false: customBrowser renders nothing (no fleet.json reaches the pod — the relay page\'s rule)');
   const vals = fs.readFileSync(path.join(CHART, 'values.yaml'), 'utf-8');
-  ok(/^customBrowser:\n  enabled: false\n  default: false\n  preinstall: false\n  source:\n    git: ""\n    ref: ""\n  kernel:\n    url: ""\n    sha256: ""$/m.test(vals) && /FULL\s+(?:#\s+)?commit sha/.test(vals) && /plugin-git/.test(vals), 'values.yaml documents the block, off by default — preinstall, the ref as a FULL commit sha (D2), the plugin-git credential row');
+  ok(gateOf(/^customBrowser:\n  enabled: false\n  default: false\n  preinstall: false\n  source:\n    git: ""\n    ref: ""\n  kernel:\n    url: ""\n    sha256: ""$/m.test(vals)) && gateOf(/FULL\s+(?:#\s+)?commit sha/.test(vals)) && verdictOf(/plugin-git/.test(vals)), 'values.yaml documents the block, off by default — preinstall, the ref as a FULL commit sha (D2), the plugin-git credential row');
   const always = chartCopy('engine-always', (x) => x.replace('{{- if $cb.enabled }}{{- $cbs := $cb.source', '{{- if true }}{{- $cbs := $cb.source'));
   ok(fleetOf(render(always, C)) !== undefined, 'CONTROL: a chart that renders the engine whatever `enabled` says writes a fleet key on the default render — the off leg above is red on it');
   // lane fleet-plugin-catalog: THE FLEET'S ROAD IS THE CLUSTER LAYER — off, this chart renders nothing for the engine, and the pod
   // still reads the cluster Secret's fleet.json (the admin's pin, followed live); the values comment and the README say so
   const cbDoc = vals.slice(vals.indexOf("# THE FLEET'S CUSTOM BROWSER KERNEL"), vals.indexOf('customBrowser:'));
   const readme = fs.readFileSync(path.join(REPO, 'deploy/README.md'), 'utf-8');
-  ok(/name: vibespace-cluster-presets\n\s+optional: true\n\s+items:\n(?:\s+- \{ key: \w+, path: [\w.-]+ \}\n)*?\s+- \{ key: fleet, path: fleet\.json \}/.test(def) && fleetOf(def) === undefined,
+  ok(gateOf(/name: vibespace-cluster-presets\n\s+optional: true\n\s+items:\n(?:\s+- \{ key: \w+, path: [\w.-]+ \}\n)*?\s+- \{ key: fleet, path: fleet\.json \}/.test(def)) && fleetOf(def) === undefined,
     'customBrowser off (the fleet\'s default): nothing rendered for the engine, and the pod still projects the CLUSTER Secret\'s fleet.json — the layer the admin pins the plugin in');
-  ok(/THE FLEET'S ROAD IS THE CLUSTER SECRET/.test(cbDoc) && /vibespace-cluster-presets/.test(cbDoc) && /no helm upgrade, no restart/.test(cbDoc) && /pins ONE release/.test(cbDoc) && /### The fleet's browser kernel — a plugin the cluster names/.test(readme),
+  ok(gateOf(/THE FLEET'S ROAD IS THE CLUSTER SECRET/.test(cbDoc)) && gateOf(/vibespace-cluster-presets/.test(cbDoc)) && gateOf(/no helm upgrade, no restart/.test(cbDoc)) && gateOf(/pins ONE release/.test(cbDoc)) && verdictOf(/### The fleet's browser kernel — a plugin the cluster names/.test(readme)),
     'values.yaml names the ONE road for the fleet (the cluster Secret, followed live) and this block as one release\'s pin; deploy/README.md carries the section');
 }
 
@@ -561,9 +561,9 @@ console.log('N the install / upgrade NOTES (helm install --dry-run=client; a fak
     c.on('close', (status) => { const i = o.indexOf('NOTES:'); res({ status, notes: i >= 0 ? o.slice(i) : '', err: e.split('\n')[0] }); });
   });
   const nOld = await notesOf({ ...C, oauthRelayUrl: RELAY }), nNew = await notesOf({ ...C, presets: { relayUrl: RELAY } }), nDef = await notesOf(C), nOff = await notesOf({ ...C, presets: { relayUrl: RELAY, volume: false } });
-  ok(nOld.status === 0 && /WARNING: oauthRelayUrl is deprecated/.test(nOld.notes) && /presets\.relayUrl/.test(nOld.notes) && /`fleet` key/.test(nOld.notes) && /override\/fleet\.json/.test(nOld.notes), 'the old key ⇒ the NOTES WARN: deprecated, move it to presets.relayUrl or the cluster Secret\'s fleet key', nOld.notes || nOld.err);
+  ok(nOld.status === 0 && gateOf(/WARNING: oauthRelayUrl is deprecated/.test(nOld.notes)) && gateOf(/presets\.relayUrl/.test(nOld.notes)) && gateOf(/`fleet` key/.test(nOld.notes)) && verdictOf(/override\/fleet\.json/.test(nOld.notes)), 'the old key ⇒ the NOTES WARN: deprecated, move it to presets.relayUrl or the cluster Secret\'s fleet key', nOld.notes || nOld.err);
   ok(nNew.status === 0 && nDef.status === 0 && !/WARNING/.test(nNew.notes) && !/WARNING/.test(nDef.notes), 'presets.relayUrl alone, and the default: no warning', JSON.stringify([nNew.notes, nDef.notes, nNew.err]));
-  ok(nOff.status === 0 && /WARNING: presets\.volume=false/.test(nOff.notes) && /gets none/.test(nOff.notes), 'presets.volume=false with a relay ⇒ the NOTES WARN that no relay page reaches the pod', nOff.notes || nOff.err);
+  ok(nOff.status === 0 && gateOf(/WARNING: presets\.volume=false/.test(nOff.notes)) && verdictOf(/gets none/.test(nOff.notes)), 'presets.volume=false with a relay ⇒ the NOTES WARN that no relay page reaches the pod', nOff.notes || nOff.err);
   // the real run, by THE LAW BY THE HELM THAT RAN (N0's apiVerdict: nothing written over zero requests too; discovery reads = Helm 3's premise)
   const HELM_MAJOR = Number((/^v(\d+)\./.exec(hv.stdout.trim()) || [])[1]);
   const vReal = apiVerdict(asked, HELM_MAJOR);
@@ -594,7 +594,7 @@ const renderErr = (values) => { const f = path.join(ROOT, `values-${++n}.json`);
   const strip = (d) => d.replace(/\n\s+# The maintainers' key, by its sha256 ONLY[\s\S]*?- name: VIBESPACE_MAINTAINER_KEY_SHA\n\s+value: "[^"]*"/, '');
   ok(strip(depOf(on)) === depOf(def), 'nothing else in the Deployment moves (the env block is the WHOLE diff)');
   const refused = [MKEY_VALUE, MSHA.toUpperCase(), MSHA.slice(1), 'yes'].map((v) => [v.slice(0, 12), renderErr({ ...C, maintainerKeySha: v })]);
-  ok(refused.every(([, e]) => e && /maintainerKeySha is the maintainer key's sha256 \(64 lowercase hex\) — never the key itself/.test(e)), 'the KEY ITSELF, an uppercase sha, 63 hex, a word ⇒ the render REFUSES, named (a key never reaches a pod by a slip)', JSON.stringify(refused.map(([v, e]) => [v, e && e.split('\n')[0]])));
+  ok(verdictOf(refused.every(([, e]) => e && /maintainerKeySha is the maintainer key's sha256 \(64 lowercase hex\) — never the key itself/.test(e))), 'the KEY ITSELF, an uppercase sha, 63 hex, a word ⇒ the render REFUSES, named (a key never reaches a pod by a slip)', JSON.stringify(refused.map(([v, e]) => [v, e && e.split('\n')[0]])));
   ok(!maintVerdict(render(CHART, { ...A, maintainerKeySha: MSHA }), MSHA).length && !volumeVerdict(render(CHART, { ...A, maintainerKeySha: MSHA }), { release: REL_OV }).length, 'beside the presets volume (a release with the blocks): the env and the volume form both hold');
 }
 
@@ -602,36 +602,36 @@ console.log('CONTROLS (chart copies)');
 {
   const def = depOf(render(CHART, C));
   const envBack = chartCopy('relay-env', (x) => x.replace('              value: {{ printf "https://%s" $host | quote }}\n', '              value: {{ printf "https://%s" $host | quote }}\n            {{- with $relay }}\n            - name: VIBESPACE_OAUTH_RELAY_URL\n              value: {{ . | quote }}\n            {{- end }}\n'));
-  ok(relayVerdict(render(envBack, { ...C, presets: { relayUrl: RELAY } }), RELAY, def).some((b) => /VIBESPACE_OAUTH_RELAY_URL rendered/.test(b)), 'CONTROL: the relay env back in the template (the .344 road) is RED');
+  ok(verdictOf(relayVerdict(render(envBack, { ...C, presets: { relayUrl: RELAY } }), RELAY, def).some((b) => /VIBESPACE_OAUTH_RELAY_URL rendered/.test(b))), 'CONTROL: the relay env back in the template (the .344 road) is RED');
   const rolls = chartCopy('relay-items-by-value', (x) => x.replace('                    - { key: fleet, path: override/fleet.json }\n', '                    {{- if $relay }}\n                    - { key: fleet, path: override/fleet.json }\n                    {{- end }}\n'));
-  ok(relayVerdict(render(rolls, { ...C, presets: { relayUrl: RELAY } }), RELAY, depOf(render(rolls, C))).some((b) => /Deployment differs/.test(b)), 'CONTROL: fleet items rendered only when a relay is set (every relay change rolls the pod) is RED');
+  ok(verdictOf(relayVerdict(render(rolls, { ...C, presets: { relayUrl: RELAY } }), RELAY, depOf(render(rolls, C))).some((b) => /Deployment differs/.test(b))), 'CONTROL: fleet items rendered only when a relay is set (every relay change rolls the pod) is RED');
   const noAlias = chartCopy('relay-no-alias', (x) => x.replace('{{- $relay := $presets.relayUrl | default .Values.oauthRelayUrl -}}', '{{- $relay := $presets.relayUrl -}}'));
-  ok(relayVerdict(render(noAlias, { ...C, oauthRelayUrl: RELAY }), RELAY, def).some((b) => /the override's fleet/.test(b)), 'CONTROL: a chart that drops the old key (a --reuse-values upgrade from .344 loses its relay page) is RED');
+  ok(verdictOf(relayVerdict(render(noAlias, { ...C, oauthRelayUrl: RELAY }), RELAY, def).some((b) => /the override's fleet/.test(b))), 'CONTROL: a chart that drops the old key (a --reuse-values upgrade from .344 loses its relay page) is RED');
 }
 const sub = chartCopy('subpath', (s) => s.replace('              mountPath: {{ $presets.mountPath | default "/etc/vibespace/presets" }}\n              readOnly: true', '              mountPath: {{ $presets.mountPath | default "/etc/vibespace/presets" }}/integrations.json\n              subPath: integrations.json\n              readOnly: true'));
-ok(volumeVerdict(render(sub, A), { release: REL_OV }).some((b) => /subPath/.test(b)), 'CONTROL: a subPath mount (the form that never updates) is RED');
+ok(verdictOf(volumeVerdict(render(sub, A), { release: REL_OV }).some((b) => /subPath/.test(b))), 'CONTROL: a subPath mount (the form that never updates) is RED');
 const req = chartCopy('required', (s) => s.replace("                  name: {{ $presets.clusterSecret | default \"vibespace-cluster-presets\" }}\n                  optional: true", "                  name: {{ $presets.clusterSecret | default \"vibespace-cluster-presets\" }}"));
-ok(volumeVerdict(render(req, A), { release: REL_OV }).some((b) => /cluster source/.test(b)), 'CONTROL: a cluster source without optional:true (a pod that cannot start before the admin makes the Secret) is RED');
+ok(verdictOf(volumeVerdict(render(req, A), { release: REL_OV }).some((b) => /cluster source/.test(b))), 'CONTROL: a cluster source without optional:true (a pod that cannot start before the admin makes the Secret) is RED');
 const both = chartCopy('envtoo', (s) => s.replace('            - name: VIBESPACE_PRESETS_DIR\n', '            - name: VIBESPACE_INTEGRATIONS\n              valueFrom: { secretKeyRef: { name: {{ $name }}, key: integrations } }\n            - name: VIBESPACE_PRESETS_DIR\n'));
-ok(volumeVerdict(render(both, A), { release: REL_OV }).some((b) => /VIBESPACE_INTEGRATIONS/.test(b)), 'CONTROL: a preset env rendered beside the volume is RED');
+ok(verdictOf(volumeVerdict(render(both, A), { release: REL_OV }).some((b) => /VIBESPACE_INTEGRATIONS/.test(b))), 'CONTROL: a preset env rendered beside the volume is RED');
 const sdata = chartCopy('stringdata', (s) => s.replace('data:\n  {{- if $ovG }}\n  gdriveClients: {{ $ovG | toJson | b64enc | quote }}', 'stringData:\n  {{- if $ovG }}\n  gdriveClients: {{ $ovG | toJson | quote }}'));
 const us = upgrade([sdata, A], [sdata, A2]);
-ok(us.before.includes('gdriveClients') && us.after.includes('gdriveClients'), `CONTROL: an override Secret rendered through stringData KEEPS the dropped gdriveClients projected (after: ${us.after.join()}) — H's first assert is red on it`);
+ok(gateOf(us.before.includes('gdriveClients')) && verdictOf(us.after.includes('gdriveClients')), `CONTROL: an override Secret rendered through stringData KEEPS the dropped gdriveClients projected (after: ${us.after.join()}) — H's first assert is red on it`);
 
 const capsOff = chartCopy('appsys-nocaps', (s) => s.replace('(and .Values.cephfs .Values.cephfs.mons) $appsys }}', '(and .Values.cephfs .Values.cephfs.mons) }}'));
-ok(appSysVerdict(render(capsOff, C, ON), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /capabilities\.add|SYS_ADMIN without/.test(b)), 'CONTROL: the env without the forced $sysadmin branch (no SYS_ADMIN, no AppArmor override) is RED');
+ok(verdictOf(appSysVerdict(render(capsOff, C, ON), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /capabilities\.add|SYS_ADMIN without/.test(b))), 'CONTROL: the env without the forced $sysadmin branch (no SYS_ADMIN, no AppArmor override) is RED');
 const capsDup = chartCopy('appsys-dup', (s) => s.replace('add: [{{ if $sysadmin }}"SYS_ADMIN"', 'add: [{{ if $appsys }}"SYS_ADMIN", {{ end }}{{ if $sysadmin }}"SYS_ADMIN"'));
-ok(appSysVerdict(render(capsDup, C, [...ON, '--set', 'fuse.enabled=true']), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /duplicate/.test(b)), 'CONTROL: a second SYS_ADMIN for the app system beside fuse is RED');
+ok(verdictOf(appSysVerdict(render(capsDup, C, [...ON, '--set', 'fuse.enabled=true']), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /duplicate/.test(b))), 'CONTROL: a second SYS_ADMIN for the app system beside fuse is RED');
 const envOn = chartCopy('appsys-always', (s) => s.replace('{{- if $appsys }}\n            # App persistence Layer 1', '{{- if true }}\n            # App persistence Layer 1'));
-ok(appSysVerdict(render(envOn, C), { on: false, caps: [] }).some((b) => /while off/.test(b)), 'CONTROL: VIBESPACE_APP_SYSTEM rendered while the switch is off is RED');
+ok(verdictOf(appSysVerdict(render(envOn, C), { on: false, caps: [] }).some((b) => /while off/.test(b))), 'CONTROL: VIBESPACE_APP_SYSTEM rendered while the switch is off is RED');
 const secc = chartCopy('appsys-seccomp', (s) => s.replace('            appArmorProfile:\n              type: Unconfined\n', '            appArmorProfile:\n              type: Unconfined\n            seccompProfile:\n              type: RuntimeDefault\n'));
-ok(appSysVerdict(render(secc, C, ON), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /seccompProfile/.test(b)), 'CONTROL: a seccompProfile on the container is RED');
-ok(bothMissing(ephVerdict(render(preJ, C))), 'CONTROL: a values.yaml without the ephemeral-storage keys (the chart before J) is RED on both');
+ok(verdictOf(appSysVerdict(render(secc, C, ON), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /seccompProfile/.test(b))), 'CONTROL: a seccompProfile on the container is RED');
+ok(verdictOf(bothMissing(ephVerdict(render(preJ, C)))), 'CONTROL: a values.yaml without the ephemeral-storage keys (the chart before J) is RED on both');
 const reqDrop = chartCopy('eph-template', (s) => s.replace('requests: {{- toYaml .Values.resources.requests | nindent 14 }}', 'requests: {{- toYaml (omit .Values.resources.requests "ephemeral-storage") | nindent 14 }}'));
-ok(ephVerdict(render(reqDrop, C)).some((b) => /^requests\.ephemeral-storage missing/.test(b)), 'CONTROL: a template that drops the key from requests is RED');
+ok(verdictOf(ephVerdict(render(reqDrop, C)).some((b) => /^requests\.ephemeral-storage missing/.test(b))), 'CONTROL: a template that drops the key from requests is RED');
 
 const maintNoGuard = chartCopy('maint-no-guard', (s) => s.replace(/\{\{- with \.Values\.maintainerKeySha \}\}\{\{ if not \(regexMatch [^\n]*\n/, ''), 'templates/_helpers.tpl');
-ok(maintVerdict(render(maintNoGuard, { ...C, maintainerKeySha: MKEY_VALUE }), MKEY_VALUE).some((b) => /not a sha256/.test(b)), 'CONTROL: a chart without the sha refusal renders the KEY into the pod\'s env — RED');
+ok(verdictOf(maintVerdict(render(maintNoGuard, { ...C, maintainerKeySha: MKEY_VALUE }), MKEY_VALUE).some((b) => /not a sha256/.test(b))), 'CONTROL: a chart without the sha refusal renders the KEY into the pod\'s env — RED');
 
 console.log('Q THE INGRESS POLICY (lane lg-remote-hardening, B-7f0b — q-042 D7a)');
 // the app port (3456) only from the ingress controller's namespace (+ the operator's named extras) and the pod itself; the
@@ -675,13 +675,13 @@ ok(!ingressVerdict(render(CHART, C, [...ING, '--set', 'metrics=null']), { metric
 ok(depOf(rOn) === depOf(rOff), 'Q the switch touches no pod: the Deployment renders the same on and off (no roll)');
 const egOff = docs(render(CHART, C, ['--set', 'networkPolicy.enabled=true'])).filter((d) => /^kind: NetworkPolicy$/m.test(d));
 const egOn = docs(render(CHART, C, ['--set', 'networkPolicy.enabled=true', ...ING])).filter((d) => /^kind: NetworkPolicy$/m.test(d));
-ok(egOff.length === 1 && egOn.length === 2 && egOn.includes(egOff[0]), 'Q beside the egress policy: the egress document is the same, the ingress one is its own');
+ok(egOff.length === 1 && egOn.length === 2 && verdictOf(egOn.includes(egOff[0])), 'Q beside the egress policy: the egress document is the same, the ingress one is its own');
 const openApp = chartCopy('ingress-open', (s) => s.replace('        - namespaceSelector:\n            matchLabels: { kubernetes.io/metadata.name: {{ $ing.controllerNamespace | default "ingress-nginx" | quote }} }\n', '        - namespaceSelector: {}\n'));
-ok(ingressVerdict(render(openApp, C, ING)).some((b) => /every namespace|namespaces are/.test(b)), 'CONTROL: a rule that admits every namespace on the app port (the neighbour pod reaching the login page) is RED');
+ok(verdictOf(ingressVerdict(render(openApp, C, ING)).some((b) => /every namespace|namespaces are/.test(b))), 'CONTROL: a rule that admits every namespace on the app port (the neighbour pod reaching the login page) is RED');
 const extraRule = chartCopy('ingress-extra', (s) => s.replace('    - from:                                  # the pod itself\n', '    - from:                                  # a fourth rule: every pod, every port\n        - podSelector: {}\n    - from:                                  # the pod itself\n'));
-ok(ingressVerdict(render(extraRule, C, ING)).some((b) => /rules \(want|pod itself/.test(b)), 'CONTROL: a fourth rule admitting every pod on every port (the neighbour hole beside the app port\'s rule) is RED');
+ok(verdictOf(ingressVerdict(render(extraRule, C, ING)).some((b) => /rules \(want|pod itself/.test(b))), 'CONTROL: a fourth rule admitting every pod on every port (the neighbour hole beside the app port\'s rule) is RED');
 const noPod = chartCopy('ingress-selects-nothing', (s) => s.replace(/(name: \{\{ \$name \}\}-ingress[\s\S]*?app\.kubernetes\.io\/name: )vibespace/, '$1vibespace-x'));
-ok(ingressVerdict(render(noPod, C, ING)).some((b) => /the policy selects/.test(b)), 'CONTROL: a policy whose selector matches no pod of the Deployment (it protects nothing) is RED');
+ok(verdictOf(ingressVerdict(render(noPod, C, ING)).some((b) => /the policy selects/.test(b))), 'CONTROL: a policy whose selector matches no pod of the Deployment (it protects nothing) is RED');
 
 console.log('R THE PROBES (bl-machines-b, B-b1f7 — the owner\'s decision 2026-11-18: a startup probe for the boot, liveness over ten minutes)');
 // a liveness kill restarts the container and ends EVERY conversation in the pod (2026-11-16: a hub held for minutes was killed six
@@ -742,21 +742,21 @@ function saidVerdict(chart) {
 ok(depOf(render(CHART, C, ['--set', 'probes=null'])) === depOf(rP), 'R a values set with no probes block (a --reuse-values upgrade from an older release) renders the SAME probes: the template\'s defaults are values.yaml\'s, no nil error');
 const err = (probes) => renderErr({ ...C, probes });
 const e270 = err({ liveness: { failureThreshold: 10 } });
-ok(!!e270 && /probes\.liveness: \(failureThreshold − 1\) × periodSeconds = 270 s, ten minutes \(600 s\) or less/.test(e270), 'R the old window, (10 − 1) × 30 s = 270 s, set by values ⇒ the render REFUSES, named with its arithmetic', e270);
+ok(!!e270 && verdictOf(/probes\.liveness: \(failureThreshold − 1\) × periodSeconds = 270 s, ten minutes \(600 s\) or less/.test(e270)), 'R the old window, (10 − 1) × 30 s = 270 s, set by values ⇒ the render REFUSES, named with its arithmetic', e270);
 const e600 = err({ liveness: { failureThreshold: 21 } }), eBoot = err({ startup: { failureThreshold: 6 } }), eBoot600 = err({ startup: { failureThreshold: 61 } }), eUnder = err({ liveness: { failureThreshold: 25 } });
-ok(!!e600 && /probes\.liveness: [^\n]*= 600 s, ten minutes/.test(e600), 'R the edge: a liveness of exactly (21 − 1) × 30 s = 600 s is refused', e600);
-ok(!!eBoot && /probes\.startup: \(failureThreshold − 1\) × periodSeconds = 50 s, ten minutes \(600 s\) or less/.test(eBoot), 'R a startup budget of (6 − 1) × 10 s = 50 s ⇒ REFUSED (a startup failure restarts the container too: a boot resuming its conversations would loop)', eBoot);
-ok(!!eBoot600 && /probes\.startup: [^\n]*= 600 s, ten minutes/.test(eBoot600), 'R the startup edge: a budget of exactly (61 − 1) × 10 s = 600 s is refused', eBoot600);
-ok(!!eUnder && /probes\.liveness: 720 s is shorter than the startup budget 900 s/.test(eUnder), 'R a liveness of (25 − 1) × 30 s = 720 s under the default startup budget of 900 s ⇒ REFUSED (an in-place restart boots under liveness alone)', eUnder);
+ok(!!e600 && verdictOf(/probes\.liveness: [^\n]*= 600 s, ten minutes/.test(e600)), 'R the edge: a liveness of exactly (21 − 1) × 30 s = 600 s is refused', e600);
+ok(!!eBoot && verdictOf(/probes\.startup: \(failureThreshold − 1\) × periodSeconds = 50 s, ten minutes \(600 s\) or less/.test(eBoot)), 'R a startup budget of (6 − 1) × 10 s = 50 s ⇒ REFUSED (a startup failure restarts the container too: a boot resuming its conversations would loop)', eBoot);
+ok(!!eBoot600 && verdictOf(/probes\.startup: [^\n]*= 600 s, ten minutes/.test(eBoot600)), 'R the startup edge: a budget of exactly (61 − 1) × 10 s = 600 s is refused', eBoot600);
+ok(!!eUnder && verdictOf(/probes\.liveness: 720 s is shorter than the startup budget 900 s/.test(eUnder)), 'R a liveness of (25 − 1) × 30 s = 720 s under the default startup budget of 900 s ⇒ REFUSED (an in-place restart boots under liveness alone)', eUnder);
 ok(!probesVerdict(render(CHART, { ...C, probes: { startup: { failureThreshold: 62 }, liveness: { failureThreshold: 22 } } }), { boot: 610, held: 630 }).length, 'R just over the edges renders: startup (62 − 1) × 10 s = 610 s, liveness (22 − 1) × 30 s = 630 s');
 // THE FLOOR (主开发's read, 00:22Z): every number of the three probes is 1 or more, refused at render by name — two negatives
 // would multiply into a window that passes, readiness has no window guard, and a typed 0 was silently the default
 const eR0 = err({ readiness: { failureThreshold: 0 } }), eNeg = err({ liveness: { periodSeconds: -30, failureThreshold: -31 } }), eT0 = err({ startup: { timeoutSeconds: 0 } });
-ok(!!eR0 && /probes\.readiness\.failureThreshold: 0 is not a whole number of 1 or more/.test(eR0), 'R a readiness failureThreshold of 0 ⇒ REFUSED by name (never replaced by the default 3)', eR0);
-ok(!!eNeg && /probes\.liveness\.failureThreshold: -31 is not a whole number of 1 or more/.test(eNeg), 'R two negatives (liveness -30 s × -31, which multiply into (−32) × (−30) = 960 s) ⇒ REFUSED by name before any window', eNeg);
-ok(!!eT0 && /probes\.startup\.timeoutSeconds: 0 is not a whole number of 1 or more/.test(eT0), 'R a typed 0 timeout ⇒ REFUSED by name (no default replaces it)', eT0);
+ok(!!eR0 && verdictOf(/probes\.readiness\.failureThreshold: 0 is not a whole number of 1 or more/.test(eR0)), 'R a readiness failureThreshold of 0 ⇒ REFUSED by name (never replaced by the default 3)', eR0);
+ok(!!eNeg && verdictOf(/probes\.liveness\.failureThreshold: -31 is not a whole number of 1 or more/.test(eNeg)), 'R two negatives (liveness -30 s × -31, which multiply into (−32) × (−30) = 960 s) ⇒ REFUSED by name before any window', eNeg);
+ok(!!eT0 && verdictOf(/probes\.startup\.timeoutSeconds: 0 is not a whole number of 1 or more/.test(eT0)), 'R a typed 0 timeout ⇒ REFUSED by name (no default replaces it)', eT0);
 const eTo = err({ startup: { timeoutSeconds: 30 } });
-ok(!!eTo && /probes\.startup: timeoutSeconds 30 is over its periodSeconds 10/.test(eTo), 'R a startup timeout (30 s) over its period (10 s) ⇒ REFUSED (its real window would be (91 − 1) × 30 s, past the liveness it was compared with)', eTo);
+ok(!!eTo && verdictOf(/probes\.startup: timeoutSeconds 30 is over its periodSeconds 10/.test(eTo)), 'R a startup timeout (30 s) over its period (10 s) ⇒ REFUSED (its real window would be (91 − 1) × 30 s, past the liveness it was compared with)', eTo);
 const NINE = { startup: { periodSeconds: 60, timeoutSeconds: 7, failureThreshold: 16 }, readiness: { periodSeconds: 8, timeoutSeconds: 8, failureThreshold: 6 }, liveness: { periodSeconds: 20, timeoutSeconds: 9, failureThreshold: 46 } };
 {
   const dep = depOf(render(CHART, { ...C, probes: NINE }));
@@ -769,19 +769,19 @@ ok((depOf(rP).match(/^ {10}(startup|readiness|liveness)Probe:$/gm) || []).length
 // leg after it
 const plantedVerdict = (chart, values, opts) => { let out; try { out = render(chart, values); } catch (e) { return [`the render refused: ${String((e && (e.stderr || e.message)) || e).trim().split('\n').slice(-1)[0]}`]; } return probesVerdict(out, opts); };
 const noStartup = chartCopy('probes-no-startup', (x) => x.replace(/ {10}startupProbe:\n(?: {12}[^\n]*\n){4}/, ''));
-{ const v = plantedVerdict(noStartup, C); ok(v.some((b) => /no startup probe/.test(b)), 'CONTROL: the chart without its startup probe (a boot meets liveness) is RED', v); }
+{ const v = plantedVerdict(noStartup, C); ok(verdictOf(v.some((b) => /no startup probe/.test(b))), 'CONTROL: the chart without its startup probe (a boot meets liveness) is RED', v); }
 const asWas = chartCopy('probes-liveness-as-was', (x) => x.replace(/( {10}livenessProbe:\n {12}httpGet: \{ path: \/login, port: 3456 \}\n) {12}periodSeconds: \{\{ \$lPeriod \}\}\n( {12}timeoutSeconds: [^\n]*\n) {12}failureThreshold: \{\{ \$lFail \}\}\n/, '$1            initialDelaySeconds: 60\n            periodSeconds: 30\n$2            failureThreshold: 10\n'));
-{ const v = plantedVerdict(asWas, C); ok(v.some((b) => /kills a hub held 270 s/.test(b)), 'CONTROL: the liveness block as it was (a 60 s delay, then (10 − 1) × 30 s = 270 s: a hub held 4.5 min is killed) is RED', v); }
+{ const v = plantedVerdict(asWas, C); ok(verdictOf(v.some((b) => /kills a hub held 270 s/.test(b))), 'CONTROL: the liveness block as it was (a 60 s delay, then (10 − 1) × 30 s = 270 s: a hub held 4.5 min is killed) is RED', v); }
 const noGuard = chartCopy('probes-no-guard', (x) => x.replace(/(?: {10}\{\{- if (?:le|lt) \$[a-zA-Z]+ [^\n]*\{\{ fail [^\n]*\n){3}/, ''));
-{ const v = plantedVerdict(noGuard, { ...C, probes: { liveness: { failureThreshold: 10 } } }, { held: 270 }); ok(v.some((b) => /ten minutes or less/.test(b)), 'CONTROL: without the render\'s refusals, a values set under ten minutes renders a killing liveness — RED (the refusal is what holds the law)', v); }
+{ const v = plantedVerdict(noGuard, { ...C, probes: { liveness: { failureThreshold: 10 } } }, { held: 270 }); ok(verdictOf(v.some((b) => /ten minutes or less/.test(b))), 'CONTROL: without the render\'s refusals, a values set under ten minutes renders a killing liveness — RED (the refusal is what holds the law)', v); }
 const noFloor = chartCopy('probes-no-floor', (x) => x.replace(/ {10}\{\{- if lt \(int \$v\) 1 \}\}[^\n]*\n/, ''));
-{ const v = plantedVerdict(noFloor, { ...C, probes: { readiness: { failureThreshold: 0 } } }); ok(v.some((b) => /readiness probe renders a number under 1/.test(b)), 'CONTROL: without the floor, a readiness failureThreshold of 0 renders as it is — RED', v); }
-{ const v = plantedVerdict(noFloor, { ...C, probes: { liveness: { periodSeconds: -30, timeoutSeconds: -30, failureThreshold: -31 } } }, { held: 960 }); ok(v.some((b) => /liveness probe renders a number under 1/.test(b)), 'CONTROL: without the floor, two negatives — and a timeout no longer than its period, so the floor is the ONLY refusal they meet — pass every window guard and render — RED', v); }
+{ const v = plantedVerdict(noFloor, { ...C, probes: { readiness: { failureThreshold: 0 } } }); ok(verdictOf(v.some((b) => /readiness probe renders a number under 1/.test(b))), 'CONTROL: without the floor, a readiness failureThreshold of 0 renders as it is — RED', v); }
+{ const v = plantedVerdict(noFloor, { ...C, probes: { liveness: { periodSeconds: -30, timeoutSeconds: -30, failureThreshold: -31 } } }, { held: 960 }); ok(verdictOf(v.some((b) => /liveness probe renders a number under 1/.test(b))), 'CONTROL: without the floor, two negatives — and a timeout no longer than its period, so the floor is the ONLY refusal they meet — pass every window guard and render — RED', v); }
 const noTimeoutGuard = chartCopy('probes-no-timeout-guard', (x) => x.replace(/ {10}\{\{- if gt \$one\.timeoutSeconds \$one\.periodSeconds \}\}[^\n]*\n/, ''));
-{ const v = plantedVerdict(noTimeoutGuard, { ...C, probes: { startup: { timeoutSeconds: 30 } } }, { timeouts: [30, 5, 5] }); ok(v.some((b) => /startup probe's timeout \(30 s\) is over its period \(10 s\)/.test(b)), 'CONTROL: without the timeout refusal, a startup timeout over its period renders — RED', v); }
+{ const v = plantedVerdict(noTimeoutGuard, { ...C, probes: { startup: { timeoutSeconds: 30 } } }, { timeouts: [30, 5, 5] }); ok(verdictOf(v.some((b) => /startup probe's timeout \(30 s\) is over its period \(10 s\)/.test(b))), 'CONTROL: without the timeout refusal, a startup timeout over its period renders — RED', v); }
 const offStep = chartCopy('probes-comment-off', (x) => x.replace('(31 − 1) × 30 s = 900 s', '(25 − 1) × 30 s = 720 s'));
-ok(saidVerdict(offStep).some((b) => /templates\/main\.yaml: liveness says 25 × 30 s/.test(b)), 'CONTROL: the chart\'s comment out of step with the render (the first cut\'s 25) is RED');
+ok(verdictOf(saidVerdict(offStep).some((b) => /templates\/main\.yaml: liveness says 25 × 30 s/.test(b))), 'CONTROL: the chart\'s comment out of step with the render (the first cut\'s 25) is RED');
 const offValues = chartCopy('probes-values-comment-off', (x) => x.replace('(31 − 1) × 30 s = 900 s', '(25 − 1) × 30 s = 720 s'), 'values.yaml');
-ok(saidVerdict(offValues).some((b) => /values\.yaml: liveness says 25 × 30 s/.test(b)), 'CONTROL: values.yaml\'s comment out of step with the render is RED');
+ok(verdictOf(saidVerdict(offValues).some((b) => /values\.yaml: liveness says 25 × 30 s/.test(b))), 'CONTROL: values.yaml\'s comment out of step with the render is RED');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

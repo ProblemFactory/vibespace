@@ -51,7 +51,7 @@ const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 const LIVE_SID = '5c3a0000-0000-4000-8000-00000000pcf1'.replace('pcf1', 'fcf1');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -171,11 +171,11 @@ try {
   for (let i = 0; i < 80 && !sid; i++) { const f = frames.find((m) => m?.type === 'created'); if (f) sid = f.sessionId; else await sleep(250); }
   check('a live claude chat session is created through the real spawn path', !!sid);
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; app.attachSession(${JSON.stringify(sid)}, 'peer-fold', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
-  check('the live chat window attaches', await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000));
+  check('the live chat window attaches', verdictOf(await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000)));
   await sleep(600);
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Collect the worker reports' }));
   const played = await waitFor(`(() => { const v = ${VIEW}; return !!v && v._messageList.querySelectorAll(':scope > .chat-peer-message').length >= 4 && /Read all four/.test(v._messageList.textContent); })()`, 25000);
-  check('three worker reports + one one-line reply arrived as peer cards (live)', played, await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-500) : 'no view'; })()`));
+  check('three worker reports + one one-line reply arrived as peer cards (live)', verdictOf(played), await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-500) : 'no view'; })()`));
   await sleep(700);
 
   // ── ① folded at 1280 and at 375 ──
@@ -186,17 +186,17 @@ try {
     const reps = reports(rows);
     console.log(`① ${width} px: ` + reps.map((c) => `${Math.round(c.h)}/${Math.round(c.pad + 3 * c.lh + (phone ? Math.max(0, 44 - c.lh) : 0) + 6)} px`).join(' · '));
     check(`${width} px: each report is folded — head (▸, no Show pill) + ONE preview line (the H1 as plain words), the body not displayed`,
-      reps.length === 3 && reps.every((c, i) => c.folded && !c.open && c.arrow === '▸' && !c.pills && c.preview === `lane-w${i + 1} verify r1 — report` && c.pvRects === 1 && c.pvH <= c.lh * 1.6 && !c.bodyShown), reps.map(({ text, ...c }) => c));
-    check(`${width} px: each report card is ≤ 3 text lines tall${phone ? ' (+ the 44 px target)' : ''}`, reps.every((c) => fits(c, phone)), reps.map((c) => [c.h, c.lh, c.pad]));
-    if (phone) check('375 px: the switch (the head row) is a ≥ 44 px target', reps.every((c) => c.headH >= 44), reps.map((c) => c.headH));
+      reps.length === 3 && verdictOf(reps.every((c, i) => c.folded && !c.open && c.arrow === '▸' && !c.pills && c.preview === `lane-w${i + 1} verify r1 — report` && c.pvRects === 1 && c.pvH <= c.lh * 1.6 && !c.bodyShown)), reps.map(({ text, ...c }) => c));
+    check(`${width} px: each report card is ≤ 3 text lines tall${phone ? ' (+ the 44 px target)' : ''}`, verdictOf(reps.every((c) => fits(c, phone))), reps.map((c) => [c.h, c.lh, c.pad]));
+    if (phone) check('375 px: the switch (the head row) is a ≥ 44 px target', verdictOf(reps.every((c) => c.headH >= 44)), reps.map((c) => c.headH));
   }
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await sleep(700);
   {
     const rows = await evalJs(CENSUS);
     const one = rows.find((c) => c.title.includes('desk-7'));
-    check('the one-line reply is whole (never folded)', one && !one.folded && one.bodyShown && /PONG from desk 7\./.test(one.text), one);
-    check('the fold control\'s accessible name says whose message it opens', reports(rows).every((c, i) => c.aria === `Show the message from ${NAMES[i]}`), reports(rows).map((c) => c.aria));
+    check('the one-line reply is whole (never folded)', gateOf(one) && !one.folded && gateOf(one.bodyShown) && verdictOf(/PONG from desk 7\./.test(one.text)), one);
+    check('the fold control\'s accessible name says whose message it opens', verdictOf(reports(rows).every((c, i) => c.aria === `Show the message from ${NAMES[i]}`)), reports(rows).map((c) => c.aria));
   }
 
   // ── ② a real press on the head's ▸: in place ──
@@ -211,9 +211,9 @@ try {
       othersClosed: [0, 2].every((i) => !window.__refs[i].querySelector('details.chat-peer-fold[open]')), opened: [...v._peerOpen] }; })()`);
   const rows2 = await evalJs(CENSUS);
   const r2 = reports(rows2)[1];
-  check('the pressed card opened IN PLACE — every peer card node identical by reference, the others still folded', s2.same && s2.open && s2.othersClosed, s2);
-  check('…its whole report is displayed (the last line on screen), the preview hidden', r2.bodyShown && /End of report 2\./.test(r2.text) && /Deviations: none\./.test(r2.text), r2.text.slice(0, 400));
-  check('…its headings are bold text (.chat-peer-h), never h1–h6', r2.hTags === 0 && r2.peerH.length === 2 && r2.peerH.every((w) => Number(w) >= 600), { hTags: r2.hTags, peerH: r2.peerH });
+  check('the pressed card opened IN PLACE — every peer card node identical by reference, the others still folded', gateOf(s2.same) && gateOf(s2.open) && verdictOf(s2.othersClosed), s2);
+  check('…its whole report is displayed (the last line on screen), the preview hidden', gateOf(r2.bodyShown) && gateOf(/End of report 2\./.test(r2.text)) && verdictOf(/Deviations: none\./.test(r2.text)), r2.text.slice(0, 400));
+  check('…its headings are bold text (.chat-peer-h), never h1–h6', r2.hTags === 0 && r2.peerH.length === 2 && verdictOf(r2.peerH.every((w) => Number(w) >= 600)), { hTags: r2.hTags, peerH: r2.peerH });
   check('…the view recorded it by message id', s2.opened.length === 1);
 
   // ── ③ a live patch keeps it open ──
@@ -221,19 +221,19 @@ try {
   const s3 = await evalJs(`(() => { const v = ${VIEW}; v._rerenderVisible(); const now = [...v._messageList.querySelectorAll(':scope > .chat-peer-message')];
     return { replaced: now[1] !== window.__refs[1], open: !!now[1].querySelector('details.chat-peer-fold[open]'), othersClosed: [0, 2].every((i) => !now[i].querySelector('details.chat-peer-fold[open]')),
       aria: now[1].querySelector('.chat-peer-head > .chat-peer-fold-arrow')?.getAttribute('aria-label') }; })()`);
-  check('the patched card is a NEW node and still open; the others still folded; the label says Hide', s3.replaced && s3.open && s3.othersClosed && s3.aria === 'Hide the message from worker two', s3);
+  check('the patched card is a NEW node and still open; the others still folded; the label says Hide', gateOf(s3.replaced) && gateOf(s3.open) && gateOf(s3.othersClosed) && s3.aria === 'Hide the message from worker two', s3);
 
   // ── ④ the setting ──
   console.log('④ chat.foldPeerMessages off ⇒ whole; on ⇒ folded, the opened card still open');
   await evalJs(`app.settings.set('chat.foldPeerMessages', false); true`);
   await sleep(700);
   const off = reports(await evalJs(CENSUS));
-  check('setting off ⇒ every report whole (no fold, the last line on screen), headings still bold text', off.length === 3 && off.every((c, i) => !c.folded && c.bodyShown && c.text.includes(`End of report ${i + 1}.`) && c.hTags === 0), off.map(({ text, ...c }) => c));
-  check('…and the ≤ 3-line census FAILS on a whole report (the census is not vacuous)', off.every((c) => !fits(c, false)), off.map((c) => c.h));
+  check('setting off ⇒ every report whole (no fold, the last line on screen), headings still bold text', off.length === 3 && verdictOf(off.every((c, i) => !c.folded && c.bodyShown && c.text.includes(`End of report ${i + 1}.`) && c.hTags === 0)), off.map(({ text, ...c }) => c));
+  check('…and the ≤ 3-line census FAILS on a whole report (the census is not vacuous)', verdictOf(off.every((c) => !fits(c, false))), off.map((c) => c.h));
   await evalJs(`app.settings.set('chat.foldPeerMessages', true); true`);
   await sleep(700);
   const on = reports(await evalJs(CENSUS));
-  check('setting back on ⇒ folded again; the card the user opened is still open', on.length === 3 && on.every((c) => c.folded) && on[1].open && !on[0].open && !on[2].open, on.map(({ text, ...c }) => c));
+  check('setting back on ⇒ folded again; the card the user opened is still open', on.length === 3 && gateOf(on.every((c) => c.folded)) && gateOf(on[1].open) && !on[0].open && !on[2].open, on.map(({ text, ...c }) => c));
   // ── ⑤ B-9fd6: a server-posted group report, opened from its transcript ──
   console.log('⑤ a server-posted group report names its author(s) and its group (B-9fd6)');
   {
@@ -272,12 +272,12 @@ try {
     })()`);
     const [c1, c2] = got.cards;
     check('⑤ the two server-posted wakes are two peer cards', got.cards.length === 2, got.cards);
-    check('⑤ ONE sender: the head is "lane-alpha 建设 (Opus) → Lane crew" (the name a link, the group a link)', c1 && c1.title === 'lane-alpha 建设 (Opus) → Lane crew' && c1.links.join() === 'lane-alpha 建设 (Opus)' && c1.group, c1);
-    check('⑤ …folded, its preview the author\'s first line (the words, 160 code points)', c1 && c1.folded && c1.preview === Array.from(WORDS).slice(0, 159).join('').trimEnd() + '…', c1 && c1.preview);
-    check('⑤ FOUR senders: "lane-alpha 建设 (Opus), lane-gamma, User and 1 more → Lane crew" — each named sender its own link', c2 && c2.title === 'lane-alpha 建设 (Opus), lane-gamma, User and 1 more → Lane crew' && c2.links.join('|') === 'lane-alpha 建设 (Opus)|lane-gamma|User' && c2.group, c2);
-    check('⑤ …its preview is the first sender\'s first line', c2 && c2.preview === 'lane-alpha 建设 (Opus): first, the API is down', c2 && c2.preview);
+    check('⑤ ONE sender: the head is "lane-alpha 建设 (Opus) → Lane crew" (the name a link, the group a link)', gateOf(c1) && c1.title === 'lane-alpha 建设 (Opus) → Lane crew' && c1.links.join() === 'lane-alpha 建设 (Opus)' && verdictOf(c1.group), c1);
+    check('⑤ …folded, its preview the author\'s first line (the words, 160 code points)', gateOf(c1) && gateOf(c1.folded) && c1.preview === Array.from(WORDS).slice(0, 159).join('').trimEnd() + '…', c1 && c1.preview);
+    check('⑤ FOUR senders: "lane-alpha 建设 (Opus), lane-gamma, User and 1 more → Lane crew" — each named sender its own link', gateOf(c2) && c2.title === 'lane-alpha 建设 (Opus), lane-gamma, User and 1 more → Lane crew' && c2.links.join('|') === 'lane-alpha 建设 (Opus)|lane-gamma|User' && verdictOf(c2.group), c2);
+    check('⑤ …its preview is the first sender\'s first line', gateOf(c2) && c2.preview === 'lane-alpha 建设 (Opus): first, the API is down', c2 && c2.preview);
     const framing = /Another Claude session|You were @mentioned|#### Group|vibespace-msg group notify|This came from another/;
-    check('⑤ no head reads "another session" / "unknown"; no preview and no body is the CLI\'s framing', got.cards.every((c) => !/another session|another agent|unknown/i.test(c.title) && !framing.test(c.preview || '') && !framing.test(c.text)), got.cards.map((c) => [c.title, c.preview]));
+    check('⑤ no head reads "another session" / "unknown"; no preview and no body is the CLI\'s framing', verdictOf(got.cards.every((c) => !/another session|another agent|unknown/i.test(c.title) && !framing.test(c.preview || '') && !framing.test(c.text))), got.cards.map((c) => [c.title, c.preview]));
   }
   // ── ⑥ lane exit-card-margin: the group card — the head's ▸/▾ is the switch, no empty row, one left edge ──
   console.log('⑥ a group card: the head\'s ▸/▾ is the switch, no empty row, no pill, one left edge');
@@ -304,18 +304,18 @@ try {
     let g = await evalJs(GCEN);
     console.log('    closed: ' + JSON.stringify(g && { rows: g.rows, pad: g.pad, bl: g.bl, bar: g.bar, arrow: g.arrow, pills: g.pills }));
     await shot('group-1280-closed');
-    check('⑥ closed: the head starts with its ▸ (aria-expanded false, the label names the sender); no Show pill; the preview the one row under it', g && g.arrow && g.arrow.first && g.arrow.text === '▸' && g.arrow.expanded === 'false' && g.arrow.label === 'Show the message from lane-alpha 建设 (Opus)' && !g.pills && !g.words && g.rows.length === 2 && g.rows[1].row === 'chat-peer-fold-summary', g);
-    check('⑥ the left edge: the card\'s padding (≥ 8 px both sides) holds every row, its left line is its own colour (not transparent) at the role bar\'s width, on the assistant bar\'s x', g && aligned(g) && solidLine(g) && g.bar && g.bar[0] === g.bar[1] && g.bar[2] === g.bl[0], g && { pad: g.pad, bl: g.bl, bar: g.bar, rows: g.rows });
+    check('⑥ closed: the head starts with its ▸ (aria-expanded false, the label names the sender); no Show pill; the preview the one row under it', gateOf(g) && gateOf(g.arrow) && gateOf(g.arrow.first) && g.arrow.text === '▸' && g.arrow.expanded === 'false' && g.arrow.label === 'Show the message from lane-alpha 建设 (Opus)' && !g.pills && !g.words && g.rows.length === 2 && g.rows[1].row === 'chat-peer-fold-summary', g);
+    check('⑥ the left edge: the card\'s padding (≥ 8 px both sides) holds every row, its left line is its own colour (not transparent) at the role bar\'s width, on the assistant bar\'s x', gateOf(g) && gateOf(aligned(g)) && gateOf(solidLine(g)) && gateOf(g.bar) && g.bar[0] === g.bar[1] && g.bar[2] === g.bl[0], g && { pad: g.pad, bl: g.bl, bar: g.bar, rows: g.rows });
     if (g && g.arrowAt) await press(g.arrowAt);
     g = await evalJs(GCEN);
     console.log('    open: ' + JSON.stringify(g && { rows: g.rows, arrow: g.arrow }));
     await shot('group-1280-open');
-    check('⑥ a real press on ▸ opens it: ▾, aria-expanded true, the label says Hide; NO empty row (every row under the head carries words — the preview row is gone) and no Show/Hide pill', g && g.open && g.arrow && g.arrow.text === '▾' && g.arrow.expanded === 'true' && g.arrow.label === 'Hide the message from lane-alpha 建设 (Opus)' && g.rows.length === 2 && g.rows[1].row === 'chat-text' && g.rows.every((x) => x.text.length > 0) && !g.pills && !g.words && aligned(g), g);
+    check('⑥ a real press on ▸ opens it: ▾, aria-expanded true, the label says Hide; NO empty row (every row under the head carries words — the preview row is gone) and no Show/Hide pill', gateOf(g) && gateOf(g.open) && gateOf(g.arrow) && g.arrow.text === '▾' && g.arrow.expanded === 'true' && g.arrow.label === 'Hide the message from lane-alpha 建设 (Opus)' && g.rows.length === 2 && g.rows[1].row === 'chat-text' && gateOf(g.rows.every((x) => x.text.length > 0)) && !g.pills && !g.words && verdictOf(aligned(g)), g);
     const endAt = g && g.headEnd;
     if (endAt) await press(endAt);
     g = await evalJs(GCEN);
     const wasHead = !!(endAt && endAt.isHead);
-    check('⑥ a real press on the head\'s empty stretch closes it again (the whole head row is the switch)', wasHead && g && !g.open && g.arrow && g.arrow.text === '▸' && g.rows.length === 2 && g.rows[1].row === 'chat-peer-fold-summary', g && { open: g.open, rows: g.rows });
+    check('⑥ a real press on the head\'s empty stretch closes it again (the whole head row is the switch)', gateOf(wasHead) && gateOf(g) && !g.open && gateOf(g.arrow) && g.arrow.text === '▸' && g.rows.length === 2 && g.rows[1].row === 'chat-peer-fold-summary', g && { open: g.open, rows: g.rows });
   }
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 3));
   liveWs.close();
@@ -324,4 +324,4 @@ try {
   console.error('  ✗ the suite threw: ' + (e.stack || e.message));
 }
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';
